@@ -44,7 +44,7 @@ def preprocess(inputxml, outputtxt) :  # takes bracketted file names as argument
     source.close()
     target.close()
 
-preprocess("article.xml", "output.txt")
+
 
 def remove_empty_lines(filename):
     if not os.path.isfile(filename):
@@ -57,7 +57,7 @@ def remove_empty_lines(filename):
         lines = filter(lambda x: x.strip(), lines)
         filehandle.writelines(lines)
 
-remove_empty_lines("output.txt")
+
 
 """
 To do : take care of the words 'cut' with a " - "
