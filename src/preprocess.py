@@ -19,6 +19,7 @@ def preprocess(inputxml, outputtxt) :  # takes bracketted file names as argument
                     target.write(d)
                     c = source.read(1)
                 else :                  # 2) end of line hyphenation
+                    target.write(c)
                     c = source.read(1)
             elif(c=='&') :              # special xml characters
                 next2 = source.read(2)
