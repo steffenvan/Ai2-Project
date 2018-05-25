@@ -1,4 +1,5 @@
 import os
+import spacy
 
 def preprocess(inputxml, outputtxt) :  # takes bracketted file names as arguments
 
@@ -19,8 +20,10 @@ def preprocess(inputxml, outputtxt) :  # takes bracketted file names as argument
                     target.write(d)
                     c = source.read(1)
                 else :                  # 2) end of line hyphenation
-                    target.write(c)
-                    c = source.read(1)
+                    #target.write(c)
+                    #c = source.read(1)
+                    #print("eol hyphenation detected")
+                    c = source.read(2)
             elif(c=='&') :              # special xml characters
                 next2 = source.read(2)
                 if (next2 == 'lt') :
@@ -38,6 +41,9 @@ def preprocess(inputxml, outputtxt) :  # takes bracketted file names as argument
 
                 while (c!=";") :
                     c = source.read(1)
+                c = source.read(1)
+            elif (c=='\n') :  # ignore line break
+                target.write(" ")
                 c = source.read(1)
             else :       # finally, regular characters are added to target
                 target.write(c)
@@ -59,6 +65,50 @@ def remove_empty_lines(filename):
         filehandle.writelines(lines)
 
 
+def one_sentence_per_line(filename) :
+    nlp = spacy.load('en')
+
+    doc = nlp(open(filename,'r').read())
+
+    out = ""
+
+    for token in doc[:len(doc)-1] :         # last pb : no space after '-'
+        if (token.is_sent_start) :
+            out+= "\n"
+        if (token.text != '\n') :
+            if token.is_punct :
+                out += token.text
+            else :
+                if (bool(len(out)) and out[-1] =='-') :   #no space
+                    if (token.text in nlp.vocab) :
+                        out += token.text
+                    else :
+                        out = out[:-1]
+                        out += token.text
+                else :
+                    out += " " + token.text
+
+
+    out += doc[len(doc)-1].text
+
+    file = open(filename, 'w')
+    file.truncate()
+    file.write(out)
+    file.close()
+
+
+
+
+
+def extract_abstract() :
+    files = os.listdir(txt_path)
+    for file in files :
+        if (file.endswith(".txt") and (os.exists("../data/abstract/"+str(file[:-4])+"_asbtract.txt") == 0)) :
+            name = file[:-4] + "_abstract.txt"
+            text = open(txt_path+file,'r').read()
+            ab = text[text.index("Abstract")+8:min(text.index("\n1 "), text.index("Introduction"))]
+            target = open(abstract+name,'w')
+            target.write(ab)
 
 """
 To do : take care of the words 'cut' with a " - "
