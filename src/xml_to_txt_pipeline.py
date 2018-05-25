@@ -65,6 +65,7 @@ def process_new_xml(old_df) :    # preprocesses all the .xml files in the new_xm
                     N[n+i,j] = val
                     N[j,n+i] = val
                     j+=1
+                    print(str(i+j) + " comparisions complete")
 
                 files.append(new_filename[:-4] + ".txt")
                 i += 1
