@@ -4,8 +4,6 @@ import pandas as pd
 import numpy as np
 import seaborn as sns
 
-df = pd.read_pickle("../data/similarities.pkl")
+df = pd.read_pickle("../data/frames.pkl")
 
-sns.heatmap(df, annot = True)
-
-plt.show()
+print(df.head(20))
