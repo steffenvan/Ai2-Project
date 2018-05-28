@@ -12,8 +12,6 @@ json_path = "../data/json/"
 
 frames = {}
 
-print("d" in frames)
-
 for filename in os.listdir(json_path) :
     if filename.endswith(".json") :
         output = json.load(open(json_path + filename))
@@ -29,13 +27,8 @@ for filename in os.listdir(json_path) :
 
 df = pd.DataFrame(frames, index = ['quantity'])
 
-# sns.distplot((df.sort_values(['quantity'], axis = 1, ascending = False).head(15)))
+df = df.sort_values(['quantity'], axis = 1, ascending = False)
 
-print(df.sort_values(['quantity'], axis = 1, ascending = False).head(15))
-#
-sns.barplot(frames)
-# #
-plt.xlabel(df.columns)
-plt.show()
-# #
-# print(df.head(100))
+df = df.transpose()
+
+df.to_pickle("../data/frames.pkl")
