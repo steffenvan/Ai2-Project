@@ -8,5 +8,5 @@ RUN apt-get update && \
 RUN pip install -U nltk numpy
 
 RUN pip install http://www.jbox.dk/sling/sling-1.0.0-cp27-none-linux_x86_64.whl
-WORKDIR cd /
+WORKDIR /
 RUN wget http://www.jbox.dk/sling/sempar.flow
