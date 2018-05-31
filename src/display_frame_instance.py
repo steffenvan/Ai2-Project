@@ -1,13 +1,14 @@
-import spacy
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+import numpy as np
 import os
 import json
 from random import shuffle
 
-nlp = spacy.load('en')
-
 json_path = "../data/json/"
 
-def display_frame_instances_with_pos(frame_name, nmax = 5) :    # prints all the instances of a given frame among the toy dataset
+def display_frame_instances(frame_name, nmax = 5) :    # prints all the instances of a given frame among the toy dataset
 
     os.system("clear")
 
@@ -48,16 +49,10 @@ def display_frame_instances_with_pos(frame_name, nmax = 5) :    # prints all the
 
                             if frame["target"]["name"] == frame_name :
 
-                                curr_sentence = " ".join(sentence["tokens"])
-                                pos = [str(token.pos_) for token in nlp(str(curr_sentence))]
-                                string = ""
-                                for k in range(len(list(sentence["tokens"]))) :
-                                    string += (sentence["tokens"][k])
-                                    string += (' [' + pos[k] + '] ')
+                                print(" ".join(sentence["tokens"]))
 
-                                print(string)
-                                print('\n')
                                 i += 1
 
 
-display_frame_instances_with_pos("Desirability", 5)
+
+display_frame_instances("Desirability", 10)
