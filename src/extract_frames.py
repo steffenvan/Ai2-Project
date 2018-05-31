@@ -1,6 +1,3 @@
-"""
-NOTE : this is a toy script just for running quick experiments
-"""
 import spacy
 import os
 import pandas as pd
