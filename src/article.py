@@ -1,7 +1,7 @@
 import os
 from xml_to_txt import convert
 
-path = "../data/"
+path = "/Users/paulazoulai/Desktop/pre/Ai2-Project/data/"
 
 class Article :
 
@@ -21,7 +21,7 @@ class Article :
             print("Text file already exists.")
 
         if (os.path.exists(self.json) == 0) :
-            command = "../semafor/bin/runSemafor.sh " + self.txt + " " + self.json + " 4"
+            command = "/Users/paulazoulai/Desktop/pre/semafor/bin/runSemafor.sh " + self.txt + " " + self.json + " 4"
             os.system(command)
             print("Json file created.")
 
