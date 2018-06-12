@@ -1,5 +1,5 @@
 import os
-from xml_to_txt import convert
+from preprocess_functions import *
 
 path = "/Users/paulazoulai/Desktop/pre/Ai2-Project/data/"
 
@@ -14,8 +14,9 @@ class Article :
 
         if (os.path.exists(self.txt) == 0) :
             print("Creating text file from xml...")
-            convert(self.xml, self.txt)
+            preprocess_file(self.xml, self.txt, path + "dico.txt", path + "corpus_words.txt", 2)
             print("Text file created.")
+            augment_word_list(self.txt, path + "corpus_words.txt", path + "dico.txt")
 
         else :
             print("Text file already exists.")
