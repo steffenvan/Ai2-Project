@@ -37,7 +37,16 @@ def abstract(file) :                    # file = path / filename
     return full_output[beg:end]
     
     
-
+def conclusion(file) :                  # file = path / filename
+        full_output = json.load(open(file))
+        i = 0
+        while ("Conclusion" not in full_output[i]["tokens"]) :
+            i += 1
+        beg = i
+        while ("Acknowledgments" not in full_output[i]["tokens"]) :
+            i += 1
+        end = i
+        return full_output[beg:end]
 
 json_path = "../data/json/"
 
@@ -47,6 +56,10 @@ output = json.load(open(json_path + filename))
 
 
 abs = abstract(json_path+filename)
+ccl = conclusion(json_path+filename)
+
+for sentence in ccl :
+    print(sentence["tokens"])
 
 vocab = []
 
@@ -58,25 +71,25 @@ vocab = list(map(str.lower,list(set(vocab))))
 
 stopwords = list(STOP_WORDS)+list("azertyuiopqsdfghjklmwxcvbn")
 
-punct = list(string.punctuation)
+# punct = list(string.punctuation)
+# 
+# G = nx.Graph()
+# 
+# edges = {}
+# 
+# for sentence in output[:50] :                   # this loop builds the dependency graph
+#     for frame in sentence["frames"] :
+#         L = extract_text(frame, vocab, stopwords, punct = punct)      # an edge is built between every word from the vocab ...
+#         # M = extract_text(frame, stopwords = stopwords, punct = punct)     # and every word in the whole text, if they appear at least once in the same frame
+#         for word1 in L :
+#             for word2 in L :
+#                 if word1 != word2 :
+#                     G.add_edge(word1,word2)
+#                     edges[(str(word1), str(word2))] = str(frame["target"]["name"])
+# 
+# nx.draw(G, pos=nx.spring_layout(G), with_labels = True)
+# 
+# plt.show()
 
-G = nx.Graph()
 
-edges = {}
-
-for sentence in output[:50] :                   # this loop builds the dependency graph
-    for frame in sentence["frames"] :
-        L = extract_text(frame, vocab, stopwords, punct = punct)      # an edge is built between every word from the vocab ...
-        # M = extract_text(frame, stopwords = stopwords, punct = punct)     # and every word in the whole text, if they appear at least once in the same frame
-        for word1 in L :
-            for word2 in L :
-                if word1 != word2 :
-                    G.add_edge(word1,word2)
-                    edges[(str(word1), str(word2))] = str(frame["target"]["name"])
-
-nx.draw(G, pos=nx.spring_layout(G), with_labels = True)
-
-plt.show()
-
-    
     
