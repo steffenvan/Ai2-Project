@@ -4,15 +4,25 @@ import matplotlib.pyplot as plt
 from spacy.lang.en import STOP_WORDS
 #from dependencies import extract_text
 import spacy
+import os
+from xml.dom import minidom
 
-G = nx.Graph()
+try:
+    import xml.etree.cElementTree as ET
+except ImportError:
+    import xml.etree.ElementTree as ET
 
-G.add_edge("word1","word2")
+# xml_path = "../data/xml/"
+# 
+# filename = "E09-1018-parscit.130908-11.49.59.xml"
+# 
+# file = xml_path + filename
+# 
+# tree = ET.ElementTree(file = file)
+# 
+# for elt in tree.iter() :
+#     print(elt.tag)
 
-edges = {("word1","word2") : "test"}
+nlp = spacy.load('en')
 
-
-nx.draw(G, with_labels = True)
-nx.draw_networkx_edge_labels(G, pos=nx.spring_layout(G), edge_labels = edges)
-
-plt.show()
+print(str('apple' in nlp.vocab) )
