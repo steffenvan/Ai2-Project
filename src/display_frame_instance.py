@@ -47,7 +47,7 @@ def display_frame_instances(frame_name, nmax = 5) :    # prints all the instance
 
                                 break
 
-                            if frame["target"]["name"] == frame_name :
+                            if frame_name in frame["target"]["name"].lower() :
 
                                 print(" ".join(sentence["tokens"]))
 
@@ -55,4 +55,4 @@ def display_frame_instances(frame_name, nmax = 5) :    # prints all the instance
 
 
 
-display_frame_instances("Desirability", 10)
+display_frame_instances("cause", 10)
