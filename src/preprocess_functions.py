@@ -2,7 +2,6 @@ try:
     import xml.etree.cElementTree as ET
 except ImportError:
     import xml.etree.ElementTree as ET
-import time
 import spacy
 import os
 from segtok.segmenter import split_single, split_multi
@@ -146,7 +145,7 @@ def format(text, en_dictionnary, corpus_dictionnary = {}, min = 1) :
     
     return output
     
-def preprocess_file(input_filename, output_filename, english_dictionnary_name, corpus_dictionnary_name = "", min = 0) :
+def preprocess_file(input_filename, output_filename, english_dictionnary_name, corpus_dictionnary_name = "", min = 1) :
     
     english_dico = load_dico(english_dictionnary_name)
     

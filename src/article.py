@@ -1,7 +1,8 @@
 import os
 from preprocess_functions import *
+from path import root
 
-path = "/Users/paulazoulai/Desktop/pre/Ai2-Project/data/"
+path = root + "data/"
 
 class Article :
 
