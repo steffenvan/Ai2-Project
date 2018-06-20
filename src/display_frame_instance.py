@@ -5,12 +5,13 @@ import numpy as np
 import os
 import json
 from random import shuffle
+from extraction import *
 
 json_path = "../data/json/"
 
-def display_frame_instances(frame_name, nmax = 5) :    # prints all the instances of a given frame among the toy dataset
+def display_frame_instances(frame_name, nmax = 5, abstract = 0) :    # prints all the instances of a given frame among the toy dataset
 
-    os.system("clear")
+    print("**************************************\n")
 
     files = os.listdir(json_path)
 
@@ -49,10 +50,15 @@ def display_frame_instances(frame_name, nmax = 5) :    # prints all the instance
 
                             if frame_name in frame["target"]["name"].lower() :
 
-                                print(" ".join(sentence["tokens"]))
+                                print(frame_name + ": " + " ".join(sentence["tokens"]))
+                                print("\n")
 
                                 i += 1
 
 
+relevant_frames = ["scale"] # "accomp","accura","compar","relevant", "competition", "desirability", "scale"
 
-display_frame_instances("cause", 10)
+for frame in relevant_frames :
+    display_frame_instances(frame, 20)
+    
+

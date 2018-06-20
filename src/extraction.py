@@ -36,10 +36,11 @@ def abstract_json(json_file) :                    # returns the part of the json
 def conclusion_json(json_file) :                  # file = path / filename
         full_output = json.load(open(json_file))
         i = 0
-        while ("Conclusion" not in full_output[i]["tokens"]) :
+        while ("Conclusion" not in full_output[i]["tokens"] and "newSection" not in full_output[i]["tokens"]) :
             i += 1
         beg = i
-        while ("Acknowledgements" not in full_output[i]["tokens"]) :
+        i += 1
+        while ("newSection" not in full_output[i]["tokens"]) :
             i += 1
         end = i
         return full_output[beg:end]
