@@ -37,7 +37,7 @@ edges = {}
 
 for sentence in abs :                   # this loop builds the dependency graph
     for frame in sentence["frames"] :
-        L = extract_text(frame, vocab, stopwords, punct = punct) 
+        L = extract_text(frame, vocab, stopwords = stopwords, punct = punct) 
         M = extract_text(frame, stopwords = stopwords, punct = punct)     
         for word1 in L :
             for word2 in M :
