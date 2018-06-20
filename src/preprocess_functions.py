@@ -11,7 +11,7 @@ def load_dico(dico_name) :
     dict = {}
     with open(dico_name) as dico :
         for word in dico :
-            dict[str(word)[:-1]] = 1   # remove the '\n'
+            dict[str(word)[:-1]] = 1   # removes the '\n'
     return dict
 
 def save_dico(dico, file_name) :
