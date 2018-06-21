@@ -8,7 +8,7 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-json_path =  root + "data/json/"
+json_path =  root + "/data/json/"
 
 def number_of_frames(json_file) :
     json_list = json.load(open(json_file))
@@ -49,24 +49,7 @@ def count_frames(in_abstract = 0) :
                     else : 
                         counts[frame_name] = 1            
     return counts
-                    
-d = count_frames()
-
-tmp = []
-
-for key, value in d.items() :
-    tmptuple = (value, key)
-    tmp.append(tmptuple)
-
-tmp = sorted(tmp, reverse = True) 
-
-output = open("frames_counts.txt", 'w+')
-
-for elt in tmp :
-    output.write(str(elt) + '\n')
-    
-output.close()
-
+                
 
 # print(head(df))
 
