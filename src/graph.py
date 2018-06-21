@@ -4,6 +4,7 @@ from path import root
 from extraction import *
 import json
 from spacy.lang.en import STOP_WORDS
+import networkx as nx
 
 json_path = root + 'data/json/'
 
@@ -38,10 +39,21 @@ def build_graph(filename, abs = 0, ccl = 0) :
                         G.add_edge(word1, word2)
                         edges[(str(word1), str(word2))] = str(frame["target"]["name"])
             
-    nx.draw(G, pos = nx.spring_layout(G), with_labels = True)
+    # nx.draw(G, pos = nx.spring_layout(G), with_labels = True)
+    # nx.draw_networkx_edge_labels(G, pos = nx.spring_layout(G))
     
-    plt.show()    
+    matrix = nx.to_numpy_matrix(G)
+
+    # print matrix
+
+    fig = plt.figure()
+    ax = fig.add_subplot(1,1,1)
+    ax.set_aspect('equal')
+    plt.imshow(matrix, interpolation='nearest', cmap=plt.cm.gray)
+    plt.show()
+    # 
+    # plt.show()    
     
      
         
-build_graph(json_path + "E09-1018-parscit.130908-11.49.59.json", abs = 1)
+build_graph(json_path + "E09-1018-parscit.130908-11.49.59.json", 0, 1)
