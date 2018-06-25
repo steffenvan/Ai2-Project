@@ -1,6 +1,11 @@
 from path import root
 import json
 
+
+"""
+This file allows the extracion of only specific sections of json / txt files
+"""
+
 def extract_text(frame, vocab = [], stopwords = [], punct = []) :      # given a frame, extract all the text from frameElements / spans
     tokens = []
     for fe in frame["annotationSets"][0]["frameElements"] :

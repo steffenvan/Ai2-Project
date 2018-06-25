@@ -8,6 +8,12 @@ import networkx as nx
 
 json_path = root + 'data/json/'
 
+"""
+this file is for building a dependency graph for one specific document
+"""
+
+
+
 def build_graph(filename, abs = 0, ccl = 0) :
     doc = []
     if abs == 1 :

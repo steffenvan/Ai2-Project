@@ -56,9 +56,9 @@ def display_frame_instances(frame_name, nmax = 5, abstract = 0) :    # prints al
                                 i += 1
 
 
-relevant_frames = ["scale"] # "accomp","accura","compar","relevant", "competition", "desirability", "scale"
+relevant_frames = ["scale", "accomp"] # "accomp","accura","compar","relevant", "competition", "desirability", "scale"
 
 for frame in relevant_frames :
-    display_frame_instances(frame, 20)
+    display_frame_instances(frame, 5)
     
 
