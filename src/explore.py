@@ -77,7 +77,9 @@ def display_frame_instances(frame_name, nmax = 5, abstract = 0) :    # prints al
                     if i > nmax :
                         break
                     if frame_name in frame["target"]["name"].lower() :
-                        print(frame["target"]["name"] + ": " + " ".join(sentence["tokens"]))
+                        print(frame["target"]["name"] + " : " + " ".join(sentence["tokens"]))
+                        print("Text : " + str(frame["target"]["spans"][0]["text"]))
+                        print("Annotation Set : " + str(frame["annotationSets"][0]["frameElements"]))
                         print("\n")
                         i += 1
 
@@ -102,8 +104,10 @@ def sentences_with(word, nmax = 5) :
                         i += 1
                 
 
-sentences_with("better", 20)
+# sentences_with("better", 20)
+display_frame_instances("purpose", 50)
 
+irrelevant_frames = ["cardinal"]
 
 # relevant_frames = ["scale", "accomp"] # "accomp","accura","compar","relevant", "competition", "desirability", "scale"
 #
