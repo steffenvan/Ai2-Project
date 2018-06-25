@@ -12,6 +12,7 @@ from random import shuffle
 from extraction import *
 
 json_path =  root + "/data/json/"
+txt_path = root+ "data/txt/"
 
 def number_of_frames(json_file) :
     json_list = json.load(open(json_file))
@@ -79,6 +80,30 @@ def display_frame_instances(frame_name, nmax = 5, abstract = 0) :    # prints al
                         print(frame["target"]["name"] + ": " + " ".join(sentence["tokens"]))
                         print("\n")
                         i += 1
+
+def sentences_with(word, nmax = 5) :
+    files = os.listdir(txt_path)
+    shuffle(files)
+    i = 1
+    for filename in files :
+        if i > nmax :
+            break
+        if filename.endswith(".txt") :
+            if i > nmax :
+                break
+            output = open(txt_path + filename).read().split('\n')
+            for sentence in output :
+                if i > nmax :
+                    break
+                else :
+                    if word in sentence.lower() :
+                        print(sentence)
+                        print("\n")
+                        i += 1
+                
+
+sentences_with("better", 20)
+
 
 # relevant_frames = ["scale", "accomp"] # "accomp","accura","compar","relevant", "competition", "desirability", "scale"
 #
