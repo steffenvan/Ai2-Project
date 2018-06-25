@@ -16,11 +16,12 @@ for i in range(len(neg)) :
     print(text[i])
     print("\n")
     print("****")
-    print(neg[i])
-    print("\n")
-    print("****")
+    # print(neg[i])
+    # print("\n")
+    # print("****")
     # print([frames[i]["frames"][j]["target"]["name"] for j in range(len(frames[i]["frames"]))])
     for j in range(len(frames[i]["frames"])) :
+        print("\n")
         frame = frames[i]["frames"][j]
         print("name : " + frame["target"]["name"])
         print("text : " + frame["target"]["spans"][0]["text"])
