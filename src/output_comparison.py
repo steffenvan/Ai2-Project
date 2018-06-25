@@ -19,7 +19,12 @@ for i in range(len(neg)) :
     print(neg[i])
     print("\n")
     print("****")
-    print([frames[i]["frames"][j]["target"]["name"] for j in range(len(frames[i]["frames"]))])
+    # print([frames[i]["frames"][j]["target"]["name"] for j in range(len(frames[i]["frames"]))])
+    for j in range(len(frames[i]["frames"])) :
+        frame = frames[i]["frames"][j]
+        print("name : " + frame["target"]["name"])
+        print("text : " + frame["target"]["spans"][0]["text"])
+        print("Annotation Set :" + str(frame["annotationSets"][0]["frameElements"]))
     print("\n")
     print("**************************************************")
     print("\n")
