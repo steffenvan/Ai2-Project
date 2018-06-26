@@ -2,12 +2,7 @@ from extraction import *
 from explore import *
 import os
 
-
-def readFile(filename):
-    filehandle = open(filename).read()
-    filehandle.close()
-
-counts = readFile("../data/frames_counts.txt")
+counts = open("../data/frames_counts.txt").read()
 
 name = input("Please enter your name ")
 
