@@ -4,8 +4,8 @@ import os
 
 counts = open("../data/frames_counts.txt").read()
 
-name = input("Please enter your name ")
 os.system('cls||clear')
+name = input("Please enter your name ")
 
 # Using path.join to ensure it can be used across all operating systems and platforms.
 output_name = os.path.join("../data/output_" + name + ".txt")
