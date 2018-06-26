@@ -4,7 +4,7 @@ import os
 
 
 def readFile(filename):
-    filehandle = open(filename).read
+    filehandle = open(filename).read()
     filehandle.close()
 
 counts = readFile("../data/frames_counts.txt")
