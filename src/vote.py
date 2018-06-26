@@ -1,11 +1,20 @@
 from extraction import *
 from explore import *
+import os
 
-counts = open("../data/frames_counts.txt").read()
+
+def readFile(filename):
+    filehandle = open(filename).read
+    filehandle.close()
+
+counts = readFile("../data/frames_counts.txt")
 
 name = input("Please enter your name ")
 
-output = open(str("../data/votes/output_" + name + ".txt"), 'w+')
+# Using path.join to ensure it can be used across all operating systems and platforms.
+filename = os.path.join("../data/output_" + name + ".txt")
+
+output = open(filename, 'w+')
 
 i = 1
 
@@ -26,7 +35,7 @@ for line in counts.split('\n')[:100] :
     print('\n')
     print('\n')
     i += 1
-    
+
 output.close()
 
 print("Tak !")
