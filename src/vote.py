@@ -21,24 +21,13 @@ for line in counts.split('\n')[:100] :
     print(frame_name)
     display_frame_instances(frame_name)
     response = input("Is that frame relevant ? (y or n, then enter)")
-<<<<<<< HEAD
-    output.write(frame_name + " : " + response)
-    # output.write(response)
-    output.write('\n')
-    print('\n')
-    print('\n')
-    print('\n')
-    print('\n')
-    print('\n')
-    print('\n')
-    print('\n')
-=======
+
     output_file.write(response)
     output_file.write('\n')
     os.system('cls||clear')
->>>>>>> 50935468bc51dde72ee9e539ddcc5a35e6ceaf6b
     i += 1
 
 output_file.close()
 
 print("Tak !")
+
