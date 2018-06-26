@@ -34,24 +34,23 @@ def number_of_sentences(json_file) :
 
 # number_of_sentences(json_path + "E09-1005-parscit.130908-11.49.59.json")
 
-def count_frames(in_abstract = 0) :
+def count_frames(filename, in_abstract = 0) :
 
     counts = {}
-    for filename in os.listdir(json_path) :
+    if in_abstract :
+        doc = abstract_json(json_path + filename)
+    else :
+        doc = json.load(open(json_path + filename))
 
-        if filename.endswith("json") :
-            if in_abstract :
-                doc = abstract_json(json_path + filename)
+    for sentence in doc :
+        for frame in sentence["frames"] :
+            frame_name = frame["target"]["name"]
+            if frame_name in counts :
+                counts[frame_name] += 1
             else :
-                doc = json.load(open(json_path + filename))
+                counts[frame_name] = 1
 
-            for sentence in doc :
-                for frame in sentence["frames"] :
-                    frame_name = frame["target"]["name"]
-                    if frame_name in counts :
-                        counts[frame_name] += 1
-                    else :
-                        counts[frame_name] = 1
+
     return counts
 
 
@@ -70,18 +69,52 @@ def display_frame_instances(frame_name, nmax = 5, abstract = 0) :    # prints al
                 break
             # We are now dealing with a json file
             output = json.load(open(json_path + filename))
-            for sentence in output :
+            shuffle(output)
+            for sentence in (output) :
                 if i > nmax :
                     break
                 for frame in sentence["frames"] :
                     if i > nmax :
                         break
-                    if frame_name in frame["target"]["name"].lower() :
-                        print(frame["target"]["name"] + " : " + " ".join(sentence["tokens"]))
+                    if frame_name.lower() in frame["target"]["name"].lower() :
+                        print("sentence : " + " ".join(sentence["tokens"]))
                         print("Text : " + str(frame["target"]["spans"][0]["text"]))
                         print("Annotation Set : " + str(frame["annotationSets"][0]["frameElements"]))
                         print("\n")
                         i += 1
+                        break
+
+def get_frame_instances(frame_name, nmax = 5, abstract = 0) :
+    
+        L = []
+
+        files = os.listdir(json_path)
+        shuffle(files)
+        i = 1
+        for filename in files :
+            if i > nmax :
+                break
+            if filename.endswith(".json") :
+                if i > nmax :
+                    break
+                # We are now dealing with a json file
+                output = json.load(open(json_path + filename))
+                for sentence in output :
+                    if i > nmax :
+                        break
+                    for frame in sentence["frames"] :
+                        if i > nmax :
+                            break
+                        if frame_name.lower() in frame["target"]["name"].lower() :
+                            frame_string = ""
+                            frame_string += (" ".join(sentence["tokens"]) + " | ")
+                            frame_string += ("Text : " + str(frame["target"]["spans"][0]["text"]) + " | ")
+                            frame_string += ("Annotation Set : " + str(frame["annotationSets"][0]["frameElements"]))
+                            i += 1
+                            L.append(frame_string)
+            
+        return L
+
 
 def sentences_with(word, nmax = 5) :
     files = os.listdir(txt_path)
@@ -104,10 +137,13 @@ def sentences_with(word, nmax = 5) :
                         i += 1
                 
 
-# sentences_with("better", 20)
-display_frame_instances("purpose", 50)
+# sentences_with("similarity", 20)
+# display_frame_instances("reliance", 50)
+# print(get_frame_instances("reliance", 3))
 
-irrelevant_frames = ["cardinal"]
+# irrelevant_frames = ["cardinal"]
+# 
+# print(count_frames(os.listdir(json_path)[3]).keys())
 
 # relevant_frames = ["scale", "accomp"] # "accomp","accura","compar","relevant", "competition", "desirability", "scale"
 #
