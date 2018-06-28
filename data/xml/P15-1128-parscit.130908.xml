@@ -1,0 +1,1670 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.000088">
+<title confidence="0.9979525">
+Semantic Parsing via Staged Query Graph Generation:
+Question Answering with Knowledge Base
+</title>
+<author confidence="0.982067">
+Wen-tau Yih Ming-Wei Chang Xiaodong He Jianfeng Gao
+</author>
+<affiliation confidence="0.959044">
+Microsoft Research
+</affiliation>
+<address confidence="0.918975">
+Redmond, WA 98052, USA
+</address>
+<email confidence="0.99799">
+iscottyih,minchang,xiaohe,jfgaol@microsoft.com
+</email>
+<sectionHeader confidence="0.997377" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.99973452631579">
+We propose a novel semantic parsing
+framework for question answering using a
+knowledge base. We define a query graph
+that resembles subgraphs of the knowl-
+edge base and can be directly mapped to
+a logical form. Semantic parsing is re-
+duced to query graph generation, formu-
+lated as a staged search problem. Unlike
+traditional approaches, our method lever-
+ages the knowledge base in an early stage
+to prune the search space and thus simpli-
+fies the semantic matching problem. By
+applying an advanced entity linking sys-
+tem and a deep convolutional neural net-
+work model that matches questions and
+predicate sequences, our system outper-
+forms previous methods substantially, and
+achieves an Fl measure of 52.5% on the
+WEBQUESTIONS dataset.
+</bodyText>
+<sectionHeader confidence="0.999515" genericHeader="keywords">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.999975372881356">
+Organizing the world’s facts and storing them
+in a structured database, large-scale knowledge
+bases (KB) like DBPedia (Auer et al., 2007) and
+Freebase (Bollacker et al., 2008) have become
+important resources for supporting open-domain
+question answering (QA). Most state-of-the-art
+approaches to KB-QA are based on semantic pars-
+ing, where a question (utterance) is mapped to its
+formal meaning representation (e.g., logical form)
+and then translated to a KB query. The answers to
+the question can then be retrieved simply by exe-
+cuting the query. The semantic parse also provides
+a deeper understanding of the question, which can
+be used to justify the answer to users, as well as to
+provide easily interpretable information to devel-
+opers for error analysis.
+However, most traditional approaches for se-
+mantic parsing are largely decoupled from the
+knowledge base, and thus are faced with sev-
+eral challenges when adapted to applications like
+QA. For instance, a generic meaning represen-
+tation may have the ontology matching problem
+when the logical form uses predicates that differ
+from those defined in the KB (Kwiatkowski et al.,
+2013). Even when the representation language
+is closely related to the knowledge base schema,
+finding the correct predicates from the large vo-
+cabulary in the KB to relations described in the
+utterance remains a difficult problem (Berant and
+Liang, 2014).
+Inspired by (Yao and Van Durme, 2014; Bao et
+al., 2014), we propose a semantic parsing frame-
+work that leverages the knowledge base more
+tightly when forming the parse for an input ques-
+tion. We first define a query graph that can be
+straightforwardly mapped to a logical form in λ-
+calculus and is semantically closely related to λ-
+DCS (Liang, 2013). Semantic parsing is then re-
+duced to query graph generation, formulated as
+a search problem with staged states and actions.
+Each state is a candidate parse in the query graph
+representation and each action defines a way to
+grow the graph. The representation power of the
+semantic parse is thus controlled by the set of le-
+gitimate actions applicable to each state. In partic-
+ular, we stage the actions into three main steps:
+locating the topic entity in the question, finding
+the main relationship between the answer and the
+topic entity, and expanding the query graph with
+additional constraints that describe properties the
+answer needs to have, or relationships between the
+answer and other entities in the question.
+One key advantage of this staged design is
+that through grounding partially the utterance to
+some entities and predicates in the KB, we make
+the search far more efficient by focusing on the
+promising areas in the space that most likely lead
+to the correct query graph, before the full parse
+is determined. For example, after linking “Fam-
+</bodyText>
+<page confidence="0.934757">
+1321
+</page>
+<note confidence="0.976258333333333">
+Proceedings of the 53rd Annual Meeting of the Association for Computational Linguistics
+and the 7th International Joint Conference on Natural Language Processing, pages 1321–1331,
+Beijing, China, July 26-31, 2015. c�2015 Association for Computational Linguistics
+</note>
+<bodyText confidence="0.999787764705882">
+ily Guy” in the question “Who first voiced Meg
+on Family Guy?” to FamilyGuy (the TV show)
+in the knowledge base, the procedure needs only
+to examine the predicates that can be applied to
+FamilyGuy instead of all the predicates in the
+KB. Resolving other entities also becomes easy,
+as given the context, it is clear that Meg refers
+to MegGriffin (the character in Family Guy).
+Our design divides this particular semantic pars-
+ing problem into several sub-problems, such as en-
+tity linking and relation matching. With this in-
+tegrated framework, best solutions to each sub-
+problem can be easily combined and help pro-
+duce the correct semantic parse. For instance,
+an advanced entity linking system that we em-
+ploy outputs candidate entities for each question
+with both high precision and recall. In addi-
+tion, by leveraging a recently developed semantic
+matching framework based on convolutional net-
+works, we present better relation matching models
+using continuous-space representations instead of
+pure lexical matching. Our semantic parsing ap-
+proach improves the state-of-the-art result on the
+WEBQUESTIONS dataset (Berant et al., 2013) to
+52.5% in F1, a 7.2% absolute gain compared to
+the best existing method.
+The rest of this paper is structured as follows.
+Sec. 2 introduces the basic notion of the graph
+knowledge base and the design of our query graph.
+Sec. 3 presents our search-based approach for gen-
+erating the query graph. The experimental results
+are shown in Sec. 4, and the discussion of our ap-
+proach and the comparisons to related work are in
+Sec. 5. Finally, Sec. 6 concludes the paper.
+</bodyText>
+<sectionHeader confidence="0.995969" genericHeader="introduction">
+2 Background
+</sectionHeader>
+<bodyText confidence="0.999884142857143">
+In this work, we aim to learn a semantic parser
+that maps a natural language question to a logi-
+cal form query q, which can be executed against a
+knowledge base K to retrieve the answers. Our ap-
+proach takes a graphical view of both K and q, and
+reduces semantic parsing to mapping questions to
+query graphs. We describe the basic design below.
+</bodyText>
+<subsectionHeader confidence="0.990701">
+2.1 Knowledge base
+</subsectionHeader>
+<bodyText confidence="0.999959166666667">
+The knowledge base K considered in this work
+is a collection of subject-predicate-object triples
+(e1,p, e2), where e1, e2 E E are the entities (e.g.,
+FamilyGuy or MegGriffin) and p E P is a
+binary predicate like character. A knowledge
+base in this form is often called a knowledge graph
+</bodyText>
+<figureCaption confidence="0.998415">
+Figure 1: Freebase subgraph of Family Guy
+</figureCaption>
+<bodyText confidence="0.9999486875">
+because of its straightforward graphical represen-
+tation – each entity is a node and two related en-
+tities are linked by a directed edge labeled by the
+predicate, from the subject to the object entity.
+To compare our approach to existing methods,
+we use Freebase, which is a large database with
+more than 46 million topics and 2.6 billion facts.
+In Freebase’s design, there is a special entity cate-
+gory called compound value type (CVT), which is
+not a real-world entity, but is used to collect mul-
+tiple fields of an event or a special relationship.
+Fig. 1 shows a small subgraph of Freebase re-
+lated to the TV show Family Guy. Nodes are the
+entities, including some dates and special CVT en-
+tities1. A directed edge describes the relation be-
+tween two entities, labeled by the predicate.
+</bodyText>
+<subsectionHeader confidence="0.999674">
+2.2 Query graph
+</subsectionHeader>
+<bodyText confidence="0.999825166666667">
+Given the knowledge graph, executing a logical-
+form query is equivalent to finding a subgraph that
+can be mapped to the query and then resolving the
+binding of the variables. To capture this intuition,
+we describe a restricted subset of A-calculus in a
+graph representation as our query graph.
+Our query graph consists of four types of nodes:
+grounded entity (rounded rectangle), existential
+variable (circle), lambda variable (shaded circle),
+aggregation function (diamond). Grounded enti-
+ties are existing entities in the knowledge base K.
+Existential variables and lambda variables are un-
+</bodyText>
+<footnote confidence="0.932368666666667">
+1In the rest of the paper, we use the term entity for both
+real-world and CVT entities, as well as properties like date or
+height. The distinction is not essential to our approach.
+</footnote>
+<page confidence="0.609991">
+12/26/1999
+</page>
+<figure confidence="0.983117066666667">
+Family Guy cvt2
+cvt1
+from
+series
+cvt3
+Mila Kunis
+1/31/1999
+Meg Griffin
+Lacey Chabert
+1322
+Family Guy cast
+argmin Meg Griffin
+Ae Ap Aa/Ac
+f Se Sp Sc
+Aa/Ac
+</figure>
+<figureCaption confidence="0.994468">
+Figure 3: The legitimate actions to grow a query
+graph. See text for detail.
+Figure 2: Query graph that represents the question
+“Who first voiced Meg on Family Guy?”
+</figureCaption>
+<bodyText confidence="0.99742915">
+grounded entities. In particular, we would like to
+retrieve all the entities that can map to the lambda
+variables in the end as the answers. Aggregation
+function is designed to operate on a specific entity,
+which typically captures some numerical proper-
+ties. Just like in the knowledge graph, related
+nodes in the query graph are connected by directed
+edges, labeled with predicates in K.
+To demonstrate this design, Fig. 2 shows one
+possible query graph for the question “Who first
+voiced Meg on Family Guy?” using Freebase.
+The two entities, MegGriffin and FamilyGuy
+are represented by two rounded rectangle nodes.
+The circle node y means that there should exist
+an entity describing some casting relations like
+the character, actor and the time she started the
+role2. The shaded circle node x is also called
+the answer node, and is used to map entities re-
+trieved by the query. The diamond node arg min
+constrains that the answer needs to be the ear-
+liest actor for this role. Equivalently, the logi-
+cal form query in A-calculus without the aggrega-
+tion function is: Ax.∃y.cast(FamilyGuy, y) ∧
+actor(y,x) ∧ character(y,MegGriffin)
+Running this query graph against K as in
+Fig. 1 will match both LaceyChabert and
+MilaKunis before applying the aggregation
+function, but only LaceyChabert is the correct
+answer as she started this role earlier (by checking
+the from property of the grounded CVT node).
+Our query graph design is inspired by (Reddy
+et al., 2014), but with some key differences. The
+nodes and edges in our query graph closely re-
+semble the exact entities and predicates from the
+knowledge base. As a result, the graph can
+be straightforwardly translated to a logical form
+query that is directly executable. In contrast, the
+query graph in (Reddy et al., 2014) is mapped
+from the CCG parse of the question, and needs fur-
+ther transformations before mapping to subgraphs
+</bodyText>
+<subsectionHeader confidence="0.420595">
+2y should be grounded to a CVT entity in this case.
+</subsectionHeader>
+<bodyText confidence="0.999589090909091">
+of the target knowledge base to retrieve answers.
+Semantically, our query graph is more related to
+simple A-DCS (Berant et al., 2013; Liang, 2013),
+which is a syntactic simplification of A-calculus
+when applied to graph databases. A query graph
+can be viewed as the tree-like graph pattern of a
+logical form in A-DCS. For instance, the path from
+the answer node to an entity node can be described
+using a series of join operations in A-DCS. Differ-
+ent paths of the tree graph are combined via the
+intersection operators.
+</bodyText>
+<sectionHeader confidence="0.991613" genericHeader="method">
+3 Staged Query Graph Generation
+</sectionHeader>
+<bodyText confidence="0.999436066666667">
+We focus on generating query graphs with the fol-
+lowing properties. First, the tree graph consists of
+one entity node as the root, referred as the topic
+entity. Second, there exists only one lambda vari-
+able x as the answer node, with a directed path
+from the root to it, and has zero or more existential
+variables in-between. We call this path the core
+inferential chain of the graph, as it describes the
+main relationship between the answer and topic
+entity. Variables can only occur in this chain, and
+the chain only has variable nodes except the root.
+Finally, zero or more entity or aggregation nodes
+can be attached to each variable node, including
+the answer node. These branches are the addi-
+tional constraints that the answers need to satisfy.
+For example, in Fig. 2, FamilyGuy is the root
+and FamilyGuy → y → x is the core inferential
+chain. The branch y → MegGriffin specifies
+the character and y → arg min constrains that the
+answer needs to be the earliest actor for this role.
+Given a question, we formalize the query
+graph generation process as a search problem,
+with staged states and actions. Let S =
+U {0, Se, Sp, Sc} be the set of states, where each
+state could be an empty graph (0), a single-
+node graph with the topic entity (Se), a core in-
+ferential chain (Sp), or a more complex query
+graph with additional constraints (Sc). Let A =
+U {Ae, Ap, Ac, Aa} be the set of actions. An ac-
+tion grows a given graph by adding some edges
+</bodyText>
+<page confidence="0.96377">
+1323
+</page>
+<figureCaption confidence="0.824242">
+Figure 4: Two possible topic entity linking actions
+applied to an empty graph, for question “Who first
+voiced [Meg] on [Family Guy]?”
+</figureCaption>
+<bodyText confidence="0.99985375">
+and nodes. In particular, Ae picks an entity node;
+Ap determines the core inferential chain; Ac and
+Aa add constraints and aggregation nodes, respec-
+tively. Given a state, the valid action set can be de-
+fined by the finite state diagram in Fig. 3. Notice
+that the order of possible actions is chosen for the
+convenience of implementation. In principle, we
+could choose a different order, such as matching
+the core inferential chain first and then resolving
+the topic entity linking. However, since we will
+consider multiple hypotheses during search, the
+order of the staged actions can simply be viewed
+as a different way to prune the search space or to
+bias the exploration order.
+We define the reward function on the state space
+using a log-linear model. The reward basically
+estimates the likelihood that a query graph cor-
+rectly parses the question. Search is done using
+the best-first strategy with a priority queue, which
+is formally defined in Appendix A. In the follow-
+ing subsections, we use a running example of find-
+ing the semantic parse of question qex = “Who
+first voiced Meg of Family Guy?” to describe the
+sequence of actions.
+</bodyText>
+<subsectionHeader confidence="0.999824">
+3.1 Linking Topic Entity
+</subsectionHeader>
+<bodyText confidence="0.999922714285714">
+Starting from the initial state so, the valid actions
+are to create a single-node graph that corresponds
+to the topic entity found in the given question. For
+instance, possible topic entities in qex can either be
+FamilyGuy or MegGriffin, shown in Fig. 4.
+We use an entity linking system that is designed
+for short and noisy text (Yang and Chang, 2015).
+For each entity e in the knowledge base, the sys-
+tem first prepares a surface-form lexicon that lists
+all possible ways that e can be mentioned in text.
+This lexicon is created using various data sources,
+such as names and aliases of the entities, the an-
+chor text in Web documents and the Wikipedia re-
+direct table. Given a question, it considers all the
+</bodyText>
+<figureCaption confidence="0.811672">
+Figure 5: Candidate core inferential chains start
+from the entity FamilyGuy.
+</figureCaption>
+<bodyText confidence="0.9988859">
+consecutive word sequences that have occurred in
+the lexicon as possible mentions, paired with their
+possible entities. Each pair is then scored by a sta-
+tistical model based on its frequency counts in the
+surface-form lexicon. To tolerate potential mis-
+takes of the entity linking system, as well as ex-
+ploring more possible query graphs, up to 10 top-
+ranked entities are considered as the topic entity.
+The linking score will also be used as a feature for
+the reward function.
+</bodyText>
+<subsectionHeader confidence="0.999369">
+3.2 Identifying Core Inferential Chain
+</subsectionHeader>
+<bodyText confidence="0.989581333333333">
+Given a state s that corresponds to a single-node
+graph with the topic entity e, valid actions to ex-
+tend this graph is to identify the core inferential
+chain; namely, the relationship between the topic
+entity and the answer. For example, Fig. 5 shows
+three possible chains that expand the single-node
+graph in si. Because the topic entity e is given,
+we only need to explore legitimate predicate se-
+quences that can start from e. Specifically, to re-
+strict the search space, we explore all paths of
+length 2 when the middle existential variable can
+be grounded to a CVT node and paths of length 1 if
+not. We also consider longer predicate sequences
+if the combinations are observed in training data3.
+Analogous to the entity linking problem, where
+the goal is to find the mapping of mentions to en-
+tities in K, identifying the core inferential chain
+is to map the natural utterance of the question to
+the correct predicate sequence. For question “Who
+first voiced Meg on [Family Guy]?” we need to
+measure the likelihood that each of the sequences
+in {cast-actor, writer-start, genre}
+correctly captures the relationship between Family
+Guy and Who. We reduce this problem to measur-
+ing semantic similarity using neural networks.
+3Decomposing relations in the utterance can be done us-
+ing decoding methods (e.g., (Bao et al., 2014)). However,
+similar to ontology mismatch, the relation in text may not
+have a corresponding single predicate, such as grandparent
+needs to be mapped to parent-parent in Freebase.
+</bodyText>
+<figure confidence="0.996959769230769">
+Sp
+ϕ
+S]
+S2Meg Griffin
+Family Guy
+S1
+Family Guy
+S3
+Sq
+SS
+Family Guy writer y start x
+Family Guy genre x
+Family Guy cast y actor x
+</figure>
+<page confidence="0.703528">
+1324
+</page>
+<figureCaption confidence="0.970132">
+Figure 6: The architecture of the convolutional
+</figureCaption>
+<bodyText confidence="0.969906">
+neural networks (CNN) used in this work. The
+CNN model maps a variable-length word se-
+quence (e.g., a pattern or predicate sequence) to a
+low-dimensional vector in a latent semantic space.
+See text for the description of each layer.
+</bodyText>
+<subsectionHeader confidence="0.443715">
+3.2.1 Deep Convolutional Neural Networks
+</subsectionHeader>
+<bodyText confidence="0.999904387096774">
+To handle the huge variety of the semantically
+equivalent ways of stating the same question, as
+well as the mismatch of the natural language ut-
+terances and predicates in the knowledge base, we
+propose using Siamese neural networks (Brom-
+ley et al., 1993) for identifying the core inferen-
+tial chain. For instance, one of our constructions
+maps the question to a pattern by replacing the en-
+tity mention with a generic symbol &lt;e&gt; and then
+compares it with a candidate chain, such as “who
+first voiced meg on &lt;e&gt;” vs. cast-actor. The
+model consists of two neural networks, one for
+the pattern and the other for the inferential chain.
+Both are mapped to k-dimensional vectors as the
+output of the networks. Their semantic similar-
+ity is then computed using some distance func-
+tion, such as cosine. This continuous-space rep-
+resentation approach has been proposed recently
+for semantic parsing and question answering (Bor-
+des et al., 2014a; Yih et al., 2014) and has shown
+better results compared to lexical matching ap-
+proaches (e.g., word-alignment models). In this
+work, we adapt a convolutional neural network
+(CNN) framework (Shen et al., 2014b; Shen et al.,
+2014a; Gao et al., 2014) to this matching problem.
+The network architecture is illustrated in Fig. 6.
+The CNN model first applies a word hashing
+technique (Huang et al., 2013) that breaks a word
+into a vector of letter-trigrams (xt → ft in Fig. 6).
+For example, the bag of letter-trigrams of the word
+“who” are #-w-h, w-h-o, h-o-# after adding the
+</bodyText>
+<figureCaption confidence="0.97978">
+Figure 7: Extending an inferential chain with con-
+straints and aggregation functions.
+</figureCaption>
+<bodyText confidence="0.999063685714286">
+word boundary symbol #. Then, it uses a convo-
+lutional layer to project the letter-trigram vectors
+of words within a context window of 3 words to
+a local contextual feature vector (ft → ht), fol-
+lowed by a max pooling layer that extracts the
+most salient local features to form a fixed-length
+global feature vector (v). The global feature vector
+is then fed to feed-forward neural network layers
+to output the final non-linear semantic features (y),
+as the vector representation of either the pattern or
+the inferential chain.
+Training the model needs positive pairs, such as
+a pattern like “who first voiced meg on &lt;e&gt;” and
+an inferential chain like cast-actor. These
+pairs can be extracted from the full semantic
+parses when provided in the training data. If the
+correct semantic parses are latent and only the
+pairs of questions and answers are available, such
+as the case in the WEBQUESTIONS dataset, we
+can still hypothesize possible inferential chains by
+traversing the paths in the knowledge base that
+connect the topic entity and the answer. Sec. 4.1
+will illustrate this data generation process in detail.
+Our model has two advantages over the embed-
+ding approach (Bordes et al., 2014a). First, the
+word hashing layer helps control the dimensional-
+ity of the input space and can easily scale to large
+vocabulary. The letter-trigrams also capture some
+sub-word semantics (e.g., words with minor ty-
+pos have almost identical letter-trigram vectors),
+which makes it especially suitable for questions
+from real-world users, such as those issued to a
+search engine. Second, it uses a deeper archi-
+tecture with convolution and max-pooling layers,
+which has more representation power.
+</bodyText>
+<figure confidence="0.861691185185185">
+Semantic layer: y
+Semantic projection matrix: Ws
+Max pooling layer: v
+300
+300
+...
+Max pooling operation
+max max
+... max
+... ... ...
+Convolutional layer: ht
+Convolution matrix: Wc
+Word hashing layer: ft
+Word hashing matrix: Wf
+Word sequence: xt
+&lt;s&gt; w1 w2 ... wT &lt;/s&gt;
+1000 1000 ... 1000
+15K 15K 15K ... 15K 15K
+S3
+S6
+S7
+Family Guy cast y actor x
+Family Guy y x
+argmin
+Family Guy cast y actor x
+Meg Griffin
+Meg Griffin
+</figure>
+<page confidence="0.863133">
+1325
+</page>
+<subsectionHeader confidence="0.994207">
+3.3 Augmenting Constraints &amp; Aggregations
+</subsectionHeader>
+<bodyText confidence="0.998283391304348">
+A graph with just the inferential chain forms the
+simplest legitimate query graph and can be exe-
+cuted against the knowledge base K to retrieve
+the answers; namely, all the entities that x can
+be grounded to. For instance, the graph in s3 in
+Fig. 7 will retrieve all the actors who have been on
+FamilyGuy. Although this set of entities obvi-
+ously contains the correct answer to the question
+(assuming the topic entity FamilyGuy is correct),
+it also includes incorrect entities that do not sat-
+isfy additional constraints implicitly or explicitly
+mentioned in the question.
+To further restrict the set of answer entities, the
+graph with only the core inferential chain can be
+expanded by two types of actions: A, and Aa. A,
+is the set of possible ways to attach an entity to a
+variable node, where the edge denotes one of the
+valid predicates that can link the variable to the
+entity. For instance, in Fig. 7, s6 is created by
+attaching MegGriffin to y with the predicate
+character. This is equivalent to the last con-
+junctive term in the corresponding λ-expression:
+λx.∃y.cast(FamilyGuy, y) n actor(y, x) n
+character(y,MegGriffin). Sometimes, the
+constraints are described over the entire answer
+set through the aggregation function, such as the
+word “first” in our example question q, This is
+handled similarly by actions Aa, which attach an
+aggregation node on a variable node. For exam-
+ple, the arg min node of s7 in Fig. 7 chooses the
+grounding with the smallest from attribute of y.
+The full possible constraint set can be derived
+by first issuing the core inferential chain as a query
+to the knowledge base to find the bindings of vari-
+ables y’s and x, and then enumerating all neigh-
+boring nodes of these entities. This, however,
+often results in an unnecessarily large constraint
+pool. In this work, we employ simple rules to re-
+tain only the nodes that have some possibility to be
+legitimate constraints. For instance, a constraint
+node can be an entity that also appears in the ques-
+tion (detected by our entity linking component), or
+an aggregation constraint can only be added if cer-
+tain keywords like “first” or “latest” occur in the
+question. The complete set of these rules can be
+found in Appendix B.
+</bodyText>
+<subsectionHeader confidence="0.98853">
+3.4 Learning the reward function
+</subsectionHeader>
+<bodyText confidence="0.999408">
+Given a state s, the reward function γ(s) basically
+judges whether the query graph represented by s
+is the correct semantic parse of the input ques-
+tion q. We use a log-linear model to learn the re-
+ward function. Below we describe the features and
+the learning process.
+</bodyText>
+<sectionHeader confidence="0.715986" genericHeader="method">
+3.4.1 Features
+</sectionHeader>
+<bodyText confidence="0.999813255813953">
+The features we designed essentially match spe-
+cific portions of the graph to the question, and gen-
+erally correspond to the staged actions described
+previously, including:
+Topic Entity The score returned by the entity
+linking system is directly used as a feature.
+Core Inferential Chain We use similarity
+scores of different CNN models described in
+Sec. 3.2.1 to measure the quality of the core infer-
+ential chain. PatChain compares the pattern (re-
+placing the topic entity with an entity symbol) and
+the predicate sequence. QuesEP concatenates the
+canonical name of the topic entity and the predi-
+cate sequence, and compares it with the question.
+This feature conceptually tries to verify the entity
+linking suggestion. These two CNN models are
+learned using pairs of the question and the infer-
+ential chain of the parse in the training data. In
+addition to the in-domain similarity features, we
+also train a ClueWeb model using the Freebase
+annotation of ClueWeb corpora (Gabrilovich et al.,
+2013). For two entities in a sentence that can be
+linked by one or two predicates, we pair the sen-
+tences and predicates to form a parallel corpus to
+train the CNN model.
+Constraints &amp; Aggregations When a con-
+straint node is present in the graph, we use some
+simple features to check whether there are words
+in the question that can be associated with the con-
+straint entity or property. Examples of such fea-
+tures include whether a mention in the question
+can be linked to this entity, and the percentage of
+the words in the name of the constraint entity ap-
+pear in the question. Similarly, we check the ex-
+istence of some keywords in a pre-compiled list,
+such as “first”, “current” or “latest” as features for
+aggregation nodes such as arg min. The complete
+list of these simple word matching features can
+also be found in Appendix B.
+Overall The number of the answer entities re-
+trieved when issuing the query to the knowledge
+base and the number of nodes in the query graph
+are both included as features.
+</bodyText>
+<page confidence="0.93849">
+1326
+</page>
+<bodyText confidence="0.522447">
+q = &amp;quot;Who first voiced Meg on Family Guy?
+</bodyText>
+<listItem confidence="0.718450444444444">
+(1) EntityLinkingScore(FamilyGuy, &amp;quot;Family Guy&amp;quot;) = 0.9
+(2) PatChain(&amp;quot;who first voiced meg on &lt;e&gt;&amp;quot;, cast-actor) = 0.7
+(3) QuesEP(q, &amp;quot;family guy cast-actor&amp;quot;) = 0.6
+(4) ClueWeb( &amp;quot;who first voiced meg on &lt;e&gt;&amp;quot;, cast-actor) = 0.2
+(5) ConstraintEntityWord( &amp;quot;Meg Griffin&amp;quot;, q) = 0.5
+(6) ConstraintEntityInQ( &amp;quot;Meg Griffin&amp;quot;, q) = 1
+(7) AggregationKeyword(argmin, q) = 1
+(8) NumNodes(s) = 5
+(9) NumAns(s) = 1
+</listItem>
+<figureCaption confidence="0.9296215">
+Figure 8: Active features of a query graph s. (1)
+is the entity linking score of the topic entity. (2)-
+</figureCaption>
+<bodyText confidence="0.869548222222222">
+(4) are different model scores of the core chain.
+(5) indicates 50% of the words in “Meg Griffin”
+appear in the question q. (6) is 1 when the mention
+“Meg” in q is correctly linked to MegGriffin
+by the entity linking component. (8) is the number
+of nodes in s. The knowledge base returns only 1
+entity when issuing this query, so (9) is 1.
+To illustrate our feature design, Fig. 8 presents
+the active features of an example query graph.
+</bodyText>
+<subsectionHeader confidence="0.952531">
+3.4.2 Learning
+</subsectionHeader>
+<bodyText confidence="0.99998195">
+In principle, once the features are extracted, the
+model can be trained using any standard off-the-
+shelf learning algorithm. Instead of treating it as a
+binary classification problem, where only the cor-
+rect query graphs are labeled as positive, we view
+it as a ranking problem. Suppose we have several
+candidate query graphs for each question4. Let ga
+and gb be the query graphs described in states sa
+and sb for the same question q, and the entity sets
+Aa and Ab be those retrieved by executing ga and
+gb, respectively. Suppose that A is the labeled an-
+swers to q. We first compute the precision, recall
+and F1 score of Aa and Ab, compared with the
+gold answer set A. We then rank sa and sb by their
+F1 scores5. The intuition behind is that even if a
+query is not completely correct, it is still preferred
+than some other totally incorrect queries. In this
+work, we use a one-layer neural network model
+based on lambda-rank (Burges, 2010) for training
+the ranker.
+</bodyText>
+<footnote confidence="0.9916915">
+4We will discuss how to create these candidate query
+graphs from question/answer pairs in Sec. 4.1.
+5We use Fl partially because it is the evaluation metric
+used in the experiments.
+</footnote>
+<sectionHeader confidence="0.998254" genericHeader="method">
+4 Experiments
+</sectionHeader>
+<bodyText confidence="0.999907666666667">
+We first introduce the dataset and evaluation met-
+ric, followed by the main experimental results and
+some analysis.
+</bodyText>
+<subsectionHeader confidence="0.996572">
+4.1 Data &amp; evaluation metric
+</subsectionHeader>
+<bodyText confidence="0.999988682926829">
+We use the WEBQUESTIONS dataset (Berant
+et al., 2013), which consists of 5,810 ques-
+tion/answer pairs. These questions were collected
+using Google Suggest API and the answers were
+obtained from Freebase with the help of Amazon
+MTurk. The questions are split into training and
+testing sets, which contain 3,778 questions (65%)
+and 2,032 questions (35%), respectively. This
+dataset has several unique properties that make it
+appealing and was used in several recent papers
+on semantic parsing and question answering. For
+instance, although the questions are not directly
+sampled from search query logs, the selection pro-
+cess was still biased to commonly asked questions
+on a search engine. The distribution of this ques-
+tion set is thus closer to the “real” information
+need of search users than that of a small number
+of human editors. The system performance is ba-
+sically measured by the ratio of questions that are
+answered correctly. Because there can be more
+than one answer to a question, precision, recall
+and F1 are computed based on the system output
+for each individual question. The average F1 score
+is reported as the main evaluation metric6.
+Because this dataset contains only question and
+answer pairs, we use essentially the same search
+procedure to simulate the semantic parses for
+training the CNN models and the overall reward
+function. Candidate topic entities are first gener-
+ated using the same entity linking system for each
+question in the training data. Paths on the Free-
+base knowledge graph that connect a candidate
+entity to at least one answer entity are identified
+as the core inferential chains7. If an inferential-
+chain query returns more entities than the correct
+answers, we explore adding constraint and aggre-
+gation nodes, until the entities retrieved by the
+query graph are identical to the labeled answers, or
+the F1 score cannot be increased further. Negative
+examples are sampled from of the incorrect can-
+didate graphs generated during the search process.
+</bodyText>
+<footnote confidence="0.9869278">
+6We used the official evaluation script from http://
+www-nlp.stanford.edu/software/sempre/.
+7We restrict the path length to 2. In principle, parses of
+shorter chains can be used to train the initial reward function,
+for exploring longer paths using the same search procedure.
+</footnote>
+<table confidence="0.840996625">
+s
+Family Guy cast
+argmin
+1f actor
+Meg Griffin
+1327
+Method Prec. Rec. Fl
+(Berant et al., 2013) 48.0 41.3 35.7
+(Bordes et al., 2014b) - - 29.7
+(Yao and Van Durme, 2014) - - 33.0
+(Berant and Liang, 2014) 40.5 46.6 39.9
+(Bao et al., 2014) - - 37.5
+(Bordes et al., 2014a) - - 39.2
+(Yang et al., 2014) - - 41.3
+(Wang et al., 2014) - - 45.3
+Our approach – STAGG 52.8 60.7 52.5
+</table>
+<tableCaption confidence="0.998242">
+Table 1: The results of our approach compared to
+</tableCaption>
+<bodyText confidence="0.995467529411765">
+existing work. The numbers of other systems are
+either from the original papers or derived from the
+evaluation script, when the output is available.
+In the end, we produce 17,277 query graphs with
+none-zero F1 scores from the training set questions
+and about 1.7M completely incorrect ones.
+For training the CNN models to identify the
+core inferential chain (Sec. 3.2.1), we only
+use 4,058 chain-only query graphs that achieve
+F1 = 0.5 to form the parallel question and pred-
+icate sequence pairs. The hyper-parameters in
+CNN, such as the learning rate and the numbers
+of hidden nodes at the convolutional and semantic
+layers were chosen via cross-validation. We re-
+served 684 pairs of patterns and inference-chains
+from the whole training examples as the held-out
+set, and the rest as the initial training set. The
+optimal hyper-parameters were determined by the
+performance of models trained on the initial train-
+ing set when applied to the held-out data. We
+then fixed the hyper-parameters and retrained the
+CNN models using the whole training set. The
+performance of CNN is insensitive to the hyper-
+parameters as long as they are in a reasonable
+range (e.g., 1000 f 200 nodes in the convolutional
+layer, 300 f 100 nodes in the semantic layer, and
+learning rate 0.05 - 0.005) and the training pro-
+cess often converges after - 800 epochs.
+When training the reward function, we created
+up to 4,000 examples for each question that con-
+tain all the positive query graphs and randomly se-
+lected negative examples. The model is trained as
+a ranker, where example query graphs are ranked
+by their F1 scores.
+</bodyText>
+<subsectionHeader confidence="0.746533">
+4.2 Results
+</subsectionHeader>
+<bodyText confidence="0.999525333333333">
+Tab. 1 shows the results of our system, STAGG
+(Staged query graph generation), compared to ex-
+isting work8. As can be seen from the table, our
+</bodyText>
+<footnote confidence="0.9865115">
+8We do not include results of (Reddy et al., 2014) because
+they used only a subset of 570 test questions, which are not
+</footnote>
+<table confidence="0.996611333333333">
+Method #Entities # Covered Ques. # Labeled Ent.
+Freebase API 19,485 3,734 (98.8%) 3,069 (81.2%)
+Ours 9,147 3,770 (99.8%) 3,318 (87.8%)
+</table>
+<tableCaption confidence="0.986063">
+Table 2: Statistics of entity linking results on train-
+</tableCaption>
+<bodyText confidence="0.997084065217391">
+ing set questions. Both methods cover roughly the
+same number of questions, but Freebase API sug-
+gests twice the number of entities output by our
+entity linking system and covers fewer topic enti-
+ties labeled in the original data.
+system outperforms the previous state-of-the-art
+method by a large margin – 7.2% absolute gain.
+Given the staged design of our approach, it is
+thus interesting to examine the contributions of
+each component. Because topic entity linking is
+the very first stage, the quality of the entities found
+in the questions, both in precision and recall, af-
+fects the final results significantly. To get some
+insight about how our topic entity linking com-
+ponent performs, we also experimented with ap-
+plying Freebase Search API to suggest entities for
+possible mentions in a question. As can be ob-
+served in Tab. 2, to cover most of the training
+questions, we only need half of the number of
+suggestions when using our entity linking compo-
+nent, compared to Freebase API. Moreover, they
+also cover more entities that were selected as the
+topic entities in the original dataset. Starting from
+those 9,147 entities output by our component, an-
+swers of 3,453 questions (91.4%) can be found in
+their neighboring nodes. When replacing our en-
+tity linking component with the results from Free-
+base API, we also observed a significant perfor-
+mance degradation. The overall system perfor-
+mance drops from 52.5% to 48.4% in F1 (Prec =
+49.8%, Rec = 55.7%), which is 4.1 points lower.
+Next we test the system performance when the
+query graph has just the core inferential chain.
+Tab. 3 summarizes the results. When only the
+PatChain CNN model is used, the performance
+is already very strong, outperforming all existing
+work. Adding the other CNN models boosts the
+performance further, reaching 51.8% and is only
+slightly lower than the full system performance.
+This may be due to two reasons. First, the ques-
+tions from search engine users are often short and
+a large portion of them simply ask about properties
+of an entity. Examining the query graphs gener-
+ated for training set questions, we found that 1,888
+directly comparable to results from other work. On these 570
+questions, our system achieves 67.0% in Fl.
+</bodyText>
+<page confidence="0.960475">
+1328
+</page>
+<table confidence="0.9994065">
+Method Prec. Rec. Fl
+PatChain 48.8 59.3 49.6
++QuesEP 50.7 60.6 50.9
++ClueWeb 51.3 62.6 51.8
+</table>
+<tableCaption confidence="0.999111">
+Table 3: The system results when only the
+</tableCaption>
+<bodyText confidence="0.964205555555556">
+inferential-chain query graphs are generated. We
+started with the PatChain CNN model and then
+added QuesEP and ClueWeb sequentially. See
+Sec. 3.4 for the description of these models.
+(50.0%) can be answered exactly (i.e., F1 = 1) us-
+ing a chain-only query graph. Second, even if the
+correct parse requires more constraints, the less
+constrained graph still gets a partial score, as its
+results cover the correct answers.
+</bodyText>
+<subsectionHeader confidence="0.93936">
+4.3 Error Analysis
+</subsectionHeader>
+<bodyText confidence="0.999984333333333">
+Although our approach substantially outperforms
+existing methods, the room for improvement
+seems big. After all, the accuracy for the intended
+application, question answering, is still low and
+only slightly above 50%. We randomly sampled
+100 questions that our system did not generate
+the completely correct query graphs, and catego-
+rized the errors. About one third of errors are in
+fact due to label issues and are not real mistakes.
+This includes label error (2%), incomplete labels
+(17%, e.g., only one song is labeled as the an-
+swer to “What songs did Bob Dylan write?”) and
+acceptable answers (15%, e.g., “Time in China”
+vs. “UTC+8”). 8% of the errors are due to incor-
+rect entity linking; however, sometimes the men-
+tion is inherently ambiguous (e.g., AFL in “Who
+founded the AFL?” could mean either “American
+Football League” or “American Federation of La-
+bor”). 35% of the errors are because of the incor-
+rect inferential chains; 23% are due to incorrect or
+missing constraints.
+</bodyText>
+<sectionHeader confidence="0.999882" genericHeader="method">
+5 Related Work and Discussion
+</sectionHeader>
+<bodyText confidence="0.999762741935484">
+Several semantic parsing methods use a domain-
+independent meaning representation derived from
+the combinatory categorial grammar (CCG) parses
+(e.g., (Cai and Yates, 2013; Kwiatkowski et al.,
+2013; Reddy et al., 2014)). In contrast, our query
+graph design matches closely the graph knowl-
+edge base. Although not fully demonstrated in
+this paper, the query graph can in fact be fairly ex-
+pressive. For instance, negations can be handled
+by adding tags to the constraint nodes indicating
+that certain conditions cannot be satisfied. Our
+graph generation method is inspired by (Yao and
+Van Durme, 2014; Bao et al., 2014). Unlike tra-
+ditional semantic parsing approaches, it uses the
+knowledge base to help prune the search space
+when forming the parse. Similar ideas have also
+been explored in (Poon, 2013).
+Empirically, our results suggest that it is cru-
+cial to identify the core inferential chain, which
+matches the relationship between the topic en-
+tity in the question and the answer. Our CNN
+models can be analogous to the embedding ap-
+proaches (Bordes et al., 2014a; Yang et al., 2014),
+but are more sophisticated. By allowing param-
+eter sharing among different question-pattern and
+KB predicate pairs, the matching score of a rare
+or even unseen pair in the training data can still be
+predicted precisely. This is due to the fact that the
+prediction is based on the shared model parame-
+ters (i.e., projection matrices) that are estimated
+using all training pairs.
+</bodyText>
+<sectionHeader confidence="0.999428" genericHeader="method">
+6 Conclusion
+</sectionHeader>
+<bodyText confidence="0.999982588235294">
+In this paper, we present a semantic parsing frame-
+work for question answering using a knowledge
+base. We define a query graph as the meaning rep-
+resentation that can be directly mapped to a logical
+form. Semantic parsing is reduced to query graph
+generation, formulated as a staged search prob-
+lem. With the help of an advanced entity linking
+system and a deep convolutional neural network
+model that matches questions and predicate se-
+quences, our system outperforms previous meth-
+ods substantially on the WEBQUESTIONS dataset.
+In the future, we would like to extend our query
+graph to represent more complicated questions,
+and explore more features and models for match-
+ing constraints and aggregation functions. Apply-
+ing other structured-output prediction methods to
+graph generation will also be investigated.
+</bodyText>
+<sectionHeader confidence="0.998137" genericHeader="evaluation">
+Acknowledgments
+</sectionHeader>
+<bodyText confidence="0.999981571428571">
+We thank the anonymous reviewers for their
+thoughtful comments, Ming Zhou, Nan Duan and
+Xuchen Yao for sharing their experience on the
+question answering problem studied in this work,
+and Chris Meek for his valuable suggestions. We
+are also grateful to Siva Reddy and Jonathan Be-
+rant for providing us additional data.
+</bodyText>
+<sectionHeader confidence="0.997776" genericHeader="conclusions">
+Appendix
+</sectionHeader>
+<bodyText confidence="0.479062">
+See supplementary notes.
+</bodyText>
+<page confidence="0.996238">
+1329
+</page>
+<sectionHeader confidence="0.996187" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.999817333333334">
+S¨oren Auer, Christian Bizer, Georgi Kobilarov, Jens
+Lehmann, Richard Cyganiak, and Zachary Ives.
+2007. DBpedia: A nucleus for a web of open data.
+In The semantic web, pages 722–735. Springer.
+Junwei Bao, Nan Duan, Ming Zhou, and Tiejun Zhao.
+2014. Knowledge-based question answering as ma-
+chine translation. In Proceedings of the 52nd An-
+nual Meeting of the Association for Computational
+Linguistics (Volume 1: Long Papers), pages 967–
+976, Baltimore, Maryland, June. Association for
+Computational Linguistics.
+Jonathan Berant and Percy Liang. 2014. Seman-
+tic parsing via paraphrasing. In Proceedings of the
+52nd Annual Meeting of the Association for Compu-
+tational Linguistics (Volume 1: Long Papers), pages
+1415–1425, Baltimore, Maryland, June. Association
+for Computational Linguistics.
+Jonathan Berant, Andrew Chou, Roy Frostig, and Percy
+Liang. 2013. Semantic parsing on Freebase from
+question-answer pairs. In Proceedings of the 2013
+Conference on Empirical Methods in Natural Lan-
+guage Processing, pages 1533–1544, Seattle, Wash-
+ington, USA, October. Association for Computa-
+tional Linguistics.
+Kurt Bollacker, Colin Evans, Praveen Paritosh, Tim
+Sturge, and Jamie Taylor. 2008. Freebase: A
+collaboratively created graph database for structur-
+ing human knowledge. In Proceedings of the 2008
+ACM SIGMOD International Conference on Man-
+agement of Data, SIGMOD ’08, pages 1247–1250,
+New York, NY, USA. ACM.
+Antoine Bordes, Sumit Chopra, and Jason Weston.
+2014a. Question answering with subgraph embed-
+dings. In Proceedings of the 2014 Conference on
+Empirical Methods in Natural Language Process-
+ing (EMNLP), pages 615–620, Doha, Qatar, Octo-
+ber. Association for Computational Linguistics.
+Antoine Bordes, Jason Weston, and Nicolas Usunier.
+2014b. Open question answering with weakly su-
+pervised embedding models. In Proceedings of
+ECML-PKDD.
+Jane Bromley, James W. Bentz, L´eon Bottou, Is-
+abelle Guyon, Yann LeCun, Cliff Moore, Eduard
+S¨ackinger, and Roopak Shah. 1993. Signature ver-
+ification using a “Siamese” time delay neural net-
+work. International Journal Pattern Recognition
+and Artificial Intelligence, 7(4):669–688.
+Christopher JC Burges. 2010. From RankNet to
+LambdaRank to LambdaMart: An overview. Learn-
+ing, 11:23–581.
+Qingqing Cai and Alexander Yates. 2013. Large-
+scale semantic parsing via schema matching and lex-
+icon extension. In Proceedings of the 51st Annual
+Meeting of the Association for Computational Lin-
+guistics (Volume 1: Long Papers), pages 423–433,
+Sofia, Bulgaria, August. Association for Computa-
+tional Linguistics.
+Evgeniy Gabrilovich, Michael Ringgaard, and Amar-
+nag Subramanya. 2013. FACC1: Freebase annota-
+tion of ClueWeb corpora, version 1. Technical re-
+port, June.
+Jianfeng Gao, Patrick Pantel, Michael Gamon, Xi-
+aodong He, Li Deng, and Yelong Shen. 2014. Mod-
+eling interestingness with deep neural networks. In
+Proceedings of the 2013 Conference on Empirical
+Methods in Natural Language Processing.
+Po-Sen Huang, Xiaodong He, Jianfeng Gao, Li Deng,
+Alex Acero, and Larry Heck. 2013. Learning deep
+structured semantic models for Web search using
+clickthrough data. In Proceedings of the 22nd ACM
+international conference on Conference on informa-
+tion &amp; knowledge management, pages 2333–2338.
+ACM.
+Tom Kwiatkowski, Eunsol Choi, Yoav Artzi, and Luke
+Zettlemoyer. 2013. Scaling semantic parsers with
+on-the-fly ontology matching. In Proceedings of
+the 2013 Conference on Empirical Methods in Natu-
+ral Language Processing, pages 1545–1556, Seattle,
+Washington, USA, October. Association for Compu-
+tational Linguistics.
+Percy Liang. 2013. Lambda dependency-based com-
+positional semantics. Technical report, arXiv.
+Hoifung Poon. 2013. Grounded unsupervised seman-
+tic parsing. In Annual Meeting of the Association for
+Computational Linguistics (ACL), pages 933–943.
+Siva Reddy, Mirella Lapata, and Mark Steedman.
+2014. Large-scale semantic parsing without
+question-answer pairs. Transactions of the Associ-
+ation for Computational Linguistics, 2:377–392.
+Yelong Shen, Xiaodong He, Jianfeng Gao, Li Deng,
+and Gregoire Mesnil. 2014a. A latent semantic
+model with convolutional-pooling structure for in-
+formation retrieval. In Proceedings of the 23rd ACM
+International Conference on Conference on Infor-
+mation and Knowledge Management, pages 101–
+110. ACM.
+Yelong Shen, Xiaodong He, Jianfeng Gao, Li Deng,
+and Gr´egoire Mesnil. 2014b. Learning semantic
+representations using convolutional neural networks
+for web search. In Proceedings of the Companion
+Publication of the 23rd International Conference on
+World Wide Web Companion, pages 373–374.
+Zhenghao Wang, Shengquan Yan, Huaming Wang, and
+Xuedong Huang. 2014. An overview of Microsoft
+Deep QA system on Stanford WebQuestions bench-
+mark. Technical Report MSR-TR-2014-121, Mi-
+crosoft, Sep.
+Yi Yang and Ming-Wei Chang. 2015. S-MART: Novel
+tree-based structured learning algorithms applied to
+tweet entity linking. In Annual Meeting of the Asso-
+ciation for Computational Linguistics (ACL).
+</reference>
+<page confidence="0.761631">
+1330
+</page>
+<reference confidence="0.99959280952381">
+Min-Chul Yang, Nan Duan, Ming Zhou, and Hae-
+Chang Rim. 2014. Joint relational embeddings for
+knowledge-based question answering. In Proceed-
+ings of the 2014 Conference on Empirical Methods
+in Natural Language Processing (EMNLP), pages
+645–650, Doha, Qatar, October. Association for
+Computational Linguistics.
+Xuchen Yao and Benjamin Van Durme. 2014. Infor-
+mation extraction over structured data: Question an-
+swering with Freebase. In Proceedings of the 52nd
+Annual Meeting of the Association for Computa-
+tional Linguistics (Volume 1: Long Papers), pages
+956–966, Baltimore, Maryland, June. Association
+for Computational Linguistics.
+Wen-tau Yih, Xiaodong He, and Christopher Meek.
+2014. Semantic parsing for single-relation ques-
+tion answering. In Proceedings of the 52nd Annual
+Meeting of the Association for Computational Lin-
+guistics (Volume 2: Short Papers), pages 643–648,
+Baltimore, Maryland, June. Association for Compu-
+tational Linguistics.
+</reference>
+<page confidence="0.993036">
+1331
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.475193">
+<title confidence="0.882352">Semantic Parsing via Staged Query Graph Question Answering with Knowledge Base</title>
+<author confidence="0.93805">Wen-tau Yih Ming-Wei Chang Xiaodong He Jianfeng</author>
+<affiliation confidence="0.948029">Microsoft</affiliation>
+<address confidence="0.998539">Redmond, WA 98052,</address>
+<abstract confidence="0.982638578947368">We propose a novel semantic parsing framework for question answering using a base. We define a graph that resembles subgraphs of the knowledge base and can be directly mapped to a logical form. Semantic parsing is reduced to query graph generation, formulated as a staged search problem. Unlike traditional approaches, our method leverages the knowledge base in an early stage to prune the search space and thus simplifies the semantic matching problem. By applying an advanced entity linking system and a deep convolutional neural network model that matches questions and predicate sequences, our system outperforms previous methods substantially, and achieves an Fl measure of 52.5% on the</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>S¨oren Auer</author>
+<author>Christian Bizer</author>
+<author>Georgi Kobilarov</author>
+<author>Jens Lehmann</author>
+<author>Richard Cyganiak</author>
+<author>Zachary Ives</author>
+</authors>
+<title>DBpedia: A nucleus for a web of open data.</title>
+<date>2007</date>
+<booktitle>In The semantic web,</booktitle>
+<pages>722--735</pages>
+<publisher>Springer.</publisher>
+<contexts>
+<context position="1123" citStr="Auer et al., 2007" startWordPosition="166" endWordPosition="169"> formulated as a staged search problem. Unlike traditional approaches, our method leverages the knowledge base in an early stage to prune the search space and thus simplifies the semantic matching problem. By applying an advanced entity linking system and a deep convolutional neural network model that matches questions and predicate sequences, our system outperforms previous methods substantially, and achieves an Fl measure of 52.5% on the WEBQUESTIONS dataset. 1 Introduction Organizing the world’s facts and storing them in a structured database, large-scale knowledge bases (KB) like DBPedia (Auer et al., 2007) and Freebase (Bollacker et al., 2008) have become important resources for supporting open-domain question answering (QA). Most state-of-the-art approaches to KB-QA are based on semantic parsing, where a question (utterance) is mapped to its formal meaning representation (e.g., logical form) and then translated to a KB query. The answers to the question can then be retrieved simply by executing the query. The semantic parse also provides a deeper understanding of the question, which can be used to justify the answer to users, as well as to provide easily interpretable information to developers</context>
+</contexts>
+<marker>Auer, Bizer, Kobilarov, Lehmann, Cyganiak, Ives, 2007</marker>
+<rawString>S¨oren Auer, Christian Bizer, Georgi Kobilarov, Jens Lehmann, Richard Cyganiak, and Zachary Ives. 2007. DBpedia: A nucleus for a web of open data. In The semantic web, pages 722–735. Springer.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Junwei Bao</author>
+<author>Nan Duan</author>
+<author>Ming Zhou</author>
+<author>Tiejun Zhao</author>
+</authors>
+<title>Knowledge-based question answering as machine translation.</title>
+<date>2014</date>
+<booktitle>In Proceedings of the 52nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers),</booktitle>
+<pages>967--976</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<location>Baltimore, Maryland,</location>
+<contexts>
+<context position="2426" citStr="Bao et al., 2014" startWordPosition="374" endWordPosition="377">gely decoupled from the knowledge base, and thus are faced with several challenges when adapted to applications like QA. For instance, a generic meaning representation may have the ontology matching problem when the logical form uses predicates that differ from those defined in the KB (Kwiatkowski et al., 2013). Even when the representation language is closely related to the knowledge base schema, finding the correct predicates from the large vocabulary in the KB to relations described in the utterance remains a difficult problem (Berant and Liang, 2014). Inspired by (Yao and Van Durme, 2014; Bao et al., 2014), we propose a semantic parsing framework that leverages the knowledge base more tightly when forming the parse for an input question. We first define a query graph that can be straightforwardly mapped to a logical form in λ- calculus and is semantically closely related to λ- DCS (Liang, 2013). Semantic parsing is then reduced to query graph generation, formulated as a search problem with staged states and actions. Each state is a candidate parse in the query graph representation and each action defines a way to grow the graph. The representation power of the semantic parse is thus controlled </context>
+<context position="16092" citStr="Bao et al., 2014" startWordPosition="2699" endWordPosition="2702">s to the entity linking problem, where the goal is to find the mapping of mentions to entities in K, identifying the core inferential chain is to map the natural utterance of the question to the correct predicate sequence. For question “Who first voiced Meg on [Family Guy]?” we need to measure the likelihood that each of the sequences in {cast-actor, writer-start, genre} correctly captures the relationship between Family Guy and Who. We reduce this problem to measuring semantic similarity using neural networks. 3Decomposing relations in the utterance can be done using decoding methods (e.g., (Bao et al., 2014)). However, similar to ontology mismatch, the relation in text may not have a corresponding single predicate, such as grandparent needs to be mapped to parent-parent in Freebase. Sp ϕ S] S2Meg Griffin Family Guy S1 Family Guy S3 Sq SS Family Guy writer y start x Family Guy genre x Family Guy cast y actor x 1324 Figure 6: The architecture of the convolutional neural networks (CNN) used in this work. The CNN model maps a variable-length word sequence (e.g., a pattern or predicate sequence) to a low-dimensional vector in a latent semantic space. See text for the description of each layer. 3.2.1 D</context>
+<context position="29767" citStr="Bao et al., 2014" startWordPosition="5021" endWordPosition="5024"> Negative examples are sampled from of the incorrect candidate graphs generated during the search process. 6We used the official evaluation script from http:// www-nlp.stanford.edu/software/sempre/. 7We restrict the path length to 2. In principle, parses of shorter chains can be used to train the initial reward function, for exploring longer paths using the same search procedure. s Family Guy cast argmin 1f actor Meg Griffin 1327 Method Prec. Rec. Fl (Berant et al., 2013) 48.0 41.3 35.7 (Bordes et al., 2014b) - - 29.7 (Yao and Van Durme, 2014) - - 33.0 (Berant and Liang, 2014) 40.5 46.6 39.9 (Bao et al., 2014) - - 37.5 (Bordes et al., 2014a) - - 39.2 (Yang et al., 2014) - - 41.3 (Wang et al., 2014) - - 45.3 Our approach – STAGG 52.8 60.7 52.5 Table 1: The results of our approach compared to existing work. The numbers of other systems are either from the original papers or derived from the evaluation script, when the output is available. In the end, we produce 17,277 query graphs with none-zero F1 scores from the training set questions and about 1.7M completely incorrect ones. For training the CNN models to identify the core inferential chain (Sec. 3.2.1), we only use 4,058 chain-only query graphs t</context>
+<context position="36427" citStr="Bao et al., 2014" startWordPosition="6143" endWordPosition="6146">ion Several semantic parsing methods use a domainindependent meaning representation derived from the combinatory categorial grammar (CCG) parses (e.g., (Cai and Yates, 2013; Kwiatkowski et al., 2013; Reddy et al., 2014)). In contrast, our query graph design matches closely the graph knowledge base. Although not fully demonstrated in this paper, the query graph can in fact be fairly expressive. For instance, negations can be handled by adding tags to the constraint nodes indicating that certain conditions cannot be satisfied. Our graph generation method is inspired by (Yao and Van Durme, 2014; Bao et al., 2014). Unlike traditional semantic parsing approaches, it uses the knowledge base to help prune the search space when forming the parse. Similar ideas have also been explored in (Poon, 2013). Empirically, our results suggest that it is crucial to identify the core inferential chain, which matches the relationship between the topic entity in the question and the answer. Our CNN models can be analogous to the embedding approaches (Bordes et al., 2014a; Yang et al., 2014), but are more sophisticated. By allowing parameter sharing among different question-pattern and KB predicate pairs, the matching sc</context>
+</contexts>
+<marker>Bao, Duan, Zhou, Zhao, 2014</marker>
+<rawString>Junwei Bao, Nan Duan, Ming Zhou, and Tiejun Zhao. 2014. Knowledge-based question answering as machine translation. In Proceedings of the 52nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 967– 976, Baltimore, Maryland, June. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jonathan Berant</author>
+<author>Percy Liang</author>
+</authors>
+<title>Semantic parsing via paraphrasing.</title>
+<date>2014</date>
+<booktitle>In Proceedings of the 52nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers),</booktitle>
+<pages>1415--1425</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<location>Baltimore, Maryland,</location>
+<contexts>
+<context position="2369" citStr="Berant and Liang, 2014" startWordPosition="363" endWordPosition="366">wever, most traditional approaches for semantic parsing are largely decoupled from the knowledge base, and thus are faced with several challenges when adapted to applications like QA. For instance, a generic meaning representation may have the ontology matching problem when the logical form uses predicates that differ from those defined in the KB (Kwiatkowski et al., 2013). Even when the representation language is closely related to the knowledge base schema, finding the correct predicates from the large vocabulary in the KB to relations described in the utterance remains a difficult problem (Berant and Liang, 2014). Inspired by (Yao and Van Durme, 2014; Bao et al., 2014), we propose a semantic parsing framework that leverages the knowledge base more tightly when forming the parse for an input question. We first define a query graph that can be straightforwardly mapped to a logical form in λ- calculus and is semantically closely related to λ- DCS (Liang, 2013). Semantic parsing is then reduced to query graph generation, formulated as a search problem with staged states and actions. Each state is a candidate parse in the query graph representation and each action defines a way to grow the graph. The repre</context>
+<context position="29733" citStr="Berant and Liang, 2014" startWordPosition="5014" endWordPosition="5017">he F1 score cannot be increased further. Negative examples are sampled from of the incorrect candidate graphs generated during the search process. 6We used the official evaluation script from http:// www-nlp.stanford.edu/software/sempre/. 7We restrict the path length to 2. In principle, parses of shorter chains can be used to train the initial reward function, for exploring longer paths using the same search procedure. s Family Guy cast argmin 1f actor Meg Griffin 1327 Method Prec. Rec. Fl (Berant et al., 2013) 48.0 41.3 35.7 (Bordes et al., 2014b) - - 29.7 (Yao and Van Durme, 2014) - - 33.0 (Berant and Liang, 2014) 40.5 46.6 39.9 (Bao et al., 2014) - - 37.5 (Bordes et al., 2014a) - - 39.2 (Yang et al., 2014) - - 41.3 (Wang et al., 2014) - - 45.3 Our approach – STAGG 52.8 60.7 52.5 Table 1: The results of our approach compared to existing work. The numbers of other systems are either from the original papers or derived from the evaluation script, when the output is available. In the end, we produce 17,277 query graphs with none-zero F1 scores from the training set questions and about 1.7M completely incorrect ones. For training the CNN models to identify the core inferential chain (Sec. 3.2.1), we only u</context>
+</contexts>
+<marker>Berant, Liang, 2014</marker>
+<rawString>Jonathan Berant and Percy Liang. 2014. Semantic parsing via paraphrasing. In Proceedings of the 52nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 1415–1425, Baltimore, Maryland, June. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jonathan Berant</author>
+<author>Andrew Chou</author>
+<author>Roy Frostig</author>
+<author>Percy Liang</author>
+</authors>
+<title>Semantic parsing on Freebase from question-answer pairs.</title>
+<date>2013</date>
+<booktitle>In Proceedings of the 2013 Conference on Empirical Methods in Natural Language Processing,</booktitle>
+<pages>1533--1544</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<location>Seattle, Washington, USA,</location>
+<contexts>
+<context position="5174" citStr="Berant et al., 2013" startWordPosition="815" endWordPosition="818">With this integrated framework, best solutions to each subproblem can be easily combined and help produce the correct semantic parse. For instance, an advanced entity linking system that we employ outputs candidate entities for each question with both high precision and recall. In addition, by leveraging a recently developed semantic matching framework based on convolutional networks, we present better relation matching models using continuous-space representations instead of pure lexical matching. Our semantic parsing approach improves the state-of-the-art result on the WEBQUESTIONS dataset (Berant et al., 2013) to 52.5% in F1, a 7.2% absolute gain compared to the best existing method. The rest of this paper is structured as follows. Sec. 2 introduces the basic notion of the graph knowledge base and the design of our query graph. Sec. 3 presents our search-based approach for generating the query graph. The experimental results are shown in Sec. 4, and the discussion of our approach and the comparisons to related work are in Sec. 5. Finally, Sec. 6 concludes the paper. 2 Background In this work, we aim to learn a semantic parser that maps a natural language question to a logical form query q, which ca</context>
+<context position="10305" citStr="Berant et al., 2013" startWordPosition="1694" endWordPosition="1697"> et al., 2014), but with some key differences. The nodes and edges in our query graph closely resemble the exact entities and predicates from the knowledge base. As a result, the graph can be straightforwardly translated to a logical form query that is directly executable. In contrast, the query graph in (Reddy et al., 2014) is mapped from the CCG parse of the question, and needs further transformations before mapping to subgraphs 2y should be grounded to a CVT entity in this case. of the target knowledge base to retrieve answers. Semantically, our query graph is more related to simple A-DCS (Berant et al., 2013; Liang, 2013), which is a syntactic simplification of A-calculus when applied to graph databases. A query graph can be viewed as the tree-like graph pattern of a logical form in A-DCS. For instance, the path from the answer node to an entity node can be described using a series of join operations in A-DCS. Different paths of the tree graph are combined via the intersection operators. 3 Staged Query Graph Generation We focus on generating query graphs with the following properties. First, the tree graph consists of one entity node as the root, referred as the topic entity. Second, there exists</context>
+<context position="27324" citStr="Berant et al., 2013" startWordPosition="4622" endWordPosition="4625">hat even if a query is not completely correct, it is still preferred than some other totally incorrect queries. In this work, we use a one-layer neural network model based on lambda-rank (Burges, 2010) for training the ranker. 4We will discuss how to create these candidate query graphs from question/answer pairs in Sec. 4.1. 5We use Fl partially because it is the evaluation metric used in the experiments. 4 Experiments We first introduce the dataset and evaluation metric, followed by the main experimental results and some analysis. 4.1 Data &amp; evaluation metric We use the WEBQUESTIONS dataset (Berant et al., 2013), which consists of 5,810 question/answer pairs. These questions were collected using Google Suggest API and the answers were obtained from Freebase with the help of Amazon MTurk. The questions are split into training and testing sets, which contain 3,778 questions (65%) and 2,032 questions (35%), respectively. This dataset has several unique properties that make it appealing and was used in several recent papers on semantic parsing and question answering. For instance, although the questions are not directly sampled from search query logs, the selection process was still biased to commonly as</context>
+<context position="29626" citStr="Berant et al., 2013" startWordPosition="4992" endWordPosition="4995">gation nodes, until the entities retrieved by the query graph are identical to the labeled answers, or the F1 score cannot be increased further. Negative examples are sampled from of the incorrect candidate graphs generated during the search process. 6We used the official evaluation script from http:// www-nlp.stanford.edu/software/sempre/. 7We restrict the path length to 2. In principle, parses of shorter chains can be used to train the initial reward function, for exploring longer paths using the same search procedure. s Family Guy cast argmin 1f actor Meg Griffin 1327 Method Prec. Rec. Fl (Berant et al., 2013) 48.0 41.3 35.7 (Bordes et al., 2014b) - - 29.7 (Yao and Van Durme, 2014) - - 33.0 (Berant and Liang, 2014) 40.5 46.6 39.9 (Bao et al., 2014) - - 37.5 (Bordes et al., 2014a) - - 39.2 (Yang et al., 2014) - - 41.3 (Wang et al., 2014) - - 45.3 Our approach – STAGG 52.8 60.7 52.5 Table 1: The results of our approach compared to existing work. The numbers of other systems are either from the original papers or derived from the evaluation script, when the output is available. In the end, we produce 17,277 query graphs with none-zero F1 scores from the training set questions and about 1.7M completely</context>
+</contexts>
+<marker>Berant, Chou, Frostig, Liang, 2013</marker>
+<rawString>Jonathan Berant, Andrew Chou, Roy Frostig, and Percy Liang. 2013. Semantic parsing on Freebase from question-answer pairs. In Proceedings of the 2013 Conference on Empirical Methods in Natural Language Processing, pages 1533–1544, Seattle, Washington, USA, October. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Kurt Bollacker</author>
+<author>Colin Evans</author>
+<author>Praveen Paritosh</author>
+<author>Tim Sturge</author>
+<author>Jamie Taylor</author>
+</authors>
+<title>Freebase: A collaboratively created graph database for structuring human knowledge.</title>
+<date>2008</date>
+<booktitle>In Proceedings of the 2008 ACM SIGMOD International Conference on Management of Data, SIGMOD ’08,</booktitle>
+<pages>1247--1250</pages>
+<publisher>ACM.</publisher>
+<location>New York, NY, USA.</location>
+<contexts>
+<context position="1161" citStr="Bollacker et al., 2008" startWordPosition="172" endWordPosition="175">oblem. Unlike traditional approaches, our method leverages the knowledge base in an early stage to prune the search space and thus simplifies the semantic matching problem. By applying an advanced entity linking system and a deep convolutional neural network model that matches questions and predicate sequences, our system outperforms previous methods substantially, and achieves an Fl measure of 52.5% on the WEBQUESTIONS dataset. 1 Introduction Organizing the world’s facts and storing them in a structured database, large-scale knowledge bases (KB) like DBPedia (Auer et al., 2007) and Freebase (Bollacker et al., 2008) have become important resources for supporting open-domain question answering (QA). Most state-of-the-art approaches to KB-QA are based on semantic parsing, where a question (utterance) is mapped to its formal meaning representation (e.g., logical form) and then translated to a KB query. The answers to the question can then be retrieved simply by executing the query. The semantic parse also provides a deeper understanding of the question, which can be used to justify the answer to users, as well as to provide easily interpretable information to developers for error analysis. However, most tra</context>
+</contexts>
+<marker>Bollacker, Evans, Paritosh, Sturge, Taylor, 2008</marker>
+<rawString>Kurt Bollacker, Colin Evans, Praveen Paritosh, Tim Sturge, and Jamie Taylor. 2008. Freebase: A collaboratively created graph database for structuring human knowledge. In Proceedings of the 2008 ACM SIGMOD International Conference on Management of Data, SIGMOD ’08, pages 1247–1250, New York, NY, USA. ACM.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Antoine Bordes</author>
+<author>Sumit Chopra</author>
+<author>Jason Weston</author>
+</authors>
+<title>Question answering with subgraph embeddings.</title>
+<date>2014</date>
+<booktitle>In Proceedings of the 2014 Conference on Empirical Methods in Natural Language Processing (EMNLP),</booktitle>
+<pages>615--620</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<location>Doha, Qatar,</location>
+<contexts>
+<context position="17653" citStr="Bordes et al., 2014" startWordPosition="2962" endWordPosition="2966">ce, one of our constructions maps the question to a pattern by replacing the entity mention with a generic symbol &lt;e&gt; and then compares it with a candidate chain, such as “who first voiced meg on &lt;e&gt;” vs. cast-actor. The model consists of two neural networks, one for the pattern and the other for the inferential chain. Both are mapped to k-dimensional vectors as the output of the networks. Their semantic similarity is then computed using some distance function, such as cosine. This continuous-space representation approach has been proposed recently for semantic parsing and question answering (Bordes et al., 2014a; Yih et al., 2014) and has shown better results compared to lexical matching approaches (e.g., word-alignment models). In this work, we adapt a convolutional neural network (CNN) framework (Shen et al., 2014b; Shen et al., 2014a; Gao et al., 2014) to this matching problem. The network architecture is illustrated in Fig. 6. The CNN model first applies a word hashing technique (Huang et al., 2013) that breaks a word into a vector of letter-trigrams (xt → ft in Fig. 6). For example, the bag of letter-trigrams of the word “who” are #-w-h, w-h-o, h-o-# after adding the Figure 7: Extending an infe</context>
+<context position="19501" citStr="Bordes et al., 2014" startWordPosition="3272" endWordPosition="3275">as a pattern like “who first voiced meg on &lt;e&gt;” and an inferential chain like cast-actor. These pairs can be extracted from the full semantic parses when provided in the training data. If the correct semantic parses are latent and only the pairs of questions and answers are available, such as the case in the WEBQUESTIONS dataset, we can still hypothesize possible inferential chains by traversing the paths in the knowledge base that connect the topic entity and the answer. Sec. 4.1 will illustrate this data generation process in detail. Our model has two advantages over the embedding approach (Bordes et al., 2014a). First, the word hashing layer helps control the dimensionality of the input space and can easily scale to large vocabulary. The letter-trigrams also capture some sub-word semantics (e.g., words with minor typos have almost identical letter-trigram vectors), which makes it especially suitable for questions from real-world users, such as those issued to a search engine. Second, it uses a deeper architecture with convolution and max-pooling layers, which has more representation power. Semantic layer: y Semantic projection matrix: Ws Max pooling layer: v 300 300 ... Max pooling operation max m</context>
+<context position="29662" citStr="Bordes et al., 2014" startWordPosition="4999" endWordPosition="5002">ieved by the query graph are identical to the labeled answers, or the F1 score cannot be increased further. Negative examples are sampled from of the incorrect candidate graphs generated during the search process. 6We used the official evaluation script from http:// www-nlp.stanford.edu/software/sempre/. 7We restrict the path length to 2. In principle, parses of shorter chains can be used to train the initial reward function, for exploring longer paths using the same search procedure. s Family Guy cast argmin 1f actor Meg Griffin 1327 Method Prec. Rec. Fl (Berant et al., 2013) 48.0 41.3 35.7 (Bordes et al., 2014b) - - 29.7 (Yao and Van Durme, 2014) - - 33.0 (Berant and Liang, 2014) 40.5 46.6 39.9 (Bao et al., 2014) - - 37.5 (Bordes et al., 2014a) - - 39.2 (Yang et al., 2014) - - 41.3 (Wang et al., 2014) - - 45.3 Our approach – STAGG 52.8 60.7 52.5 Table 1: The results of our approach compared to existing work. The numbers of other systems are either from the original papers or derived from the evaluation script, when the output is available. In the end, we produce 17,277 query graphs with none-zero F1 scores from the training set questions and about 1.7M completely incorrect ones. For training the CN</context>
+<context position="36874" citStr="Bordes et al., 2014" startWordPosition="6218" endWordPosition="6221"> tags to the constraint nodes indicating that certain conditions cannot be satisfied. Our graph generation method is inspired by (Yao and Van Durme, 2014; Bao et al., 2014). Unlike traditional semantic parsing approaches, it uses the knowledge base to help prune the search space when forming the parse. Similar ideas have also been explored in (Poon, 2013). Empirically, our results suggest that it is crucial to identify the core inferential chain, which matches the relationship between the topic entity in the question and the answer. Our CNN models can be analogous to the embedding approaches (Bordes et al., 2014a; Yang et al., 2014), but are more sophisticated. By allowing parameter sharing among different question-pattern and KB predicate pairs, the matching score of a rare or even unseen pair in the training data can still be predicted precisely. This is due to the fact that the prediction is based on the shared model parameters (i.e., projection matrices) that are estimated using all training pairs. 6 Conclusion In this paper, we present a semantic parsing framework for question answering using a knowledge base. We define a query graph as the meaning representation that can be directly mapped to a</context>
+</contexts>
+<marker>Bordes, Chopra, Weston, 2014</marker>
+<rawString>Antoine Bordes, Sumit Chopra, and Jason Weston. 2014a. Question answering with subgraph embeddings. In Proceedings of the 2014 Conference on Empirical Methods in Natural Language Processing (EMNLP), pages 615–620, Doha, Qatar, October. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Antoine Bordes</author>
+<author>Jason Weston</author>
+<author>Nicolas Usunier</author>
+</authors>
+<title>Open question answering with weakly supervised embedding models.</title>
+<date>2014</date>
+<booktitle>In Proceedings of ECML-PKDD.</booktitle>
+<contexts>
+<context position="17653" citStr="Bordes et al., 2014" startWordPosition="2962" endWordPosition="2966">ce, one of our constructions maps the question to a pattern by replacing the entity mention with a generic symbol &lt;e&gt; and then compares it with a candidate chain, such as “who first voiced meg on &lt;e&gt;” vs. cast-actor. The model consists of two neural networks, one for the pattern and the other for the inferential chain. Both are mapped to k-dimensional vectors as the output of the networks. Their semantic similarity is then computed using some distance function, such as cosine. This continuous-space representation approach has been proposed recently for semantic parsing and question answering (Bordes et al., 2014a; Yih et al., 2014) and has shown better results compared to lexical matching approaches (e.g., word-alignment models). In this work, we adapt a convolutional neural network (CNN) framework (Shen et al., 2014b; Shen et al., 2014a; Gao et al., 2014) to this matching problem. The network architecture is illustrated in Fig. 6. The CNN model first applies a word hashing technique (Huang et al., 2013) that breaks a word into a vector of letter-trigrams (xt → ft in Fig. 6). For example, the bag of letter-trigrams of the word “who” are #-w-h, w-h-o, h-o-# after adding the Figure 7: Extending an infe</context>
+<context position="19501" citStr="Bordes et al., 2014" startWordPosition="3272" endWordPosition="3275">as a pattern like “who first voiced meg on &lt;e&gt;” and an inferential chain like cast-actor. These pairs can be extracted from the full semantic parses when provided in the training data. If the correct semantic parses are latent and only the pairs of questions and answers are available, such as the case in the WEBQUESTIONS dataset, we can still hypothesize possible inferential chains by traversing the paths in the knowledge base that connect the topic entity and the answer. Sec. 4.1 will illustrate this data generation process in detail. Our model has two advantages over the embedding approach (Bordes et al., 2014a). First, the word hashing layer helps control the dimensionality of the input space and can easily scale to large vocabulary. The letter-trigrams also capture some sub-word semantics (e.g., words with minor typos have almost identical letter-trigram vectors), which makes it especially suitable for questions from real-world users, such as those issued to a search engine. Second, it uses a deeper architecture with convolution and max-pooling layers, which has more representation power. Semantic layer: y Semantic projection matrix: Ws Max pooling layer: v 300 300 ... Max pooling operation max m</context>
+<context position="29662" citStr="Bordes et al., 2014" startWordPosition="4999" endWordPosition="5002">ieved by the query graph are identical to the labeled answers, or the F1 score cannot be increased further. Negative examples are sampled from of the incorrect candidate graphs generated during the search process. 6We used the official evaluation script from http:// www-nlp.stanford.edu/software/sempre/. 7We restrict the path length to 2. In principle, parses of shorter chains can be used to train the initial reward function, for exploring longer paths using the same search procedure. s Family Guy cast argmin 1f actor Meg Griffin 1327 Method Prec. Rec. Fl (Berant et al., 2013) 48.0 41.3 35.7 (Bordes et al., 2014b) - - 29.7 (Yao and Van Durme, 2014) - - 33.0 (Berant and Liang, 2014) 40.5 46.6 39.9 (Bao et al., 2014) - - 37.5 (Bordes et al., 2014a) - - 39.2 (Yang et al., 2014) - - 41.3 (Wang et al., 2014) - - 45.3 Our approach – STAGG 52.8 60.7 52.5 Table 1: The results of our approach compared to existing work. The numbers of other systems are either from the original papers or derived from the evaluation script, when the output is available. In the end, we produce 17,277 query graphs with none-zero F1 scores from the training set questions and about 1.7M completely incorrect ones. For training the CN</context>
+<context position="36874" citStr="Bordes et al., 2014" startWordPosition="6218" endWordPosition="6221"> tags to the constraint nodes indicating that certain conditions cannot be satisfied. Our graph generation method is inspired by (Yao and Van Durme, 2014; Bao et al., 2014). Unlike traditional semantic parsing approaches, it uses the knowledge base to help prune the search space when forming the parse. Similar ideas have also been explored in (Poon, 2013). Empirically, our results suggest that it is crucial to identify the core inferential chain, which matches the relationship between the topic entity in the question and the answer. Our CNN models can be analogous to the embedding approaches (Bordes et al., 2014a; Yang et al., 2014), but are more sophisticated. By allowing parameter sharing among different question-pattern and KB predicate pairs, the matching score of a rare or even unseen pair in the training data can still be predicted precisely. This is due to the fact that the prediction is based on the shared model parameters (i.e., projection matrices) that are estimated using all training pairs. 6 Conclusion In this paper, we present a semantic parsing framework for question answering using a knowledge base. We define a query graph as the meaning representation that can be directly mapped to a</context>
+</contexts>
+<marker>Bordes, Weston, Usunier, 2014</marker>
+<rawString>Antoine Bordes, Jason Weston, and Nicolas Usunier. 2014b. Open question answering with weakly supervised embedding models. In Proceedings of ECML-PKDD.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jane Bromley</author>
+<author>James W Bentz</author>
+<author>L´eon Bottou</author>
+<author>Isabelle Guyon</author>
+<author>Yann LeCun</author>
+<author>Cliff Moore</author>
+<author>Eduard S¨ackinger</author>
+<author>Roopak Shah</author>
+</authors>
+<title>Signature verification using a “Siamese” time delay neural network.</title>
+<date>1993</date>
+<journal>International Journal Pattern Recognition and Artificial Intelligence,</journal>
+<volume>7</volume>
+<issue>4</issue>
+<marker>Bromley, Bentz, Bottou, Guyon, LeCun, Moore, S¨ackinger, Shah, 1993</marker>
+<rawString>Jane Bromley, James W. Bentz, L´eon Bottou, Isabelle Guyon, Yann LeCun, Cliff Moore, Eduard S¨ackinger, and Roopak Shah. 1993. Signature verification using a “Siamese” time delay neural network. International Journal Pattern Recognition and Artificial Intelligence, 7(4):669–688.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Christopher JC Burges</author>
+</authors>
+<title>From RankNet to LambdaRank to LambdaMart: An overview.</title>
+<date>2010</date>
+<booktitle>Learning,</booktitle>
+<pages>11--23</pages>
+<contexts>
+<context position="26905" citStr="Burges, 2010" startWordPosition="4556" endWordPosition="4557">for each question4. Let ga and gb be the query graphs described in states sa and sb for the same question q, and the entity sets Aa and Ab be those retrieved by executing ga and gb, respectively. Suppose that A is the labeled answers to q. We first compute the precision, recall and F1 score of Aa and Ab, compared with the gold answer set A. We then rank sa and sb by their F1 scores5. The intuition behind is that even if a query is not completely correct, it is still preferred than some other totally incorrect queries. In this work, we use a one-layer neural network model based on lambda-rank (Burges, 2010) for training the ranker. 4We will discuss how to create these candidate query graphs from question/answer pairs in Sec. 4.1. 5We use Fl partially because it is the evaluation metric used in the experiments. 4 Experiments We first introduce the dataset and evaluation metric, followed by the main experimental results and some analysis. 4.1 Data &amp; evaluation metric We use the WEBQUESTIONS dataset (Berant et al., 2013), which consists of 5,810 question/answer pairs. These questions were collected using Google Suggest API and the answers were obtained from Freebase with the help of Amazon MTurk. T</context>
+</contexts>
+<marker>Burges, 2010</marker>
+<rawString>Christopher JC Burges. 2010. From RankNet to LambdaRank to LambdaMart: An overview. Learning, 11:23–581.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Qingqing Cai</author>
+<author>Alexander Yates</author>
+</authors>
+<title>Largescale semantic parsing via schema matching and lexicon extension.</title>
+<date>2013</date>
+<booktitle>In Proceedings of the 51st Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers),</booktitle>
+<pages>423--433</pages>
+<contexts>
+<context position="35982" citStr="Cai and Yates, 2013" startWordPosition="6069" endWordPosition="6072">lan write?”) and acceptable answers (15%, e.g., “Time in China” vs. “UTC+8”). 8% of the errors are due to incorrect entity linking; however, sometimes the mention is inherently ambiguous (e.g., AFL in “Who founded the AFL?” could mean either “American Football League” or “American Federation of Labor”). 35% of the errors are because of the incorrect inferential chains; 23% are due to incorrect or missing constraints. 5 Related Work and Discussion Several semantic parsing methods use a domainindependent meaning representation derived from the combinatory categorial grammar (CCG) parses (e.g., (Cai and Yates, 2013; Kwiatkowski et al., 2013; Reddy et al., 2014)). In contrast, our query graph design matches closely the graph knowledge base. Although not fully demonstrated in this paper, the query graph can in fact be fairly expressive. For instance, negations can be handled by adding tags to the constraint nodes indicating that certain conditions cannot be satisfied. Our graph generation method is inspired by (Yao and Van Durme, 2014; Bao et al., 2014). Unlike traditional semantic parsing approaches, it uses the knowledge base to help prune the search space when forming the parse. Similar ideas have also</context>
+</contexts>
+<marker>Cai, Yates, 2013</marker>
+<rawString>Qingqing Cai and Alexander Yates. 2013. Largescale semantic parsing via schema matching and lexicon extension. In Proceedings of the 51st Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 423–433,</rawString>
+</citation>
+<citation valid="false">
+<authors>
+<author>Bulgaria Sofia</author>
+<author>August</author>
+</authors>
+<title>Association for Computational Linguistics.</title>
+<marker>Sofia, August, </marker>
+<rawString>Sofia, Bulgaria, August. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Evgeniy Gabrilovich</author>
+<author>Michael Ringgaard</author>
+<author>Amarnag Subramanya</author>
+</authors>
+<title>FACC1: Freebase annotation of ClueWeb corpora, version 1.</title>
+<date>2013</date>
+<tech>Technical report,</tech>
+<contexts>
+<context position="23973" citStr="Gabrilovich et al., 2013" startWordPosition="4030" endWordPosition="4033"> the quality of the core inferential chain. PatChain compares the pattern (replacing the topic entity with an entity symbol) and the predicate sequence. QuesEP concatenates the canonical name of the topic entity and the predicate sequence, and compares it with the question. This feature conceptually tries to verify the entity linking suggestion. These two CNN models are learned using pairs of the question and the inferential chain of the parse in the training data. In addition to the in-domain similarity features, we also train a ClueWeb model using the Freebase annotation of ClueWeb corpora (Gabrilovich et al., 2013). For two entities in a sentence that can be linked by one or two predicates, we pair the sentences and predicates to form a parallel corpus to train the CNN model. Constraints &amp; Aggregations When a constraint node is present in the graph, we use some simple features to check whether there are words in the question that can be associated with the constraint entity or property. Examples of such features include whether a mention in the question can be linked to this entity, and the percentage of the words in the name of the constraint entity appear in the question. Similarly, we check the exist</context>
+</contexts>
+<marker>Gabrilovich, Ringgaard, Subramanya, 2013</marker>
+<rawString>Evgeniy Gabrilovich, Michael Ringgaard, and Amarnag Subramanya. 2013. FACC1: Freebase annotation of ClueWeb corpora, version 1. Technical report, June.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jianfeng Gao</author>
+<author>Patrick Pantel</author>
+<author>Michael Gamon</author>
+<author>Xiaodong He</author>
+<author>Li Deng</author>
+<author>Yelong Shen</author>
+</authors>
+<title>Modeling interestingness with deep neural networks.</title>
+<date>2014</date>
+<booktitle>In Proceedings of the 2013 Conference on Empirical Methods in Natural Language Processing.</booktitle>
+<contexts>
+<context position="17902" citStr="Gao et al., 2014" startWordPosition="3004" endWordPosition="3007">etworks, one for the pattern and the other for the inferential chain. Both are mapped to k-dimensional vectors as the output of the networks. Their semantic similarity is then computed using some distance function, such as cosine. This continuous-space representation approach has been proposed recently for semantic parsing and question answering (Bordes et al., 2014a; Yih et al., 2014) and has shown better results compared to lexical matching approaches (e.g., word-alignment models). In this work, we adapt a convolutional neural network (CNN) framework (Shen et al., 2014b; Shen et al., 2014a; Gao et al., 2014) to this matching problem. The network architecture is illustrated in Fig. 6. The CNN model first applies a word hashing technique (Huang et al., 2013) that breaks a word into a vector of letter-trigrams (xt → ft in Fig. 6). For example, the bag of letter-trigrams of the word “who” are #-w-h, w-h-o, h-o-# after adding the Figure 7: Extending an inferential chain with constraints and aggregation functions. word boundary symbol #. Then, it uses a convolutional layer to project the letter-trigram vectors of words within a context window of 3 words to a local contextual feature vector (ft → ht), f</context>
+</contexts>
+<marker>Gao, Pantel, Gamon, He, Deng, Shen, 2014</marker>
+<rawString>Jianfeng Gao, Patrick Pantel, Michael Gamon, Xiaodong He, Li Deng, and Yelong Shen. 2014. Modeling interestingness with deep neural networks. In Proceedings of the 2013 Conference on Empirical Methods in Natural Language Processing.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Po-Sen Huang</author>
+<author>Xiaodong He</author>
+<author>Jianfeng Gao</author>
+<author>Li Deng</author>
+<author>Alex Acero</author>
+<author>Larry Heck</author>
+</authors>
+<title>Learning deep structured semantic models for Web search using clickthrough data.</title>
+<date>2013</date>
+<booktitle>In Proceedings of the 22nd ACM international conference on Conference on information &amp; knowledge management,</booktitle>
+<pages>2333--2338</pages>
+<publisher>ACM.</publisher>
+<contexts>
+<context position="18053" citStr="Huang et al., 2013" startWordPosition="3029" endWordPosition="3032">emantic similarity is then computed using some distance function, such as cosine. This continuous-space representation approach has been proposed recently for semantic parsing and question answering (Bordes et al., 2014a; Yih et al., 2014) and has shown better results compared to lexical matching approaches (e.g., word-alignment models). In this work, we adapt a convolutional neural network (CNN) framework (Shen et al., 2014b; Shen et al., 2014a; Gao et al., 2014) to this matching problem. The network architecture is illustrated in Fig. 6. The CNN model first applies a word hashing technique (Huang et al., 2013) that breaks a word into a vector of letter-trigrams (xt → ft in Fig. 6). For example, the bag of letter-trigrams of the word “who” are #-w-h, w-h-o, h-o-# after adding the Figure 7: Extending an inferential chain with constraints and aggregation functions. word boundary symbol #. Then, it uses a convolutional layer to project the letter-trigram vectors of words within a context window of 3 words to a local contextual feature vector (ft → ht), followed by a max pooling layer that extracts the most salient local features to form a fixed-length global feature vector (v). The global feature vecto</context>
+</contexts>
+<marker>Huang, He, Gao, Deng, Acero, Heck, 2013</marker>
+<rawString>Po-Sen Huang, Xiaodong He, Jianfeng Gao, Li Deng, Alex Acero, and Larry Heck. 2013. Learning deep structured semantic models for Web search using clickthrough data. In Proceedings of the 22nd ACM international conference on Conference on information &amp; knowledge management, pages 2333–2338. ACM.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Tom Kwiatkowski</author>
+<author>Eunsol Choi</author>
+<author>Yoav Artzi</author>
+<author>Luke Zettlemoyer</author>
+</authors>
+<title>Scaling semantic parsers with on-the-fly ontology matching.</title>
+<date>2013</date>
+<booktitle>In Proceedings of the 2013 Conference on Empirical Methods in Natural Language Processing,</booktitle>
+<pages>1545--1556</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<location>Seattle, Washington, USA,</location>
+<contexts>
+<context position="2121" citStr="Kwiatkowski et al., 2013" startWordPosition="324" endWordPosition="327">eved simply by executing the query. The semantic parse also provides a deeper understanding of the question, which can be used to justify the answer to users, as well as to provide easily interpretable information to developers for error analysis. However, most traditional approaches for semantic parsing are largely decoupled from the knowledge base, and thus are faced with several challenges when adapted to applications like QA. For instance, a generic meaning representation may have the ontology matching problem when the logical form uses predicates that differ from those defined in the KB (Kwiatkowski et al., 2013). Even when the representation language is closely related to the knowledge base schema, finding the correct predicates from the large vocabulary in the KB to relations described in the utterance remains a difficult problem (Berant and Liang, 2014). Inspired by (Yao and Van Durme, 2014; Bao et al., 2014), we propose a semantic parsing framework that leverages the knowledge base more tightly when forming the parse for an input question. We first define a query graph that can be straightforwardly mapped to a logical form in λ- calculus and is semantically closely related to λ- DCS (Liang, 2013).</context>
+<context position="36008" citStr="Kwiatkowski et al., 2013" startWordPosition="6073" endWordPosition="6076">ptable answers (15%, e.g., “Time in China” vs. “UTC+8”). 8% of the errors are due to incorrect entity linking; however, sometimes the mention is inherently ambiguous (e.g., AFL in “Who founded the AFL?” could mean either “American Football League” or “American Federation of Labor”). 35% of the errors are because of the incorrect inferential chains; 23% are due to incorrect or missing constraints. 5 Related Work and Discussion Several semantic parsing methods use a domainindependent meaning representation derived from the combinatory categorial grammar (CCG) parses (e.g., (Cai and Yates, 2013; Kwiatkowski et al., 2013; Reddy et al., 2014)). In contrast, our query graph design matches closely the graph knowledge base. Although not fully demonstrated in this paper, the query graph can in fact be fairly expressive. For instance, negations can be handled by adding tags to the constraint nodes indicating that certain conditions cannot be satisfied. Our graph generation method is inspired by (Yao and Van Durme, 2014; Bao et al., 2014). Unlike traditional semantic parsing approaches, it uses the knowledge base to help prune the search space when forming the parse. Similar ideas have also been explored in (Poon, 2</context>
+</contexts>
+<marker>Kwiatkowski, Choi, Artzi, Zettlemoyer, 2013</marker>
+<rawString>Tom Kwiatkowski, Eunsol Choi, Yoav Artzi, and Luke Zettlemoyer. 2013. Scaling semantic parsers with on-the-fly ontology matching. In Proceedings of the 2013 Conference on Empirical Methods in Natural Language Processing, pages 1545–1556, Seattle, Washington, USA, October. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Percy Liang</author>
+</authors>
+<title>Lambda dependency-based compositional semantics.</title>
+<date>2013</date>
+<tech>Technical report, arXiv.</tech>
+<contexts>
+<context position="2720" citStr="Liang, 2013" startWordPosition="427" endWordPosition="428">et al., 2013). Even when the representation language is closely related to the knowledge base schema, finding the correct predicates from the large vocabulary in the KB to relations described in the utterance remains a difficult problem (Berant and Liang, 2014). Inspired by (Yao and Van Durme, 2014; Bao et al., 2014), we propose a semantic parsing framework that leverages the knowledge base more tightly when forming the parse for an input question. We first define a query graph that can be straightforwardly mapped to a logical form in λ- calculus and is semantically closely related to λ- DCS (Liang, 2013). Semantic parsing is then reduced to query graph generation, formulated as a search problem with staged states and actions. Each state is a candidate parse in the query graph representation and each action defines a way to grow the graph. The representation power of the semantic parse is thus controlled by the set of legitimate actions applicable to each state. In particular, we stage the actions into three main steps: locating the topic entity in the question, finding the main relationship between the answer and the topic entity, and expanding the query graph with additional constraints that</context>
+<context position="10319" citStr="Liang, 2013" startWordPosition="1698" endWordPosition="1699">ith some key differences. The nodes and edges in our query graph closely resemble the exact entities and predicates from the knowledge base. As a result, the graph can be straightforwardly translated to a logical form query that is directly executable. In contrast, the query graph in (Reddy et al., 2014) is mapped from the CCG parse of the question, and needs further transformations before mapping to subgraphs 2y should be grounded to a CVT entity in this case. of the target knowledge base to retrieve answers. Semantically, our query graph is more related to simple A-DCS (Berant et al., 2013; Liang, 2013), which is a syntactic simplification of A-calculus when applied to graph databases. A query graph can be viewed as the tree-like graph pattern of a logical form in A-DCS. For instance, the path from the answer node to an entity node can be described using a series of join operations in A-DCS. Different paths of the tree graph are combined via the intersection operators. 3 Staged Query Graph Generation We focus on generating query graphs with the following properties. First, the tree graph consists of one entity node as the root, referred as the topic entity. Second, there exists only one lamb</context>
+</contexts>
+<marker>Liang, 2013</marker>
+<rawString>Percy Liang. 2013. Lambda dependency-based compositional semantics. Technical report, arXiv.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Hoifung Poon</author>
+</authors>
+<title>Grounded unsupervised semantic parsing.</title>
+<date>2013</date>
+<booktitle>In Annual Meeting of the Association for Computational Linguistics (ACL),</booktitle>
+<pages>933--943</pages>
+<contexts>
+<context position="36612" citStr="Poon, 2013" startWordPosition="6175" endWordPosition="6176">., 2013; Reddy et al., 2014)). In contrast, our query graph design matches closely the graph knowledge base. Although not fully demonstrated in this paper, the query graph can in fact be fairly expressive. For instance, negations can be handled by adding tags to the constraint nodes indicating that certain conditions cannot be satisfied. Our graph generation method is inspired by (Yao and Van Durme, 2014; Bao et al., 2014). Unlike traditional semantic parsing approaches, it uses the knowledge base to help prune the search space when forming the parse. Similar ideas have also been explored in (Poon, 2013). Empirically, our results suggest that it is crucial to identify the core inferential chain, which matches the relationship between the topic entity in the question and the answer. Our CNN models can be analogous to the embedding approaches (Bordes et al., 2014a; Yang et al., 2014), but are more sophisticated. By allowing parameter sharing among different question-pattern and KB predicate pairs, the matching score of a rare or even unseen pair in the training data can still be predicted precisely. This is due to the fact that the prediction is based on the shared model parameters (i.e., proje</context>
+</contexts>
+<marker>Poon, 2013</marker>
+<rawString>Hoifung Poon. 2013. Grounded unsupervised semantic parsing. In Annual Meeting of the Association for Computational Linguistics (ACL), pages 933–943.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Siva Reddy</author>
+<author>Mirella Lapata</author>
+<author>Mark Steedman</author>
+</authors>
+<title>Large-scale semantic parsing without question-answer pairs.</title>
+<date>2014</date>
+<journal>Transactions of the Association for Computational Linguistics,</journal>
+<pages>2--377</pages>
+<contexts>
+<context position="9700" citStr="Reddy et al., 2014" startWordPosition="1590" endWordPosition="1593">ed to map entities retrieved by the query. The diamond node arg min constrains that the answer needs to be the earliest actor for this role. Equivalently, the logical form query in A-calculus without the aggregation function is: Ax.∃y.cast(FamilyGuy, y) ∧ actor(y,x) ∧ character(y,MegGriffin) Running this query graph against K as in Fig. 1 will match both LaceyChabert and MilaKunis before applying the aggregation function, but only LaceyChabert is the correct answer as she started this role earlier (by checking the from property of the grounded CVT node). Our query graph design is inspired by (Reddy et al., 2014), but with some key differences. The nodes and edges in our query graph closely resemble the exact entities and predicates from the knowledge base. As a result, the graph can be straightforwardly translated to a logical form query that is directly executable. In contrast, the query graph in (Reddy et al., 2014) is mapped from the CCG parse of the question, and needs further transformations before mapping to subgraphs 2y should be grounded to a CVT entity in this case. of the target knowledge base to retrieve answers. Semantically, our query graph is more related to simple A-DCS (Berant et al.,</context>
+<context position="31752" citStr="Reddy et al., 2014" startWordPosition="5368" endWordPosition="5371"> convolutional layer, 300 f 100 nodes in the semantic layer, and learning rate 0.05 - 0.005) and the training process often converges after - 800 epochs. When training the reward function, we created up to 4,000 examples for each question that contain all the positive query graphs and randomly selected negative examples. The model is trained as a ranker, where example query graphs are ranked by their F1 scores. 4.2 Results Tab. 1 shows the results of our system, STAGG (Staged query graph generation), compared to existing work8. As can be seen from the table, our 8We do not include results of (Reddy et al., 2014) because they used only a subset of 570 test questions, which are not Method #Entities # Covered Ques. # Labeled Ent. Freebase API 19,485 3,734 (98.8%) 3,069 (81.2%) Ours 9,147 3,770 (99.8%) 3,318 (87.8%) Table 2: Statistics of entity linking results on training set questions. Both methods cover roughly the same number of questions, but Freebase API suggests twice the number of entities output by our entity linking system and covers fewer topic entities labeled in the original data. system outperforms the previous state-of-the-art method by a large margin – 7.2% absolute gain. Given the staged</context>
+<context position="36029" citStr="Reddy et al., 2014" startWordPosition="6077" endWordPosition="6080"> “Time in China” vs. “UTC+8”). 8% of the errors are due to incorrect entity linking; however, sometimes the mention is inherently ambiguous (e.g., AFL in “Who founded the AFL?” could mean either “American Football League” or “American Federation of Labor”). 35% of the errors are because of the incorrect inferential chains; 23% are due to incorrect or missing constraints. 5 Related Work and Discussion Several semantic parsing methods use a domainindependent meaning representation derived from the combinatory categorial grammar (CCG) parses (e.g., (Cai and Yates, 2013; Kwiatkowski et al., 2013; Reddy et al., 2014)). In contrast, our query graph design matches closely the graph knowledge base. Although not fully demonstrated in this paper, the query graph can in fact be fairly expressive. For instance, negations can be handled by adding tags to the constraint nodes indicating that certain conditions cannot be satisfied. Our graph generation method is inspired by (Yao and Van Durme, 2014; Bao et al., 2014). Unlike traditional semantic parsing approaches, it uses the knowledge base to help prune the search space when forming the parse. Similar ideas have also been explored in (Poon, 2013). Empirically, ou</context>
+</contexts>
+<marker>Reddy, Lapata, Steedman, 2014</marker>
+<rawString>Siva Reddy, Mirella Lapata, and Mark Steedman. 2014. Large-scale semantic parsing without question-answer pairs. Transactions of the Association for Computational Linguistics, 2:377–392.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yelong Shen</author>
+<author>Xiaodong He</author>
+<author>Jianfeng Gao</author>
+<author>Li Deng</author>
+<author>Gregoire Mesnil</author>
+</authors>
+<title>A latent semantic model with convolutional-pooling structure for information retrieval.</title>
+<date>2014</date>
+<booktitle>In Proceedings of the 23rd ACM International Conference on Conference on Information and Knowledge Management,</booktitle>
+<pages>101--110</pages>
+<publisher>ACM.</publisher>
+<contexts>
+<context position="17862" citStr="Shen et al., 2014" startWordPosition="2996" endWordPosition="2999">ctor. The model consists of two neural networks, one for the pattern and the other for the inferential chain. Both are mapped to k-dimensional vectors as the output of the networks. Their semantic similarity is then computed using some distance function, such as cosine. This continuous-space representation approach has been proposed recently for semantic parsing and question answering (Bordes et al., 2014a; Yih et al., 2014) and has shown better results compared to lexical matching approaches (e.g., word-alignment models). In this work, we adapt a convolutional neural network (CNN) framework (Shen et al., 2014b; Shen et al., 2014a; Gao et al., 2014) to this matching problem. The network architecture is illustrated in Fig. 6. The CNN model first applies a word hashing technique (Huang et al., 2013) that breaks a word into a vector of letter-trigrams (xt → ft in Fig. 6). For example, the bag of letter-trigrams of the word “who” are #-w-h, w-h-o, h-o-# after adding the Figure 7: Extending an inferential chain with constraints and aggregation functions. word boundary symbol #. Then, it uses a convolutional layer to project the letter-trigram vectors of words within a context window of 3 words to a loca</context>
+</contexts>
+<marker>Shen, He, Gao, Deng, Mesnil, 2014</marker>
+<rawString>Yelong Shen, Xiaodong He, Jianfeng Gao, Li Deng, and Gregoire Mesnil. 2014a. A latent semantic model with convolutional-pooling structure for information retrieval. In Proceedings of the 23rd ACM International Conference on Conference on Information and Knowledge Management, pages 101– 110. ACM.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yelong Shen</author>
+<author>Xiaodong He</author>
+<author>Jianfeng Gao</author>
+<author>Li Deng</author>
+<author>Gr´egoire Mesnil</author>
+</authors>
+<title>Learning semantic representations using convolutional neural networks for web search.</title>
+<date>2014</date>
+<booktitle>In Proceedings of the Companion Publication of the 23rd International Conference on World Wide Web Companion,</booktitle>
+<pages>373--374</pages>
+<contexts>
+<context position="17862" citStr="Shen et al., 2014" startWordPosition="2996" endWordPosition="2999">ctor. The model consists of two neural networks, one for the pattern and the other for the inferential chain. Both are mapped to k-dimensional vectors as the output of the networks. Their semantic similarity is then computed using some distance function, such as cosine. This continuous-space representation approach has been proposed recently for semantic parsing and question answering (Bordes et al., 2014a; Yih et al., 2014) and has shown better results compared to lexical matching approaches (e.g., word-alignment models). In this work, we adapt a convolutional neural network (CNN) framework (Shen et al., 2014b; Shen et al., 2014a; Gao et al., 2014) to this matching problem. The network architecture is illustrated in Fig. 6. The CNN model first applies a word hashing technique (Huang et al., 2013) that breaks a word into a vector of letter-trigrams (xt → ft in Fig. 6). For example, the bag of letter-trigrams of the word “who” are #-w-h, w-h-o, h-o-# after adding the Figure 7: Extending an inferential chain with constraints and aggregation functions. word boundary symbol #. Then, it uses a convolutional layer to project the letter-trigram vectors of words within a context window of 3 words to a loca</context>
+</contexts>
+<marker>Shen, He, Gao, Deng, Mesnil, 2014</marker>
+<rawString>Yelong Shen, Xiaodong He, Jianfeng Gao, Li Deng, and Gr´egoire Mesnil. 2014b. Learning semantic representations using convolutional neural networks for web search. In Proceedings of the Companion Publication of the 23rd International Conference on World Wide Web Companion, pages 373–374.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Zhenghao Wang</author>
+<author>Shengquan Yan</author>
+<author>Huaming Wang</author>
+<author>Xuedong Huang</author>
+</authors>
+<title>An overview of Microsoft Deep QA system on Stanford WebQuestions benchmark.</title>
+<date>2014</date>
+<tech>Technical Report MSR-TR-2014-121, Microsoft,</tech>
+<contexts>
+<context position="29857" citStr="Wang et al., 2014" startWordPosition="5042" endWordPosition="5045">e search process. 6We used the official evaluation script from http:// www-nlp.stanford.edu/software/sempre/. 7We restrict the path length to 2. In principle, parses of shorter chains can be used to train the initial reward function, for exploring longer paths using the same search procedure. s Family Guy cast argmin 1f actor Meg Griffin 1327 Method Prec. Rec. Fl (Berant et al., 2013) 48.0 41.3 35.7 (Bordes et al., 2014b) - - 29.7 (Yao and Van Durme, 2014) - - 33.0 (Berant and Liang, 2014) 40.5 46.6 39.9 (Bao et al., 2014) - - 37.5 (Bordes et al., 2014a) - - 39.2 (Yang et al., 2014) - - 41.3 (Wang et al., 2014) - - 45.3 Our approach – STAGG 52.8 60.7 52.5 Table 1: The results of our approach compared to existing work. The numbers of other systems are either from the original papers or derived from the evaluation script, when the output is available. In the end, we produce 17,277 query graphs with none-zero F1 scores from the training set questions and about 1.7M completely incorrect ones. For training the CNN models to identify the core inferential chain (Sec. 3.2.1), we only use 4,058 chain-only query graphs that achieve F1 = 0.5 to form the parallel question and predicate sequence pairs. The hyper</context>
+</contexts>
+<marker>Wang, Yan, Wang, Huang, 2014</marker>
+<rawString>Zhenghao Wang, Shengquan Yan, Huaming Wang, and Xuedong Huang. 2014. An overview of Microsoft Deep QA system on Stanford WebQuestions benchmark. Technical Report MSR-TR-2014-121, Microsoft, Sep.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yi Yang</author>
+<author>Ming-Wei Chang</author>
+</authors>
+<title>S-MART: Novel tree-based structured learning algorithms applied to tweet entity linking.</title>
+<date>2015</date>
+<booktitle>In Annual Meeting of the Association for Computational Linguistics (ACL).</booktitle>
+<contexts>
+<context position="13822" citStr="Yang and Chang, 2015" startWordPosition="2314" endWordPosition="2317">gy with a priority queue, which is formally defined in Appendix A. In the following subsections, we use a running example of finding the semantic parse of question qex = “Who first voiced Meg of Family Guy?” to describe the sequence of actions. 3.1 Linking Topic Entity Starting from the initial state so, the valid actions are to create a single-node graph that corresponds to the topic entity found in the given question. For instance, possible topic entities in qex can either be FamilyGuy or MegGriffin, shown in Fig. 4. We use an entity linking system that is designed for short and noisy text (Yang and Chang, 2015). For each entity e in the knowledge base, the system first prepares a surface-form lexicon that lists all possible ways that e can be mentioned in text. This lexicon is created using various data sources, such as names and aliases of the entities, the anchor text in Web documents and the Wikipedia redirect table. Given a question, it considers all the Figure 5: Candidate core inferential chains start from the entity FamilyGuy. consecutive word sequences that have occurred in the lexicon as possible mentions, paired with their possible entities. Each pair is then scored by a statistical model </context>
+</contexts>
+<marker>Yang, Chang, 2015</marker>
+<rawString>Yi Yang and Ming-Wei Chang. 2015. S-MART: Novel tree-based structured learning algorithms applied to tweet entity linking. In Annual Meeting of the Association for Computational Linguistics (ACL).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Min-Chul Yang</author>
+<author>Nan Duan</author>
+<author>Ming Zhou</author>
+<author>HaeChang Rim</author>
+</authors>
+<title>Joint relational embeddings for knowledge-based question answering.</title>
+<date>2014</date>
+<booktitle>In Proceedings of the 2014 Conference on Empirical Methods in Natural Language Processing (EMNLP),</booktitle>
+<pages>645--650</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<location>Doha, Qatar,</location>
+<contexts>
+<context position="29828" citStr="Yang et al., 2014" startWordPosition="5035" endWordPosition="5038">te graphs generated during the search process. 6We used the official evaluation script from http:// www-nlp.stanford.edu/software/sempre/. 7We restrict the path length to 2. In principle, parses of shorter chains can be used to train the initial reward function, for exploring longer paths using the same search procedure. s Family Guy cast argmin 1f actor Meg Griffin 1327 Method Prec. Rec. Fl (Berant et al., 2013) 48.0 41.3 35.7 (Bordes et al., 2014b) - - 29.7 (Yao and Van Durme, 2014) - - 33.0 (Berant and Liang, 2014) 40.5 46.6 39.9 (Bao et al., 2014) - - 37.5 (Bordes et al., 2014a) - - 39.2 (Yang et al., 2014) - - 41.3 (Wang et al., 2014) - - 45.3 Our approach – STAGG 52.8 60.7 52.5 Table 1: The results of our approach compared to existing work. The numbers of other systems are either from the original papers or derived from the evaluation script, when the output is available. In the end, we produce 17,277 query graphs with none-zero F1 scores from the training set questions and about 1.7M completely incorrect ones. For training the CNN models to identify the core inferential chain (Sec. 3.2.1), we only use 4,058 chain-only query graphs that achieve F1 = 0.5 to form the parallel question and predic</context>
+<context position="36895" citStr="Yang et al., 2014" startWordPosition="6222" endWordPosition="6225">t nodes indicating that certain conditions cannot be satisfied. Our graph generation method is inspired by (Yao and Van Durme, 2014; Bao et al., 2014). Unlike traditional semantic parsing approaches, it uses the knowledge base to help prune the search space when forming the parse. Similar ideas have also been explored in (Poon, 2013). Empirically, our results suggest that it is crucial to identify the core inferential chain, which matches the relationship between the topic entity in the question and the answer. Our CNN models can be analogous to the embedding approaches (Bordes et al., 2014a; Yang et al., 2014), but are more sophisticated. By allowing parameter sharing among different question-pattern and KB predicate pairs, the matching score of a rare or even unseen pair in the training data can still be predicted precisely. This is due to the fact that the prediction is based on the shared model parameters (i.e., projection matrices) that are estimated using all training pairs. 6 Conclusion In this paper, we present a semantic parsing framework for question answering using a knowledge base. We define a query graph as the meaning representation that can be directly mapped to a logical form. Semant</context>
+</contexts>
+<marker>Yang, Duan, Zhou, Rim, 2014</marker>
+<rawString>Min-Chul Yang, Nan Duan, Ming Zhou, and HaeChang Rim. 2014. Joint relational embeddings for knowledge-based question answering. In Proceedings of the 2014 Conference on Empirical Methods in Natural Language Processing (EMNLP), pages 645–650, Doha, Qatar, October. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Xuchen Yao</author>
+<author>Benjamin Van Durme</author>
+</authors>
+<title>Information extraction over structured data: Question answering with Freebase.</title>
+<date>2014</date>
+<booktitle>In Proceedings of the 52nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers),</booktitle>
+<pages>956--966</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<location>Baltimore, Maryland,</location>
+<marker>Yao, Van Durme, 2014</marker>
+<rawString>Xuchen Yao and Benjamin Van Durme. 2014. Information extraction over structured data: Question answering with Freebase. In Proceedings of the 52nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 956–966, Baltimore, Maryland, June. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Wen-tau Yih</author>
+<author>Xiaodong He</author>
+<author>Christopher Meek</author>
+</authors>
+<title>Semantic parsing for single-relation question answering.</title>
+<date>2014</date>
+<booktitle>In Proceedings of the 52nd Annual Meeting of the Association for Computational Linguistics (Volume 2: Short Papers),</booktitle>
+<pages>643--648</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<location>Baltimore, Maryland,</location>
+<contexts>
+<context position="17673" citStr="Yih et al., 2014" startWordPosition="2967" endWordPosition="2970">ctions maps the question to a pattern by replacing the entity mention with a generic symbol &lt;e&gt; and then compares it with a candidate chain, such as “who first voiced meg on &lt;e&gt;” vs. cast-actor. The model consists of two neural networks, one for the pattern and the other for the inferential chain. Both are mapped to k-dimensional vectors as the output of the networks. Their semantic similarity is then computed using some distance function, such as cosine. This continuous-space representation approach has been proposed recently for semantic parsing and question answering (Bordes et al., 2014a; Yih et al., 2014) and has shown better results compared to lexical matching approaches (e.g., word-alignment models). In this work, we adapt a convolutional neural network (CNN) framework (Shen et al., 2014b; Shen et al., 2014a; Gao et al., 2014) to this matching problem. The network architecture is illustrated in Fig. 6. The CNN model first applies a word hashing technique (Huang et al., 2013) that breaks a word into a vector of letter-trigrams (xt → ft in Fig. 6). For example, the bag of letter-trigrams of the word “who” are #-w-h, w-h-o, h-o-# after adding the Figure 7: Extending an inferential chain with c</context>
+</contexts>
+<marker>Yih, He, Meek, 2014</marker>
+<rawString>Wen-tau Yih, Xiaodong He, and Christopher Meek. 2014. Semantic parsing for single-relation question answering. In Proceedings of the 52nd Annual Meeting of the Association for Computational Linguistics (Volume 2: Short Papers), pages 643–648, Baltimore, Maryland, June. Association for Computational Linguistics.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

@@ -1,0 +1,1853 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.000020">
+<title confidence="0.989967">
+Transition-Based Dependency Parsing with Stack Long Short-Term Memory
+</title>
+<author confidence="0.885516">
+Chris Dyer♣♠ Miguel Ballesteros♦♠ Wang Ling♠ Austin Matthews♠ Noah A. Smith♠♣Marianas Labs ♦NLP Group, Pompeu Fabra University ♠Carnegie Mellon University
+</author>
+<email confidence="0.942667">
+chris@marianaslabs.com, miguel.ballesteros@upf.edu,
+{lingwang,austinma,nasmith}@cs.cmu.edu
+</email>
+<sectionHeader confidence="0.997133" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.999907818181818">
+We propose a technique for learning rep-
+resentations of parser states in transition-
+based dependency parsers. Our primary
+innovation is a new control structure for
+sequence-to-sequence neural networks—
+the stack LSTM. Like the conventional
+stack data structures used in transition-
+based parsing, elements can be pushed to
+or popped from the top of the stack in
+constant time, but, in addition, an LSTM
+maintains a continuous space embedding
+of the stack contents. This lets us formu-
+late an efficient parsing model that cap-
+tures three facets of a parser’s state: (i)
+unbounded look-ahead into the buffer of
+incoming words, (ii) the complete history
+of actions taken by the parser, and (iii) the
+complete contents of the stack of partially
+built tree fragments, including their inter-
+nal structures. Standard backpropagation
+techniques are used for training and yield
+state-of-the-art parsing performance.
+</bodyText>
+<sectionHeader confidence="0.999518" genericHeader="introduction">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.999646666666667">
+Transition-based dependency parsing formalizes
+the parsing problem as a series of decisions that
+read words sequentially from a buffer and combine
+them incrementally into syntactic structures (Ya-
+mada and Matsumoto, 2003; Nivre, 2003; Nivre,
+2004). This formalization is attractive since the
+number of operations required to build any projec-
+tive parse tree is linear in the length of the sen-
+tence, making transition-based parsing computa-
+tionally efficient relative to graph- and grammar-
+based formalisms. The challenge in transition-
+based parsing is modeling which action should be
+taken in each of the unboundedly many states en-
+countered as the parser progresses.
+This challenge has been addressed by develop-
+ment of alternative transition sets that simplify the
+modeling problem by making better attachment
+decisions (Nivre, 2007; Nivre, 2008; Nivre, 2009;
+Choi and McCallum, 2013; Bohnet and Nivre,
+2012), through feature engineering (Zhang and
+Nivre, 2011; Ballesteros and Nivre, 2014; Chen et
+al., 2014; Ballesteros and Bohnet, 2014) and more
+recently using neural networks (Chen and Man-
+ning, 2014; Stenetorp, 2013).
+We extend this last line of work by learning
+representations of the parser state that are sensi-
+tive to the complete contents of the parser’s state:
+that is, the complete input buffer, the complete
+history of parser actions, and the complete con-
+tents of the stack of partially constructed syn-
+tactic structures. This “global” sensitivity to the
+state contrasts with previous work in transition-
+based dependency parsing that uses only a nar-
+row view of the parsing state when constructing
+representations (e.g., just the next few incoming
+words, the head words of the top few positions
+in the stack, etc.). Although our parser integrates
+large amounts of information, the representation
+used for prediction at each time step is constructed
+incrementally, and therefore parsing and training
+time remain linear in the length of the input sen-
+tence. The technical innovation that lets us do this
+is a variation of recurrent neural networks with
+long short-term memory units (LSTMs) which we
+call stack LSTMs (§2), and which support both
+reading (pushing) and “forgetting” (popping) in-
+puts.
+Our parsing model uses three stack LSTMs: one
+representing the input, one representing the stack
+of partial syntactic trees, and one representing the
+history of parse actions to encode parser states
+(§3). Since the stack of partial syntactic trees may
+contain both individual tokens and partial syntac-
+tic structures, representations of individual tree
+fragments are computed compositionally with re-
+cursive (i.e., similar to Socher et al., 2014) neural
+networks. The parameters are learned with back-
+propagation (§4), and we obtain state-of-the-art re-
+sults on Chinese and English dependency parsing
+tasks (§5).
+</bodyText>
+<page confidence="0.982093">
+334
+</page>
+<note confidence="0.984636">
+Proceedings of the 53rd Annual Meeting of the Association for Computational Linguistics
+and the 7th International Joint Conference on Natural Language Processing, pages 334–343,
+Beijing, China, July 26-31, 2015. c�2015 Association for Computational Linguistics
+</note>
+<sectionHeader confidence="0.898326" genericHeader="method">
+2 Stack LSTMs
+</sectionHeader>
+<bodyText confidence="0.999871333333333">
+In this section we provide a brief review of LSTMs
+(§2.1) and then define stack LSTMs (§2.2).
+Notation. We follow the convention that vectors
+are written with lowercase, boldface letters (e.g., v
+or vw); matrices are written with uppercase, bold-
+face letters (e.g., M, Ma, or Mab), and scalars are
+written as lowercase letters (e.g., s or qz). Struc-
+tured objects such as sequences of discrete sym-
+bols are written with lowercase, bold, italic letters
+(e.g., w refers to a sequence of input words). Dis-
+cussion of dimensionality is deferred to the exper-
+iments section below (§5).
+</bodyText>
+<subsectionHeader confidence="0.997346">
+2.1 Long Short-Term Memories
+</subsectionHeader>
+<bodyText confidence="0.999966565217392">
+LSTMs are a variant of recurrent neural networks
+(RNNs) designed to cope with the vanishing gra-
+dient problem inherent in RNNs (Hochreiter and
+Schmidhuber, 1997; Graves, 2013). RNNs read
+a vector xt at each time step and compute a
+new (hidden) state ht by applying a linear map
+to the concatenation of the previous time step’s
+state ht−1 and the input, and passing this through
+a logistic sigmoid nonlinearity. Although RNNs
+can, in principle, model long-range dependencies,
+training them is difficult in practice since the re-
+peated application of a squashing nonlinearity at
+each step results in an exponential decay in the er-
+ror signal through time. LSTMs address this with
+an extra memory “cell” (ct) that is constructed as a
+linear combination of the previous state and signal
+from the input.
+LSTM cells process inputs with three multi-
+plicative gates which control what proportion of
+the current input to pass into the memory cell (it)
+and what proportion of the previous memory cell
+to “forget” (ft). The updated value of the memory
+cell after an input xt is computed as follows:
+</bodyText>
+<equation confidence="0.98966575">
+it = Q(Wixxt + Wihht−1 + Wicct−1 + bi)
+ft = Q(Wfxxt + Wfhht−1 + Wfcct−1 + bf)
+ct = ft O ct−1+
+it O tanh(Wcxxt + Wchht−1 + bc),
+</equation>
+<bodyText confidence="0.999522333333333">
+where Q is the component-wise logistic sig-
+moid function, and O is the component-wise
+(Hadamard) product.
+The value ht of the LSTM at each time step is
+controlled by a third gate (ot) that is applied to the
+result of the application of a nonlinearity to the
+</bodyText>
+<equation confidence="0.886526333333333">
+memory cell contents:
+ot = Q(Woxxt + Wohht−1 + Wocct + bo)
+ht = ot O tanh(ct).
+</equation>
+<bodyText confidence="0.99990475">
+To improve the representational capacity of
+LSTMs (and RNNs generally), LSTMs can be
+stacked in “layers” (Pascanu et al., 2014). In these
+architectures, the input LSTM at higher layers at
+time t is the value of ht computed by the lower
+layer (and xt is the input at the lowest layer).
+Finally, output is produced at each time step
+from the ht value at the top layer:
+</bodyText>
+<equation confidence="0.594311">
+yt = g(ht),
+</equation>
+<bodyText confidence="0.995478">
+where g is an arbitrary differentiable function.
+</bodyText>
+<subsectionHeader confidence="0.996737">
+2.2 Stack Long Short-Term Memories
+</subsectionHeader>
+<bodyText confidence="0.996886384615385">
+Conventional LSTMs model sequences in a left-
+to-right order.1 Our innovation here is to augment
+the LSTM with a “stack pointer.” Like a conven-
+tional LSTM, new inputs are always added in the
+right-most position, but in stack LSTMs, the cur-
+rent location of the stack pointer determines which
+cell in the LSTM provides ct−1 and ht−1 when
+computing the new memory cell contents.
+In addition to adding elements to the end of the
+sequence, the stack LSTM provides a pop oper-
+ation which moves the stack pointer to the previ-
+ous element (i.e., the previous element that was
+extended, not necessarily the right-most element).
+Thus, the LSTM can be understood as a stack im-
+plemented so that contents are never overwritten,
+that is, push always adds a new entry at the end of
+the list that contains a back-pointer to the previous
+top, and pop only updates the stack pointer.2 This
+control structure is schematized in Figure 1.
+By querying the output vector to which the stack
+pointer points (i.e., the hTOP), a continuous-space
+“summary” of the contents of the current stack
+configuration is available. We refer to this value
+as the “stack summary.”
+What does the stack summary look like? In-
+tuitively, elements near the top of the stack will
+</bodyText>
+<footnote confidence="0.99926425">
+1Ours is not the first deviation from a strict left-to-
+right order: previous variations include bidirectional LSTMs
+(Graves and Schmidhuber, 2005) and multidimensional
+LSTMs (Graves et al., 2007).
+2Goldberg et al. (2013) propose a similar stack construc-
+tion to prevent stack operations from invalidating existing ref-
+erences to the stack in a beam-search parser that must (effi-
+ciently) maintain a priority queue of stacks.
+</footnote>
+<page confidence="0.998186">
+335
+</page>
+<figureCaption confidence="0.998865">
+Figure 1: A stack LSTM extends a conventional left-to-right LSTM with the addition of a stack pointer
+</figureCaption>
+<bodyText confidence="0.984032833333333">
+(notated as TOP in the figure). This figure shows three configurations: a stack with a single element (left),
+the result of a pop operation to this (middle), and then the result of applying a push operation (right).
+The boxes in the lowest rows represent stack contents, which are the inputs to the LSTM, the upper rows
+are the outputs of the LSTM (in this paper, only the output pointed to by TOP is ever accessed), and the
+middle rows are the memory cells (the ct’s and ht’s) and gates. Arrows represent function applications
+(usually affine transformations followed by a nonlinearity), refer to §2.1 for specifics.
+</bodyText>
+<equation confidence="0.9854316">
+Y1
+Y2
+Y1
+Y1
+X1
+X2
+X1
+push
+pop
+X1
+</equation>
+<bodyText confidence="0.999849">
+influence the representation of the stack. How-
+ever, the LSTM has the flexibility to learn to ex-
+tract information from arbitrary points in the stack
+(Hochreiter and Schmidhuber, 1997).
+Although this architecture is to the best of
+our knowledge novel, it is reminiscent of the
+Recurrent Neural Network Pushdown Automa-
+ton (NNPDA) of Das et al. (1992), which added an
+external stack memory to an RNN. However, our
+architecture provides an embedding of the com-
+plete contents of the stack, whereas theirs made
+only the top of the stack visible to the RNN.
+</bodyText>
+<sectionHeader confidence="0.991147" genericHeader="method">
+3 Dependency Parser
+</sectionHeader>
+<bodyText confidence="0.999984933333333">
+We now turn to the problem of learning represen-
+tations of dependency parsers. We preserve the
+standard data structures of a transition-based de-
+pendency parser, namely a buffer of words (B)
+to be processed and a stack (5) of partially con-
+structed syntactic elements. Each stack element
+is augmented with a continuous-space vector em-
+bedding representing a word and, in the case of
+5, any of its syntactic dependents. Additionally,
+we introduce a third stack (A) to represent the his-
+tory of actions taken by the parser.3 Each of these
+stacks is associated with a stack LSTM that pro-
+vides an encoding of their current contents. The
+full architecture is illustrated in Figure 3, and we
+will review each of the components in turn.
+</bodyText>
+<footnote confidence="0.920654333333333">
+3The A stack is only ever pushed to; our use of a stack
+here is purely for implementational and expository conve-
+nience.
+</footnote>
+<subsectionHeader confidence="0.996714">
+3.1 Parser Operation
+</subsectionHeader>
+<bodyText confidence="0.986838222222222">
+The dependency parser is initialized by pushing
+the words and their representations (we discuss
+word representations below in §3.3) of the input
+sentence in reverse order onto B such that the first
+word is at the top of B and the ROOT symbol is at
+the bottom, and 5 and A each contain an empty-
+stack token. At each time step, the parser com-
+putes a composite representation of the stack states
+(as determined by the current configurations of B,
+5, and A) and uses that to predict an action to take,
+which updates the stacks. Processing completes
+when B is empty (except for the empty-stack sym-
+bol), 5 contains two elements, one representing
+the full parse tree headed by the ROOT symbol and
+the other the empty-stack symbol, and A is the his-
+tory of operations taken by the parser.
+The parser state representation at time t, which
+we write pt, which is used to is determine the tran-
+sition to take, is defined as follows:
+pt = max {0, W[st; bt; at] + d} ,
+where W is a learned parameter matrix, bt is
+the stack LSTM encoding of the input buffer B,
+st is the stack LSTM encoding of 5, at is the
+stack LSTM encoding of A, d is a bias term, then
+passed through a component-wise rectified linear
+unit (ReLU) nonlinearity (Glorot et al., 2011).4
+Finally, the parser state pt is used to compute
+</bodyText>
+<footnote confidence="0.972149">
+4In preliminary experiments, we tried several nonlineari-
+ties and found ReLU to work slightly better than the others.
+</footnote>
+<page confidence="0.996067">
+336
+</page>
+<figure confidence="0.999825230769231">
+A
+overhasty
+REDUCE-LEFT(amod)
+SHIFT
+S
+É
+B
+Pt
+amod
+made
+was
+an decision
+É
+</figure>
+<figureCaption confidence="0.7852015">
+Figure 2: Parser state computation encountered while parsing the sentence “an overhasty decision was
+made.” Here S designates the stack of partially constructed dependency subtrees and its LSTM encod-
+</figureCaption>
+<bodyText confidence="0.9877732">
+ing; B is the buffer of words remaining to be processed and its LSTM encoding; and A is the stack
+representing the history of actions taken by the parser. These are linearly transformed, passed through a
+ReLU nonlinearity to produce the parser state embedding pt. An affine transformation of this embedding
+is passed to a softmax layer to give a distribution over parsing decisions that can be taken.
+the probability of the parser action at time t as:
+where gz is a column vector representing the (out-
+put) embedding of the parser action z, and qz is
+a bias term for action z. The set A(S, B) repre-
+sents the valid actions that may be taken given the
+current contents of the stack and buffer.5 Since
+pt = f(st, bt, at) encodes information about all
+previous decisions made by the parser, the chain
+rule may be invoked to write the probability of any
+valid sequence of parse actions z conditional on
+the input as:
+</bodyText>
+<equation confidence="0.989952666666667">
+|z|
+p(z  |w) = H p(zt  |pt). (1)
+t=1
+</equation>
+<subsectionHeader confidence="0.998047">
+3.2 Transition Operations
+</subsectionHeader>
+<bodyText confidence="0.8376255">
+Our parser is based on the arc-standard transition
+inventory (Nivre, 2004), given in Figure 3.
+</bodyText>
+<footnote confidence="0.651267">
+5In general, A(S, B) is the complete set of parser actions
+discussed in §3.2, but in some cases not all actions are avail-
+able. For example, when S is empty and words remain in B,
+a SHIFT operation is obligatory (Sartorio et al., 2013).
+</footnote>
+<bodyText confidence="0.999699555555556">
+Why arc-standard? Arc-standard transitions
+parse a sentence from left to right, using a stack
+to store partially built syntactic structures and
+a buffer that keeps the incoming tokens to be
+parsed. The parsing algorithm chooses an action
+at each configuration by means of a score. In
+arc-standard parsing, the dependency tree is con-
+structed bottom-up, because right-dependents of a
+head are only attached after the subtree under the
+dependent is fully parsed. Since our parser recur-
+sively computes representations of tree fragments,
+this construction order guarantees that once a syn-
+tactic structure has been used to modify a head, the
+algorithm will not try to find another head for the
+dependent structure. This means we can evaluate
+composed representations of tree fragments incre-
+mentally; we discuss our strategy for this below
+(§3.4).
+</bodyText>
+<subsectionHeader confidence="0.999859">
+3.3 Token Embeddings and OOVs
+</subsectionHeader>
+<bodyText confidence="0.999991">
+To represent each input token, we concatenate
+three vectors: a learned vector representation for
+each word type (w); a fixed vector representa-
+tion from a neural language model ( ˜wLM), and a
+learned representation (t) of the POS tag of the to-
+ken, provided as auxiliary input to the parser. A
+</bodyText>
+<equation confidence="0.9868965">
+p(zt  |pt) = exp (gZtpt + qzt)
+Ez&apos;EA(S,B) exp (gzpt + qz&apos; ),
+</equation>
+<page confidence="0.987354">
+337
+</page>
+<table confidence="0.995988333333333">
+Stackt Buffert Action Stackt+1 Buffert+1 Dependency
+(u, u), (v, v), 5 B REDUCE-RIGHT(r) (gr(u, v), u), 5 B r
+(u, u), (v, v), 5 B REDUCE-LEFT(r) (gr(v, u), v), 5 B u → v
+5 (u, u), B SHIFT (u, u), 5 B r
+u ← v
+—
+</table>
+<figureCaption confidence="0.910559">
+Figure 3: Parser transitions indicating the action applied to the stack and buffer and the resulting stack
+and buffer states. Bold symbols indicate (learned) embeddings of words and relations, script symbols
+indicate the corresponding words and relations.
+</figureCaption>
+<bodyText confidence="0.639242666666667">
+linear map (V) is applied to the resulting vector
+and passed through a component-wise ReLU,
+x = max {0, V[w; ˜wLM; t] + b} .
+</bodyText>
+<figureCaption confidence="0.871854857142857">
+This mapping can be shown schematically as in
+Figure 4.
+Figure 4: Token embedding of the words decision,
+which is present in both the parser’s training data
+and the language model data, and overhasty, an
+adjective that is not present in the parser’s training
+data but is present in the LM data.
+</figureCaption>
+<bodyText confidence="0.99981632">
+This architecture lets us deal flexibly with out-
+of-vocabulary words—both those that are OOV in
+both the very limited parsing data but present in
+the pretraining LM, and words that are OOV in
+both. To ensure we have estimates of the OOVs in
+the parsing training data, we stochastically replace
+(with p = 0.5) each singleton word type in the
+parsing training data with the UNK token in each
+training iteration.
+Pretrained word embeddings. A veritable cot-
+tage industry exists for creating word embeddings,
+meaning numerous pretraining options for ˜wLM
+are available. However, for syntax modeling prob-
+lems, embedding approaches which discard order
+perform less well (Bansal et al., 2014); therefore
+we used a variant of the skip n-gram model in-
+troduced by Ling et al. (2015), named “structured
+skip n-gram,” where a different set of parameters
+is used to predict each context word depending on
+its position relative to the target word. The hy-
+perparameters of the model are the same as in the
+skip n-gram model defined in word2vec (Mikolov
+et al., 2013), and we set the window size to 5, used
+a negative sampling rate to 10, and ran 5 epochs
+through unannotated corpora described in §5.1.
+</bodyText>
+<subsectionHeader confidence="0.9893">
+3.4 Composition Functions
+</subsectionHeader>
+<bodyText confidence="0.999935791666667">
+Recursive neural network models enable complex
+phrases to be represented compositionally in terms
+of their parts and the relations that link them
+(Socher et al., 2011; Socher et al., 2013c; Her-
+mann and Blunsom, 2013; Socher et al., 2013b).
+We follow this previous line of work in embed-
+ding dependency tree fragments that are present in
+the stack 5 in the same vector space as the token
+embeddings discussed above.
+A particular challenge here is that a syntactic
+head may, in general, have an arbitrary number
+of dependents. To simplify the parameterization
+of our composition function, we combine head-
+modifier pairs one at a time, building up more
+complicated structures in the order they are “re-
+duced” in the parser, as illustrated in Figure 5.
+Each node in this expanded syntactic tree has a
+value computed as a function of its three argu-
+ments: the syntactic head (h), the dependent (d),
+and the syntactic relation being satisfied (r). We
+define this by concatenating the vector embed-
+dings of the head, dependent and relation, apply-
+ing a linear operator and a component-wise non-
+linearity as follows:
+</bodyText>
+<equation confidence="0.508995">
+c = tanh (U[h; d; r] + e) .
+</equation>
+<bodyText confidence="0.99794825">
+For the relation vector, we use an embedding of
+the parser action that was applied to construct the
+relation (i.e., the syntactic relation paired with the
+direction of attachment).
+</bodyText>
+<sectionHeader confidence="0.996374" genericHeader="method">
+4 Training Procedure
+</sectionHeader>
+<bodyText confidence="0.9999256">
+We trained our parser to maximize the conditional
+log-likelihood (Eq. 1) of treebank parses given
+sentences. Our implementation constructs a com-
+putation graph for each sentence and runs forward-
+and backpropagation to obtain the gradients of this
+</bodyText>
+<equation confidence="0.806486">
+overhasty UNK JJ decision decision NN
+X2 X3
+LM LM
+W2 W2 t2 W3 W3 t3
+</equation>
+<page confidence="0.951664">
+338
+</page>
+<figureCaption confidence="0.972188">
+Figure 5: The representation of a depen-
+</figureCaption>
+<bodyText confidence="0.980937675675676">
+dency subtree (above) is computed by re-
+cursively applying composition functions to
+(head, modifier, relation) triples. In the case of
+multiple dependents of a single head, the recur-
+sive branching order is imposed by the order of
+the parser’s reduce operations (below).
+objective with respect to the model parameters.
+The computations for a single parsing model were
+run on a single thread on a CPU. Using the dimen-
+sions discussed in the next section, we required
+between 8 and 12 hours to reach convergence on a
+held-out dev set.6
+Parameter optimization was performed using
+stochastic gradient descent with an initial learn-
+ing rate of 770 = 0.1, and the learning rate was
+updated on each pass through the training data as
+77t = 770/(1 + pt), with p = 0.1 and where t is the
+number of epochs completed. No momentum was
+used. To mitigate the effects of “exploding” gra-
+dients, we clipped the E2 norm of the gradient to 5
+before applying the weight update rule (Sutskever
+et al., 2014; Graves, 2013). An E2 penalty of
+1 x 10−6 was applied to all weights.
+Matrix and vector parameters were initialized
+�
+with uniform samples in ± 6/(r + c), where r
+and c were the number of rows and columns in the
+structure (Glorot and Bengio, 2010).
+Dimensionality. The full version of our parsing
+model sets dimensionalities as follows. LSTM
+hidden states are of size 100, and we use two lay-
+ers of LSTMs for each stack. Embeddings of the
+parser actions used in the composition functions
+have 16 dimensions, and the output embedding
+size is 20 dimensions. Pretained word embeddings
+have 100 dimensions (English) and 80 dimensions
+(Chinese), and the learned word embeddings have
+</bodyText>
+<footnote confidence="0.993234">
+6Software for replicating the experiments is available
+from https://github.com/clab/lstm-parser.
+</footnote>
+<bodyText confidence="0.916177916666666">
+32 dimensions. Part of speech embeddings have
+12 dimensions.
+These dimensions were chosen based on in-
+tuitively reasonable values (words should have
+higher dimensionality than parsing actions, POS
+tags, and relations; LSTM states should be rela-
+tively large), and it was confirmed on development
+data that they performed well.7 Future work might
+more carefully optimize these parameters; our re-
+ported architecture strikes a balance between min-
+imizing computational expense and finding solu-
+tions that work.
+</bodyText>
+<sectionHeader confidence="0.999609" genericHeader="method">
+5 Experiments
+</sectionHeader>
+<bodyText confidence="0.999755666666667">
+We applied our parsing model and several varia-
+tions of it to two parsing tasks and report results
+below.
+</bodyText>
+<subsectionHeader confidence="0.962511">
+5.1 Data
+</subsectionHeader>
+<bodyText confidence="0.996444166666667">
+We used the same data setup as Chen and Manning
+(2014), namely an English and a Chinese parsing
+task. This baseline configuration was chosen since
+they likewise used a neural parameterization to
+predict actions in an arc-standard transition-based
+parser.
+</bodyText>
+<listItem confidence="0.947200466666667">
+• For English, we used the Stanford Depen-
+dencency (SD) treebank (de Marneffe et al.,
+2006) used in (Chen and Manning, 2014)
+which is the closest model published, with
+the same splits.8 The part-of-speech tags
+are predicted by using the Stanford Tagger
+(Toutanova et al., 2003) with an accuracy
+of 97.3%. This treebank contains a negligi-
+ble amount of non-projective arcs (Chen and
+Manning, 2014).
+• For Chinese, we use the Penn Chinese Tree-
+bank 5.1 (CTB5) following Zhang and Clark
+(2008),9 with gold part-of-speech tags which
+is also the same as in Chen and Manning
+(2014).
+</listItem>
+<bodyText confidence="0.832218">
+Language model word embeddings were gener-
+ated, for English, from the AFP portion of the En-
+glish Gigaword corpus (version 5), and from the
+complete Chinese Gigaword corpus (version 2),
+7We did perform preliminary experiments with LSTM
+states of 32, 50, and 80, but the other dimensions were our
+initial guesses.
+</bodyText>
+<note confidence="0.538437">
+8Training: 02-21. Development: 22. Test: 23.
+9Training: 001–815, 1001–1136. Development: 886–
+931, 1148–1151. Test: 816–885, 1137–1147.
+</note>
+<figure confidence="0.996308428571429">
+mod
+head
+Cl
+rel
+det
+amod
+an
+decision
+overhasty
+mod 2c head
+rel
+det
+an
+overhasty amod decision
+</figure>
+<page confidence="0.996893">
+339
+</page>
+<bodyText confidence="0.998085">
+as segmented by the Stanford Chinese Segmenter
+(Tseng et al., 2005).
+</bodyText>
+<subsectionHeader confidence="0.998079">
+5.2 Experimental configurations
+</subsectionHeader>
+<bodyText confidence="0.999965">
+We report results on five experimental configu-
+rations per language, as well as the Chen and
+Manning (2014) baseline. These are: the full
+stack LSTM parsing model (S-LSTM), the stack
+LSTM parsing model without POS tags (−POS),
+the stack LSTM parsing model without pretrained
+language model embeddings (−pretraining), the
+stack LSTM parsing model that uses just head
+words on the stack instead of composed represen-
+tations (−composition), and the full parsing model
+where rather than an LSTM, a classical recurrent
+neural network is used (S-RNN).
+</bodyText>
+<subsectionHeader confidence="0.618857">
+5.3 Results
+</subsectionHeader>
+<bodyText confidence="0.9990115">
+Following Chen and Manning (2014) we exclude
+punctuation symbols for evaluation. Tables 1 and
+2 show comparable results with Chen and Man-
+ning (2014), and we show that our model is better
+than their model in both the development set and
+the test set.
+</bodyText>
+<table confidence="0.9983475">
+Development Test
+UAS LAS UAS LAS
+S-LSTM 93.2 90.9 93.1 90.9
+−POS 93.1 90.4 92.7 90.3
+−pretraining 92.7 90.4 92.4 90.0
+−composition 92.7 89.9 92.2 89.6
+S-RNN 92.8 90.4 92.3 90.1
+C&amp;M (2014) 92.2 89.7 91.8 89.6
+</table>
+<tableCaption confidence="0.998832">
+Table 1: English parsing results (SD)
+</tableCaption>
+<table confidence="0.999942375">
+Dev. set Test set
+UAS LAS UAS LAS
+S-LSTM 87.2 85.9 87.2 85.7
+−composition 85.8 84.0 85.3 83.6
+−pretraining 86.3 84.7 85.7 84.1
+−POS 82.8 79.8 82.2 79.1
+S-RNN 86.3 84.7 86.1 84.6
+C&amp;M (2014) 84.0 82.4 83.9 82.4
+</table>
+<tableCaption confidence="0.997704">
+Table 2: Chinese parsing results (CTB5)
+</tableCaption>
+<subsectionHeader confidence="0.996974">
+5.4 Analysis
+</subsectionHeader>
+<bodyText confidence="0.994805258064516">
+Overall, our parser substantially outperforms the
+baseline neural network parser of Chen and Man-
+ning (2014), both in the full configuration and
+in the various ablated conditions we report. The
+one exception to this is the −POS condition for
+the Chinese parsing task, which in which we un-
+derperform their baseline (which used gold POS
+tags), although we do still obtain reasonable pars-
+ing performance in this limited case. We note
+that predicted POS tags in English add very lit-
+tle value—suggesting that we can think of parsing
+sentences directly without first tagging them. We
+also find that using composed representations of
+dependency tree fragments outperforms using rep-
+resentations of head words alone, which has im-
+plications for theories of headedness. Finally, we
+find that while LSTMs outperform baselines that
+use only classical RNNs, these are still quite capa-
+ble of learning good representations.
+Effect of beam size. Beam search was deter-
+mined to have minimal impact on scores (abso-
+lute improvements of G 0.3% were possible with
+small beams). Therefore, all results we report
+used greedy decoding—Chen and Manning (2014)
+likewise only report results with greedy decoding.
+This finding is in line with previous work that gen-
+erates sequences from recurrent networks (Grefen-
+stette et al., 2014), although Vinyals et al. (2015)
+did report much more substantial improvements
+with beam search on their “grammar as a foreign
+language” parser.10
+</bodyText>
+<sectionHeader confidence="0.99994" genericHeader="method">
+6 Related Work
+</sectionHeader>
+<bodyText confidence="0.998540176470588">
+Our approach ties together several strands of pre-
+vious work. First, several kinds of stack memories
+have been proposed to augment neural architec-
+tures. Das et al. (1992) proposed a neural network
+with an external stack memory based on recur-
+rent neural networks. In contrast to our model, in
+which the entire contents of the stack are summa-
+rized in a single value, in their model, the network
+could only see the contents of the top of the stack.
+Mikkulainen (1996) proposed an architecture with
+a stack that had a summary feature, although the
+stack control was learned as a latent variable.
+A variety of authors have used neural networks
+to predict parser actions in shift-reduce parsers.
+The earliest attempt we are aware of is due to
+Mayberry and Miikkulainen (1999). The resur-
+gence of interest in neural networks has resulted
+</bodyText>
+<footnote confidence="0.999439">
+10Although superficially similar to ours, Vinyals et al.
+(2015) is a phrase-structure parser and adaptation to the de-
+pendency parsing scenario would have been nontrivial. We
+discuss their work in §6.
+</footnote>
+<page confidence="0.997057">
+340
+</page>
+<bodyText confidence="0.9999904">
+in in several applications to transition-based de-
+pendency parsers (Weiss et al., 2015; Chen and
+Manning, 2014; Stenetorp, 2013). In these works,
+the conditioning structure was manually crafted
+and sensitive to only certain properties of the state,
+while we are conditioning on the global state ob-
+ject. Like us, Stenetorp (2013) used recursively
+composed representations of the tree fragments
+(a head and its dependents). Neural networks
+have also been used to learn representations for
+use in chart parsing (Henderson, 2004; Titov and
+Henderson, 2007; Socher et al., 2013a; Le and
+Zuidema, 2014).
+LSTMs have also recently been demonstrated
+as a mechanism for learning to represent parse
+structure.Vinyals et al. (2015) proposed a phrase-
+structure parser based on LSTMs which operated
+by first reading the entire input sentence in so as
+to obtain a vector representation of it, and then
+generating bracketing structures sequentially con-
+ditioned on this representation. Although super-
+ficially similar to our model, their approach has
+a number of disadvantages. First, they relied on
+a large amount of semi-supervised training data
+that was generated by parsing a large unanno-
+tated corpus with an off-the-shelf parser. Sec-
+ond, while they recognized that a stack-like shift-
+reduce parser control provided useful information,
+they only made the top word of the stack visible
+during training and decoding. Third, although it
+is impressive feat of learning that an entire parse
+tree be represented by a vector, it seems that this
+formulation makes the problem unnecessarily dif-
+ficult.
+Finally, our work can be understood as a pro-
+gression toward using larger contexts in parsing.
+An exhaustive summary is beyond the scope of
+this paper, but some of the important milestones
+in this tradition are the use of cube pruning to ef-
+ficiently include nonlocal features in discrimina-
+tive chart reranking (Huang and Chiang, 2008),
+approximate decoding techniques based on LP re-
+laxations in graph-based parsing to include higher-
+order features (Martins et al., 2010), and random-
+ized hill-climbing methods that enable arbitrary
+nonlocal features in global discriminative parsing
+models (Zhang et al., 2014). Since our parser is
+sensitive to any part of the input, its history, or its
+stack contents, it is similar in spirit to the last ap-
+proach, which permits truly arbitrary features.
+</bodyText>
+<sectionHeader confidence="0.99844" genericHeader="conclusions">
+7 Conclusion
+</sectionHeader>
+<bodyText confidence="0.999993555555555">
+We presented stack LSTMs, recurrent neural net-
+works for sequences, with push and pop opera-
+tions, and used them to implement a state-of-the-
+art transition-based dependency parser. We con-
+clude by remarking that stack memory offers in-
+triguing possibilities for learning to solve general
+information processing problems (Mikkulainen,
+1996). Here, we learned from observable stack
+manipulation operations (i.e., supervision from a
+treebank), and the computed embeddings of final
+parser states were not used for any further predic-
+tion. However, this could be reversed, giving a de-
+vice that learns to construct context-free programs
+(e.g., expression trees) given only observed out-
+puts; one application would be unsupervised pars-
+ing. Such an extension of the work would make
+it an alternative to architectures that have an ex-
+plicit external memory such as neural Turing ma-
+chines (Graves et al., 2014) and memory networks
+(Weston et al., 2015). However, as with those
+models, without supervision of the stack opera-
+tions, formidable computational challenges must
+be solved (e.g., marginalizing over all latent stack
+operations), but sampling techniques and tech-
+niques from reinforcement learning have promise
+here (Zaremba and Sutskever, 2015), making this
+an intriguing avenue for future work.
+</bodyText>
+<sectionHeader confidence="0.99863" genericHeader="acknowledgments">
+Acknowledgments
+</sectionHeader>
+<bodyText confidence="0.999158166666667">
+The authors would like to thank Lingpeng Kong
+and Jacob Eisenstein for comments on an earlier
+version of this draft and Danqi Chen for assis-
+tance with the parsing datasets. This work was
+sponsored in part by the U. S. Army Research
+Laboratory and the U. S. Army Research Office
+under contract/grant number W911NF-10-1-0533,
+and in part by NSF CAREER grant IIS-1054319.
+Miguel Ballesteros is supported by the European
+Commission under the contract numbers FP7-ICT-
+610411 (project MULTISENSOR) and H2020-
+RIA-645012 (project KRISTINA).
+</bodyText>
+<sectionHeader confidence="0.999283" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.995549">
+Miguel Ballesteros and Bernd Bohnet. 2014. Au-
+tomatic feature selection for agenda-based depen-
+dency parsing. In Proc. COLING.
+Miguel Ballesteros and Joakim Nivre. 2014. MaltOp-
+timizer: Fast and effective parser optimization. Nat-
+ural Language Engineering.
+</reference>
+<page confidence="0.992162">
+341
+</page>
+<reference confidence="0.999508067307692">
+Mohit Bansal, Kevin Gimpel, and Karen Livescu.
+2014. Tailoring continuous word representations for
+dependency parsing. In Proc. ACL.
+Bernd Bohnet and Joakim Nivre. 2012. A transition-
+based system for joint part-of-speech tagging and la-
+beled non-projective dependency parsing. In Proc.
+EMNLP.
+Danqi Chen and Christopher D. Manning. 2014. A fast
+and accurate dependency parser using neural net-
+works. In Proc. EMNLP.
+Wenliang Chen, Yue Zhang, and Min Zhang. 2014.
+Feature embedding for dependency parsing. In
+Proc. COLING.
+Jinho D. Choi and Andrew McCallum. 2013.
+Transition-based dependency parsing with selec-
+tional branching. In Proc. ACL.
+Sreerupa Das, C. Lee Giles, and Guo-Zheng Sun.
+1992. Learning context-free grammars: Capabilities
+and limitations of a recurrent neural network with an
+external stack memory. In Proc. Cognitive Science
+Society.
+Marie-Catherine de Marneffe, Bill MacCartney, and
+Christopher D. Manning. 2006. Generating typed
+dependency parses from phrase structure parses. In
+Proc. LREC.
+Xavier Glorot and Yoshua Bengio. 2010. Understand-
+ing the difficulty of training deep feedforward neural
+networks. In Proc. ICML.
+Xavier Glorot, Antoine Bordes, and Yoshua Bengio.
+2011. Deep sparse rectifier neural networks. In
+Proc. AISTATS.
+Yoav Goldberg, Kai Zhao, and Liang Huang. 2013.
+Efficient implementation of beam-search incremen-
+tal parsers. In Proc. ACL.
+Alex Graves and J¨urgen Schmidhuber. 2005. Frame-
+wise phoneme classification with bidirectional
+LSTM networks. In Proc. IJCNN.
+Alex Graves, Santiago Fern´andez, and J¨urgen Schmid-
+huber. 2007. Multi-dimensional recurrent neural
+networks. In Proc. ICANN.
+Alex Graves, Greg Wayne, and Ivo Danihelka. 2014.
+Neural Turing machines. CoRR, abs/1410.5401.
+Alex Graves. 2013. Generating sequences with recur-
+rent neural networks. CoRR, abs/1308.0850.
+Edward Grefenstette, Karl Moritz Hermann, Georgiana
+Dinu, and Phil Blunsom. 2014. New directions in
+vector space models of meaning. ACL Tutorial.
+James Henderson. 2004. Discriminative training of a
+neural network discriminative parser. In Proc. ACL.
+Karl Moritz Hermann and Phil Blunsom. 2013. The
+role of syntax in vector space models of composi-
+tional semantics. In Proc. ACL.
+Sepp Hochreiter and J¨urgen Schmidhuber. 1997.
+Long short-term memory. Neural Computation,
+9(8):1735–1780.
+Liang Huang and David Chiang. 2008. Forest rerank-
+ing: Discriminative parsing with non-local features.
+In Proc. ACL.
+Phong Le and Willem Zuidema. 2014. Inside-
+outside recursive neural network model for depen-
+dency parsing. In Proc. EMNLP.
+Wang Ling, Chris Dyer, Alan Black, and Isabel
+Trancoso. 2015. Two/too simple adaptations of
+word2vec for syntax problems. In Proc. NAACL.
+Andr´e F. T. Martins, Noah A. Smith, Eric P. Xing, Pe-
+dro M. Q. Aguiar, and M´ario A. T. Figueiredo. 2010.
+Turboparsers: Dependency parsing by approximate
+variational inference. In Proc. EMNLP.
+Marshall R. Mayberry and Risto Miikkulainen. 1999.
+SARDSRN: A neural network shift-reduce parser. In
+Proc. IJCAI.
+Risto Mikkulainen. 1996. Subsymbolic case-role anal-
+ysis of sentences with embedded clauses. Cognitive
+Science, 20:47–73.
+Tomas Mikolov, Ilya Sutskever, Kai Chen, Greg S Cor-
+rado, and Jeff Dean. 2013. Distributed representa-
+tions of words and phrases and their compositional-
+ity. In Proc. NIPS.
+Joakim Nivre. 2003. An efficient algorithm for projec-
+tive dependency parsing. In Proc. IWPT.
+Joakim Nivre. 2004. Incrementality in deterministic
+dependency parsing. In Proceedings of the Work-
+shop on Incremental Parsing: Bringing Engineering
+and Cognition Together.
+Joakim Nivre. 2007. Incremental non-projective de-
+pendency parsing. In Proc. NAACL.
+Joakim Nivre. 2008. Algorithms for deterministic in-
+cremental dependency parsing. Computational Lin-
+guistics, 34:4:513–553. MIT Press.
+Joakim Nivre. 2009. Non-projective dependency pars-
+ing in expected linear time. In Proc. ACL.
+Razvan Pascanu, C¸aglar G¨ulc¸ehre, Kyunghyun Cho,
+and Yoshua Bengio. 2014. How to construct deep
+recurrent neural networks. In Proc. ICLR.
+Francesco Sartorio, Giorgio Satta, and Joakim Nivre.
+2013. A transition-based dependency parser using a
+dynamic parsing strategy. In Proc. ACL.
+Richard Socher, Eric H. Huang, Jeffrey Pennington,
+Andrew Y. Ng, and Christopher D. Manning. 2011.
+Dynamic pooling and unfolding recursive autoen-
+coders for paraphrase detection. In Proc. NIPS.
+Richard Socher, John Bauer, Christopher D. Manning,
+and Andrew Y. Ng. 2013a. Parsing with composi-
+tional vector grammars. In Proc. ACL.
+</reference>
+<page confidence="0.980249">
+342
+</page>
+<reference confidence="0.999821333333333">
+Richard Socher, Andrej Karpathy, Quoc V. Le, Christo-
+pher D. Manning, and Andrew Y. Ng. 2013b.
+Grounded compositional semantics for finding and
+describing images with sentences. TACL.
+Richard Socher, Alex Perelygin, Jean Y. Wu, Jason
+Chuang, Christopher D. Manning, Andrew Y. Ng,
+and Christopher Potts. 2013c. Recursive deep mod-
+els for semantic compositionality over a sentiment
+treebank. In Proc. EMNLP.
+Pontus Stenetorp. 2013. Transition-based dependency
+parsing using recursive neural networks. In Proc.
+NIPS Deep Learning Workshop.
+Ilya Sutskever, Oriol Vinyals, and Quoc V. Le. 2014.
+Sequence to sequence learning with neural net-
+works. In Proc. NIPS.
+Ivan Titov and James Henderson. 2007. Constituent
+parsing with incremental sigmoid belief networks.
+In Proc. ACL.
+Kristina Toutanova, Dan Klein, Christopher D. Man-
+ning, and Yoram Singer. 2003. Feature-rich part-of-
+speech tagging with a cyclic dependency network.
+In Proc. NAACL.
+Huihsin Tseng, Pichuan Chang, Galen Andrew, Daniel
+Jurafsky, and Christopher Manning. 2005. A con-
+ditional random field word segmenter for SIGHAN
+bakeoff 2005. In Proc. Fourth SIGHAN Workshop
+on Chinese Language Processing.
+Oriol Vinyals, Lukasz Kaiser, Terry Koo, Slav Petrov,
+Ilya Sutskever, and Geoffrey Hinton. 2015. Gram-
+mar as a foreign language. In Proc. ICLR.
+David Weiss, Christopher Alberti, Michael Collins, and
+Slav Petrov. 2015. Structured training for neural
+network transition-based parsing. In Proc. ACL.
+Jason Weston, Sumit Chopra, and Antoine Bordes.
+2015. Memory networks. In Proc. ICLR.
+Hiroyasu Yamada and Yuji Matsumoto. 2003. Statis-
+tical dependency analysis with support vector ma-
+chines. In Proc. IWPT.
+Wojciech Zaremba and Ilya Sutskever. 2015. Rein-
+forcement learning neural Turing machines. ArXiv
+e-prints, May.
+Yue Zhang and Stephen Clark. 2008. A tale of two
+parsers: Investigating and combining graph-based
+and transition-based dependency parsing. In Proc.
+EMNLP.
+Yue Zhang and Joakim Nivre. 2011. Transition-based
+dependency parsing with rich non-local features. In
+Proc. ACL.
+Yuan Zhang, Tao Lei, Regina Barzilay, and Tommi
+Jaakkola. 2014. Greed is good if randomized: New
+inference for dependency parsing. In Proc. EMNLP.
+</reference>
+<page confidence="0.99937">
+343
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.872044">
+<title confidence="0.990346">Transition-Based Dependency Parsing with Stack Long Short-Term Memory</title>
+<author confidence="0.915449">A Labs Group</author>
+<author confidence="0.915449">Pompeu Fabra University Mellon</author>
+<email confidence="0.950623">chris@marianaslabs.com,</email>
+<abstract confidence="0.999537608695652">We propose a technique for learning representations of parser states in transitionbased dependency parsers. Our primary innovation is a new control structure for sequence-to-sequence neural networks— the stack LSTM. Like the conventional stack data structures used in transitionbased parsing, elements can be pushed to or popped from the top of the stack in constant time, but, in addition, an LSTM maintains a continuous space embedding of the stack contents. This lets us formulate an efficient parsing model that captures three facets of a parser’s state: (i) unbounded look-ahead into the buffer of incoming words, (ii) the complete history of actions taken by the parser, and (iii) the complete contents of the stack of partially built tree fragments, including their internal structures. Standard backpropagation techniques are used for training and yield state-of-the-art parsing performance.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>Miguel Ballesteros</author>
+<author>Bernd Bohnet</author>
+</authors>
+<title>Automatic feature selection for agenda-based dependency parsing.</title>
+<date>2014</date>
+<booktitle>In Proc. COLING.</booktitle>
+<contexts>
+<context position="2274" citStr="Ballesteros and Bohnet, 2014" startWordPosition="324" endWordPosition="327">ransition-based parsing computationally efficient relative to graph- and grammarbased formalisms. The challenge in transitionbased parsing is modeling which action should be taken in each of the unboundedly many states encountered as the parser progresses. This challenge has been addressed by development of alternative transition sets that simplify the modeling problem by making better attachment decisions (Nivre, 2007; Nivre, 2008; Nivre, 2009; Choi and McCallum, 2013; Bohnet and Nivre, 2012), through feature engineering (Zhang and Nivre, 2011; Ballesteros and Nivre, 2014; Chen et al., 2014; Ballesteros and Bohnet, 2014) and more recently using neural networks (Chen and Manning, 2014; Stenetorp, 2013). We extend this last line of work by learning representations of the parser state that are sensitive to the complete contents of the parser’s state: that is, the complete input buffer, the complete history of parser actions, and the complete contents of the stack of partially constructed syntactic structures. This “global” sensitivity to the state contrasts with previous work in transitionbased dependency parsing that uses only a narrow view of the parsing state when constructing representations (e.g., just the </context>
+</contexts>
+<marker>Ballesteros, Bohnet, 2014</marker>
+<rawString>Miguel Ballesteros and Bernd Bohnet. 2014. Automatic feature selection for agenda-based dependency parsing. In Proc. COLING.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Miguel Ballesteros</author>
+<author>Joakim Nivre</author>
+</authors>
+<title>MaltOptimizer: Fast and effective parser optimization. Natural Language Engineering.</title>
+<date>2014</date>
+<contexts>
+<context position="2224" citStr="Ballesteros and Nivre, 2014" startWordPosition="316" endWordPosition="319">s linear in the length of the sentence, making transition-based parsing computationally efficient relative to graph- and grammarbased formalisms. The challenge in transitionbased parsing is modeling which action should be taken in each of the unboundedly many states encountered as the parser progresses. This challenge has been addressed by development of alternative transition sets that simplify the modeling problem by making better attachment decisions (Nivre, 2007; Nivre, 2008; Nivre, 2009; Choi and McCallum, 2013; Bohnet and Nivre, 2012), through feature engineering (Zhang and Nivre, 2011; Ballesteros and Nivre, 2014; Chen et al., 2014; Ballesteros and Bohnet, 2014) and more recently using neural networks (Chen and Manning, 2014; Stenetorp, 2013). We extend this last line of work by learning representations of the parser state that are sensitive to the complete contents of the parser’s state: that is, the complete input buffer, the complete history of parser actions, and the complete contents of the stack of partially constructed syntactic structures. This “global” sensitivity to the state contrasts with previous work in transitionbased dependency parsing that uses only a narrow view of the parsing state </context>
+</contexts>
+<marker>Ballesteros, Nivre, 2014</marker>
+<rawString>Miguel Ballesteros and Joakim Nivre. 2014. MaltOptimizer: Fast and effective parser optimization. Natural Language Engineering.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Mohit Bansal</author>
+<author>Kevin Gimpel</author>
+<author>Karen Livescu</author>
+</authors>
+<title>Tailoring continuous word representations for dependency parsing. In</title>
+<date>2014</date>
+<booktitle>Proc. ACL.</booktitle>
+<contexts>
+<context position="16561" citStr="Bansal et al., 2014" startWordPosition="2763" endWordPosition="2766">ords—both those that are OOV in both the very limited parsing data but present in the pretraining LM, and words that are OOV in both. To ensure we have estimates of the OOVs in the parsing training data, we stochastically replace (with p = 0.5) each singleton word type in the parsing training data with the UNK token in each training iteration. Pretrained word embeddings. A veritable cottage industry exists for creating word embeddings, meaning numerous pretraining options for ˜wLM are available. However, for syntax modeling problems, embedding approaches which discard order perform less well (Bansal et al., 2014); therefore we used a variant of the skip n-gram model introduced by Ling et al. (2015), named “structured skip n-gram,” where a different set of parameters is used to predict each context word depending on its position relative to the target word. The hyperparameters of the model are the same as in the skip n-gram model defined in word2vec (Mikolov et al., 2013), and we set the window size to 5, used a negative sampling rate to 10, and ran 5 epochs through unannotated corpora described in §5.1. 3.4 Composition Functions Recursive neural network models enable complex phrases to be represented </context>
+</contexts>
+<marker>Bansal, Gimpel, Livescu, 2014</marker>
+<rawString>Mohit Bansal, Kevin Gimpel, and Karen Livescu. 2014. Tailoring continuous word representations for dependency parsing. In Proc. ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Bernd Bohnet</author>
+<author>Joakim Nivre</author>
+</authors>
+<title>A transitionbased system for joint part-of-speech tagging and labeled non-projective dependency parsing.</title>
+<date>2012</date>
+<booktitle>In Proc. EMNLP.</booktitle>
+<contexts>
+<context position="2143" citStr="Bohnet and Nivre, 2012" startWordPosition="305" endWordPosition="308"> since the number of operations required to build any projective parse tree is linear in the length of the sentence, making transition-based parsing computationally efficient relative to graph- and grammarbased formalisms. The challenge in transitionbased parsing is modeling which action should be taken in each of the unboundedly many states encountered as the parser progresses. This challenge has been addressed by development of alternative transition sets that simplify the modeling problem by making better attachment decisions (Nivre, 2007; Nivre, 2008; Nivre, 2009; Choi and McCallum, 2013; Bohnet and Nivre, 2012), through feature engineering (Zhang and Nivre, 2011; Ballesteros and Nivre, 2014; Chen et al., 2014; Ballesteros and Bohnet, 2014) and more recently using neural networks (Chen and Manning, 2014; Stenetorp, 2013). We extend this last line of work by learning representations of the parser state that are sensitive to the complete contents of the parser’s state: that is, the complete input buffer, the complete history of parser actions, and the complete contents of the stack of partially constructed syntactic structures. This “global” sensitivity to the state contrasts with previous work in tran</context>
+</contexts>
+<marker>Bohnet, Nivre, 2012</marker>
+<rawString>Bernd Bohnet and Joakim Nivre. 2012. A transitionbased system for joint part-of-speech tagging and labeled non-projective dependency parsing. In Proc. EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Danqi Chen</author>
+<author>Christopher D Manning</author>
+</authors>
+<title>A fast and accurate dependency parser using neural networks.</title>
+<date>2014</date>
+<booktitle>In Proc. EMNLP.</booktitle>
+<contexts>
+<context position="2338" citStr="Chen and Manning, 2014" startWordPosition="334" endWordPosition="338">d grammarbased formalisms. The challenge in transitionbased parsing is modeling which action should be taken in each of the unboundedly many states encountered as the parser progresses. This challenge has been addressed by development of alternative transition sets that simplify the modeling problem by making better attachment decisions (Nivre, 2007; Nivre, 2008; Nivre, 2009; Choi and McCallum, 2013; Bohnet and Nivre, 2012), through feature engineering (Zhang and Nivre, 2011; Ballesteros and Nivre, 2014; Chen et al., 2014; Ballesteros and Bohnet, 2014) and more recently using neural networks (Chen and Manning, 2014; Stenetorp, 2013). We extend this last line of work by learning representations of the parser state that are sensitive to the complete contents of the parser’s state: that is, the complete input buffer, the complete history of parser actions, and the complete contents of the stack of partially constructed syntactic structures. This “global” sensitivity to the state contrasts with previous work in transitionbased dependency parsing that uses only a narrow view of the parsing state when constructing representations (e.g., just the next few incoming words, the head words of the top few positions</context>
+<context position="21217" citStr="Chen and Manning (2014)" startWordPosition="3547" endWordPosition="3550">ese dimensions were chosen based on intuitively reasonable values (words should have higher dimensionality than parsing actions, POS tags, and relations; LSTM states should be relatively large), and it was confirmed on development data that they performed well.7 Future work might more carefully optimize these parameters; our reported architecture strikes a balance between minimizing computational expense and finding solutions that work. 5 Experiments We applied our parsing model and several variations of it to two parsing tasks and report results below. 5.1 Data We used the same data setup as Chen and Manning (2014), namely an English and a Chinese parsing task. This baseline configuration was chosen since they likewise used a neural parameterization to predict actions in an arc-standard transition-based parser. • For English, we used the Stanford Dependencency (SD) treebank (de Marneffe et al., 2006) used in (Chen and Manning, 2014) which is the closest model published, with the same splits.8 The part-of-speech tags are predicted by using the Stanford Tagger (Toutanova et al., 2003) with an accuracy of 97.3%. This treebank contains a negligible amount of non-projective arcs (Chen and Manning, 2014). • F</context>
+<context position="22744" citStr="Chen and Manning (2014)" startWordPosition="3790" endWordPosition="3793">from the complete Chinese Gigaword corpus (version 2), 7We did perform preliminary experiments with LSTM states of 32, 50, and 80, but the other dimensions were our initial guesses. 8Training: 02-21. Development: 22. Test: 23. 9Training: 001–815, 1001–1136. Development: 886– 931, 1148–1151. Test: 816–885, 1137–1147. mod head Cl rel det amod an decision overhasty mod 2c head rel det an overhasty amod decision 339 as segmented by the Stanford Chinese Segmenter (Tseng et al., 2005). 5.2 Experimental configurations We report results on five experimental configurations per language, as well as the Chen and Manning (2014) baseline. These are: the full stack LSTM parsing model (S-LSTM), the stack LSTM parsing model without POS tags (−POS), the stack LSTM parsing model without pretrained language model embeddings (−pretraining), the stack LSTM parsing model that uses just head words on the stack instead of composed representations (−composition), and the full parsing model where rather than an LSTM, a classical recurrent neural network is used (S-RNN). 5.3 Results Following Chen and Manning (2014) we exclude punctuation symbols for evaluation. Tables 1 and 2 show comparable results with Chen and Manning (2014), </context>
+<context position="24059" citStr="Chen and Manning (2014)" startWordPosition="4008" endWordPosition="4012">st set. Development Test UAS LAS UAS LAS S-LSTM 93.2 90.9 93.1 90.9 −POS 93.1 90.4 92.7 90.3 −pretraining 92.7 90.4 92.4 90.0 −composition 92.7 89.9 92.2 89.6 S-RNN 92.8 90.4 92.3 90.1 C&amp;M (2014) 92.2 89.7 91.8 89.6 Table 1: English parsing results (SD) Dev. set Test set UAS LAS UAS LAS S-LSTM 87.2 85.9 87.2 85.7 −composition 85.8 84.0 85.3 83.6 −pretraining 86.3 84.7 85.7 84.1 −POS 82.8 79.8 82.2 79.1 S-RNN 86.3 84.7 86.1 84.6 C&amp;M (2014) 84.0 82.4 83.9 82.4 Table 2: Chinese parsing results (CTB5) 5.4 Analysis Overall, our parser substantially outperforms the baseline neural network parser of Chen and Manning (2014), both in the full configuration and in the various ablated conditions we report. The one exception to this is the −POS condition for the Chinese parsing task, which in which we underperform their baseline (which used gold POS tags), although we do still obtain reasonable parsing performance in this limited case. We note that predicted POS tags in English add very little value—suggesting that we can think of parsing sentences directly without first tagging them. We also find that using composed representations of dependency tree fragments outperforms using representations of head words alone, </context>
+<context position="26558" citStr="Chen and Manning, 2014" startWordPosition="4416" endWordPosition="4419"> feature, although the stack control was learned as a latent variable. A variety of authors have used neural networks to predict parser actions in shift-reduce parsers. The earliest attempt we are aware of is due to Mayberry and Miikkulainen (1999). The resurgence of interest in neural networks has resulted 10Although superficially similar to ours, Vinyals et al. (2015) is a phrase-structure parser and adaptation to the dependency parsing scenario would have been nontrivial. We discuss their work in §6. 340 in in several applications to transition-based dependency parsers (Weiss et al., 2015; Chen and Manning, 2014; Stenetorp, 2013). In these works, the conditioning structure was manually crafted and sensitive to only certain properties of the state, while we are conditioning on the global state object. Like us, Stenetorp (2013) used recursively composed representations of the tree fragments (a head and its dependents). Neural networks have also been used to learn representations for use in chart parsing (Henderson, 2004; Titov and Henderson, 2007; Socher et al., 2013a; Le and Zuidema, 2014). LSTMs have also recently been demonstrated as a mechanism for learning to represent parse structure.Vinyals et a</context>
+</contexts>
+<marker>Chen, Manning, 2014</marker>
+<rawString>Danqi Chen and Christopher D. Manning. 2014. A fast and accurate dependency parser using neural networks. In Proc. EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Wenliang Chen</author>
+<author>Yue Zhang</author>
+<author>Min Zhang</author>
+</authors>
+<title>Feature embedding for dependency parsing. In</title>
+<date>2014</date>
+<booktitle>Proc. COLING.</booktitle>
+<contexts>
+<context position="2243" citStr="Chen et al., 2014" startWordPosition="320" endWordPosition="323"> sentence, making transition-based parsing computationally efficient relative to graph- and grammarbased formalisms. The challenge in transitionbased parsing is modeling which action should be taken in each of the unboundedly many states encountered as the parser progresses. This challenge has been addressed by development of alternative transition sets that simplify the modeling problem by making better attachment decisions (Nivre, 2007; Nivre, 2008; Nivre, 2009; Choi and McCallum, 2013; Bohnet and Nivre, 2012), through feature engineering (Zhang and Nivre, 2011; Ballesteros and Nivre, 2014; Chen et al., 2014; Ballesteros and Bohnet, 2014) and more recently using neural networks (Chen and Manning, 2014; Stenetorp, 2013). We extend this last line of work by learning representations of the parser state that are sensitive to the complete contents of the parser’s state: that is, the complete input buffer, the complete history of parser actions, and the complete contents of the stack of partially constructed syntactic structures. This “global” sensitivity to the state contrasts with previous work in transitionbased dependency parsing that uses only a narrow view of the parsing state when constructing r</context>
+</contexts>
+<marker>Chen, Zhang, Zhang, 2014</marker>
+<rawString>Wenliang Chen, Yue Zhang, and Min Zhang. 2014. Feature embedding for dependency parsing. In Proc. COLING.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jinho D Choi</author>
+<author>Andrew McCallum</author>
+</authors>
+<title>Transition-based dependency parsing with selectional branching.</title>
+<date>2013</date>
+<booktitle>In Proc. ACL.</booktitle>
+<contexts>
+<context position="2118" citStr="Choi and McCallum, 2013" startWordPosition="301" endWordPosition="304">rmalization is attractive since the number of operations required to build any projective parse tree is linear in the length of the sentence, making transition-based parsing computationally efficient relative to graph- and grammarbased formalisms. The challenge in transitionbased parsing is modeling which action should be taken in each of the unboundedly many states encountered as the parser progresses. This challenge has been addressed by development of alternative transition sets that simplify the modeling problem by making better attachment decisions (Nivre, 2007; Nivre, 2008; Nivre, 2009; Choi and McCallum, 2013; Bohnet and Nivre, 2012), through feature engineering (Zhang and Nivre, 2011; Ballesteros and Nivre, 2014; Chen et al., 2014; Ballesteros and Bohnet, 2014) and more recently using neural networks (Chen and Manning, 2014; Stenetorp, 2013). We extend this last line of work by learning representations of the parser state that are sensitive to the complete contents of the parser’s state: that is, the complete input buffer, the complete history of parser actions, and the complete contents of the stack of partially constructed syntactic structures. This “global” sensitivity to the state contrasts w</context>
+</contexts>
+<marker>Choi, McCallum, 2013</marker>
+<rawString>Jinho D. Choi and Andrew McCallum. 2013. Transition-based dependency parsing with selectional branching. In Proc. ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Sreerupa Das</author>
+<author>C Lee Giles</author>
+<author>Guo-Zheng Sun</author>
+</authors>
+<title>Learning context-free grammars: Capabilities and limitations of a recurrent neural network with an external stack memory.</title>
+<date>1992</date>
+<booktitle>In Proc. Cognitive Science Society.</booktitle>
+<contexts>
+<context position="9696" citStr="Das et al. (1992)" startWordPosition="1565" endWordPosition="1568">ointed to by TOP is ever accessed), and the middle rows are the memory cells (the ct’s and ht’s) and gates. Arrows represent function applications (usually affine transformations followed by a nonlinearity), refer to §2.1 for specifics. Y1 Y2 Y1 Y1 X1 X2 X1 push pop X1 influence the representation of the stack. However, the LSTM has the flexibility to learn to extract information from arbitrary points in the stack (Hochreiter and Schmidhuber, 1997). Although this architecture is to the best of our knowledge novel, it is reminiscent of the Recurrent Neural Network Pushdown Automaton (NNPDA) of Das et al. (1992), which added an external stack memory to an RNN. However, our architecture provides an embedding of the complete contents of the stack, whereas theirs made only the top of the stack visible to the RNN. 3 Dependency Parser We now turn to the problem of learning representations of dependency parsers. We preserve the standard data structures of a transition-based dependency parser, namely a buffer of words (B) to be processed and a stack (5) of partially constructed syntactic elements. Each stack element is augmented with a continuous-space vector embedding representing a word and, in the case o</context>
+<context position="25585" citStr="Das et al. (1992)" startWordPosition="4254" endWordPosition="4257">0.3% were possible with small beams). Therefore, all results we report used greedy decoding—Chen and Manning (2014) likewise only report results with greedy decoding. This finding is in line with previous work that generates sequences from recurrent networks (Grefenstette et al., 2014), although Vinyals et al. (2015) did report much more substantial improvements with beam search on their “grammar as a foreign language” parser.10 6 Related Work Our approach ties together several strands of previous work. First, several kinds of stack memories have been proposed to augment neural architectures. Das et al. (1992) proposed a neural network with an external stack memory based on recurrent neural networks. In contrast to our model, in which the entire contents of the stack are summarized in a single value, in their model, the network could only see the contents of the top of the stack. Mikkulainen (1996) proposed an architecture with a stack that had a summary feature, although the stack control was learned as a latent variable. A variety of authors have used neural networks to predict parser actions in shift-reduce parsers. The earliest attempt we are aware of is due to Mayberry and Miikkulainen (1999).</context>
+</contexts>
+<marker>Das, Giles, Sun, 1992</marker>
+<rawString>Sreerupa Das, C. Lee Giles, and Guo-Zheng Sun. 1992. Learning context-free grammars: Capabilities and limitations of a recurrent neural network with an external stack memory. In Proc. Cognitive Science Society.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Marie-Catherine de Marneffe</author>
+<author>Bill MacCartney</author>
+<author>Christopher D Manning</author>
+</authors>
+<title>Generating typed dependency parses from phrase structure parses.</title>
+<date>2006</date>
+<booktitle>In Proc. LREC.</booktitle>
+<marker>de Marneffe, MacCartney, Manning, 2006</marker>
+<rawString>Marie-Catherine de Marneffe, Bill MacCartney, and Christopher D. Manning. 2006. Generating typed dependency parses from phrase structure parses. In Proc. LREC.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Xavier Glorot</author>
+<author>Yoshua Bengio</author>
+</authors>
+<title>Understanding the difficulty of training deep feedforward neural networks.</title>
+<date>2010</date>
+<booktitle>In Proc. ICML.</booktitle>
+<contexts>
+<context position="20004" citStr="Glorot and Bengio, 2010" startWordPosition="3361" endWordPosition="3364">th an initial learning rate of 770 = 0.1, and the learning rate was updated on each pass through the training data as 77t = 770/(1 + pt), with p = 0.1 and where t is the number of epochs completed. No momentum was used. To mitigate the effects of “exploding” gradients, we clipped the E2 norm of the gradient to 5 before applying the weight update rule (Sutskever et al., 2014; Graves, 2013). An E2 penalty of 1 x 10−6 was applied to all weights. Matrix and vector parameters were initialized � with uniform samples in ± 6/(r + c), where r and c were the number of rows and columns in the structure (Glorot and Bengio, 2010). Dimensionality. The full version of our parsing model sets dimensionalities as follows. LSTM hidden states are of size 100, and we use two layers of LSTMs for each stack. Embeddings of the parser actions used in the composition functions have 16 dimensions, and the output embedding size is 20 dimensions. Pretained word embeddings have 100 dimensions (English) and 80 dimensions (Chinese), and the learned word embeddings have 6Software for replicating the experiments is available from https://github.com/clab/lstm-parser. 32 dimensions. Part of speech embeddings have 12 dimensions. These dimens</context>
+</contexts>
+<marker>Glorot, Bengio, 2010</marker>
+<rawString>Xavier Glorot and Yoshua Bengio. 2010. Understanding the difficulty of training deep feedforward neural networks. In Proc. ICML.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Xavier Glorot</author>
+<author>Antoine Bordes</author>
+<author>Yoshua Bengio</author>
+</authors>
+<title>Deep sparse rectifier neural networks.</title>
+<date>2011</date>
+<booktitle>In Proc. AISTATS.</booktitle>
+<contexts>
+<context position="12019" citStr="Glorot et al., 2011" startWordPosition="1983" endWordPosition="1986">ements, one representing the full parse tree headed by the ROOT symbol and the other the empty-stack symbol, and A is the history of operations taken by the parser. The parser state representation at time t, which we write pt, which is used to is determine the transition to take, is defined as follows: pt = max {0, W[st; bt; at] + d} , where W is a learned parameter matrix, bt is the stack LSTM encoding of the input buffer B, st is the stack LSTM encoding of 5, at is the stack LSTM encoding of A, d is a bias term, then passed through a component-wise rectified linear unit (ReLU) nonlinearity (Glorot et al., 2011).4 Finally, the parser state pt is used to compute 4In preliminary experiments, we tried several nonlinearities and found ReLU to work slightly better than the others. 336 A overhasty REDUCE-LEFT(amod) SHIFT S É B Pt amod made was an decision É Figure 2: Parser state computation encountered while parsing the sentence “an overhasty decision was made.” Here S designates the stack of partially constructed dependency subtrees and its LSTM encoding; B is the buffer of words remaining to be processed and its LSTM encoding; and A is the stack representing the history of actions taken by the parser. T</context>
+</contexts>
+<marker>Glorot, Bordes, Bengio, 2011</marker>
+<rawString>Xavier Glorot, Antoine Bordes, and Yoshua Bengio. 2011. Deep sparse rectifier neural networks. In Proc. AISTATS.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yoav Goldberg</author>
+<author>Kai Zhao</author>
+<author>Liang Huang</author>
+</authors>
+<title>Efficient implementation of beam-search incremental parsers.</title>
+<date>2013</date>
+<booktitle>In Proc. ACL.</booktitle>
+<contexts>
+<context position="8390" citStr="Goldberg et al. (2013)" startWordPosition="1343" endWordPosition="1346">pop only updates the stack pointer.2 This control structure is schematized in Figure 1. By querying the output vector to which the stack pointer points (i.e., the hTOP), a continuous-space “summary” of the contents of the current stack configuration is available. We refer to this value as the “stack summary.” What does the stack summary look like? Intuitively, elements near the top of the stack will 1Ours is not the first deviation from a strict left-toright order: previous variations include bidirectional LSTMs (Graves and Schmidhuber, 2005) and multidimensional LSTMs (Graves et al., 2007). 2Goldberg et al. (2013) propose a similar stack construction to prevent stack operations from invalidating existing references to the stack in a beam-search parser that must (efficiently) maintain a priority queue of stacks. 335 Figure 1: A stack LSTM extends a conventional left-to-right LSTM with the addition of a stack pointer (notated as TOP in the figure). This figure shows three configurations: a stack with a single element (left), the result of a pop operation to this (middle), and then the result of applying a push operation (right). The boxes in the lowest rows represent stack contents, which are the inputs </context>
+</contexts>
+<marker>Goldberg, Zhao, Huang, 2013</marker>
+<rawString>Yoav Goldberg, Kai Zhao, and Liang Huang. 2013. Efficient implementation of beam-search incremental parsers. In Proc. ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Alex Graves</author>
+<author>J¨urgen Schmidhuber</author>
+</authors>
+<title>Framewise phoneme classification with bidirectional LSTM networks.</title>
+<date>2005</date>
+<booktitle>In Proc. IJCNN.</booktitle>
+<contexts>
+<context position="8316" citStr="Graves and Schmidhuber, 2005" startWordPosition="1332" endWordPosition="1335">try at the end of the list that contains a back-pointer to the previous top, and pop only updates the stack pointer.2 This control structure is schematized in Figure 1. By querying the output vector to which the stack pointer points (i.e., the hTOP), a continuous-space “summary” of the contents of the current stack configuration is available. We refer to this value as the “stack summary.” What does the stack summary look like? Intuitively, elements near the top of the stack will 1Ours is not the first deviation from a strict left-toright order: previous variations include bidirectional LSTMs (Graves and Schmidhuber, 2005) and multidimensional LSTMs (Graves et al., 2007). 2Goldberg et al. (2013) propose a similar stack construction to prevent stack operations from invalidating existing references to the stack in a beam-search parser that must (efficiently) maintain a priority queue of stacks. 335 Figure 1: A stack LSTM extends a conventional left-to-right LSTM with the addition of a stack pointer (notated as TOP in the figure). This figure shows three configurations: a stack with a single element (left), the result of a pop operation to this (middle), and then the result of applying a push operation (right). Th</context>
+</contexts>
+<marker>Graves, Schmidhuber, 2005</marker>
+<rawString>Alex Graves and J¨urgen Schmidhuber. 2005. Framewise phoneme classification with bidirectional LSTM networks. In Proc. IJCNN.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Alex Graves</author>
+<author>Santiago Fern´andez</author>
+<author>J¨urgen Schmidhuber</author>
+</authors>
+<title>Multi-dimensional recurrent neural networks.</title>
+<date>2007</date>
+<booktitle>In Proc. ICANN.</booktitle>
+<marker>Graves, Fern´andez, Schmidhuber, 2007</marker>
+<rawString>Alex Graves, Santiago Fern´andez, and J¨urgen Schmidhuber. 2007. Multi-dimensional recurrent neural networks. In Proc. ICANN.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Alex Graves</author>
+<author>Greg Wayne</author>
+<author>Ivo Danihelka</author>
+</authors>
+<title>Neural Turing machines.</title>
+<date>2014</date>
+<location>CoRR, abs/1410.5401.</location>
+<contexts>
+<context position="29717" citStr="Graves et al., 2014" startWordPosition="4911" endWordPosition="4914">ve general information processing problems (Mikkulainen, 1996). Here, we learned from observable stack manipulation operations (i.e., supervision from a treebank), and the computed embeddings of final parser states were not used for any further prediction. However, this could be reversed, giving a device that learns to construct context-free programs (e.g., expression trees) given only observed outputs; one application would be unsupervised parsing. Such an extension of the work would make it an alternative to architectures that have an explicit external memory such as neural Turing machines (Graves et al., 2014) and memory networks (Weston et al., 2015). However, as with those models, without supervision of the stack operations, formidable computational challenges must be solved (e.g., marginalizing over all latent stack operations), but sampling techniques and techniques from reinforcement learning have promise here (Zaremba and Sutskever, 2015), making this an intriguing avenue for future work. Acknowledgments The authors would like to thank Lingpeng Kong and Jacob Eisenstein for comments on an earlier version of this draft and Danqi Chen for assistance with the parsing datasets. This work was spon</context>
+</contexts>
+<marker>Graves, Wayne, Danihelka, 2014</marker>
+<rawString>Alex Graves, Greg Wayne, and Ivo Danihelka. 2014. Neural Turing machines. CoRR, abs/1410.5401.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Alex Graves</author>
+</authors>
+<title>Generating sequences with recurrent neural networks.</title>
+<date>2013</date>
+<tech>CoRR, abs/1308.0850.</tech>
+<contexts>
+<context position="5106" citStr="Graves, 2013" startWordPosition="770" endWordPosition="771">se, boldface letters (e.g., v or vw); matrices are written with uppercase, boldface letters (e.g., M, Ma, or Mab), and scalars are written as lowercase letters (e.g., s or qz). Structured objects such as sequences of discrete symbols are written with lowercase, bold, italic letters (e.g., w refers to a sequence of input words). Discussion of dimensionality is deferred to the experiments section below (§5). 2.1 Long Short-Term Memories LSTMs are a variant of recurrent neural networks (RNNs) designed to cope with the vanishing gradient problem inherent in RNNs (Hochreiter and Schmidhuber, 1997; Graves, 2013). RNNs read a vector xt at each time step and compute a new (hidden) state ht by applying a linear map to the concatenation of the previous time step’s state ht−1 and the input, and passing this through a logistic sigmoid nonlinearity. Although RNNs can, in principle, model long-range dependencies, training them is difficult in practice since the repeated application of a squashing nonlinearity at each step results in an exponential decay in the error signal through time. LSTMs address this with an extra memory “cell” (ct) that is constructed as a linear combination of the previous state and s</context>
+<context position="19771" citStr="Graves, 2013" startWordPosition="3318" endWordPosition="3319">thread on a CPU. Using the dimensions discussed in the next section, we required between 8 and 12 hours to reach convergence on a held-out dev set.6 Parameter optimization was performed using stochastic gradient descent with an initial learning rate of 770 = 0.1, and the learning rate was updated on each pass through the training data as 77t = 770/(1 + pt), with p = 0.1 and where t is the number of epochs completed. No momentum was used. To mitigate the effects of “exploding” gradients, we clipped the E2 norm of the gradient to 5 before applying the weight update rule (Sutskever et al., 2014; Graves, 2013). An E2 penalty of 1 x 10−6 was applied to all weights. Matrix and vector parameters were initialized � with uniform samples in ± 6/(r + c), where r and c were the number of rows and columns in the structure (Glorot and Bengio, 2010). Dimensionality. The full version of our parsing model sets dimensionalities as follows. LSTM hidden states are of size 100, and we use two layers of LSTMs for each stack. Embeddings of the parser actions used in the composition functions have 16 dimensions, and the output embedding size is 20 dimensions. Pretained word embeddings have 100 dimensions (English) and</context>
+</contexts>
+<marker>Graves, 2013</marker>
+<rawString>Alex Graves. 2013. Generating sequences with recurrent neural networks. CoRR, abs/1308.0850.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Edward Grefenstette</author>
+<author>Karl Moritz Hermann</author>
+<author>Georgiana Dinu</author>
+<author>Phil Blunsom</author>
+</authors>
+<title>New directions in vector space models of meaning.</title>
+<date>2014</date>
+<journal>ACL Tutorial.</journal>
+<contexts>
+<context position="25254" citStr="Grefenstette et al., 2014" startWordPosition="4200" endWordPosition="4204">entations of head words alone, which has implications for theories of headedness. Finally, we find that while LSTMs outperform baselines that use only classical RNNs, these are still quite capable of learning good representations. Effect of beam size. Beam search was determined to have minimal impact on scores (absolute improvements of G 0.3% were possible with small beams). Therefore, all results we report used greedy decoding—Chen and Manning (2014) likewise only report results with greedy decoding. This finding is in line with previous work that generates sequences from recurrent networks (Grefenstette et al., 2014), although Vinyals et al. (2015) did report much more substantial improvements with beam search on their “grammar as a foreign language” parser.10 6 Related Work Our approach ties together several strands of previous work. First, several kinds of stack memories have been proposed to augment neural architectures. Das et al. (1992) proposed a neural network with an external stack memory based on recurrent neural networks. In contrast to our model, in which the entire contents of the stack are summarized in a single value, in their model, the network could only see the contents of the top of the </context>
+</contexts>
+<marker>Grefenstette, Hermann, Dinu, Blunsom, 2014</marker>
+<rawString>Edward Grefenstette, Karl Moritz Hermann, Georgiana Dinu, and Phil Blunsom. 2014. New directions in vector space models of meaning. ACL Tutorial.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>James Henderson</author>
+</authors>
+<title>Discriminative training of a neural network discriminative parser.</title>
+<date>2004</date>
+<booktitle>In Proc. ACL.</booktitle>
+<contexts>
+<context position="26972" citStr="Henderson, 2004" startWordPosition="4481" endWordPosition="4482">he dependency parsing scenario would have been nontrivial. We discuss their work in §6. 340 in in several applications to transition-based dependency parsers (Weiss et al., 2015; Chen and Manning, 2014; Stenetorp, 2013). In these works, the conditioning structure was manually crafted and sensitive to only certain properties of the state, while we are conditioning on the global state object. Like us, Stenetorp (2013) used recursively composed representations of the tree fragments (a head and its dependents). Neural networks have also been used to learn representations for use in chart parsing (Henderson, 2004; Titov and Henderson, 2007; Socher et al., 2013a; Le and Zuidema, 2014). LSTMs have also recently been demonstrated as a mechanism for learning to represent parse structure.Vinyals et al. (2015) proposed a phrasestructure parser based on LSTMs which operated by first reading the entire input sentence in so as to obtain a vector representation of it, and then generating bracketing structures sequentially conditioned on this representation. Although superficially similar to our model, their approach has a number of disadvantages. First, they relied on a large amount of semi-supervised training </context>
+</contexts>
+<marker>Henderson, 2004</marker>
+<rawString>James Henderson. 2004. Discriminative training of a neural network discriminative parser. In Proc. ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Karl Moritz Hermann</author>
+<author>Phil Blunsom</author>
+</authors>
+<title>The role of syntax in vector space models of compositional semantics.</title>
+<date>2013</date>
+<booktitle>In Proc. ACL.</booktitle>
+<contexts>
+<context position="17303" citStr="Hermann and Blunsom, 2013" startWordPosition="2890" endWordPosition="2894">m,” where a different set of parameters is used to predict each context word depending on its position relative to the target word. The hyperparameters of the model are the same as in the skip n-gram model defined in word2vec (Mikolov et al., 2013), and we set the window size to 5, used a negative sampling rate to 10, and ran 5 epochs through unannotated corpora described in §5.1. 3.4 Composition Functions Recursive neural network models enable complex phrases to be represented compositionally in terms of their parts and the relations that link them (Socher et al., 2011; Socher et al., 2013c; Hermann and Blunsom, 2013; Socher et al., 2013b). We follow this previous line of work in embedding dependency tree fragments that are present in the stack 5 in the same vector space as the token embeddings discussed above. A particular challenge here is that a syntactic head may, in general, have an arbitrary number of dependents. To simplify the parameterization of our composition function, we combine headmodifier pairs one at a time, building up more complicated structures in the order they are “reduced” in the parser, as illustrated in Figure 5. Each node in this expanded syntactic tree has a value computed as a f</context>
+</contexts>
+<marker>Hermann, Blunsom, 2013</marker>
+<rawString>Karl Moritz Hermann and Phil Blunsom. 2013. The role of syntax in vector space models of compositional semantics. In Proc. ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Sepp Hochreiter</author>
+<author>J¨urgen Schmidhuber</author>
+</authors>
+<title>Long short-term memory.</title>
+<date>1997</date>
+<journal>Neural Computation,</journal>
+<volume>9</volume>
+<issue>8</issue>
+<contexts>
+<context position="5091" citStr="Hochreiter and Schmidhuber, 1997" startWordPosition="766" endWordPosition="769">t vectors are written with lowercase, boldface letters (e.g., v or vw); matrices are written with uppercase, boldface letters (e.g., M, Ma, or Mab), and scalars are written as lowercase letters (e.g., s or qz). Structured objects such as sequences of discrete symbols are written with lowercase, bold, italic letters (e.g., w refers to a sequence of input words). Discussion of dimensionality is deferred to the experiments section below (§5). 2.1 Long Short-Term Memories LSTMs are a variant of recurrent neural networks (RNNs) designed to cope with the vanishing gradient problem inherent in RNNs (Hochreiter and Schmidhuber, 1997; Graves, 2013). RNNs read a vector xt at each time step and compute a new (hidden) state ht by applying a linear map to the concatenation of the previous time step’s state ht−1 and the input, and passing this through a logistic sigmoid nonlinearity. Although RNNs can, in principle, model long-range dependencies, training them is difficult in practice since the repeated application of a squashing nonlinearity at each step results in an exponential decay in the error signal through time. LSTMs address this with an extra memory “cell” (ct) that is constructed as a linear combination of the previ</context>
+<context position="9531" citStr="Hochreiter and Schmidhuber, 1997" startWordPosition="1537" endWordPosition="1540">ration (right). The boxes in the lowest rows represent stack contents, which are the inputs to the LSTM, the upper rows are the outputs of the LSTM (in this paper, only the output pointed to by TOP is ever accessed), and the middle rows are the memory cells (the ct’s and ht’s) and gates. Arrows represent function applications (usually affine transformations followed by a nonlinearity), refer to §2.1 for specifics. Y1 Y2 Y1 Y1 X1 X2 X1 push pop X1 influence the representation of the stack. However, the LSTM has the flexibility to learn to extract information from arbitrary points in the stack (Hochreiter and Schmidhuber, 1997). Although this architecture is to the best of our knowledge novel, it is reminiscent of the Recurrent Neural Network Pushdown Automaton (NNPDA) of Das et al. (1992), which added an external stack memory to an RNN. However, our architecture provides an embedding of the complete contents of the stack, whereas theirs made only the top of the stack visible to the RNN. 3 Dependency Parser We now turn to the problem of learning representations of dependency parsers. We preserve the standard data structures of a transition-based dependency parser, namely a buffer of words (B) to be processed and a s</context>
+</contexts>
+<marker>Hochreiter, Schmidhuber, 1997</marker>
+<rawString>Sepp Hochreiter and J¨urgen Schmidhuber. 1997. Long short-term memory. Neural Computation, 9(8):1735–1780.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Liang Huang</author>
+<author>David Chiang</author>
+</authors>
+<title>Forest reranking: Discriminative parsing with non-local features.</title>
+<date>2008</date>
+<booktitle>In Proc. ACL.</booktitle>
+<contexts>
+<context position="28358" citStr="Huang and Chiang, 2008" startWordPosition="4700" endWordPosition="4703">rol provided useful information, they only made the top word of the stack visible during training and decoding. Third, although it is impressive feat of learning that an entire parse tree be represented by a vector, it seems that this formulation makes the problem unnecessarily difficult. Finally, our work can be understood as a progression toward using larger contexts in parsing. An exhaustive summary is beyond the scope of this paper, but some of the important milestones in this tradition are the use of cube pruning to efficiently include nonlocal features in discriminative chart reranking (Huang and Chiang, 2008), approximate decoding techniques based on LP relaxations in graph-based parsing to include higherorder features (Martins et al., 2010), and randomized hill-climbing methods that enable arbitrary nonlocal features in global discriminative parsing models (Zhang et al., 2014). Since our parser is sensitive to any part of the input, its history, or its stack contents, it is similar in spirit to the last approach, which permits truly arbitrary features. 7 Conclusion We presented stack LSTMs, recurrent neural networks for sequences, with push and pop operations, and used them to implement a state-o</context>
+</contexts>
+<marker>Huang, Chiang, 2008</marker>
+<rawString>Liang Huang and David Chiang. 2008. Forest reranking: Discriminative parsing with non-local features. In Proc. ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Phong Le and Willem Zuidema</author>
+</authors>
+<title>Insideoutside recursive neural network model for dependency parsing. In</title>
+<date>2014</date>
+<booktitle>Proc. EMNLP.</booktitle>
+<contexts>
+<context position="27044" citStr="Zuidema, 2014" startWordPosition="4493" endWordPosition="4494">ir work in §6. 340 in in several applications to transition-based dependency parsers (Weiss et al., 2015; Chen and Manning, 2014; Stenetorp, 2013). In these works, the conditioning structure was manually crafted and sensitive to only certain properties of the state, while we are conditioning on the global state object. Like us, Stenetorp (2013) used recursively composed representations of the tree fragments (a head and its dependents). Neural networks have also been used to learn representations for use in chart parsing (Henderson, 2004; Titov and Henderson, 2007; Socher et al., 2013a; Le and Zuidema, 2014). LSTMs have also recently been demonstrated as a mechanism for learning to represent parse structure.Vinyals et al. (2015) proposed a phrasestructure parser based on LSTMs which operated by first reading the entire input sentence in so as to obtain a vector representation of it, and then generating bracketing structures sequentially conditioned on this representation. Although superficially similar to our model, their approach has a number of disadvantages. First, they relied on a large amount of semi-supervised training data that was generated by parsing a large unannotated corpus with an of</context>
+</contexts>
+<marker>Zuidema, 2014</marker>
+<rawString>Phong Le and Willem Zuidema. 2014. Insideoutside recursive neural network model for dependency parsing. In Proc. EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Wang Ling</author>
+<author>Chris Dyer</author>
+<author>Alan Black</author>
+<author>Isabel Trancoso</author>
+</authors>
+<title>Two/too simple adaptations of word2vec for syntax problems.</title>
+<date>2015</date>
+<booktitle>In Proc. NAACL.</booktitle>
+<contexts>
+<context position="16648" citStr="Ling et al. (2015)" startWordPosition="2780" endWordPosition="2783">training LM, and words that are OOV in both. To ensure we have estimates of the OOVs in the parsing training data, we stochastically replace (with p = 0.5) each singleton word type in the parsing training data with the UNK token in each training iteration. Pretrained word embeddings. A veritable cottage industry exists for creating word embeddings, meaning numerous pretraining options for ˜wLM are available. However, for syntax modeling problems, embedding approaches which discard order perform less well (Bansal et al., 2014); therefore we used a variant of the skip n-gram model introduced by Ling et al. (2015), named “structured skip n-gram,” where a different set of parameters is used to predict each context word depending on its position relative to the target word. The hyperparameters of the model are the same as in the skip n-gram model defined in word2vec (Mikolov et al., 2013), and we set the window size to 5, used a negative sampling rate to 10, and ran 5 epochs through unannotated corpora described in §5.1. 3.4 Composition Functions Recursive neural network models enable complex phrases to be represented compositionally in terms of their parts and the relations that link them (Socher et al.</context>
+</contexts>
+<marker>Ling, Dyer, Black, Trancoso, 2015</marker>
+<rawString>Wang Ling, Chris Dyer, Alan Black, and Isabel Trancoso. 2015. Two/too simple adaptations of word2vec for syntax problems. In Proc. NAACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Andr´e F T Martins</author>
+<author>Noah A Smith</author>
+<author>Eric P Xing</author>
+<author>Pedro M Q Aguiar</author>
+<author>M´ario A T Figueiredo</author>
+</authors>
+<title>Turboparsers: Dependency parsing by approximate variational inference.</title>
+<date>2010</date>
+<booktitle>In Proc. EMNLP.</booktitle>
+<contexts>
+<context position="28493" citStr="Martins et al., 2010" startWordPosition="4720" endWordPosition="4723">ressive feat of learning that an entire parse tree be represented by a vector, it seems that this formulation makes the problem unnecessarily difficult. Finally, our work can be understood as a progression toward using larger contexts in parsing. An exhaustive summary is beyond the scope of this paper, but some of the important milestones in this tradition are the use of cube pruning to efficiently include nonlocal features in discriminative chart reranking (Huang and Chiang, 2008), approximate decoding techniques based on LP relaxations in graph-based parsing to include higherorder features (Martins et al., 2010), and randomized hill-climbing methods that enable arbitrary nonlocal features in global discriminative parsing models (Zhang et al., 2014). Since our parser is sensitive to any part of the input, its history, or its stack contents, it is similar in spirit to the last approach, which permits truly arbitrary features. 7 Conclusion We presented stack LSTMs, recurrent neural networks for sequences, with push and pop operations, and used them to implement a state-of-theart transition-based dependency parser. We conclude by remarking that stack memory offers intriguing possibilities for learning to</context>
+</contexts>
+<marker>Martins, Smith, Xing, Aguiar, Figueiredo, 2010</marker>
+<rawString>Andr´e F. T. Martins, Noah A. Smith, Eric P. Xing, Pedro M. Q. Aguiar, and M´ario A. T. Figueiredo. 2010. Turboparsers: Dependency parsing by approximate variational inference. In Proc. EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Marshall R Mayberry</author>
+<author>Risto Miikkulainen</author>
+</authors>
+<title>SARDSRN: A neural network shift-reduce parser.</title>
+<date>1999</date>
+<booktitle>In Proc. IJCAI.</booktitle>
+<contexts>
+<context position="26184" citStr="Mayberry and Miikkulainen (1999)" startWordPosition="4357" endWordPosition="4360"> architectures. Das et al. (1992) proposed a neural network with an external stack memory based on recurrent neural networks. In contrast to our model, in which the entire contents of the stack are summarized in a single value, in their model, the network could only see the contents of the top of the stack. Mikkulainen (1996) proposed an architecture with a stack that had a summary feature, although the stack control was learned as a latent variable. A variety of authors have used neural networks to predict parser actions in shift-reduce parsers. The earliest attempt we are aware of is due to Mayberry and Miikkulainen (1999). The resurgence of interest in neural networks has resulted 10Although superficially similar to ours, Vinyals et al. (2015) is a phrase-structure parser and adaptation to the dependency parsing scenario would have been nontrivial. We discuss their work in §6. 340 in in several applications to transition-based dependency parsers (Weiss et al., 2015; Chen and Manning, 2014; Stenetorp, 2013). In these works, the conditioning structure was manually crafted and sensitive to only certain properties of the state, while we are conditioning on the global state object. Like us, Stenetorp (2013) used re</context>
+</contexts>
+<marker>Mayberry, Miikkulainen, 1999</marker>
+<rawString>Marshall R. Mayberry and Risto Miikkulainen. 1999. SARDSRN: A neural network shift-reduce parser. In Proc. IJCAI.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Risto Mikkulainen</author>
+</authors>
+<title>Subsymbolic case-role analysis of sentences with embedded clauses.</title>
+<date>1996</date>
+<journal>Cognitive Science,</journal>
+<pages>20--47</pages>
+<contexts>
+<context position="25879" citStr="Mikkulainen (1996)" startWordPosition="4309" endWordPosition="4310">ugh Vinyals et al. (2015) did report much more substantial improvements with beam search on their “grammar as a foreign language” parser.10 6 Related Work Our approach ties together several strands of previous work. First, several kinds of stack memories have been proposed to augment neural architectures. Das et al. (1992) proposed a neural network with an external stack memory based on recurrent neural networks. In contrast to our model, in which the entire contents of the stack are summarized in a single value, in their model, the network could only see the contents of the top of the stack. Mikkulainen (1996) proposed an architecture with a stack that had a summary feature, although the stack control was learned as a latent variable. A variety of authors have used neural networks to predict parser actions in shift-reduce parsers. The earliest attempt we are aware of is due to Mayberry and Miikkulainen (1999). The resurgence of interest in neural networks has resulted 10Although superficially similar to ours, Vinyals et al. (2015) is a phrase-structure parser and adaptation to the dependency parsing scenario would have been nontrivial. We discuss their work in §6. 340 in in several applications to </context>
+<context position="29159" citStr="Mikkulainen, 1996" startWordPosition="4824" endWordPosition="4825">le arbitrary nonlocal features in global discriminative parsing models (Zhang et al., 2014). Since our parser is sensitive to any part of the input, its history, or its stack contents, it is similar in spirit to the last approach, which permits truly arbitrary features. 7 Conclusion We presented stack LSTMs, recurrent neural networks for sequences, with push and pop operations, and used them to implement a state-of-theart transition-based dependency parser. We conclude by remarking that stack memory offers intriguing possibilities for learning to solve general information processing problems (Mikkulainen, 1996). Here, we learned from observable stack manipulation operations (i.e., supervision from a treebank), and the computed embeddings of final parser states were not used for any further prediction. However, this could be reversed, giving a device that learns to construct context-free programs (e.g., expression trees) given only observed outputs; one application would be unsupervised parsing. Such an extension of the work would make it an alternative to architectures that have an explicit external memory such as neural Turing machines (Graves et al., 2014) and memory networks (Weston et al., 2015)</context>
+</contexts>
+<marker>Mikkulainen, 1996</marker>
+<rawString>Risto Mikkulainen. 1996. Subsymbolic case-role analysis of sentences with embedded clauses. Cognitive Science, 20:47–73.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Tomas Mikolov</author>
+<author>Ilya Sutskever</author>
+<author>Kai Chen</author>
+<author>Greg S Corrado</author>
+<author>Jeff Dean</author>
+</authors>
+<title>Distributed representations of words and phrases and their compositionality.</title>
+<date>2013</date>
+<booktitle>In Proc. NIPS.</booktitle>
+<contexts>
+<context position="16926" citStr="Mikolov et al., 2013" startWordPosition="2828" endWordPosition="2831">beddings. A veritable cottage industry exists for creating word embeddings, meaning numerous pretraining options for ˜wLM are available. However, for syntax modeling problems, embedding approaches which discard order perform less well (Bansal et al., 2014); therefore we used a variant of the skip n-gram model introduced by Ling et al. (2015), named “structured skip n-gram,” where a different set of parameters is used to predict each context word depending on its position relative to the target word. The hyperparameters of the model are the same as in the skip n-gram model defined in word2vec (Mikolov et al., 2013), and we set the window size to 5, used a negative sampling rate to 10, and ran 5 epochs through unannotated corpora described in §5.1. 3.4 Composition Functions Recursive neural network models enable complex phrases to be represented compositionally in terms of their parts and the relations that link them (Socher et al., 2011; Socher et al., 2013c; Hermann and Blunsom, 2013; Socher et al., 2013b). We follow this previous line of work in embedding dependency tree fragments that are present in the stack 5 in the same vector space as the token embeddings discussed above. A particular challenge h</context>
+</contexts>
+<marker>Mikolov, Sutskever, Chen, Corrado, Dean, 2013</marker>
+<rawString>Tomas Mikolov, Ilya Sutskever, Kai Chen, Greg S Corrado, and Jeff Dean. 2013. Distributed representations of words and phrases and their compositionality. In Proc. NIPS.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Joakim Nivre</author>
+</authors>
+<title>An efficient algorithm for projective dependency parsing.</title>
+<date>2003</date>
+<booktitle>In Proc. IWPT.</booktitle>
+<contexts>
+<context position="1472" citStr="Nivre, 2003" startWordPosition="204" endWordPosition="205">s of a parser’s state: (i) unbounded look-ahead into the buffer of incoming words, (ii) the complete history of actions taken by the parser, and (iii) the complete contents of the stack of partially built tree fragments, including their internal structures. Standard backpropagation techniques are used for training and yield state-of-the-art parsing performance. 1 Introduction Transition-based dependency parsing formalizes the parsing problem as a series of decisions that read words sequentially from a buffer and combine them incrementally into syntactic structures (Yamada and Matsumoto, 2003; Nivre, 2003; Nivre, 2004). This formalization is attractive since the number of operations required to build any projective parse tree is linear in the length of the sentence, making transition-based parsing computationally efficient relative to graph- and grammarbased formalisms. The challenge in transitionbased parsing is modeling which action should be taken in each of the unboundedly many states encountered as the parser progresses. This challenge has been addressed by development of alternative transition sets that simplify the modeling problem by making better attachment decisions (Nivre, 2007; Niv</context>
+</contexts>
+<marker>Nivre, 2003</marker>
+<rawString>Joakim Nivre. 2003. An efficient algorithm for projective dependency parsing. In Proc. IWPT.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Joakim Nivre</author>
+</authors>
+<title>Incrementality in deterministic dependency parsing.</title>
+<date>2004</date>
+<booktitle>In Proceedings of the Workshop on Incremental Parsing: Bringing Engineering and Cognition Together.</booktitle>
+<contexts>
+<context position="1486" citStr="Nivre, 2004" startWordPosition="206" endWordPosition="207">’s state: (i) unbounded look-ahead into the buffer of incoming words, (ii) the complete history of actions taken by the parser, and (iii) the complete contents of the stack of partially built tree fragments, including their internal structures. Standard backpropagation techniques are used for training and yield state-of-the-art parsing performance. 1 Introduction Transition-based dependency parsing formalizes the parsing problem as a series of decisions that read words sequentially from a buffer and combine them incrementally into syntactic structures (Yamada and Matsumoto, 2003; Nivre, 2003; Nivre, 2004). This formalization is attractive since the number of operations required to build any projective parse tree is linear in the length of the sentence, making transition-based parsing computationally efficient relative to graph- and grammarbased formalisms. The challenge in transitionbased parsing is modeling which action should be taken in each of the unboundedly many states encountered as the parser progresses. This challenge has been addressed by development of alternative transition sets that simplify the modeling problem by making better attachment decisions (Nivre, 2007; Nivre, 2008; Nivr</context>
+<context position="13509" citStr="Nivre, 2004" startWordPosition="2243" endWordPosition="2244">ion at time t as: where gz is a column vector representing the (output) embedding of the parser action z, and qz is a bias term for action z. The set A(S, B) represents the valid actions that may be taken given the current contents of the stack and buffer.5 Since pt = f(st, bt, at) encodes information about all previous decisions made by the parser, the chain rule may be invoked to write the probability of any valid sequence of parse actions z conditional on the input as: |z| p(z |w) = H p(zt |pt). (1) t=1 3.2 Transition Operations Our parser is based on the arc-standard transition inventory (Nivre, 2004), given in Figure 3. 5In general, A(S, B) is the complete set of parser actions discussed in §3.2, but in some cases not all actions are available. For example, when S is empty and words remain in B, a SHIFT operation is obligatory (Sartorio et al., 2013). Why arc-standard? Arc-standard transitions parse a sentence from left to right, using a stack to store partially built syntactic structures and a buffer that keeps the incoming tokens to be parsed. The parsing algorithm chooses an action at each configuration by means of a score. In arc-standard parsing, the dependency tree is constructed bo</context>
+</contexts>
+<marker>Nivre, 2004</marker>
+<rawString>Joakim Nivre. 2004. Incrementality in deterministic dependency parsing. In Proceedings of the Workshop on Incremental Parsing: Bringing Engineering and Cognition Together.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Joakim Nivre</author>
+</authors>
+<title>Incremental non-projective dependency parsing.</title>
+<date>2007</date>
+<booktitle>In Proc. NAACL.</booktitle>
+<contexts>
+<context position="2067" citStr="Nivre, 2007" startWordPosition="295" endWordPosition="296">003; Nivre, 2003; Nivre, 2004). This formalization is attractive since the number of operations required to build any projective parse tree is linear in the length of the sentence, making transition-based parsing computationally efficient relative to graph- and grammarbased formalisms. The challenge in transitionbased parsing is modeling which action should be taken in each of the unboundedly many states encountered as the parser progresses. This challenge has been addressed by development of alternative transition sets that simplify the modeling problem by making better attachment decisions (Nivre, 2007; Nivre, 2008; Nivre, 2009; Choi and McCallum, 2013; Bohnet and Nivre, 2012), through feature engineering (Zhang and Nivre, 2011; Ballesteros and Nivre, 2014; Chen et al., 2014; Ballesteros and Bohnet, 2014) and more recently using neural networks (Chen and Manning, 2014; Stenetorp, 2013). We extend this last line of work by learning representations of the parser state that are sensitive to the complete contents of the parser’s state: that is, the complete input buffer, the complete history of parser actions, and the complete contents of the stack of partially constructed syntactic structures.</context>
+</contexts>
+<marker>Nivre, 2007</marker>
+<rawString>Joakim Nivre. 2007. Incremental non-projective dependency parsing. In Proc. NAACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Joakim Nivre</author>
+</authors>
+<title>Algorithms for deterministic incremental dependency parsing.</title>
+<date>2008</date>
+<journal>Computational Linguistics,</journal>
+<pages>34--4</pages>
+<publisher>MIT Press.</publisher>
+<contexts>
+<context position="2080" citStr="Nivre, 2008" startWordPosition="297" endWordPosition="298">003; Nivre, 2004). This formalization is attractive since the number of operations required to build any projective parse tree is linear in the length of the sentence, making transition-based parsing computationally efficient relative to graph- and grammarbased formalisms. The challenge in transitionbased parsing is modeling which action should be taken in each of the unboundedly many states encountered as the parser progresses. This challenge has been addressed by development of alternative transition sets that simplify the modeling problem by making better attachment decisions (Nivre, 2007; Nivre, 2008; Nivre, 2009; Choi and McCallum, 2013; Bohnet and Nivre, 2012), through feature engineering (Zhang and Nivre, 2011; Ballesteros and Nivre, 2014; Chen et al., 2014; Ballesteros and Bohnet, 2014) and more recently using neural networks (Chen and Manning, 2014; Stenetorp, 2013). We extend this last line of work by learning representations of the parser state that are sensitive to the complete contents of the parser’s state: that is, the complete input buffer, the complete history of parser actions, and the complete contents of the stack of partially constructed syntactic structures. This “global</context>
+</contexts>
+<marker>Nivre, 2008</marker>
+<rawString>Joakim Nivre. 2008. Algorithms for deterministic incremental dependency parsing. Computational Linguistics, 34:4:513–553. MIT Press.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Joakim Nivre</author>
+</authors>
+<title>Non-projective dependency parsing in expected linear time.</title>
+<date>2009</date>
+<booktitle>In Proc. ACL.</booktitle>
+<contexts>
+<context position="2093" citStr="Nivre, 2009" startWordPosition="299" endWordPosition="300">004). This formalization is attractive since the number of operations required to build any projective parse tree is linear in the length of the sentence, making transition-based parsing computationally efficient relative to graph- and grammarbased formalisms. The challenge in transitionbased parsing is modeling which action should be taken in each of the unboundedly many states encountered as the parser progresses. This challenge has been addressed by development of alternative transition sets that simplify the modeling problem by making better attachment decisions (Nivre, 2007; Nivre, 2008; Nivre, 2009; Choi and McCallum, 2013; Bohnet and Nivre, 2012), through feature engineering (Zhang and Nivre, 2011; Ballesteros and Nivre, 2014; Chen et al., 2014; Ballesteros and Bohnet, 2014) and more recently using neural networks (Chen and Manning, 2014; Stenetorp, 2013). We extend this last line of work by learning representations of the parser state that are sensitive to the complete contents of the parser’s state: that is, the complete input buffer, the complete history of parser actions, and the complete contents of the stack of partially constructed syntactic structures. This “global” sensitivity</context>
+</contexts>
+<marker>Nivre, 2009</marker>
+<rawString>Joakim Nivre. 2009. Non-projective dependency parsing in expected linear time. In Proc. ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Razvan Pascanu</author>
+<author>C¸aglar G¨ulc¸ehre</author>
+<author>Kyunghyun Cho</author>
+<author>Yoshua Bengio</author>
+</authors>
+<title>How to construct deep recurrent neural networks.</title>
+<date>2014</date>
+<booktitle>In Proc. ICLR.</booktitle>
+<marker>Pascanu, G¨ulc¸ehre, Cho, Bengio, 2014</marker>
+<rawString>Razvan Pascanu, C¸aglar G¨ulc¸ehre, Kyunghyun Cho, and Yoshua Bengio. 2014. How to construct deep recurrent neural networks. In Proc. ICLR.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Francesco Sartorio</author>
+<author>Giorgio Satta</author>
+<author>Joakim Nivre</author>
+</authors>
+<title>A transition-based dependency parser using a dynamic parsing strategy.</title>
+<date>2013</date>
+<booktitle>In Proc. ACL.</booktitle>
+<contexts>
+<context position="13764" citStr="Sartorio et al., 2013" startWordPosition="2289" endWordPosition="2292">and buffer.5 Since pt = f(st, bt, at) encodes information about all previous decisions made by the parser, the chain rule may be invoked to write the probability of any valid sequence of parse actions z conditional on the input as: |z| p(z |w) = H p(zt |pt). (1) t=1 3.2 Transition Operations Our parser is based on the arc-standard transition inventory (Nivre, 2004), given in Figure 3. 5In general, A(S, B) is the complete set of parser actions discussed in §3.2, but in some cases not all actions are available. For example, when S is empty and words remain in B, a SHIFT operation is obligatory (Sartorio et al., 2013). Why arc-standard? Arc-standard transitions parse a sentence from left to right, using a stack to store partially built syntactic structures and a buffer that keeps the incoming tokens to be parsed. The parsing algorithm chooses an action at each configuration by means of a score. In arc-standard parsing, the dependency tree is constructed bottom-up, because right-dependents of a head are only attached after the subtree under the dependent is fully parsed. Since our parser recursively computes representations of tree fragments, this construction order guarantees that once a syntactic structur</context>
+</contexts>
+<marker>Sartorio, Satta, Nivre, 2013</marker>
+<rawString>Francesco Sartorio, Giorgio Satta, and Joakim Nivre. 2013. A transition-based dependency parser using a dynamic parsing strategy. In Proc. ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Richard Socher</author>
+<author>Eric H Huang</author>
+<author>Jeffrey Pennington</author>
+<author>Andrew Y Ng</author>
+<author>Christopher D Manning</author>
+</authors>
+<title>Dynamic pooling and unfolding recursive autoencoders for paraphrase detection. In</title>
+<date>2011</date>
+<booktitle>Proc. NIPS.</booktitle>
+<contexts>
+<context position="17254" citStr="Socher et al., 2011" startWordPosition="2882" endWordPosition="2885">et al. (2015), named “structured skip n-gram,” where a different set of parameters is used to predict each context word depending on its position relative to the target word. The hyperparameters of the model are the same as in the skip n-gram model defined in word2vec (Mikolov et al., 2013), and we set the window size to 5, used a negative sampling rate to 10, and ran 5 epochs through unannotated corpora described in §5.1. 3.4 Composition Functions Recursive neural network models enable complex phrases to be represented compositionally in terms of their parts and the relations that link them (Socher et al., 2011; Socher et al., 2013c; Hermann and Blunsom, 2013; Socher et al., 2013b). We follow this previous line of work in embedding dependency tree fragments that are present in the stack 5 in the same vector space as the token embeddings discussed above. A particular challenge here is that a syntactic head may, in general, have an arbitrary number of dependents. To simplify the parameterization of our composition function, we combine headmodifier pairs one at a time, building up more complicated structures in the order they are “reduced” in the parser, as illustrated in Figure 5. Each node in this ex</context>
+</contexts>
+<marker>Socher, Huang, Pennington, Ng, Manning, 2011</marker>
+<rawString>Richard Socher, Eric H. Huang, Jeffrey Pennington, Andrew Y. Ng, and Christopher D. Manning. 2011. Dynamic pooling and unfolding recursive autoencoders for paraphrase detection. In Proc. NIPS.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Richard Socher</author>
+<author>John Bauer</author>
+<author>Christopher D Manning</author>
+<author>Andrew Y Ng</author>
+</authors>
+<title>Parsing with compositional vector grammars.</title>
+<date>2013</date>
+<booktitle>In Proc. ACL.</booktitle>
+<contexts>
+<context position="17275" citStr="Socher et al., 2013" startWordPosition="2886" endWordPosition="2889">“structured skip n-gram,” where a different set of parameters is used to predict each context word depending on its position relative to the target word. The hyperparameters of the model are the same as in the skip n-gram model defined in word2vec (Mikolov et al., 2013), and we set the window size to 5, used a negative sampling rate to 10, and ran 5 epochs through unannotated corpora described in §5.1. 3.4 Composition Functions Recursive neural network models enable complex phrases to be represented compositionally in terms of their parts and the relations that link them (Socher et al., 2011; Socher et al., 2013c; Hermann and Blunsom, 2013; Socher et al., 2013b). We follow this previous line of work in embedding dependency tree fragments that are present in the stack 5 in the same vector space as the token embeddings discussed above. A particular challenge here is that a syntactic head may, in general, have an arbitrary number of dependents. To simplify the parameterization of our composition function, we combine headmodifier pairs one at a time, building up more complicated structures in the order they are “reduced” in the parser, as illustrated in Figure 5. Each node in this expanded syntactic tree</context>
+<context position="27020" citStr="Socher et al., 2013" startWordPosition="4487" endWordPosition="4490">en nontrivial. We discuss their work in §6. 340 in in several applications to transition-based dependency parsers (Weiss et al., 2015; Chen and Manning, 2014; Stenetorp, 2013). In these works, the conditioning structure was manually crafted and sensitive to only certain properties of the state, while we are conditioning on the global state object. Like us, Stenetorp (2013) used recursively composed representations of the tree fragments (a head and its dependents). Neural networks have also been used to learn representations for use in chart parsing (Henderson, 2004; Titov and Henderson, 2007; Socher et al., 2013a; Le and Zuidema, 2014). LSTMs have also recently been demonstrated as a mechanism for learning to represent parse structure.Vinyals et al. (2015) proposed a phrasestructure parser based on LSTMs which operated by first reading the entire input sentence in so as to obtain a vector representation of it, and then generating bracketing structures sequentially conditioned on this representation. Although superficially similar to our model, their approach has a number of disadvantages. First, they relied on a large amount of semi-supervised training data that was generated by parsing a large unann</context>
+</contexts>
+<marker>Socher, Bauer, Manning, Ng, 2013</marker>
+<rawString>Richard Socher, John Bauer, Christopher D. Manning, and Andrew Y. Ng. 2013a. Parsing with compositional vector grammars. In Proc. ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Richard Socher</author>
+<author>Andrej Karpathy</author>
+<author>Quoc V Le</author>
+<author>Christopher D Manning</author>
+<author>Andrew Y Ng</author>
+</authors>
+<title>Grounded compositional semantics for finding and describing images with sentences.</title>
+<date>2013</date>
+<publisher>TACL.</publisher>
+<contexts>
+<context position="17275" citStr="Socher et al., 2013" startWordPosition="2886" endWordPosition="2889">“structured skip n-gram,” where a different set of parameters is used to predict each context word depending on its position relative to the target word. The hyperparameters of the model are the same as in the skip n-gram model defined in word2vec (Mikolov et al., 2013), and we set the window size to 5, used a negative sampling rate to 10, and ran 5 epochs through unannotated corpora described in §5.1. 3.4 Composition Functions Recursive neural network models enable complex phrases to be represented compositionally in terms of their parts and the relations that link them (Socher et al., 2011; Socher et al., 2013c; Hermann and Blunsom, 2013; Socher et al., 2013b). We follow this previous line of work in embedding dependency tree fragments that are present in the stack 5 in the same vector space as the token embeddings discussed above. A particular challenge here is that a syntactic head may, in general, have an arbitrary number of dependents. To simplify the parameterization of our composition function, we combine headmodifier pairs one at a time, building up more complicated structures in the order they are “reduced” in the parser, as illustrated in Figure 5. Each node in this expanded syntactic tree</context>
+<context position="27020" citStr="Socher et al., 2013" startWordPosition="4487" endWordPosition="4490">en nontrivial. We discuss their work in §6. 340 in in several applications to transition-based dependency parsers (Weiss et al., 2015; Chen and Manning, 2014; Stenetorp, 2013). In these works, the conditioning structure was manually crafted and sensitive to only certain properties of the state, while we are conditioning on the global state object. Like us, Stenetorp (2013) used recursively composed representations of the tree fragments (a head and its dependents). Neural networks have also been used to learn representations for use in chart parsing (Henderson, 2004; Titov and Henderson, 2007; Socher et al., 2013a; Le and Zuidema, 2014). LSTMs have also recently been demonstrated as a mechanism for learning to represent parse structure.Vinyals et al. (2015) proposed a phrasestructure parser based on LSTMs which operated by first reading the entire input sentence in so as to obtain a vector representation of it, and then generating bracketing structures sequentially conditioned on this representation. Although superficially similar to our model, their approach has a number of disadvantages. First, they relied on a large amount of semi-supervised training data that was generated by parsing a large unann</context>
+</contexts>
+<marker>Socher, Karpathy, Le, Manning, Ng, 2013</marker>
+<rawString>Richard Socher, Andrej Karpathy, Quoc V. Le, Christopher D. Manning, and Andrew Y. Ng. 2013b. Grounded compositional semantics for finding and describing images with sentences. TACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Richard Socher</author>
+<author>Alex Perelygin</author>
+<author>Jean Y Wu</author>
+<author>Jason Chuang</author>
+<author>Christopher D Manning</author>
+<author>Andrew Y Ng</author>
+<author>Christopher Potts</author>
+</authors>
+<title>Recursive deep models for semantic compositionality over a sentiment treebank. In</title>
+<date>2013</date>
+<booktitle>Proc. EMNLP.</booktitle>
+<contexts>
+<context position="17275" citStr="Socher et al., 2013" startWordPosition="2886" endWordPosition="2889">“structured skip n-gram,” where a different set of parameters is used to predict each context word depending on its position relative to the target word. The hyperparameters of the model are the same as in the skip n-gram model defined in word2vec (Mikolov et al., 2013), and we set the window size to 5, used a negative sampling rate to 10, and ran 5 epochs through unannotated corpora described in §5.1. 3.4 Composition Functions Recursive neural network models enable complex phrases to be represented compositionally in terms of their parts and the relations that link them (Socher et al., 2011; Socher et al., 2013c; Hermann and Blunsom, 2013; Socher et al., 2013b). We follow this previous line of work in embedding dependency tree fragments that are present in the stack 5 in the same vector space as the token embeddings discussed above. A particular challenge here is that a syntactic head may, in general, have an arbitrary number of dependents. To simplify the parameterization of our composition function, we combine headmodifier pairs one at a time, building up more complicated structures in the order they are “reduced” in the parser, as illustrated in Figure 5. Each node in this expanded syntactic tree</context>
+<context position="27020" citStr="Socher et al., 2013" startWordPosition="4487" endWordPosition="4490">en nontrivial. We discuss their work in §6. 340 in in several applications to transition-based dependency parsers (Weiss et al., 2015; Chen and Manning, 2014; Stenetorp, 2013). In these works, the conditioning structure was manually crafted and sensitive to only certain properties of the state, while we are conditioning on the global state object. Like us, Stenetorp (2013) used recursively composed representations of the tree fragments (a head and its dependents). Neural networks have also been used to learn representations for use in chart parsing (Henderson, 2004; Titov and Henderson, 2007; Socher et al., 2013a; Le and Zuidema, 2014). LSTMs have also recently been demonstrated as a mechanism for learning to represent parse structure.Vinyals et al. (2015) proposed a phrasestructure parser based on LSTMs which operated by first reading the entire input sentence in so as to obtain a vector representation of it, and then generating bracketing structures sequentially conditioned on this representation. Although superficially similar to our model, their approach has a number of disadvantages. First, they relied on a large amount of semi-supervised training data that was generated by parsing a large unann</context>
+</contexts>
+<marker>Socher, Perelygin, Wu, Chuang, Manning, Ng, Potts, 2013</marker>
+<rawString>Richard Socher, Alex Perelygin, Jean Y. Wu, Jason Chuang, Christopher D. Manning, Andrew Y. Ng, and Christopher Potts. 2013c. Recursive deep models for semantic compositionality over a sentiment treebank. In Proc. EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Pontus Stenetorp</author>
+</authors>
+<title>Transition-based dependency parsing using recursive neural networks.</title>
+<date>2013</date>
+<booktitle>In Proc. NIPS Deep Learning Workshop.</booktitle>
+<contexts>
+<context position="2356" citStr="Stenetorp, 2013" startWordPosition="339" endWordPosition="340">s. The challenge in transitionbased parsing is modeling which action should be taken in each of the unboundedly many states encountered as the parser progresses. This challenge has been addressed by development of alternative transition sets that simplify the modeling problem by making better attachment decisions (Nivre, 2007; Nivre, 2008; Nivre, 2009; Choi and McCallum, 2013; Bohnet and Nivre, 2012), through feature engineering (Zhang and Nivre, 2011; Ballesteros and Nivre, 2014; Chen et al., 2014; Ballesteros and Bohnet, 2014) and more recently using neural networks (Chen and Manning, 2014; Stenetorp, 2013). We extend this last line of work by learning representations of the parser state that are sensitive to the complete contents of the parser’s state: that is, the complete input buffer, the complete history of parser actions, and the complete contents of the stack of partially constructed syntactic structures. This “global” sensitivity to the state contrasts with previous work in transitionbased dependency parsing that uses only a narrow view of the parsing state when constructing representations (e.g., just the next few incoming words, the head words of the top few positions in the stack, etc</context>
+<context position="26576" citStr="Stenetorp, 2013" startWordPosition="4420" endWordPosition="4421">tack control was learned as a latent variable. A variety of authors have used neural networks to predict parser actions in shift-reduce parsers. The earliest attempt we are aware of is due to Mayberry and Miikkulainen (1999). The resurgence of interest in neural networks has resulted 10Although superficially similar to ours, Vinyals et al. (2015) is a phrase-structure parser and adaptation to the dependency parsing scenario would have been nontrivial. We discuss their work in §6. 340 in in several applications to transition-based dependency parsers (Weiss et al., 2015; Chen and Manning, 2014; Stenetorp, 2013). In these works, the conditioning structure was manually crafted and sensitive to only certain properties of the state, while we are conditioning on the global state object. Like us, Stenetorp (2013) used recursively composed representations of the tree fragments (a head and its dependents). Neural networks have also been used to learn representations for use in chart parsing (Henderson, 2004; Titov and Henderson, 2007; Socher et al., 2013a; Le and Zuidema, 2014). LSTMs have also recently been demonstrated as a mechanism for learning to represent parse structure.Vinyals et al. (2015) proposed</context>
+</contexts>
+<marker>Stenetorp, 2013</marker>
+<rawString>Pontus Stenetorp. 2013. Transition-based dependency parsing using recursive neural networks. In Proc. NIPS Deep Learning Workshop.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ilya Sutskever</author>
+<author>Oriol Vinyals</author>
+<author>Quoc V Le</author>
+</authors>
+<title>Sequence to sequence learning with neural networks.</title>
+<date>2014</date>
+<booktitle>In Proc. NIPS.</booktitle>
+<contexts>
+<context position="19756" citStr="Sutskever et al., 2014" startWordPosition="3314" endWordPosition="3317">el were run on a single thread on a CPU. Using the dimensions discussed in the next section, we required between 8 and 12 hours to reach convergence on a held-out dev set.6 Parameter optimization was performed using stochastic gradient descent with an initial learning rate of 770 = 0.1, and the learning rate was updated on each pass through the training data as 77t = 770/(1 + pt), with p = 0.1 and where t is the number of epochs completed. No momentum was used. To mitigate the effects of “exploding” gradients, we clipped the E2 norm of the gradient to 5 before applying the weight update rule (Sutskever et al., 2014; Graves, 2013). An E2 penalty of 1 x 10−6 was applied to all weights. Matrix and vector parameters were initialized � with uniform samples in ± 6/(r + c), where r and c were the number of rows and columns in the structure (Glorot and Bengio, 2010). Dimensionality. The full version of our parsing model sets dimensionalities as follows. LSTM hidden states are of size 100, and we use two layers of LSTMs for each stack. Embeddings of the parser actions used in the composition functions have 16 dimensions, and the output embedding size is 20 dimensions. Pretained word embeddings have 100 dimension</context>
+</contexts>
+<marker>Sutskever, Vinyals, Le, 2014</marker>
+<rawString>Ilya Sutskever, Oriol Vinyals, and Quoc V. Le. 2014. Sequence to sequence learning with neural networks. In Proc. NIPS.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ivan Titov</author>
+<author>James Henderson</author>
+</authors>
+<title>Constituent parsing with incremental sigmoid belief networks.</title>
+<date>2007</date>
+<booktitle>In Proc. ACL.</booktitle>
+<contexts>
+<context position="26999" citStr="Titov and Henderson, 2007" startWordPosition="4483" endWordPosition="4486">sing scenario would have been nontrivial. We discuss their work in §6. 340 in in several applications to transition-based dependency parsers (Weiss et al., 2015; Chen and Manning, 2014; Stenetorp, 2013). In these works, the conditioning structure was manually crafted and sensitive to only certain properties of the state, while we are conditioning on the global state object. Like us, Stenetorp (2013) used recursively composed representations of the tree fragments (a head and its dependents). Neural networks have also been used to learn representations for use in chart parsing (Henderson, 2004; Titov and Henderson, 2007; Socher et al., 2013a; Le and Zuidema, 2014). LSTMs have also recently been demonstrated as a mechanism for learning to represent parse structure.Vinyals et al. (2015) proposed a phrasestructure parser based on LSTMs which operated by first reading the entire input sentence in so as to obtain a vector representation of it, and then generating bracketing structures sequentially conditioned on this representation. Although superficially similar to our model, their approach has a number of disadvantages. First, they relied on a large amount of semi-supervised training data that was generated by </context>
+</contexts>
+<marker>Titov, Henderson, 2007</marker>
+<rawString>Ivan Titov and James Henderson. 2007. Constituent parsing with incremental sigmoid belief networks. In Proc. ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Kristina Toutanova</author>
+<author>Dan Klein</author>
+<author>Christopher D Manning</author>
+<author>Yoram Singer</author>
+</authors>
+<title>Feature-rich part-ofspeech tagging with a cyclic dependency network. In</title>
+<date>2003</date>
+<booktitle>Proc. NAACL.</booktitle>
+<contexts>
+<context position="21694" citStr="Toutanova et al., 2003" startWordPosition="3621" endWordPosition="3624"> model and several variations of it to two parsing tasks and report results below. 5.1 Data We used the same data setup as Chen and Manning (2014), namely an English and a Chinese parsing task. This baseline configuration was chosen since they likewise used a neural parameterization to predict actions in an arc-standard transition-based parser. • For English, we used the Stanford Dependencency (SD) treebank (de Marneffe et al., 2006) used in (Chen and Manning, 2014) which is the closest model published, with the same splits.8 The part-of-speech tags are predicted by using the Stanford Tagger (Toutanova et al., 2003) with an accuracy of 97.3%. This treebank contains a negligible amount of non-projective arcs (Chen and Manning, 2014). • For Chinese, we use the Penn Chinese Treebank 5.1 (CTB5) following Zhang and Clark (2008),9 with gold part-of-speech tags which is also the same as in Chen and Manning (2014). Language model word embeddings were generated, for English, from the AFP portion of the English Gigaword corpus (version 5), and from the complete Chinese Gigaword corpus (version 2), 7We did perform preliminary experiments with LSTM states of 32, 50, and 80, but the other dimensions were our initial </context>
+</contexts>
+<marker>Toutanova, Klein, Manning, Singer, 2003</marker>
+<rawString>Kristina Toutanova, Dan Klein, Christopher D. Manning, and Yoram Singer. 2003. Feature-rich part-ofspeech tagging with a cyclic dependency network. In Proc. NAACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Huihsin Tseng</author>
+<author>Pichuan Chang</author>
+<author>Galen Andrew</author>
+<author>Daniel Jurafsky</author>
+<author>Christopher Manning</author>
+</authors>
+<title>A conditional random field word segmenter for SIGHAN bakeoff 2005. In</title>
+<date>2005</date>
+<booktitle>Proc. Fourth SIGHAN Workshop on Chinese Language Processing.</booktitle>
+<contexts>
+<context position="22604" citStr="Tseng et al., 2005" startWordPosition="3769" endWordPosition="3772">2014). Language model word embeddings were generated, for English, from the AFP portion of the English Gigaword corpus (version 5), and from the complete Chinese Gigaword corpus (version 2), 7We did perform preliminary experiments with LSTM states of 32, 50, and 80, but the other dimensions were our initial guesses. 8Training: 02-21. Development: 22. Test: 23. 9Training: 001–815, 1001–1136. Development: 886– 931, 1148–1151. Test: 816–885, 1137–1147. mod head Cl rel det amod an decision overhasty mod 2c head rel det an overhasty amod decision 339 as segmented by the Stanford Chinese Segmenter (Tseng et al., 2005). 5.2 Experimental configurations We report results on five experimental configurations per language, as well as the Chen and Manning (2014) baseline. These are: the full stack LSTM parsing model (S-LSTM), the stack LSTM parsing model without POS tags (−POS), the stack LSTM parsing model without pretrained language model embeddings (−pretraining), the stack LSTM parsing model that uses just head words on the stack instead of composed representations (−composition), and the full parsing model where rather than an LSTM, a classical recurrent neural network is used (S-RNN). 5.3 Results Following </context>
+</contexts>
+<marker>Tseng, Chang, Andrew, Jurafsky, Manning, 2005</marker>
+<rawString>Huihsin Tseng, Pichuan Chang, Galen Andrew, Daniel Jurafsky, and Christopher Manning. 2005. A conditional random field word segmenter for SIGHAN bakeoff 2005. In Proc. Fourth SIGHAN Workshop on Chinese Language Processing.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Oriol Vinyals</author>
+<author>Lukasz Kaiser</author>
+<author>Terry Koo</author>
+<author>Slav Petrov</author>
+<author>Ilya Sutskever</author>
+<author>Geoffrey Hinton</author>
+</authors>
+<title>Grammar as a foreign language. In</title>
+<date>2015</date>
+<booktitle>Proc. ICLR.</booktitle>
+<contexts>
+<context position="25286" citStr="Vinyals et al. (2015)" startWordPosition="4206" endWordPosition="4209">has implications for theories of headedness. Finally, we find that while LSTMs outperform baselines that use only classical RNNs, these are still quite capable of learning good representations. Effect of beam size. Beam search was determined to have minimal impact on scores (absolute improvements of G 0.3% were possible with small beams). Therefore, all results we report used greedy decoding—Chen and Manning (2014) likewise only report results with greedy decoding. This finding is in line with previous work that generates sequences from recurrent networks (Grefenstette et al., 2014), although Vinyals et al. (2015) did report much more substantial improvements with beam search on their “grammar as a foreign language” parser.10 6 Related Work Our approach ties together several strands of previous work. First, several kinds of stack memories have been proposed to augment neural architectures. Das et al. (1992) proposed a neural network with an external stack memory based on recurrent neural networks. In contrast to our model, in which the entire contents of the stack are summarized in a single value, in their model, the network could only see the contents of the top of the stack. Mikkulainen (1996) propos</context>
+<context position="27167" citStr="Vinyals et al. (2015)" startWordPosition="4509" endWordPosition="4512">anning, 2014; Stenetorp, 2013). In these works, the conditioning structure was manually crafted and sensitive to only certain properties of the state, while we are conditioning on the global state object. Like us, Stenetorp (2013) used recursively composed representations of the tree fragments (a head and its dependents). Neural networks have also been used to learn representations for use in chart parsing (Henderson, 2004; Titov and Henderson, 2007; Socher et al., 2013a; Le and Zuidema, 2014). LSTMs have also recently been demonstrated as a mechanism for learning to represent parse structure.Vinyals et al. (2015) proposed a phrasestructure parser based on LSTMs which operated by first reading the entire input sentence in so as to obtain a vector representation of it, and then generating bracketing structures sequentially conditioned on this representation. Although superficially similar to our model, their approach has a number of disadvantages. First, they relied on a large amount of semi-supervised training data that was generated by parsing a large unannotated corpus with an off-the-shelf parser. Second, while they recognized that a stack-like shiftreduce parser control provided useful information,</context>
+</contexts>
+<marker>Vinyals, Kaiser, Koo, Petrov, Sutskever, Hinton, 2015</marker>
+<rawString>Oriol Vinyals, Lukasz Kaiser, Terry Koo, Slav Petrov, Ilya Sutskever, and Geoffrey Hinton. 2015. Grammar as a foreign language. In Proc. ICLR.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>David Weiss</author>
+<author>Christopher Alberti</author>
+<author>Michael Collins</author>
+<author>Slav Petrov</author>
+</authors>
+<title>Structured training for neural network transition-based parsing.</title>
+<date>2015</date>
+<booktitle>In Proc. ACL.</booktitle>
+<contexts>
+<context position="26534" citStr="Weiss et al., 2015" startWordPosition="4412" endWordPosition="4415">k that had a summary feature, although the stack control was learned as a latent variable. A variety of authors have used neural networks to predict parser actions in shift-reduce parsers. The earliest attempt we are aware of is due to Mayberry and Miikkulainen (1999). The resurgence of interest in neural networks has resulted 10Although superficially similar to ours, Vinyals et al. (2015) is a phrase-structure parser and adaptation to the dependency parsing scenario would have been nontrivial. We discuss their work in §6. 340 in in several applications to transition-based dependency parsers (Weiss et al., 2015; Chen and Manning, 2014; Stenetorp, 2013). In these works, the conditioning structure was manually crafted and sensitive to only certain properties of the state, while we are conditioning on the global state object. Like us, Stenetorp (2013) used recursively composed representations of the tree fragments (a head and its dependents). Neural networks have also been used to learn representations for use in chart parsing (Henderson, 2004; Titov and Henderson, 2007; Socher et al., 2013a; Le and Zuidema, 2014). LSTMs have also recently been demonstrated as a mechanism for learning to represent pars</context>
+</contexts>
+<marker>Weiss, Alberti, Collins, Petrov, 2015</marker>
+<rawString>David Weiss, Christopher Alberti, Michael Collins, and Slav Petrov. 2015. Structured training for neural network transition-based parsing. In Proc. ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jason Weston</author>
+<author>Sumit Chopra</author>
+<author>Antoine Bordes</author>
+</authors>
+<title>Memory networks.</title>
+<date>2015</date>
+<booktitle>In Proc. ICLR.</booktitle>
+<contexts>
+<context position="29759" citStr="Weston et al., 2015" startWordPosition="4918" endWordPosition="4921"> (Mikkulainen, 1996). Here, we learned from observable stack manipulation operations (i.e., supervision from a treebank), and the computed embeddings of final parser states were not used for any further prediction. However, this could be reversed, giving a device that learns to construct context-free programs (e.g., expression trees) given only observed outputs; one application would be unsupervised parsing. Such an extension of the work would make it an alternative to architectures that have an explicit external memory such as neural Turing machines (Graves et al., 2014) and memory networks (Weston et al., 2015). However, as with those models, without supervision of the stack operations, formidable computational challenges must be solved (e.g., marginalizing over all latent stack operations), but sampling techniques and techniques from reinforcement learning have promise here (Zaremba and Sutskever, 2015), making this an intriguing avenue for future work. Acknowledgments The authors would like to thank Lingpeng Kong and Jacob Eisenstein for comments on an earlier version of this draft and Danqi Chen for assistance with the parsing datasets. This work was sponsored in part by the U. S. Army Research L</context>
+</contexts>
+<marker>Weston, Chopra, Bordes, 2015</marker>
+<rawString>Jason Weston, Sumit Chopra, and Antoine Bordes. 2015. Memory networks. In Proc. ICLR.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Hiroyasu Yamada</author>
+<author>Yuji Matsumoto</author>
+</authors>
+<title>Statistical dependency analysis with support vector machines.</title>
+<date>2003</date>
+<booktitle>In Proc. IWPT.</booktitle>
+<contexts>
+<context position="1459" citStr="Yamada and Matsumoto, 2003" startWordPosition="199" endWordPosition="203">el that captures three facets of a parser’s state: (i) unbounded look-ahead into the buffer of incoming words, (ii) the complete history of actions taken by the parser, and (iii) the complete contents of the stack of partially built tree fragments, including their internal structures. Standard backpropagation techniques are used for training and yield state-of-the-art parsing performance. 1 Introduction Transition-based dependency parsing formalizes the parsing problem as a series of decisions that read words sequentially from a buffer and combine them incrementally into syntactic structures (Yamada and Matsumoto, 2003; Nivre, 2003; Nivre, 2004). This formalization is attractive since the number of operations required to build any projective parse tree is linear in the length of the sentence, making transition-based parsing computationally efficient relative to graph- and grammarbased formalisms. The challenge in transitionbased parsing is modeling which action should be taken in each of the unboundedly many states encountered as the parser progresses. This challenge has been addressed by development of alternative transition sets that simplify the modeling problem by making better attachment decisions (Niv</context>
+</contexts>
+<marker>Yamada, Matsumoto, 2003</marker>
+<rawString>Hiroyasu Yamada and Yuji Matsumoto. 2003. Statistical dependency analysis with support vector machines. In Proc. IWPT.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Wojciech Zaremba</author>
+<author>Ilya Sutskever</author>
+</authors>
+<title>Reinforcement learning neural Turing machines. ArXiv e-prints,</title>
+<date>2015</date>
+<contexts>
+<context position="30058" citStr="Zaremba and Sutskever, 2015" startWordPosition="4959" endWordPosition="4962">ntext-free programs (e.g., expression trees) given only observed outputs; one application would be unsupervised parsing. Such an extension of the work would make it an alternative to architectures that have an explicit external memory such as neural Turing machines (Graves et al., 2014) and memory networks (Weston et al., 2015). However, as with those models, without supervision of the stack operations, formidable computational challenges must be solved (e.g., marginalizing over all latent stack operations), but sampling techniques and techniques from reinforcement learning have promise here (Zaremba and Sutskever, 2015), making this an intriguing avenue for future work. Acknowledgments The authors would like to thank Lingpeng Kong and Jacob Eisenstein for comments on an earlier version of this draft and Danqi Chen for assistance with the parsing datasets. This work was sponsored in part by the U. S. Army Research Laboratory and the U. S. Army Research Office under contract/grant number W911NF-10-1-0533, and in part by NSF CAREER grant IIS-1054319. Miguel Ballesteros is supported by the European Commission under the contract numbers FP7-ICT610411 (project MULTISENSOR) and H2020- RIA-645012 (project KRISTINA).</context>
+</contexts>
+<marker>Zaremba, Sutskever, 2015</marker>
+<rawString>Wojciech Zaremba and Ilya Sutskever. 2015. Reinforcement learning neural Turing machines. ArXiv e-prints, May.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yue Zhang</author>
+<author>Stephen Clark</author>
+</authors>
+<title>A tale of two parsers: Investigating and combining graph-based and transition-based dependency parsing.</title>
+<date>2008</date>
+<booktitle>In Proc. EMNLP.</booktitle>
+<contexts>
+<context position="21905" citStr="Zhang and Clark (2008)" startWordPosition="3657" endWordPosition="3660">iguration was chosen since they likewise used a neural parameterization to predict actions in an arc-standard transition-based parser. • For English, we used the Stanford Dependencency (SD) treebank (de Marneffe et al., 2006) used in (Chen and Manning, 2014) which is the closest model published, with the same splits.8 The part-of-speech tags are predicted by using the Stanford Tagger (Toutanova et al., 2003) with an accuracy of 97.3%. This treebank contains a negligible amount of non-projective arcs (Chen and Manning, 2014). • For Chinese, we use the Penn Chinese Treebank 5.1 (CTB5) following Zhang and Clark (2008),9 with gold part-of-speech tags which is also the same as in Chen and Manning (2014). Language model word embeddings were generated, for English, from the AFP portion of the English Gigaword corpus (version 5), and from the complete Chinese Gigaword corpus (version 2), 7We did perform preliminary experiments with LSTM states of 32, 50, and 80, but the other dimensions were our initial guesses. 8Training: 02-21. Development: 22. Test: 23. 9Training: 001–815, 1001–1136. Development: 886– 931, 1148–1151. Test: 816–885, 1137–1147. mod head Cl rel det amod an decision overhasty mod 2c head rel det</context>
+</contexts>
+<marker>Zhang, Clark, 2008</marker>
+<rawString>Yue Zhang and Stephen Clark. 2008. A tale of two parsers: Investigating and combining graph-based and transition-based dependency parsing. In Proc. EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yue Zhang</author>
+<author>Joakim Nivre</author>
+</authors>
+<title>Transition-based dependency parsing with rich non-local features.</title>
+<date>2011</date>
+<booktitle>In Proc. ACL.</booktitle>
+<contexts>
+<context position="2195" citStr="Zhang and Nivre, 2011" startWordPosition="312" endWordPosition="315">projective parse tree is linear in the length of the sentence, making transition-based parsing computationally efficient relative to graph- and grammarbased formalisms. The challenge in transitionbased parsing is modeling which action should be taken in each of the unboundedly many states encountered as the parser progresses. This challenge has been addressed by development of alternative transition sets that simplify the modeling problem by making better attachment decisions (Nivre, 2007; Nivre, 2008; Nivre, 2009; Choi and McCallum, 2013; Bohnet and Nivre, 2012), through feature engineering (Zhang and Nivre, 2011; Ballesteros and Nivre, 2014; Chen et al., 2014; Ballesteros and Bohnet, 2014) and more recently using neural networks (Chen and Manning, 2014; Stenetorp, 2013). We extend this last line of work by learning representations of the parser state that are sensitive to the complete contents of the parser’s state: that is, the complete input buffer, the complete history of parser actions, and the complete contents of the stack of partially constructed syntactic structures. This “global” sensitivity to the state contrasts with previous work in transitionbased dependency parsing that uses only a narr</context>
+</contexts>
+<marker>Zhang, Nivre, 2011</marker>
+<rawString>Yue Zhang and Joakim Nivre. 2011. Transition-based dependency parsing with rich non-local features. In Proc. ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yuan Zhang</author>
+<author>Tao Lei</author>
+<author>Regina Barzilay</author>
+<author>Tommi Jaakkola</author>
+</authors>
+<title>Greed is good if randomized: New inference for dependency parsing. In</title>
+<date>2014</date>
+<booktitle>Proc. EMNLP.</booktitle>
+<contexts>
+<context position="28632" citStr="Zhang et al., 2014" startWordPosition="4739" endWordPosition="4742"> difficult. Finally, our work can be understood as a progression toward using larger contexts in parsing. An exhaustive summary is beyond the scope of this paper, but some of the important milestones in this tradition are the use of cube pruning to efficiently include nonlocal features in discriminative chart reranking (Huang and Chiang, 2008), approximate decoding techniques based on LP relaxations in graph-based parsing to include higherorder features (Martins et al., 2010), and randomized hill-climbing methods that enable arbitrary nonlocal features in global discriminative parsing models (Zhang et al., 2014). Since our parser is sensitive to any part of the input, its history, or its stack contents, it is similar in spirit to the last approach, which permits truly arbitrary features. 7 Conclusion We presented stack LSTMs, recurrent neural networks for sequences, with push and pop operations, and used them to implement a state-of-theart transition-based dependency parser. We conclude by remarking that stack memory offers intriguing possibilities for learning to solve general information processing problems (Mikkulainen, 1996). Here, we learned from observable stack manipulation operations (i.e., s</context>
+</contexts>
+<marker>Zhang, Lei, Barzilay, Jaakkola, 2014</marker>
+<rawString>Yuan Zhang, Tao Lei, Regina Barzilay, and Tommi Jaakkola. 2014. Greed is good if randomized: New inference for dependency parsing. In Proc. EMNLP.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

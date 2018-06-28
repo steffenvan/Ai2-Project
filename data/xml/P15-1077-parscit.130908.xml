@@ -1,0 +1,1634 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.000009">
+<title confidence="0.846787">
+Gaussian LDA for Topic Models with Word Embeddings
+</title>
+<author confidence="0.990568">
+Rajarshi Das*, Manzil Zaheer*, Chris Dyer
+</author>
+<affiliation confidence="0.9902625">
+School of Computer Science
+Carnegie Mellon University
+</affiliation>
+<address confidence="0.429554">
+Pittsburgh, PA, 15213, USA
+</address>
+<email confidence="0.690994">
+{rajarshd,manzilz, cdyer} Ucs.cmu.edu
+</email>
+<sectionHeader confidence="0.98769" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.999855862068966">
+Continuous space word embeddings
+learned from large, unstructured corpora
+have been shown to be effective at cap-
+turing semantic regularities in language.
+In this paper we replace LDA’s param-
+eterization of “topics” as categorical
+distributions over opaque word types with
+multivariate Gaussian distributions on
+the embedding space. This encourages
+the model to group words that are a
+priori known to be semantically related
+into topics. To perform inference, we
+introduce a fast collapsed Gibbs sampling
+algorithm based on Cholesky decom-
+positions of covariance matrices of the
+posterior predictive distributions. We fur-
+ther derive a scalable algorithm that draws
+samples from stale posterior predictive
+distributions and corrects them with a
+Metropolis–Hastings step. Using vectors
+learned from a domain-general corpus
+(English Wikipedia), we report results on
+two document collections (20-newsgroups
+and NIPS). Qualitatively, Gaussian LDA
+infers different (but still very sensible)
+topics relative to standard LDA. Quantita-
+tively, our technique outperforms existing
+models at dealing with OOV words in
+held-out documents.
+</bodyText>
+<sectionHeader confidence="0.999139" genericHeader="keywords">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.995285591836735">
+Latent Dirichlet Allocation (LDA) is a Bayesian
+technique that is widely used for inferring the
+topic structure in corpora of documents. It con-
+ceives of a document as a mixture of a small num-
+ber of topics, and topics as a (relatively sparse) dis-
+tribution over word types (Blei et al., 2003). These
+priors are remarkably effective at producing useful
+*Both student authors had equal contribution.
+results. However, our intuitions tell us that while
+documents may indeed be conceived of as a mix-
+ture of topics, we should further expect topics to
+be semantically coherent. Indeed, standard human
+evaluations of topic modeling performance are de-
+signed to elicit assessment of semantic coherence
+(Chang et al., 2009; Newman et al., 2009). How-
+ever, this prior preference for semantic coherence
+is not encoded in the model, and any such obser-
+vation of semantic coherence found in the inferred
+topic distributions is, in some sense, accidental. In
+this paper, we develop a variant of LDA that oper-
+ates on continuous space embeddings of words—
+rather than word types—to impose a prior expec-
+tation for semantic coherence. Our approach re-
+places the opaque word types usually modeled in
+LDA with continuous space embeddings of these
+words, which are generated as draws from a mul-
+tivariate Gaussian.
+How does this capture our preference for se-
+mantic coherence? Word embeddings have been
+shown to capture lexico-semantic regularities in
+language: words with similar syntactic and seman-
+tic properties are found to be close to each other in
+the embedding space (Agirre et al., 2009; Mikolov
+et al., 2013). Since Gaussian distributions capture
+a notion of centrality in space, and semantically
+related words are localized in space, our Gaussian
+LDA model encodes a prior preference for seman-
+tically coherent topics. Our model further has sev-
+eral advantages. Traditional LDA assumes a fixed
+vocabulary of word types. This modeling assump-
+tion drawback as it cannot handle out of vocabu-
+lary (OOV) words in “held out” documents. Zhai
+and Boyd-Graber (2013) proposed an approach
+to address this problem by drawing topics from
+a Dirichlet Process with a base distribution over
+all possible character strings (i.e., words). While
+this model can in principle handle unseen words,
+the only bias toward being included in a particular
+topic comes from the topic assignments in the rest
+</bodyText>
+<page confidence="0.975873">
+795
+</page>
+<note confidence="0.977918666666667">
+Proceedings of the 53rd Annual Meeting of the Association for Computational Linguistics
+and the 7th International Joint Conference on Natural Language Processing, pages 795–804,
+Beijing, China, July 26-31, 2015. c�2015 Association for Computational Linguistics
+</note>
+<bodyText confidence="0.999923947368421">
+of the document. Our model can exploit the conti-
+guity of semantically similar words in the embed-
+ding space and can assign high topic probability to
+a word which is similar to an existing topical word
+even if it has never been seen before.
+The main contributions of our paper are as fol-
+lows: We propose a new technique for topic mod-
+eling by treating the document as a collection of
+word embeddings and topics itself as multivari-
+ate Gaussian distributions in the embedding space
+(§3). We explore several strategies for collapsed
+Gibbs sampling and derive scalable algorithms,
+achieving asymptotic speed-up over the naive im-
+plementation (§4). We qualitatively show that
+our topics make intuitive sense and quantitatively
+demonstrate that our model captures a better rep-
+resentation of a document in the topic space by
+outperforming other models in a classification task
+(§5).
+</bodyText>
+<sectionHeader confidence="0.992039" genericHeader="introduction">
+2 Background
+</sectionHeader>
+<bodyText confidence="0.9978135">
+Before going to the details of our model we pro-
+vide some background on two topics relevant to
+our work: vector space word embeddings and
+LDA.
+</bodyText>
+<subsectionHeader confidence="0.931334">
+2.1 Vector Space Semantics
+</subsectionHeader>
+<bodyText confidence="0.998429090909091">
+According to the distributional hypothesis (Har-
+ris, 1954), words occurring in similar contexts
+tend to have similar meaning. This has given
+rise to data-driven learning of word vectors that
+capture lexical and semantic properties, which is
+now a technique of central importance in natu-
+ral language processing. These word vectors can
+be used for identifying semantically related word
+pairs (Turney, 2006; Agirre et al., 2009) or as fea-
+tures in downstream text processing applications
+(Turian et al., 2010; Guo et al., 2014). Word
+vectors can either be constructed using low rank
+approximations of cooccurrence statistics (Deer-
+wester et al., 1990) or using internal represen-
+tations from neural network models of word se-
+quences (Collobert and Weston, 2008). We use a
+recently popular and fast tool called word2vec1,
+to generate skip-gram word embeddings from un-
+labeled corpus. In this model, a word is used as
+an input to a log-linear classifier with continuous
+projection layer and words within a certain win-
+dow before and after the words are predicted.
+</bodyText>
+<footnote confidence="0.982131">
+1https://code.google.com/p/word2vec/
+</footnote>
+<subsectionHeader confidence="0.99905">
+2.2 Latent Dirichlet Allocation (LDA)
+</subsectionHeader>
+<bodyText confidence="0.9995635">
+LDA (Blei et al., 2003) is a probabilistic topic
+model of corpora of documents which seeks to
+represent the underlying thematic structure of the
+document collection. They have emerged as a
+powerful new technique of finding useful structure
+in an unstructured collection as it learns distribu-
+tions over words. The high probability words in
+each distribution gives us a way of understanding
+the contents of the corpus at a very high level. In
+LDA, each document of the corpus is assumed to
+have a distribution over K topics, where the dis-
+crete topic distributions are drawn from a symmet-
+ric dirichlet distribution. The generative process is
+as follows.
+</bodyText>
+<listItem confidence="0.951670777777778">
+1. for k = 1 to K
+(a) Choose topic βk N Dir(η)
+2. for each document d in corpus D
+(a) Choose a topic distribution θd N Dir(α)
+(b) for each word index n from 1 to Nd
+i. Choose a topic zn N
+Categorical(θd)
+ii. Choose word wn N
+Categorical(βzn)
+</listItem>
+<bodyText confidence="0.997638">
+As it follows from the definition above, a topic
+is a discrete distribution over a fixed vocabulary
+of word types. This modeling assumption pre-
+cludes new words to be added to topics. However
+modeling topics as a continuous distribution over
+word embeddings gives us a way to address this
+problem. In the next section we describe Gaus-
+sian LDA, a straightforward extension of LDA that
+replaces categorical distributions over word types
+with multivariate Gaussian distributions over the
+word embedding space.
+</bodyText>
+<sectionHeader confidence="0.991306" genericHeader="method">
+3 Gaussian LDA
+</sectionHeader>
+<bodyText confidence="0.999902285714286">
+As with multinomial LDA, we are interested in
+modeling a collection of documents. However,
+we assume that rather than consisting of sequences
+of word types, documents consist of sequences of
+word embeddings. We write v(w) E RM as the
+embedding of word of type w or vd,Z when we are
+indexing a vector in a document d at position i.
+Since our observations are no longer dis-
+crete values but continuous vectors in an M-
+dimensional space, we characterize each topic k as
+a multivariate Gaussian distribution with mean µk
+and covariance Σk. The choice of a Gaussian pa-
+rameterization is justified by both analytic conve-
+nience and observations that Euclidean distances
+</bodyText>
+<page confidence="0.932625">
+796
+</page>
+<equation confidence="0.9387825">
+p(zd,i = k  |z−(d,i), Vd, ζ, α) a (nk,d + αk) X tνk−M+1 ~vd,i~~µk, κ Kk 1 Σk~ (1)
+Kk
+</equation>
+<figureCaption confidence="0.9075695">
+Figure 1: Sampling equation for the collapsed Gibbs sampler; refer to text for a description of the
+notation.
+</figureCaption>
+<bodyText confidence="0.9964377">
+between embeddings correlate with semantic sim-
+ilarity (Collobert and Weston, 2008; Turney and
+Pantel, 2010; Hermann and Blunsom, 2014). We
+place conjugate priors on these values: a Gaus-
+sian centered at zero for the mean and an inverse
+Wishart distribution for the covariance. As be-
+fore, each document is seen as a mixture of top-
+ics whose proportions are drawn from a symmetric
+Dirichlet prior. The generative process can thus be
+summarized as follows:
+</bodyText>
+<listItem confidence="0.993850111111111">
+1. for k = 1 to K
+(a) Draw topic covariance Σk ti
+W−1(Ψ, ν)
+(b) Draw topic mean µk — JU(µ, 1κΣk)
+2. for each document d in corpus D
+(a) Draw topic distribution θd — Dir(α)
+(b) for each word index n from 1 to Nd
+i. Draw a topic zn — Categorical(θd)
+ii. Draw vd,n — JU(µzn, Σzn)
+</listItem>
+<bodyText confidence="0.99996035">
+This model has previously been proposed for
+obtaining indexing representations for audio re-
+trieval (Hu et al., 2012). They use variational/EM
+method for posterior inference. Although we don’t
+do any experiment to compare the running time of
+both approaches, the per-iteration computational
+complexity is same for both inference methods.
+We propose a faster inference technique using
+Cholesky decomposition of covariance matrices
+which can be applied to both the Gibbs and varia-
+tional/EM method. However we are not aware of
+any straightforward way of applying the aliasing
+trick proposed by (Li et al., 2014) on the varia-
+tional/EM method which gave us huge improve-
+ment on running time (see Figure 2). Another
+work which combines embedding with topic mod-
+els is by (Wan et al., 2012) where they jointly learn
+the parameters of a neural network and a topic
+model to capture the topic distribution of low di-
+mensional representation of images.
+</bodyText>
+<sectionHeader confidence="0.993067" genericHeader="method">
+4 Posterior Inference
+</sectionHeader>
+<bodyText confidence="0.999017771428572">
+In our application, we observe documents consist-
+ing of word vectors and wish to infer the poste-
+rior distribution over the topic parameters, pro-
+portions, and the topic assignments of individual
+words. Since there is no analytic form of the poste-
+rior, approximations are required. Because of our
+choice of conjugate priors for topic parameters and
+proportions, these variables can be analytically in-
+tegrated out, and we can derive a collapsed Gibbs
+sampler that resamples topic assignments to indi-
+vidual word vectors, similar to the collapsed sam-
+pling scheme proposed by Griffiths and Steyvers
+(2004).
+The conditional distribution we need for sam-
+pling is shown in Figure 1. Here, z−(d,i) repre-
+sents the topic assignments of all word embed-
+dings, excluding the one at ith position of docu-
+ment d; Vd is the sequence of vectors for docu-
+ment d; tν,(x  |µ0, Σ0) is the multivariate t - distri-
+bution with ν0 degrees of freedom and parameters
+µ0 and Σ0. The tuple ζ = (µ, κ, Σ, ν) represents
+the parameters of the prior distribution.
+It should be noted that the first part of the equa-
+tion which expresses the probability of topic k in
+document d is the same as that of LDA. This is
+because the portion of the model which generates
+a topic for each word (vector) from its document
+topic distribution is still the same. The second
+part of the equation which expresses the probabil-
+ity of assignment of topic k to the word vector vd,i
+given the current topic assignments (aka posterior
+predictive) is given by a multivariate t distribution
+with parameters (µk, κk, Σk, νk). The parameters
+of the posterior predictive distribution are given as
+(Murphy, 2012):
+</bodyText>
+<equation confidence="0.9914075">
+κk = κ + Nk µk =
+κk
+Ψk
+νk = ν + Nk Σk = (νk — M
++ 1)
+Ψk = Ψ + Ck+ κκNk (¯vk — µ)(¯vk — µ)&gt;
+κµ + Nk¯vk
+(2)
+</equation>
+<page confidence="0.947888">
+797
+</page>
+<bodyText confidence="0.999067">
+where ¯vk and Ck are given by,
+</bodyText>
+<equation confidence="0.912994">
+Pd Pi:zd,i =k (vd,i)
+Nk
+XCk = X (vd,i − ¯vk)(vd,i − ¯vk)&gt;
+d i:zd,i=k
+</equation>
+<bodyText confidence="0.999514625">
+Here ¯vk is the sample mean and Ck is the scaled
+form of sample covariance of the vectors with
+topic assignment k. Nk represents the count of
+words assigned to topic k across all documents.
+Intuitively the parameters µk and Σk represents
+the posterior mean and covariance of the topic dis-
+tribution and Kk, vk represents the strength of the
+prior for mean and covariance respectively.
+</bodyText>
+<subsectionHeader confidence="0.823161">
+Analysis of running time complexity
+</subsectionHeader>
+<bodyText confidence="0.999887705882353">
+As can be seen from (1), for computation of the
+posterior predictive we need to evaluate the deter-
+minant and inverse of the posterior covariance ma-
+trix. Direct naive computation of these terms re-
+quire O(M3) operations. Moreover, during sam-
+pling as words get assigned to different topics,
+the parameters (µk, Kk, Ψk, vk) associated with a
+topic changes and hence we have to recompute
+the determinant and inverse matrix. Since these
+step has to be recomputed several times (as many
+times as number of words times number of topics
+in one Gibbs sweep, in the worst case), it is criti-
+cal to make the process as efficient as possible. We
+speed up this process by employing a combination
+of modern computational techniques and mathe-
+matical (linear algebra) tricks, as described in the
+following subsections.
+</bodyText>
+<subsectionHeader confidence="0.992617">
+4.1 Faster sampling using Cholesky
+</subsectionHeader>
+<bodyText confidence="0.886854">
+decomposition of covariance matrix
+Having another look at the posterior equation for
+Ψk, we can re-write the equation as:
+</bodyText>
+<equation confidence="0.970766333333333">
+KNk
+Ψk = Ψ + Ck + (¯vk − µ)(¯vk − µ
+Kk
+= Ψ + X X vd,iv&gt;d,i − Kkµkµ&gt;k
+d i:zd,i=k
++ Kµµ&gt;. (3)
+</equation>
+<bodyText confidence="0.955555833333333">
+During sampling when we are computing the
+assignment probability of topic k to vd,i, we need
+to calculate the updated parameters of the topic.
+Using (3) it can be shown that Ψk can be updated
+from current value of Ψk, after updating Kk.vk and
+µk, as follows:
+</bodyText>
+<equation confidence="0.993958">
+Ψk ← Ψk + Kk− 1 (µk − vd,i) (µk − vd,i)&gt; .
+Kk
+(4)
+</equation>
+<bodyText confidence="0.998893095238095">
+This equation has the form of a rank 1 update,
+hinting towards use of Cholesky decomposition. If
+we have the Cholesky decomposition of Ψk com-
+puted, then we have tools to update Ψk cheaply.
+Since Ψk and Σk are off by only a scalar fac-
+tor, we can equivalently talk about Σk. Equation
+(4) can also be understood in the following way.
+During sampling, when a word embedding vd,i
+gets a new assignment to a topic, say k, then the
+new value of the topic covariance can be computed
+from the current one using just a rank 1 update.2
+We next describe how to exploit the Cholesky de-
+composition representation to speed up computa-
+tions.
+For sake of completeness, any symmetric M ×
+M real matrix Σk is said to be positive definite if
+∀z ∈ RM : z&gt;Σkz &gt; 0. The Cholesky decom-
+position of such a symmetric positive definite ma-
+trix Σk is nothing but its decomposition into the
+product of some lower triangular matrix L and its
+transpose, i.e.
+</bodyText>
+<equation confidence="0.676817">
+Σk = LL&gt;.
+</equation>
+<bodyText confidence="0.99866275">
+Finding this factorization also take cubic opera-
+tion. However given Cholesky decomposition of
+Σk, after a rank 1 update (or downdate), i.e. the
+operation:
+</bodyText>
+<equation confidence="0.907782">
+Σk ← Σk + zz&gt;
+</equation>
+<bodyText confidence="0.998507428571428">
+we can find the factorization of new Σk in just
+quadratic time (Stewart, 1998). We will use this
+trick to speed up the computations3. Basically, in-
+stead of computing determinant and inverse again
+in cubic time, we will use such rank 1 update
+(downdate) to find new determinant and inverse in
+an efficient manner as explained in details below.
+To compute the density of the posterior predic-
+tive t−distibution, we need to compute the de-
+terminant |Σk |and the term of the form (vd,i −
+µk )&gt;Σ k 1 (vd,i − µk). The Cholesky decomposi-
+tion of the covariance matrix can be used for ef-
+ficient computation of these expression as shown
+below.
+</bodyText>
+<footnote confidence="0.989882">
+2Similarly the covariance of the old topic assignment of
+the word w can be computed using a rank 1 downdate
+3For our experiments, we set the prior covariance to be
+3*1, which is a positive definite matrix.
+</footnote>
+<equation confidence="0.9550085">
+vk =
+)&gt;
+</equation>
+<page confidence="0.975528">
+798
+</page>
+<bodyText confidence="0.991021333333333">
+Computation of determinant: The determinant
+of Ek can be computed from from its Cholesky
+decomposition L as:
+</bodyText>
+<equation confidence="0.999866">
+log(|Ek|) = 2 x
+</equation>
+<bodyText confidence="0.997716333333333">
+This takes linear time in the order of dimension
+and is clearly a significant gain from cubic time
+complexity.
+</bodyText>
+<equation confidence="0.934267">
+Computation of (vd,i − µk)&gt;E−1
+k (vd,i − µ): Let
+b = (vd,i − µk). Now b&gt;E−1b can be written as
+b&gt;E−1b = b&gt;(LL&gt;)−1b
+= bT(L−1)&gt;L−1b
+= (L−1b)&gt;(L−1b)
+Now (L−1b) is the solution of the equation Lx =
+</equation>
+<bodyText confidence="0.791672857142857">
+b. Also since L is a lower triangular matrix,
+this equation can be solved easily using forward
+substitution. Lastly we will have to take an in-
+ner product of x and x&gt; to get the value of
+(vd,i−µk)&gt;E−1(vd,i−µk). This step again takes
+quadratic time and is again a savings from the cu-
+bic time complexity.
+</bodyText>
+<subsectionHeader confidence="0.686623">
+4.2 Further reduction of sampling
+complexity using Alias Sampling
+</subsectionHeader>
+<bodyText confidence="0.977798869565217">
+Although Cholesky trick helps us to reduce
+the sampling complexity of a embedding to
+O(KM2), it can still be impractical.In Gaus-
+sian LDA, the Gibbs sampling equation (1) can
+be split into two terms. The first term nk,d x
+tνk−M+1 (vd,i µk, κk+ 1 Ek~ denotes the docu-
+ment contribution and the second term αk x
+tνk−M+1 (vd,i µk, κk+ 1 Ek~ denotes the lan-
+guage model contribution. Empirically one can
+make two observations about these terms. First,
+nk,d is often a sparse vector, as a document most
+likely contains only a few of the topics. Sec-
+ondly, topic parameters (µk, Ek) captures global
+phenomenon, and rather change relatively slowly
+over the iterations. We can exploit these findings
+to avoid the naive approach to draw a sample from
+(1).
+In particular, we compute the document-specific
+sparse term exactly and for the remainder lan-
+guage model term we borrow idea from (Li et al.,
+2014). We use a slightly stale distribution for the
+language model. Then Metropolis Hastings (MH)
+algorithm allows us to convert the stale sample
+</bodyText>
+<figure confidence="0.978734">
+0 1 2 3 4 5
+Time #104
+</figure>
+<figureCaption confidence="0.66983575">
+Figure 2: Plot comparing average log-likelihood
+vs time (in sec) achieved after applying each trick
+on the NIPS dataset. The shapes on each curve
+denote end of each iteration.
+</figureCaption>
+<bodyText confidence="0.999865483870968">
+into a fresh one, provided that we compute ra-
+tios between successive states correctly. It is suf-
+ficient to run MH for a few number of steps be-
+cause the stale distribution acting as the proposal
+is very similar to the target. This is because, as
+pointed out earlier, the language model term does
+not change too drastically whenever we resample a
+single word. The number of words is huge, hence
+the amount of change per word is concomitantly
+small. (Only if one could convert stale bread into
+fresh one, it would solve world’s food problem!)
+The exercise of using stale distribution and MH
+steps is advantageous because sampling from it
+can be carried out in O(1) amortized time, thanks
+to alias sampling technique (Vose, 1991). More-
+over, the task of building the alias tables can be
+outsourced to other cores.
+With the combination of both Cholesky and
+Alias tricks, the sampling complexity can thus be
+brought down to O(KdM2) where Kd represents
+the number of actually instantiated topics in the
+document and Kd « K. In particular, we plot
+the sampling rate achieved naively, with Cholesky
+(CH) trick and with Cholesky+Alias (A+CH) trick
+in figure 2 demonstrating better likelihood at much
+less time. Also after initial few iterations, the time
+per iteration of A+CH trick is 9.93 times less than
+CH and 53.1 times less than naive method. This is
+because initially we start with random initializa-
+tion of words to topics, but after few iterations the
+nk,d vector starts to become sparse.
+</bodyText>
+<figure confidence="0.981251571428571">
+80
+75
+70
+65
+60
+55
+50
+Naive
+Cholesky
+Alias+Cholesky
+Log-Likelihood
+log (Li,i) .
+M
+i=1
+</figure>
+<page confidence="0.99332">
+799
+</page>
+<sectionHeader confidence="0.997571" genericHeader="evaluation">
+5 Experiments
+</sectionHeader>
+<bodyText confidence="0.998396333333333">
+In this section we evaluate our Word Vector Topic
+Model on various experimental tasks. Specifically
+we wish to determine:
+</bodyText>
+<listItem confidence="0.997911166666667">
+• Is our model is able to find coherent and
+meaningful topics?
+• Is our model able to infer the topic distribu-
+tion of a held-out document even when the
+document contains words which were previ-
+ously unseen?
+</listItem>
+<bodyText confidence="0.99953775">
+We run our experiments4 on two datasets 20-
+NEWSGROUP5 and NIPS6. All the datasets were
+tokenized and lowercased with cdec (Dyer et al.,
+2010).
+</bodyText>
+<subsectionHeader confidence="0.964704">
+5.1 Topic Coherence
+</subsectionHeader>
+<bodyText confidence="0.999944833333333">
+Quantitative Analysis Typically topic models
+are evaluated based on the likelihood of held-out
+documents. But in this case, it is not correct to
+compare perplexities with models which do topic
+modeling on words. Since our topics are contin-
+uous distributions, the probability of a word vec-
+tor is given by its density w.r.t the normal distri-
+bution based on its topic assignment, instead of
+a probability mass from a discrete topic distribu-
+tion. Moreover, (Chang et al., 2009) showed that
+higher likelihood of held-out documents doesn’t
+necessarily correspond to human perception of
+topic coherence. Instead to measure topic coher-
+ence we follow (Newman et al., 2009) to compute
+the Pointwise Mutual Information (PMI) of topic
+words w.r.t wikipedia articles. We extract the doc-
+ument co-occurrence statistics of topic words from
+Wikipedia and compute the score of a topic by av-
+eraging the score of the top 15 words of the topic.
+A higher PMI score implies a more coherent topic
+as it means the topic words usually co-occur in the
+same document. In the last line of Table 1, we
+present the PMI score for some of the topics for
+both Gaussian LDA and traditional multinomial
+</bodyText>
+<footnote confidence="0.994309818181818">
+4Our implementation is available at https:
+//github.com/rajarshd/Gaussian_LDA
+5A collection of newsgroup documents partitioned into
+20 news groups. After pre-processing we had 18768 docu-
+ments. We randomly selected 2000 documents as our test set.
+This dataset is publicly available at http://qwone.com/
+-jason/20Newsgroups/
+6A collection of 1740 papers from the proceedings of
+Neural Information Processing System. The dataset is avail-
+able at http://www.cs.nyu.edu/-roweis/data.
+html
+</footnote>
+<bodyText confidence="0.999875725">
+LDA. It can be seen that Gaussian LDA is a clear
+winner, achieving an average 275% higher score
+on average.
+However, we are using embeddings trained on
+Wikipedia corpus itself, and the PMI measure is
+computed from co-occurrence in the Wikipedia
+corpus. As a result, our model is definitely bi-
+ased towards producing higher PMI. Nevertheless
+Wikipedia PMI is a believed to be a good measure
+of semantic coherence.
+Qualitative Analysis Table 1 shows some top
+words from topics from Gaussian-LDA and LDA
+on the 20-news dataset for K = 50. The words
+in Gaussian-LDA are ranked based on their den-
+sity assigned to them by the posterior predictive
+distribution in the final sample. As shown, Gaus-
+sian LDA is able to capture several intuitive top-
+ics in the corpus such as sports, government, ‘re-
+ligion’, ’universities’, ‘tech’, ‘finance’ etc. One
+interesting topic discovered by our model (on both
+20-news and NIPS dataset) is the collection of hu-
+man names, which was not captured by classic
+LDA. While one might imagine that names associ-
+ated with particular topics might be preferable to a
+‘names-in-general’ topic, this ultimately is a mat-
+ter of user preference. More substantively, classic
+LDA failed to identify the ‘finance’ topics. We
+also noticed that there were certain words (‘don’,
+‘writes’, etc) which often came as a top word in
+many topics in classic LDA. However our model
+was not able to capture the ‘space’ topics which
+LDA was able to identify.
+Also we visualize a part of the continuous space
+where the word embedding is performed. For this
+task we performed the Principal Component Anal-
+ysis (PCA) over all the word vectors and plot the
+first two components as shown in Figure 3. We can
+see clear separations between some of the clusters
+of topics as depicted. The other topics would be
+separated in other dimensions.
+</bodyText>
+<subsectionHeader confidence="0.956555">
+5.2 Performance on document containing
+new words
+</subsectionHeader>
+<bodyText confidence="0.999500875">
+In this experiment we evaluate the performance
+of our model on documents which contains pre-
+viously unseen words. It should be noted that tra-
+ditional topic modeling algorithms will typically
+ignore such words while inferring the topic distri-
+bution and hence might miss out important words.
+The continuous topic distributions of the Word
+Vector Topic Model on the other hand, will be able
+</bodyText>
+<page confidence="0.986489">
+800
+</page>
+<subsectionHeader confidence="0.43214">
+Gaussian LDA topics
+</subsectionHeader>
+<bodyText confidence="0.977704606060606">
+hostile play government people university hardware scott market gun
+murder round state god program interface stevens buying rocket
+violence win group jews public mode graham sector military
+victim players initiative israel law devices walker purchases force
+testifying games board christians institute rendering tom payments machine
+provoking goal legal christian high renderer russell purchase attack
+legal challenge bill great research user baker company operation
+citizens final general jesus college computers barry owners enemy
+conflict playing policy muslims center monitor adams paying fire
+victims hitting favor religion study static jones corporate flying
+rape match office armenian reading encryption joe limited defense
+laws ball political armenians technology emulation palmer loans warning
+violent advance commission church programs reverse cooper credit soldiers
+trial participants private muslim level device robinson financing guns
+intervention scores federal bible press target smith fees operations
+0.8302 0.9302 0.4943 2.0306 0.5216 2.3615 2.7660 1.4999 1.1847
+Multinomial LDA topics
+turkish year people god university window space ken gun
+armenian writes president jesus information image nasa stuff people
+people game mr people national color gov serve law
+armenians good don bible research file earth line guns
+armenia team money christian center windows launch attempt don
+turks article government church april program writes den state
+turkey baseball stephanopoulos christ san display orbit due crime
+don don time christians number jpeg moon peaceful weapons
+greek games make life year problem satellite article firearms
+soviet season clinton time conference screen article served police
+time runs work don washington bit shuttle warrant control
+genocide players tax faith california files lunar lotsa writes
+government hit years good page graphics henry occurred rights
+told time ll man state gif data writes article
+killed apr ve law states writes flight process laws
+0.3394 0.2036 0.1578 0.7561 0.0039 1.3767 1.5747 -0.0721 0.2443
+</bodyText>
+<tableCaption confidence="0.923136">
+Table 1: Top words of some topics from Gaussian-LDA and multinomial LDA on 20-newsgroups for
+</tableCaption>
+<bodyText confidence="0.991604428571429">
+K = 50. Words in Gaussian LDA are ranked based on density assigned to them by the posterior predic-
+tive distribution. The last row for each method indicates the PMI score (w.r.t. Wikipedia co-occurence)
+of the topics fifteen highest ranked words.
+to assign topics to an unseen word, if we have the
+vector representation of the word. Given the re-
+cent development of fast and scalable methods of
+estimating word embeddings, it is possible to train
+them on huge text corpora and hence it makes our
+model a viable alternative for topic inference on
+documents with new words.
+Experimental Setup: Since we want to capture
+the strength of our model on documents containing
+unseen words, we select a subset of documents and
+replace words of those documents by its synonyms
+if they haven’t occurred in the corpus before. We
+obtain the synonym of a word using two existing
+resources and hence we create two such datasets.
+For the first set, we use the Paraphrase Database
+(Ganitkevitch et al., 2013) to get the lexical para-
+phrase of a word. The paraphrase database7 is a
+semantic lexicon containing around 169 million
+paraphrase pairs of which 7.6 million are lexical
+(one word to one word) paraphrases. The dataset
+comes in varying size ranges starting from S to
+XXXL in increasing order of size and decreasing
+order of paraphrasing confidence. For our exper-
+iments we selected the L size of the paraphrase
+database.
+The second set was obtained using WordNet
+(Miller, 1995), a large human annotated lexicon
+for English that groups words into sets of syn-
+onyms called synsets. To obtain the synonym of
+a word, we first label the words with their part-of-
+speech using the Stanford POS tagger (Toutanova
+et al., 2003). Then we use the WordNet database
+</bodyText>
+<footnote confidence="0.976118">
+7http://www.cis.upenn.edu/˜ccb/ppdb/
+</footnote>
+<page confidence="0.991886">
+801
+</page>
+<figure confidence="0.9170865">
+-1.4 -1.2 -1 -0.8 -0.6 -0.4 -0.2 0 0.2 0.4 0.6
+1st Principal Component
+</figure>
+<figureCaption confidence="0.991436">
+Figure 3: The first two principal components for
+</figureCaption>
+<bodyText confidence="0.980485428571429">
+the word embeddings of the top words of top-
+ics shown in Table 1 have been visualized. Each
+blob represents a word color coded according to
+its topic in the Table 1.
+to get the synonym from its sysnset.8 We select
+the first synonym from the synset which hasn’t
+occurred in the corpus before. On the 20-news
+dataset (vocab size = 18,179 words, test corpus
+size = 188,694 words), a total of 21,919 words
+(2,741 distinct words) were replaced by synonyms
+from PPDB and 38,687 words (2,037 distinct
+words) were replaced by synonyms from Wordnet.
+Evaluation Benchmark: As mentioned before
+traditional topic model algorithms cannot handle
+OOV words. So comparing the performance of
+our document with those models would be unfair.
+Recently (Zhai and Boyd-Graber, 2013) proposed
+an extension of LDA (infvoc) which can incorpo-
+rate new words. They have shown better perfor-
+mances in a document classification task which
+uses the topic distribution of a document as fea-
+tures on the 20-news group dataset as compared to
+other fixed vocabulary algorithms. Even though,
+the infvoc model can handle OOV words, it will
+most likely not assign high probability to a new
+topical word when it encounters it for the first time
+since it is directly proportional to the number of
+times the word has been observed On the other
+hand, our model could assign high probability to
+the word if its corresponding embedding gets a
+high probability from one of the topic gaussians.
+With the experimental setup mentioned before, we
+want to evaluate performance of this property of
+8We use the JWI toolkit (Finlayson, 2014)
+our model. Using the topic distribution of a docu-
+ment as features, we try to classify the document
+into one of the 20 news groups it belongs to. If the
+document topic distribution is modeled well, then
+our model should be able to do a better job in the
+classification task.
+To infer the topic distribution of a document
+we follow the usual strategy of fixing the learnt
+topics during the training phase and then running
+Gibbs sampling on the test set (G-LDA (fix) in ta-
+ble 2). However infvoc is an online algorithm, so it
+would be unfair to compare our model which ob-
+serves the entire set of documents during test time.
+Therefore we implement the online version of our
+algorithm using Gibbs sampling following (Yao et
+al., 2009). We input the test documents in batches
+and do inference on those batches independently
+also sampling for the topic parameter, along the
+lines of infvoc. The batch size for our experiments
+are mentioned in parentheses in table 2. We clas-
+sify using the multi class logistic regression clas-
+sifier available in Weka (Hall et al., 2009).
+It is clear from table 2 that we outperform in-
+fvoc in all settings of our experiments. This im-
+plies that even if new documents have significant
+amount of new words, our model would still do
+a better job in modeling it. We also conduct an
+experiment to check the actual difference between
+the topic distribution of the original and synthetic
+documents. Let h and h&apos; denote the topic vectors
+of the original and synthetic documents. Table 3
+shows the average l1, l2 and l∞ norm of (h − h&apos;)
+of the test documents in the NIPS dataset. A low
+value of these metrics indicates higher similarity.
+As shown in the table, Gaussian LDA performs
+better here too.
+</bodyText>
+<sectionHeader confidence="0.996456" genericHeader="conclusions">
+6 Conclusion and Future Work
+</sectionHeader>
+<bodyText confidence="0.999966846153846">
+While word embeddings have been incorporated
+to produce state-of-the-art results in numerous su-
+pervised natural language processing tasks from
+the word level to document level ; however, they
+have played a more minor role in unsupervised
+learning problems. This work shows some of the
+promise that they hold in this domain. Our model
+can be extended in a number of potentially useful,
+but straightforward ways. First, DPMM models of
+word emissions would better model the fact that
+identical vectors will be generated multiple times,
+and perhaps add flexibility to the topic distribu-
+tions that can be captured, without sacrificing our
+</bodyText>
+<figure confidence="0.993662375">
+rendering
+emulation
+user
+static
+muslims
+devices
+interface
+joe
+monitor
+armenian
+muslim
+graham
+almer
+cooped
+armenians
+2nd Principal Component 1.2
+1
+0.8
+0.6
+0.4
+0.2
+0
+-0.2
+-0.4
+</figure>
+<page confidence="0.980885">
+802
+</page>
+<table confidence="0.998496142857143">
+Model Accuracy
+PPDB WordNet
+infvoc 28.00% 19.30%
+G-LDA (fix) 44.51% 43.53%
+G-LDA (1) 44.66% 43.47%
+G-LDA (100) 43.63% 43.11%
+G-LDA (1932) 44.72% 42.90%
+</table>
+<tableCaption confidence="0.997571">
+Table 2: Accuracy of our model and infvoc on the
+</tableCaption>
+<bodyText confidence="0.963482857142857">
+synthetic datasets. In Gaussian LDA fix, the topic
+distributions learnt during training were fixed; G-
+LDA(1, 100, 1932) is the online implementation
+of our model where the documents comes in mini-
+batches. The number in parenthesis denote the
+size of the batch. The full size of the test corpus is
+1932.
+</bodyText>
+<table confidence="0.999457571428571">
+Model PPDB (Mean Deviation)
+L1 L2 L∞
+infvoc 94.95 7.98 1.72
+G-LDA (fix) 15.13 1.81 0.66
+G-LDA (1) 15.71 1.90 0.66
+G-LDA (10) 15.76 1.97 0.66
+G-LDA (174) 14.58 1.66 0.66
+</table>
+<tableCaption confidence="0.994639">
+Table 3: This table shows the Average L1 Devia-
+</tableCaption>
+<bodyText confidence="0.992021842105263">
+tion, Average L2 Deviation, Average L∞ Devia-
+tion for the difference of the topic distribution of
+the actual document and the synthetic document
+on the NIPS corpus. Compared to infvoc, G-LDA
+achieves a lower deviation of topic distribution in-
+ferred on the synthetic documents with respect to
+actual document. The full size of the test corpus is
+174.
+preference for topical coherence. More broadly
+still, running LDA on documents consisting of dif-
+ferent modalities than just text is facilitated by us-
+ing the lingua franca of vector space representa-
+tions, so we expect numerous interesting appli-
+cations in this area. An interesting extension to
+our work would be the ability to handle polyse-
+mous words based on multi-prototype vector space
+models (Neelakantan et al., 2014; Reisinger and
+Mooney, 2010) and we keep this as an avenue for
+future research.
+</bodyText>
+<sectionHeader confidence="0.998028" genericHeader="acknowledgments">
+Acknowledgments
+</sectionHeader>
+<bodyText confidence="0.9989175">
+We thank the anonymous reviewers and Manaal
+Faruqui for helpful comments and feedback.
+</bodyText>
+<sectionHeader confidence="0.981605" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.998675156862745">
+Eneko Agirre, Enrique Alfonseca, Keith Hall, Jana
+Kravalova, Marius Pas¸ca, and Aitor Soroa. 2009.
+A study on similarity and relatedness using distribu-
+tional and wordnet-based approaches. In Proceed-
+ings of NAACL.
+David M. Blei, Andrew Y. Ng, and Michael I. Jordan.
+2003. Latent dirichlet allocation. J. Mach. Learn.
+Res., 3:993–1022, March.
+Jonathan Chang, Jordan Boyd-Graber, Chong Wang,
+Sean Gerrish, and David M. Blei. 2009. Reading
+tea leaves: How humans interpret topic models. In
+Neural Information Processing Systems.
+Ronan Collobert and Jason Weston. 2008. A unified
+architecture for natural language processing: deep
+neural networks with multitask learning. In Pro-
+ceedings of ICML.
+S. C. Deerwester, S. T. Dumais, T. K. Landauer, G. W.
+Furnas, and R. A. Harshman. 1990. Indexing by
+latent semantic analysis. Journal of the American
+Society for Information Science.
+Chris Dyer, Adam Lopez, Juri Ganitkevitch, Johnathan
+Weese, Ferhan Ture, Phil Blunsom, Hendra Seti-
+awan, Vladimir Eidelman, and Philip Resnik. 2010.
+cdec: A decoder, alignment, and learning framework
+for finite-state and context-free translation models.
+In Proceedings ofACL.
+Mark Finlayson, 2014. Proceedings of the Seventh
+Global Wordnet Conference, chapter Java Libraries
+for Accessing the Princeton Wordnet: Comparison
+and Evaluation, pages 78–85.
+Juri Ganitkevitch, Benjamin Van Durme, and Chris
+Callison-Burch. 2013. PPDB: The paraphrase
+database. In Proceedings of NAACL-HLT, pages
+758–764, Atlanta, Georgia, June. Association for
+Computational Linguistics.
+T. L. Griffiths and M. Steyvers. 2004. Finding scien-
+tific topics. Proceedings of the National Academy of
+Sciences, 101:5228–5235, April.
+Jiang Guo, Wanxiang Che, Haifeng Wang, and Ting
+Liu. 2014. Revisiting embedding features for sim-
+ple semi-supervised learning. In Proceedings of
+EMNLP.
+Mark Hall, Eibe Frank, Geoffrey Holmes, Bernhard
+Pfahringer, Peter Reutemann, and Ian H. Witten.
+2009. The weka data mining software: An update.
+SIGKDD Explor. Newsl., 11(1):10–18, November.
+Zellig Harris. 1954. Distributional structure. Word,
+10(23):146–162.
+Karl Moritz Hermann and Phil Blunsom. 2014. Multi-
+lingual models for compositional distributed seman-
+tics. arXiv preprint arXiv:1404.4641.
+</reference>
+<page confidence="0.989319">
+803
+</page>
+<reference confidence="0.999853230769231">
+Pengfei Hu, Wenju Liu, Wei Jiang, and Zhanlei Yang.
+2012. Latent topic model based on Gaussian-LDA
+for audio retrieval. In Pattern Recognition, volume
+321 of CCIS, pages 556–563. Springer.
+Aaron Q. Li, Amr Ahmed, Sujith Ravi, and Alexan-
+der J. Smola. 2014. Reducing the sampling com-
+plexity of topic models. In Proceedings of the 20th
+ACM SIGKDD International Conference on Knowl-
+edge Discovery and Data Mining, KDD ’14.
+Tomas Mikolov, Wen-tau Yih, and Geoffrey Zweig.
+2013. Linguistic regularities in continuous space
+word representations. In Proceedings of the 2013
+Conference of the North American Chapter of the
+Association for Computational Linguistics: Human
+Language Technologies, pages 746–751, Atlanta,
+Georgia, June. Association for Computational Lin-
+guistics.
+George A. Miller. 1995. Wordnet: A lexical database
+for english. Commun. ACM, 38(11):39–41, Novem-
+ber.
+Kevin P. Murphy. 2012. Machine Learning: A Proba-
+bilistic Perspective. The MIT Press.
+Arvind Neelakantan, Jeevan Shankar, Alexandre Pas-
+sos, and Andrew McCallum. 2014. Efficient non-
+parametric estimation of multiple embeddings per
+word in vector space. In Proceedings of the 2014
+Conference on Empirical Methods in Natural Lan-
+guage Processing, EMNLP 2014, October 25-29,
+2014, Doha, Qatar, A meeting of SIGDAT, a Special
+Interest Group of the ACL.
+David Newman, Sarvnaz Karimi, and Lawrence Cave-
+don. 2009. External evaluation of topic models.
+pages 11–18, December.
+Joseph Reisinger and Raymond J. Mooney. 2010.
+Multi-prototype vector-space models of word mean-
+ing. In Human Language Technologies: The 2010
+Annual Conference of the North American Chap-
+ter of the Association for Computational Linguistics,
+HLT ’10.
+G. Stewart. 1998. Matrix Algorithms. Society for In-
+dustrial and Applied Mathematics.
+Kristina Toutanova, Dan Klein, Christopher D. Man-
+ning, and Yoram Singer. 2003. Feature-rich part-of-
+speech tagging with a cyclic dependency network.
+In Proceedings of the 2003 Conference of the North
+American Chapter of the Association for Computa-
+tional Linguistics on Human Language Technology
+- Volume 1, NAACL ’03, pages 173–180, Strouds-
+burg, PA, USA. Association for Computational Lin-
+guistics.
+Joseph Turian, Lev Ratinov, and Yoshua Bengio. 2010.
+Word representations: a simple and general method
+for semi-supervised learning. In Proc. of ACL.
+Peter D. Turney and Patrick Pantel. 2010. From fre-
+quency to meaning: Vector space models of seman-
+tics. JAIR, pages 141–188.
+Peter D. Turney. 2006. Similarity of semantic rela-
+tions. Comput. Linguist., 32(3):379–416, Septem-
+ber.
+Michael D. Vose. 1991. A linear algorithm for gen-
+erating random numbers with a given distribution.
+Software Engineering, IEEE Transactions on.
+Li Wan, Leo Zhu, and Rob Fergus. 2012. A hy-
+brid neural network-latent topic model. In Neil D.
+Lawrence and Mark A. Girolami, editors, Proceed-
+ings of the Fifteenth International Conference on Ar-
+tificial Intelligence and Statistics (AISTATS-12), vol-
+ume 22, pages 1287–1294.
+Limin Yao, David Mimno, and Andrew McCallum.
+2009. Efficient methods for topic model inference
+on streaming document collections. In Proceedings
+of the 15th ACM SIGKDD International Conference
+on Knowledge Discovery and Data Mining, KDD
+’09, pages 937–946, New York, NY, USA. ACM.
+Ke Zhai and Jordan L. Boyd-Graber. 2013. Online la-
+tent dirichlet allocation with infinite vocabulary. In
+ICML (1), volume 28 of JMLR Proceedings, pages
+561–569. JMLR.org.
+</reference>
+<page confidence="0.998784">
+804
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.973486">
+<title confidence="0.999077">Gaussian LDA for Topic Models with Word Embeddings</title>
+<author confidence="0.999671">Manzil Chris Dyer</author>
+<affiliation confidence="0.9999455">School of Computer Science Carnegie Mellon University</affiliation>
+<address confidence="0.999761">Pittsburgh, PA, 15213, USA</address>
+<abstract confidence="0.999158533333334">Continuous space word embeddings learned from large, unstructured corpora have been shown to be effective at capturing semantic regularities in language. In this paper we replace LDA’s parameterization of “topics” as categorical distributions over opaque word types with multivariate Gaussian distributions on the embedding space. This encourages model to group words that are to be semantically related into topics. To perform inference, we introduce a fast collapsed Gibbs sampling algorithm based on Cholesky decompositions of covariance matrices of the posterior predictive distributions. We further derive a scalable algorithm that draws samples from stale posterior predictive distributions and corrects them with a Metropolis–Hastings step. Using vectors learned from a domain-general corpus (English Wikipedia), we report results on two document collections (20-newsgroups and NIPS). Qualitatively, Gaussian LDA infers different (but still very sensible) topics relative to standard LDA. Quantitatively, our technique outperforms existing models at dealing with OOV words in held-out documents.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>Eneko Agirre</author>
+<author>Enrique Alfonseca</author>
+<author>Keith Hall</author>
+<author>Jana Kravalova</author>
+<author>Marius Pas¸ca</author>
+<author>Aitor Soroa</author>
+</authors>
+<title>A study on similarity and relatedness using distributional and wordnet-based approaches.</title>
+<date>2009</date>
+<booktitle>In Proceedings of NAACL.</booktitle>
+<marker>Agirre, Alfonseca, Hall, Kravalova, Pas¸ca, Soroa, 2009</marker>
+<rawString>Eneko Agirre, Enrique Alfonseca, Keith Hall, Jana Kravalova, Marius Pas¸ca, and Aitor Soroa. 2009. A study on similarity and relatedness using distributional and wordnet-based approaches. In Proceedings of NAACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>David M Blei</author>
+<author>Andrew Y Ng</author>
+<author>Michael I Jordan</author>
+</authors>
+<title>Latent dirichlet allocation.</title>
+<date>2003</date>
+<journal>J. Mach. Learn. Res.,</journal>
+<pages>3--993</pages>
+<contexts>
+<context position="1648" citStr="Blei et al., 2003" startWordPosition="238" endWordPosition="241">l corpus (English Wikipedia), we report results on two document collections (20-newsgroups and NIPS). Qualitatively, Gaussian LDA infers different (but still very sensible) topics relative to standard LDA. Quantitatively, our technique outperforms existing models at dealing with OOV words in held-out documents. 1 Introduction Latent Dirichlet Allocation (LDA) is a Bayesian technique that is widely used for inferring the topic structure in corpora of documents. It conceives of a document as a mixture of a small number of topics, and topics as a (relatively sparse) distribution over word types (Blei et al., 2003). These priors are remarkably effective at producing useful *Both student authors had equal contribution. results. However, our intuitions tell us that while documents may indeed be conceived of as a mixture of topics, we should further expect topics to be semantically coherent. Indeed, standard human evaluations of topic modeling performance are designed to elicit assessment of semantic coherence (Chang et al., 2009; Newman et al., 2009). However, this prior preference for semantic coherence is not encoded in the model, and any such observation of semantic coherence found in the inferred topi</context>
+<context position="6185" citStr="Blei et al., 2003" startWordPosition="958" endWordPosition="961">tors can either be constructed using low rank approximations of cooccurrence statistics (Deerwester et al., 1990) or using internal representations from neural network models of word sequences (Collobert and Weston, 2008). We use a recently popular and fast tool called word2vec1, to generate skip-gram word embeddings from unlabeled corpus. In this model, a word is used as an input to a log-linear classifier with continuous projection layer and words within a certain window before and after the words are predicted. 1https://code.google.com/p/word2vec/ 2.2 Latent Dirichlet Allocation (LDA) LDA (Blei et al., 2003) is a probabilistic topic model of corpora of documents which seeks to represent the underlying thematic structure of the document collection. They have emerged as a powerful new technique of finding useful structure in an unstructured collection as it learns distributions over words. The high probability words in each distribution gives us a way of understanding the contents of the corpus at a very high level. In LDA, each document of the corpus is assumed to have a distribution over K topics, where the discrete topic distributions are drawn from a symmetric dirichlet distribution. The genera</context>
+</contexts>
+<marker>Blei, Ng, Jordan, 2003</marker>
+<rawString>David M. Blei, Andrew Y. Ng, and Michael I. Jordan. 2003. Latent dirichlet allocation. J. Mach. Learn. Res., 3:993–1022, March.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jonathan Chang</author>
+<author>Jordan Boyd-Graber</author>
+<author>Chong Wang</author>
+<author>Sean Gerrish</author>
+<author>David M Blei</author>
+</authors>
+<title>Reading tea leaves: How humans interpret topic models.</title>
+<date>2009</date>
+<booktitle>In Neural Information Processing Systems.</booktitle>
+<contexts>
+<context position="2068" citStr="Chang et al., 2009" startWordPosition="302" endWordPosition="305">the topic structure in corpora of documents. It conceives of a document as a mixture of a small number of topics, and topics as a (relatively sparse) distribution over word types (Blei et al., 2003). These priors are remarkably effective at producing useful *Both student authors had equal contribution. results. However, our intuitions tell us that while documents may indeed be conceived of as a mixture of topics, we should further expect topics to be semantically coherent. Indeed, standard human evaluations of topic modeling performance are designed to elicit assessment of semantic coherence (Chang et al., 2009; Newman et al., 2009). However, this prior preference for semantic coherence is not encoded in the model, and any such observation of semantic coherence found in the inferred topic distributions is, in some sense, accidental. In this paper, we develop a variant of LDA that operates on continuous space embeddings of words— rather than word types—to impose a prior expectation for semantic coherence. Our approach replaces the opaque word types usually modeled in LDA with continuous space embeddings of these words, which are generated as draws from a multivariate Gaussian. How does this capture o</context>
+<context position="20291" citStr="Chang et al., 2009" startWordPosition="3444" endWordPosition="3447">ents4 on two datasets 20- NEWSGROUP5 and NIPS6. All the datasets were tokenized and lowercased with cdec (Dyer et al., 2010). 5.1 Topic Coherence Quantitative Analysis Typically topic models are evaluated based on the likelihood of held-out documents. But in this case, it is not correct to compare perplexities with models which do topic modeling on words. Since our topics are continuous distributions, the probability of a word vector is given by its density w.r.t the normal distribution based on its topic assignment, instead of a probability mass from a discrete topic distribution. Moreover, (Chang et al., 2009) showed that higher likelihood of held-out documents doesn’t necessarily correspond to human perception of topic coherence. Instead to measure topic coherence we follow (Newman et al., 2009) to compute the Pointwise Mutual Information (PMI) of topic words w.r.t wikipedia articles. We extract the document co-occurrence statistics of topic words from Wikipedia and compute the score of a topic by averaging the score of the top 15 words of the topic. A higher PMI score implies a more coherent topic as it means the topic words usually co-occur in the same document. In the last line of Table 1, we p</context>
+</contexts>
+<marker>Chang, Boyd-Graber, Wang, Gerrish, Blei, 2009</marker>
+<rawString>Jonathan Chang, Jordan Boyd-Graber, Chong Wang, Sean Gerrish, and David M. Blei. 2009. Reading tea leaves: How humans interpret topic models. In Neural Information Processing Systems.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ronan Collobert</author>
+<author>Jason Weston</author>
+</authors>
+<title>A unified architecture for natural language processing: deep neural networks with multitask learning.</title>
+<date>2008</date>
+<booktitle>In Proceedings of ICML.</booktitle>
+<contexts>
+<context position="5788" citStr="Collobert and Weston, 2008" startWordPosition="896" endWordPosition="899">his has given rise to data-driven learning of word vectors that capture lexical and semantic properties, which is now a technique of central importance in natural language processing. These word vectors can be used for identifying semantically related word pairs (Turney, 2006; Agirre et al., 2009) or as features in downstream text processing applications (Turian et al., 2010; Guo et al., 2014). Word vectors can either be constructed using low rank approximations of cooccurrence statistics (Deerwester et al., 1990) or using internal representations from neural network models of word sequences (Collobert and Weston, 2008). We use a recently popular and fast tool called word2vec1, to generate skip-gram word embeddings from unlabeled corpus. In this model, a word is used as an input to a log-linear classifier with continuous projection layer and words within a certain window before and after the words are predicted. 1https://code.google.com/p/word2vec/ 2.2 Latent Dirichlet Allocation (LDA) LDA (Blei et al., 2003) is a probabilistic topic model of corpora of documents which seeks to represent the underlying thematic structure of the document collection. They have emerged as a powerful new technique of finding use</context>
+<context position="8515" citStr="Collobert and Weston, 2008" startWordPosition="1358" endWordPosition="1361"> d at position i. Since our observations are no longer discrete values but continuous vectors in an Mdimensional space, we characterize each topic k as a multivariate Gaussian distribution with mean µk and covariance Σk. The choice of a Gaussian parameterization is justified by both analytic convenience and observations that Euclidean distances 796 p(zd,i = k |z−(d,i), Vd, ζ, α) a (nk,d + αk) X tνk−M+1 ~vd,i~~µk, κ Kk 1 Σk~ (1) Kk Figure 1: Sampling equation for the collapsed Gibbs sampler; refer to text for a description of the notation. between embeddings correlate with semantic similarity (Collobert and Weston, 2008; Turney and Pantel, 2010; Hermann and Blunsom, 2014). We place conjugate priors on these values: a Gaussian centered at zero for the mean and an inverse Wishart distribution for the covariance. As before, each document is seen as a mixture of topics whose proportions are drawn from a symmetric Dirichlet prior. The generative process can thus be summarized as follows: 1. for k = 1 to K (a) Draw topic covariance Σk ti W−1(Ψ, ν) (b) Draw topic mean µk — JU(µ, 1κΣk) 2. for each document d in corpus D (a) Draw topic distribution θd — Dir(α) (b) for each word index n from 1 to Nd i. Draw a topic zn</context>
+</contexts>
+<marker>Collobert, Weston, 2008</marker>
+<rawString>Ronan Collobert and Jason Weston. 2008. A unified architecture for natural language processing: deep neural networks with multitask learning. In Proceedings of ICML.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>S C Deerwester</author>
+<author>S T Dumais</author>
+<author>T K Landauer</author>
+<author>G W Furnas</author>
+<author>R A Harshman</author>
+</authors>
+<title>Indexing by latent semantic analysis.</title>
+<date>1990</date>
+<journal>Journal of the American Society for Information Science.</journal>
+<contexts>
+<context position="5680" citStr="Deerwester et al., 1990" startWordPosition="878" endWordPosition="882">ributional hypothesis (Harris, 1954), words occurring in similar contexts tend to have similar meaning. This has given rise to data-driven learning of word vectors that capture lexical and semantic properties, which is now a technique of central importance in natural language processing. These word vectors can be used for identifying semantically related word pairs (Turney, 2006; Agirre et al., 2009) or as features in downstream text processing applications (Turian et al., 2010; Guo et al., 2014). Word vectors can either be constructed using low rank approximations of cooccurrence statistics (Deerwester et al., 1990) or using internal representations from neural network models of word sequences (Collobert and Weston, 2008). We use a recently popular and fast tool called word2vec1, to generate skip-gram word embeddings from unlabeled corpus. In this model, a word is used as an input to a log-linear classifier with continuous projection layer and words within a certain window before and after the words are predicted. 1https://code.google.com/p/word2vec/ 2.2 Latent Dirichlet Allocation (LDA) LDA (Blei et al., 2003) is a probabilistic topic model of corpora of documents which seeks to represent the underlying</context>
+</contexts>
+<marker>Deerwester, Dumais, Landauer, Furnas, Harshman, 1990</marker>
+<rawString>S. C. Deerwester, S. T. Dumais, T. K. Landauer, G. W. Furnas, and R. A. Harshman. 1990. Indexing by latent semantic analysis. Journal of the American Society for Information Science.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Chris Dyer</author>
+<author>Adam Lopez</author>
+<author>Juri Ganitkevitch</author>
+<author>Johnathan Weese</author>
+<author>Ferhan Ture</author>
+<author>Phil Blunsom</author>
+<author>Hendra Setiawan</author>
+<author>Vladimir Eidelman</author>
+<author>Philip Resnik</author>
+</authors>
+<title>cdec: A decoder, alignment, and learning framework for finite-state and context-free translation models.</title>
+<date>2010</date>
+<booktitle>In Proceedings ofACL.</booktitle>
+<contexts>
+<context position="19796" citStr="Dyer et al., 2010" startWordPosition="3363" endWordPosition="3366">ons the nk,d vector starts to become sparse. 80 75 70 65 60 55 50 Naive Cholesky Alias+Cholesky Log-Likelihood log (Li,i) . M i=1 799 5 Experiments In this section we evaluate our Word Vector Topic Model on various experimental tasks. Specifically we wish to determine: • Is our model is able to find coherent and meaningful topics? • Is our model able to infer the topic distribution of a held-out document even when the document contains words which were previously unseen? We run our experiments4 on two datasets 20- NEWSGROUP5 and NIPS6. All the datasets were tokenized and lowercased with cdec (Dyer et al., 2010). 5.1 Topic Coherence Quantitative Analysis Typically topic models are evaluated based on the likelihood of held-out documents. But in this case, it is not correct to compare perplexities with models which do topic modeling on words. Since our topics are continuous distributions, the probability of a word vector is given by its density w.r.t the normal distribution based on its topic assignment, instead of a probability mass from a discrete topic distribution. Moreover, (Chang et al., 2009) showed that higher likelihood of held-out documents doesn’t necessarily correspond to human perception o</context>
+</contexts>
+<marker>Dyer, Lopez, Ganitkevitch, Weese, Ture, Blunsom, Setiawan, Eidelman, Resnik, 2010</marker>
+<rawString>Chris Dyer, Adam Lopez, Juri Ganitkevitch, Johnathan Weese, Ferhan Ture, Phil Blunsom, Hendra Setiawan, Vladimir Eidelman, and Philip Resnik. 2010. cdec: A decoder, alignment, and learning framework for finite-state and context-free translation models. In Proceedings ofACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Mark Finlayson</author>
+</authors>
+<date>2014</date>
+<booktitle>Proceedings of the Seventh Global Wordnet Conference, chapter Java Libraries for Accessing the Princeton Wordnet: Comparison and Evaluation,</booktitle>
+<pages>78--85</pages>
+<contexts>
+<context position="29388" citStr="Finlayson, 2014" startWordPosition="4902" endWordPosition="4903">0-news group dataset as compared to other fixed vocabulary algorithms. Even though, the infvoc model can handle OOV words, it will most likely not assign high probability to a new topical word when it encounters it for the first time since it is directly proportional to the number of times the word has been observed On the other hand, our model could assign high probability to the word if its corresponding embedding gets a high probability from one of the topic gaussians. With the experimental setup mentioned before, we want to evaluate performance of this property of 8We use the JWI toolkit (Finlayson, 2014) our model. Using the topic distribution of a document as features, we try to classify the document into one of the 20 news groups it belongs to. If the document topic distribution is modeled well, then our model should be able to do a better job in the classification task. To infer the topic distribution of a document we follow the usual strategy of fixing the learnt topics during the training phase and then running Gibbs sampling on the test set (G-LDA (fix) in table 2). However infvoc is an online algorithm, so it would be unfair to compare our model which observes the entire set of documen</context>
+</contexts>
+<marker>Finlayson, 2014</marker>
+<rawString>Mark Finlayson, 2014. Proceedings of the Seventh Global Wordnet Conference, chapter Java Libraries for Accessing the Princeton Wordnet: Comparison and Evaluation, pages 78–85.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Juri Ganitkevitch</author>
+<author>Benjamin Van Durme</author>
+<author>Chris Callison-Burch</author>
+</authors>
+<title>PPDB: The paraphrase database.</title>
+<date>2013</date>
+<booktitle>In Proceedings of NAACL-HLT,</booktitle>
+<pages>758--764</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<location>Atlanta, Georgia,</location>
+<marker>Ganitkevitch, Van Durme, Callison-Burch, 2013</marker>
+<rawString>Juri Ganitkevitch, Benjamin Van Durme, and Chris Callison-Burch. 2013. PPDB: The paraphrase database. In Proceedings of NAACL-HLT, pages 758–764, Atlanta, Georgia, June. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>T L Griffiths</author>
+<author>M Steyvers</author>
+</authors>
+<title>Finding scientific topics.</title>
+<date>2004</date>
+<booktitle>Proceedings of the National Academy of Sciences,</booktitle>
+<pages>101--5228</pages>
+<contexts>
+<context position="10721" citStr="Griffiths and Steyvers (2004)" startWordPosition="1731" endWordPosition="1734"> images. 4 Posterior Inference In our application, we observe documents consisting of word vectors and wish to infer the posterior distribution over the topic parameters, proportions, and the topic assignments of individual words. Since there is no analytic form of the posterior, approximations are required. Because of our choice of conjugate priors for topic parameters and proportions, these variables can be analytically integrated out, and we can derive a collapsed Gibbs sampler that resamples topic assignments to individual word vectors, similar to the collapsed sampling scheme proposed by Griffiths and Steyvers (2004). The conditional distribution we need for sampling is shown in Figure 1. Here, z−(d,i) represents the topic assignments of all word embeddings, excluding the one at ith position of document d; Vd is the sequence of vectors for document d; tν,(x |µ0, Σ0) is the multivariate t - distribution with ν0 degrees of freedom and parameters µ0 and Σ0. The tuple ζ = (µ, κ, Σ, ν) represents the parameters of the prior distribution. It should be noted that the first part of the equation which expresses the probability of topic k in document d is the same as that of LDA. This is because the portion of the </context>
+</contexts>
+<marker>Griffiths, Steyvers, 2004</marker>
+<rawString>T. L. Griffiths and M. Steyvers. 2004. Finding scientific topics. Proceedings of the National Academy of Sciences, 101:5228–5235, April.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jiang Guo</author>
+<author>Wanxiang Che</author>
+<author>Haifeng Wang</author>
+<author>Ting Liu</author>
+</authors>
+<title>Revisiting embedding features for simple semi-supervised learning.</title>
+<date>2014</date>
+<booktitle>In Proceedings of EMNLP.</booktitle>
+<contexts>
+<context position="5557" citStr="Guo et al., 2014" startWordPosition="861" endWordPosition="864"> topics relevant to our work: vector space word embeddings and LDA. 2.1 Vector Space Semantics According to the distributional hypothesis (Harris, 1954), words occurring in similar contexts tend to have similar meaning. This has given rise to data-driven learning of word vectors that capture lexical and semantic properties, which is now a technique of central importance in natural language processing. These word vectors can be used for identifying semantically related word pairs (Turney, 2006; Agirre et al., 2009) or as features in downstream text processing applications (Turian et al., 2010; Guo et al., 2014). Word vectors can either be constructed using low rank approximations of cooccurrence statistics (Deerwester et al., 1990) or using internal representations from neural network models of word sequences (Collobert and Weston, 2008). We use a recently popular and fast tool called word2vec1, to generate skip-gram word embeddings from unlabeled corpus. In this model, a word is used as an input to a log-linear classifier with continuous projection layer and words within a certain window before and after the words are predicted. 1https://code.google.com/p/word2vec/ 2.2 Latent Dirichlet Allocation (</context>
+</contexts>
+<marker>Guo, Che, Wang, Liu, 2014</marker>
+<rawString>Jiang Guo, Wanxiang Che, Haifeng Wang, and Ting Liu. 2014. Revisiting embedding features for simple semi-supervised learning. In Proceedings of EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Mark Hall</author>
+<author>Eibe Frank</author>
+<author>Geoffrey Holmes</author>
+<author>Bernhard Pfahringer</author>
+<author>Peter Reutemann</author>
+<author>Ian H Witten</author>
+</authors>
+<title>The weka data mining software: An update.</title>
+<date>2009</date>
+<journal>SIGKDD Explor. Newsl.,</journal>
+<volume>11</volume>
+<issue>1</issue>
+<contexts>
+<context position="30450" citStr="Hall et al., 2009" startWordPosition="5087" endWordPosition="5090">est set (G-LDA (fix) in table 2). However infvoc is an online algorithm, so it would be unfair to compare our model which observes the entire set of documents during test time. Therefore we implement the online version of our algorithm using Gibbs sampling following (Yao et al., 2009). We input the test documents in batches and do inference on those batches independently also sampling for the topic parameter, along the lines of infvoc. The batch size for our experiments are mentioned in parentheses in table 2. We classify using the multi class logistic regression classifier available in Weka (Hall et al., 2009). It is clear from table 2 that we outperform infvoc in all settings of our experiments. This implies that even if new documents have significant amount of new words, our model would still do a better job in modeling it. We also conduct an experiment to check the actual difference between the topic distribution of the original and synthetic documents. Let h and h&apos; denote the topic vectors of the original and synthetic documents. Table 3 shows the average l1, l2 and l∞ norm of (h − h&apos;) of the test documents in the NIPS dataset. A low value of these metrics indicates higher similarity. As shown </context>
+</contexts>
+<marker>Hall, Frank, Holmes, Pfahringer, Reutemann, Witten, 2009</marker>
+<rawString>Mark Hall, Eibe Frank, Geoffrey Holmes, Bernhard Pfahringer, Peter Reutemann, and Ian H. Witten. 2009. The weka data mining software: An update. SIGKDD Explor. Newsl., 11(1):10–18, November.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Zellig Harris</author>
+</authors>
+<date>1954</date>
+<journal>Distributional structure. Word,</journal>
+<volume>10</volume>
+<issue>23</issue>
+<contexts>
+<context position="5092" citStr="Harris, 1954" startWordPosition="788" endWordPosition="790">ral strategies for collapsed Gibbs sampling and derive scalable algorithms, achieving asymptotic speed-up over the naive implementation (§4). We qualitatively show that our topics make intuitive sense and quantitatively demonstrate that our model captures a better representation of a document in the topic space by outperforming other models in a classification task (§5). 2 Background Before going to the details of our model we provide some background on two topics relevant to our work: vector space word embeddings and LDA. 2.1 Vector Space Semantics According to the distributional hypothesis (Harris, 1954), words occurring in similar contexts tend to have similar meaning. This has given rise to data-driven learning of word vectors that capture lexical and semantic properties, which is now a technique of central importance in natural language processing. These word vectors can be used for identifying semantically related word pairs (Turney, 2006; Agirre et al., 2009) or as features in downstream text processing applications (Turian et al., 2010; Guo et al., 2014). Word vectors can either be constructed using low rank approximations of cooccurrence statistics (Deerwester et al., 1990) or using in</context>
+</contexts>
+<marker>Harris, 1954</marker>
+<rawString>Zellig Harris. 1954. Distributional structure. Word, 10(23):146–162.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Karl Moritz Hermann</author>
+<author>Phil Blunsom</author>
+</authors>
+<title>Multilingual models for compositional distributed semantics. arXiv preprint arXiv:1404.4641.</title>
+<date>2014</date>
+<contexts>
+<context position="8568" citStr="Hermann and Blunsom, 2014" startWordPosition="1366" endWordPosition="1369">r discrete values but continuous vectors in an Mdimensional space, we characterize each topic k as a multivariate Gaussian distribution with mean µk and covariance Σk. The choice of a Gaussian parameterization is justified by both analytic convenience and observations that Euclidean distances 796 p(zd,i = k |z−(d,i), Vd, ζ, α) a (nk,d + αk) X tνk−M+1 ~vd,i~~µk, κ Kk 1 Σk~ (1) Kk Figure 1: Sampling equation for the collapsed Gibbs sampler; refer to text for a description of the notation. between embeddings correlate with semantic similarity (Collobert and Weston, 2008; Turney and Pantel, 2010; Hermann and Blunsom, 2014). We place conjugate priors on these values: a Gaussian centered at zero for the mean and an inverse Wishart distribution for the covariance. As before, each document is seen as a mixture of topics whose proportions are drawn from a symmetric Dirichlet prior. The generative process can thus be summarized as follows: 1. for k = 1 to K (a) Draw topic covariance Σk ti W−1(Ψ, ν) (b) Draw topic mean µk — JU(µ, 1κΣk) 2. for each document d in corpus D (a) Draw topic distribution θd — Dir(α) (b) for each word index n from 1 to Nd i. Draw a topic zn — Categorical(θd) ii. Draw vd,n — JU(µzn, Σzn) This </context>
+</contexts>
+<marker>Hermann, Blunsom, 2014</marker>
+<rawString>Karl Moritz Hermann and Phil Blunsom. 2014. Multilingual models for compositional distributed semantics. arXiv preprint arXiv:1404.4641.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Pengfei Hu</author>
+<author>Wenju Liu</author>
+<author>Wei Jiang</author>
+<author>Zhanlei Yang</author>
+</authors>
+<title>Latent topic model based on Gaussian-LDA for audio retrieval.</title>
+<date>2012</date>
+<booktitle>In Pattern Recognition,</booktitle>
+<volume>321</volume>
+<pages>556--563</pages>
+<publisher>Springer.</publisher>
+<contexts>
+<context position="9279" citStr="Hu et al., 2012" startWordPosition="1500" endWordPosition="1503">verse Wishart distribution for the covariance. As before, each document is seen as a mixture of topics whose proportions are drawn from a symmetric Dirichlet prior. The generative process can thus be summarized as follows: 1. for k = 1 to K (a) Draw topic covariance Σk ti W−1(Ψ, ν) (b) Draw topic mean µk — JU(µ, 1κΣk) 2. for each document d in corpus D (a) Draw topic distribution θd — Dir(α) (b) for each word index n from 1 to Nd i. Draw a topic zn — Categorical(θd) ii. Draw vd,n — JU(µzn, Σzn) This model has previously been proposed for obtaining indexing representations for audio retrieval (Hu et al., 2012). They use variational/EM method for posterior inference. Although we don’t do any experiment to compare the running time of both approaches, the per-iteration computational complexity is same for both inference methods. We propose a faster inference technique using Cholesky decomposition of covariance matrices which can be applied to both the Gibbs and variational/EM method. However we are not aware of any straightforward way of applying the aliasing trick proposed by (Li et al., 2014) on the variational/EM method which gave us huge improvement on running time (see Figure 2). Another work whi</context>
+</contexts>
+<marker>Hu, Liu, Jiang, Yang, 2012</marker>
+<rawString>Pengfei Hu, Wenju Liu, Wei Jiang, and Zhanlei Yang. 2012. Latent topic model based on Gaussian-LDA for audio retrieval. In Pattern Recognition, volume 321 of CCIS, pages 556–563. Springer.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Aaron Q Li</author>
+<author>Amr Ahmed</author>
+<author>Sujith Ravi</author>
+<author>Alexander J Smola</author>
+</authors>
+<title>Reducing the sampling complexity of topic models.</title>
+<date>2014</date>
+<booktitle>In Proceedings of the 20th ACM SIGKDD International Conference on Knowledge Discovery and Data Mining, KDD ’14.</booktitle>
+<contexts>
+<context position="9770" citStr="Li et al., 2014" startWordPosition="1575" endWordPosition="1578">zn, Σzn) This model has previously been proposed for obtaining indexing representations for audio retrieval (Hu et al., 2012). They use variational/EM method for posterior inference. Although we don’t do any experiment to compare the running time of both approaches, the per-iteration computational complexity is same for both inference methods. We propose a faster inference technique using Cholesky decomposition of covariance matrices which can be applied to both the Gibbs and variational/EM method. However we are not aware of any straightforward way of applying the aliasing trick proposed by (Li et al., 2014) on the variational/EM method which gave us huge improvement on running time (see Figure 2). Another work which combines embedding with topic models is by (Wan et al., 2012) where they jointly learn the parameters of a neural network and a topic model to capture the topic distribution of low dimensional representation of images. 4 Posterior Inference In our application, we observe documents consisting of word vectors and wish to infer the posterior distribution over the topic parameters, proportions, and the topic assignments of individual words. Since there is no analytic form of the posterio</context>
+<context position="17398" citStr="Li et al., 2014" startWordPosition="2950" endWordPosition="2953">ribution and the second term αk x tνk−M+1 (vd,i µk, κk+ 1 Ek~ denotes the language model contribution. Empirically one can make two observations about these terms. First, nk,d is often a sparse vector, as a document most likely contains only a few of the topics. Secondly, topic parameters (µk, Ek) captures global phenomenon, and rather change relatively slowly over the iterations. We can exploit these findings to avoid the naive approach to draw a sample from (1). In particular, we compute the document-specific sparse term exactly and for the remainder language model term we borrow idea from (Li et al., 2014). We use a slightly stale distribution for the language model. Then Metropolis Hastings (MH) algorithm allows us to convert the stale sample 0 1 2 3 4 5 Time #104 Figure 2: Plot comparing average log-likelihood vs time (in sec) achieved after applying each trick on the NIPS dataset. The shapes on each curve denote end of each iteration. into a fresh one, provided that we compute ratios between successive states correctly. It is sufficient to run MH for a few number of steps because the stale distribution acting as the proposal is very similar to the target. This is because, as pointed out earl</context>
+</contexts>
+<marker>Li, Ahmed, Ravi, Smola, 2014</marker>
+<rawString>Aaron Q. Li, Amr Ahmed, Sujith Ravi, and Alexander J. Smola. 2014. Reducing the sampling complexity of topic models. In Proceedings of the 20th ACM SIGKDD International Conference on Knowledge Discovery and Data Mining, KDD ’14.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Tomas Mikolov</author>
+<author>Wen-tau Yih</author>
+<author>Geoffrey Zweig</author>
+</authors>
+<title>Linguistic regularities in continuous space word representations.</title>
+<date>2013</date>
+<booktitle>In Proceedings of the 2013 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies,</booktitle>
+<pages>746--751</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<location>Atlanta, Georgia,</location>
+<contexts>
+<context position="2946" citStr="Mikolov et al., 2013" startWordPosition="447" endWordPosition="450">riant of LDA that operates on continuous space embeddings of words— rather than word types—to impose a prior expectation for semantic coherence. Our approach replaces the opaque word types usually modeled in LDA with continuous space embeddings of these words, which are generated as draws from a multivariate Gaussian. How does this capture our preference for semantic coherence? Word embeddings have been shown to capture lexico-semantic regularities in language: words with similar syntactic and semantic properties are found to be close to each other in the embedding space (Agirre et al., 2009; Mikolov et al., 2013). Since Gaussian distributions capture a notion of centrality in space, and semantically related words are localized in space, our Gaussian LDA model encodes a prior preference for semantically coherent topics. Our model further has several advantages. Traditional LDA assumes a fixed vocabulary of word types. This modeling assumption drawback as it cannot handle out of vocabulary (OOV) words in “held out” documents. Zhai and Boyd-Graber (2013) proposed an approach to address this problem by drawing topics from a Dirichlet Process with a base distribution over all possible character strings (i.</context>
+</contexts>
+<marker>Mikolov, Yih, Zweig, 2013</marker>
+<rawString>Tomas Mikolov, Wen-tau Yih, and Geoffrey Zweig. 2013. Linguistic regularities in continuous space word representations. In Proceedings of the 2013 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies, pages 746–751, Atlanta, Georgia, June. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>George A Miller</author>
+</authors>
+<title>Wordnet: A lexical database for english.</title>
+<date>1995</date>
+<journal>Commun. ACM,</journal>
+<volume>38</volume>
+<issue>11</issue>
+<contexts>
+<context position="27368" citStr="Miller, 1995" startWordPosition="4564" endWordPosition="4565">two existing resources and hence we create two such datasets. For the first set, we use the Paraphrase Database (Ganitkevitch et al., 2013) to get the lexical paraphrase of a word. The paraphrase database7 is a semantic lexicon containing around 169 million paraphrase pairs of which 7.6 million are lexical (one word to one word) paraphrases. The dataset comes in varying size ranges starting from S to XXXL in increasing order of size and decreasing order of paraphrasing confidence. For our experiments we selected the L size of the paraphrase database. The second set was obtained using WordNet (Miller, 1995), a large human annotated lexicon for English that groups words into sets of synonyms called synsets. To obtain the synonym of a word, we first label the words with their part-ofspeech using the Stanford POS tagger (Toutanova et al., 2003). Then we use the WordNet database 7http://www.cis.upenn.edu/˜ccb/ppdb/ 801 -1.4 -1.2 -1 -0.8 -0.6 -0.4 -0.2 0 0.2 0.4 0.6 1st Principal Component Figure 3: The first two principal components for the word embeddings of the top words of topics shown in Table 1 have been visualized. Each blob represents a word color coded according to its topic in the Table 1. </context>
+</contexts>
+<marker>Miller, 1995</marker>
+<rawString>George A. Miller. 1995. Wordnet: A lexical database for english. Commun. ACM, 38(11):39–41, November.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Kevin P Murphy</author>
+</authors>
+<title>Machine Learning: A Probabilistic Perspective.</title>
+<date>2012</date>
+<publisher>The MIT Press.</publisher>
+<contexts>
+<context position="11765" citStr="Murphy, 2012" startWordPosition="1921" endWordPosition="1922">uld be noted that the first part of the equation which expresses the probability of topic k in document d is the same as that of LDA. This is because the portion of the model which generates a topic for each word (vector) from its document topic distribution is still the same. The second part of the equation which expresses the probability of assignment of topic k to the word vector vd,i given the current topic assignments (aka posterior predictive) is given by a multivariate t distribution with parameters (µk, κk, Σk, νk). The parameters of the posterior predictive distribution are given as (Murphy, 2012): κk = κ + Nk µk = κk Ψk νk = ν + Nk Σk = (νk — M + 1) Ψk = Ψ + Ck+ κκNk (¯vk — µ)(¯vk — µ)&gt; κµ + Nk¯vk (2) 797 where ¯vk and Ck are given by, Pd Pi:zd,i =k (vd,i) Nk XCk = X (vd,i − ¯vk)(vd,i − ¯vk)&gt; d i:zd,i=k Here ¯vk is the sample mean and Ck is the scaled form of sample covariance of the vectors with topic assignment k. Nk represents the count of words assigned to topic k across all documents. Intuitively the parameters µk and Σk represents the posterior mean and covariance of the topic distribution and Kk, vk represents the strength of the prior for mean and covariance respectively. Anal</context>
+</contexts>
+<marker>Murphy, 2012</marker>
+<rawString>Kevin P. Murphy. 2012. Machine Learning: A Probabilistic Perspective. The MIT Press.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Arvind Neelakantan</author>
+<author>Jeevan Shankar</author>
+<author>Alexandre Passos</author>
+<author>Andrew McCallum</author>
+</authors>
+<title>Efficient nonparametric estimation of multiple embeddings per word in vector space.</title>
+<date>2014</date>
+<journal>A meeting of SIGDAT, a Special Interest Group of the ACL.</journal>
+<booktitle>In Proceedings of the 2014 Conference on Empirical Methods in Natural Language Processing, EMNLP</booktitle>
+<location>Doha, Qatar,</location>
+<marker>Neelakantan, Shankar, Passos, McCallum, 2014</marker>
+<rawString>Arvind Neelakantan, Jeevan Shankar, Alexandre Passos, and Andrew McCallum. 2014. Efficient nonparametric estimation of multiple embeddings per word in vector space. In Proceedings of the 2014 Conference on Empirical Methods in Natural Language Processing, EMNLP 2014, October 25-29, 2014, Doha, Qatar, A meeting of SIGDAT, a Special Interest Group of the ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>David Newman</author>
+<author>Sarvnaz Karimi</author>
+<author>Lawrence Cavedon</author>
+</authors>
+<title>External evaluation of topic models.</title>
+<date>2009</date>
+<pages>11--18</pages>
+<contexts>
+<context position="2090" citStr="Newman et al., 2009" startWordPosition="306" endWordPosition="309">in corpora of documents. It conceives of a document as a mixture of a small number of topics, and topics as a (relatively sparse) distribution over word types (Blei et al., 2003). These priors are remarkably effective at producing useful *Both student authors had equal contribution. results. However, our intuitions tell us that while documents may indeed be conceived of as a mixture of topics, we should further expect topics to be semantically coherent. Indeed, standard human evaluations of topic modeling performance are designed to elicit assessment of semantic coherence (Chang et al., 2009; Newman et al., 2009). However, this prior preference for semantic coherence is not encoded in the model, and any such observation of semantic coherence found in the inferred topic distributions is, in some sense, accidental. In this paper, we develop a variant of LDA that operates on continuous space embeddings of words— rather than word types—to impose a prior expectation for semantic coherence. Our approach replaces the opaque word types usually modeled in LDA with continuous space embeddings of these words, which are generated as draws from a multivariate Gaussian. How does this capture our preference for sema</context>
+<context position="20481" citStr="Newman et al., 2009" startWordPosition="3472" endWordPosition="3475">s are evaluated based on the likelihood of held-out documents. But in this case, it is not correct to compare perplexities with models which do topic modeling on words. Since our topics are continuous distributions, the probability of a word vector is given by its density w.r.t the normal distribution based on its topic assignment, instead of a probability mass from a discrete topic distribution. Moreover, (Chang et al., 2009) showed that higher likelihood of held-out documents doesn’t necessarily correspond to human perception of topic coherence. Instead to measure topic coherence we follow (Newman et al., 2009) to compute the Pointwise Mutual Information (PMI) of topic words w.r.t wikipedia articles. We extract the document co-occurrence statistics of topic words from Wikipedia and compute the score of a topic by averaging the score of the top 15 words of the topic. A higher PMI score implies a more coherent topic as it means the topic words usually co-occur in the same document. In the last line of Table 1, we present the PMI score for some of the topics for both Gaussian LDA and traditional multinomial 4Our implementation is available at https: //github.com/rajarshd/Gaussian_LDA 5A collection of n</context>
+</contexts>
+<marker>Newman, Karimi, Cavedon, 2009</marker>
+<rawString>David Newman, Sarvnaz Karimi, and Lawrence Cavedon. 2009. External evaluation of topic models. pages 11–18, December.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Joseph Reisinger</author>
+<author>Raymond J Mooney</author>
+</authors>
+<title>Multi-prototype vector-space models of word meaning.</title>
+<date>2010</date>
+<booktitle>In Human Language Technologies: The 2010 Annual Conference of the North American Chapter of the Association for Computational Linguistics, HLT ’10.</booktitle>
+<marker>Reisinger, Mooney, 2010</marker>
+<rawString>Joseph Reisinger and Raymond J. Mooney. 2010. Multi-prototype vector-space models of word meaning. In Human Language Technologies: The 2010 Annual Conference of the North American Chapter of the Association for Computational Linguistics, HLT ’10.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>G Stewart</author>
+</authors>
+<title>Matrix Algorithms.</title>
+<date>1998</date>
+<journal>Society for Industrial and Applied Mathematics.</journal>
+<contexts>
+<context position="14938" citStr="Stewart, 1998" startWordPosition="2516" endWordPosition="2517">y decomposition representation to speed up computations. For sake of completeness, any symmetric M × M real matrix Σk is said to be positive definite if ∀z ∈ RM : z&gt;Σkz &gt; 0. The Cholesky decomposition of such a symmetric positive definite matrix Σk is nothing but its decomposition into the product of some lower triangular matrix L and its transpose, i.e. Σk = LL&gt;. Finding this factorization also take cubic operation. However given Cholesky decomposition of Σk, after a rank 1 update (or downdate), i.e. the operation: Σk ← Σk + zz&gt; we can find the factorization of new Σk in just quadratic time (Stewart, 1998). We will use this trick to speed up the computations3. Basically, instead of computing determinant and inverse again in cubic time, we will use such rank 1 update (downdate) to find new determinant and inverse in an efficient manner as explained in details below. To compute the density of the posterior predictive t−distibution, we need to compute the determinant |Σk |and the term of the form (vd,i − µk )&gt;Σ k 1 (vd,i − µk). The Cholesky decomposition of the covariance matrix can be used for efficient computation of these expression as shown below. 2Similarly the covariance of the old topic ass</context>
+</contexts>
+<marker>Stewart, 1998</marker>
+<rawString>G. Stewart. 1998. Matrix Algorithms. Society for Industrial and Applied Mathematics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Kristina Toutanova</author>
+<author>Dan Klein</author>
+<author>Christopher D Manning</author>
+<author>Yoram Singer</author>
+</authors>
+<title>Feature-rich part-ofspeech tagging with a cyclic dependency network.</title>
+<date>2003</date>
+<booktitle>In Proceedings of the 2003 Conference of the North American Chapter of the Association for Computational Linguistics on Human Language Technology - Volume 1, NAACL ’03,</booktitle>
+<pages>173--180</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<location>Stroudsburg, PA, USA.</location>
+<contexts>
+<context position="27607" citStr="Toutanova et al., 2003" startWordPosition="4604" endWordPosition="4607">ontaining around 169 million paraphrase pairs of which 7.6 million are lexical (one word to one word) paraphrases. The dataset comes in varying size ranges starting from S to XXXL in increasing order of size and decreasing order of paraphrasing confidence. For our experiments we selected the L size of the paraphrase database. The second set was obtained using WordNet (Miller, 1995), a large human annotated lexicon for English that groups words into sets of synonyms called synsets. To obtain the synonym of a word, we first label the words with their part-ofspeech using the Stanford POS tagger (Toutanova et al., 2003). Then we use the WordNet database 7http://www.cis.upenn.edu/˜ccb/ppdb/ 801 -1.4 -1.2 -1 -0.8 -0.6 -0.4 -0.2 0 0.2 0.4 0.6 1st Principal Component Figure 3: The first two principal components for the word embeddings of the top words of topics shown in Table 1 have been visualized. Each blob represents a word color coded according to its topic in the Table 1. to get the synonym from its sysnset.8 We select the first synonym from the synset which hasn’t occurred in the corpus before. On the 20-news dataset (vocab size = 18,179 words, test corpus size = 188,694 words), a total of 21,919 words (2,</context>
+</contexts>
+<marker>Toutanova, Klein, Manning, Singer, 2003</marker>
+<rawString>Kristina Toutanova, Dan Klein, Christopher D. Manning, and Yoram Singer. 2003. Feature-rich part-ofspeech tagging with a cyclic dependency network. In Proceedings of the 2003 Conference of the North American Chapter of the Association for Computational Linguistics on Human Language Technology - Volume 1, NAACL ’03, pages 173–180, Stroudsburg, PA, USA. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Joseph Turian</author>
+<author>Lev Ratinov</author>
+<author>Yoshua Bengio</author>
+</authors>
+<title>Word representations: a simple and general method for semi-supervised learning.</title>
+<date>2010</date>
+<booktitle>In Proc. of ACL.</booktitle>
+<contexts>
+<context position="5538" citStr="Turian et al., 2010" startWordPosition="857" endWordPosition="860">ome background on two topics relevant to our work: vector space word embeddings and LDA. 2.1 Vector Space Semantics According to the distributional hypothesis (Harris, 1954), words occurring in similar contexts tend to have similar meaning. This has given rise to data-driven learning of word vectors that capture lexical and semantic properties, which is now a technique of central importance in natural language processing. These word vectors can be used for identifying semantically related word pairs (Turney, 2006; Agirre et al., 2009) or as features in downstream text processing applications (Turian et al., 2010; Guo et al., 2014). Word vectors can either be constructed using low rank approximations of cooccurrence statistics (Deerwester et al., 1990) or using internal representations from neural network models of word sequences (Collobert and Weston, 2008). We use a recently popular and fast tool called word2vec1, to generate skip-gram word embeddings from unlabeled corpus. In this model, a word is used as an input to a log-linear classifier with continuous projection layer and words within a certain window before and after the words are predicted. 1https://code.google.com/p/word2vec/ 2.2 Latent Dir</context>
+</contexts>
+<marker>Turian, Ratinov, Bengio, 2010</marker>
+<rawString>Joseph Turian, Lev Ratinov, and Yoshua Bengio. 2010. Word representations: a simple and general method for semi-supervised learning. In Proc. of ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Peter D Turney</author>
+<author>Patrick Pantel</author>
+</authors>
+<title>From frequency to meaning: Vector space models of semantics.</title>
+<date>2010</date>
+<journal>JAIR,</journal>
+<pages>141--188</pages>
+<contexts>
+<context position="8540" citStr="Turney and Pantel, 2010" startWordPosition="1362" endWordPosition="1365">observations are no longer discrete values but continuous vectors in an Mdimensional space, we characterize each topic k as a multivariate Gaussian distribution with mean µk and covariance Σk. The choice of a Gaussian parameterization is justified by both analytic convenience and observations that Euclidean distances 796 p(zd,i = k |z−(d,i), Vd, ζ, α) a (nk,d + αk) X tνk−M+1 ~vd,i~~µk, κ Kk 1 Σk~ (1) Kk Figure 1: Sampling equation for the collapsed Gibbs sampler; refer to text for a description of the notation. between embeddings correlate with semantic similarity (Collobert and Weston, 2008; Turney and Pantel, 2010; Hermann and Blunsom, 2014). We place conjugate priors on these values: a Gaussian centered at zero for the mean and an inverse Wishart distribution for the covariance. As before, each document is seen as a mixture of topics whose proportions are drawn from a symmetric Dirichlet prior. The generative process can thus be summarized as follows: 1. for k = 1 to K (a) Draw topic covariance Σk ti W−1(Ψ, ν) (b) Draw topic mean µk — JU(µ, 1κΣk) 2. for each document d in corpus D (a) Draw topic distribution θd — Dir(α) (b) for each word index n from 1 to Nd i. Draw a topic zn — Categorical(θd) ii. Dr</context>
+</contexts>
+<marker>Turney, Pantel, 2010</marker>
+<rawString>Peter D. Turney and Patrick Pantel. 2010. From frequency to meaning: Vector space models of semantics. JAIR, pages 141–188.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Peter D Turney</author>
+</authors>
+<title>Similarity of semantic relations.</title>
+<date>2006</date>
+<journal>Comput. Linguist.,</journal>
+<volume>32</volume>
+<issue>3</issue>
+<contexts>
+<context position="5437" citStr="Turney, 2006" startWordPosition="842" endWordPosition="843">a classification task (§5). 2 Background Before going to the details of our model we provide some background on two topics relevant to our work: vector space word embeddings and LDA. 2.1 Vector Space Semantics According to the distributional hypothesis (Harris, 1954), words occurring in similar contexts tend to have similar meaning. This has given rise to data-driven learning of word vectors that capture lexical and semantic properties, which is now a technique of central importance in natural language processing. These word vectors can be used for identifying semantically related word pairs (Turney, 2006; Agirre et al., 2009) or as features in downstream text processing applications (Turian et al., 2010; Guo et al., 2014). Word vectors can either be constructed using low rank approximations of cooccurrence statistics (Deerwester et al., 1990) or using internal representations from neural network models of word sequences (Collobert and Weston, 2008). We use a recently popular and fast tool called word2vec1, to generate skip-gram word embeddings from unlabeled corpus. In this model, a word is used as an input to a log-linear classifier with continuous projection layer and words within a certain</context>
+</contexts>
+<marker>Turney, 2006</marker>
+<rawString>Peter D. Turney. 2006. Similarity of semantic relations. Comput. Linguist., 32(3):379–416, September.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Michael D Vose</author>
+</authors>
+<title>A linear algorithm for generating random numbers with a given distribution. Software Engineering,</title>
+<date>1991</date>
+<journal>IEEE Transactions on.</journal>
+<contexts>
+<context position="18462" citStr="Vose, 1991" startWordPosition="3137" endWordPosition="3138">for a few number of steps because the stale distribution acting as the proposal is very similar to the target. This is because, as pointed out earlier, the language model term does not change too drastically whenever we resample a single word. The number of words is huge, hence the amount of change per word is concomitantly small. (Only if one could convert stale bread into fresh one, it would solve world’s food problem!) The exercise of using stale distribution and MH steps is advantageous because sampling from it can be carried out in O(1) amortized time, thanks to alias sampling technique (Vose, 1991). Moreover, the task of building the alias tables can be outsourced to other cores. With the combination of both Cholesky and Alias tricks, the sampling complexity can thus be brought down to O(KdM2) where Kd represents the number of actually instantiated topics in the document and Kd « K. In particular, we plot the sampling rate achieved naively, with Cholesky (CH) trick and with Cholesky+Alias (A+CH) trick in figure 2 demonstrating better likelihood at much less time. Also after initial few iterations, the time per iteration of A+CH trick is 9.93 times less than CH and 53.1 times less than n</context>
+</contexts>
+<marker>Vose, 1991</marker>
+<rawString>Michael D. Vose. 1991. A linear algorithm for generating random numbers with a given distribution. Software Engineering, IEEE Transactions on.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Li Wan</author>
+<author>Leo Zhu</author>
+<author>Rob Fergus</author>
+</authors>
+<title>A hybrid neural network-latent topic model.</title>
+<date>2012</date>
+<booktitle>Proceedings of the Fifteenth International Conference on Artificial Intelligence and Statistics (AISTATS-12),</booktitle>
+<volume>22</volume>
+<pages>1287--1294</pages>
+<editor>In Neil D. Lawrence and Mark A. Girolami, editors,</editor>
+<contexts>
+<context position="9943" citStr="Wan et al., 2012" startWordPosition="1607" endWordPosition="1610">inference. Although we don’t do any experiment to compare the running time of both approaches, the per-iteration computational complexity is same for both inference methods. We propose a faster inference technique using Cholesky decomposition of covariance matrices which can be applied to both the Gibbs and variational/EM method. However we are not aware of any straightforward way of applying the aliasing trick proposed by (Li et al., 2014) on the variational/EM method which gave us huge improvement on running time (see Figure 2). Another work which combines embedding with topic models is by (Wan et al., 2012) where they jointly learn the parameters of a neural network and a topic model to capture the topic distribution of low dimensional representation of images. 4 Posterior Inference In our application, we observe documents consisting of word vectors and wish to infer the posterior distribution over the topic parameters, proportions, and the topic assignments of individual words. Since there is no analytic form of the posterior, approximations are required. Because of our choice of conjugate priors for topic parameters and proportions, these variables can be analytically integrated out, and we ca</context>
+</contexts>
+<marker>Wan, Zhu, Fergus, 2012</marker>
+<rawString>Li Wan, Leo Zhu, and Rob Fergus. 2012. A hybrid neural network-latent topic model. In Neil D. Lawrence and Mark A. Girolami, editors, Proceedings of the Fifteenth International Conference on Artificial Intelligence and Statistics (AISTATS-12), volume 22, pages 1287–1294.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Limin Yao</author>
+<author>David Mimno</author>
+<author>Andrew McCallum</author>
+</authors>
+<title>Efficient methods for topic model inference on streaming document collections.</title>
+<date>2009</date>
+<booktitle>In Proceedings of the 15th ACM SIGKDD International Conference on Knowledge Discovery and Data Mining, KDD ’09,</booktitle>
+<pages>937--946</pages>
+<publisher>ACM.</publisher>
+<location>New York, NY, USA.</location>
+<contexts>
+<context position="30117" citStr="Yao et al., 2009" startWordPosition="5031" endWordPosition="5034">the 20 news groups it belongs to. If the document topic distribution is modeled well, then our model should be able to do a better job in the classification task. To infer the topic distribution of a document we follow the usual strategy of fixing the learnt topics during the training phase and then running Gibbs sampling on the test set (G-LDA (fix) in table 2). However infvoc is an online algorithm, so it would be unfair to compare our model which observes the entire set of documents during test time. Therefore we implement the online version of our algorithm using Gibbs sampling following (Yao et al., 2009). We input the test documents in batches and do inference on those batches independently also sampling for the topic parameter, along the lines of infvoc. The batch size for our experiments are mentioned in parentheses in table 2. We classify using the multi class logistic regression classifier available in Weka (Hall et al., 2009). It is clear from table 2 that we outperform infvoc in all settings of our experiments. This implies that even if new documents have significant amount of new words, our model would still do a better job in modeling it. We also conduct an experiment to check the act</context>
+</contexts>
+<marker>Yao, Mimno, McCallum, 2009</marker>
+<rawString>Limin Yao, David Mimno, and Andrew McCallum. 2009. Efficient methods for topic model inference on streaming document collections. In Proceedings of the 15th ACM SIGKDD International Conference on Knowledge Discovery and Data Mining, KDD ’09, pages 937–946, New York, NY, USA. ACM.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ke Zhai</author>
+<author>Jordan L Boyd-Graber</author>
+</authors>
+<title>Online latent dirichlet allocation with infinite vocabulary.</title>
+<date>2013</date>
+<booktitle>In ICML</booktitle>
+<volume>1</volume>
+<pages>561--569</pages>
+<contexts>
+<context position="3393" citStr="Zhai and Boyd-Graber (2013)" startWordPosition="517" endWordPosition="520">egularities in language: words with similar syntactic and semantic properties are found to be close to each other in the embedding space (Agirre et al., 2009; Mikolov et al., 2013). Since Gaussian distributions capture a notion of centrality in space, and semantically related words are localized in space, our Gaussian LDA model encodes a prior preference for semantically coherent topics. Our model further has several advantages. Traditional LDA assumes a fixed vocabulary of word types. This modeling assumption drawback as it cannot handle out of vocabulary (OOV) words in “held out” documents. Zhai and Boyd-Graber (2013) proposed an approach to address this problem by drawing topics from a Dirichlet Process with a base distribution over all possible character strings (i.e., words). While this model can in principle handle unseen words, the only bias toward being included in a particular topic comes from the topic assignments in the rest 795 Proceedings of the 53rd Annual Meeting of the Association for Computational Linguistics and the 7th International Joint Conference on Natural Language Processing, pages 795–804, Beijing, China, July 26-31, 2015. c�2015 Association for Computational Linguistics of the docum</context>
+<context position="28562" citStr="Zhai and Boyd-Graber, 2013" startWordPosition="4760" endWordPosition="4763">ing to its topic in the Table 1. to get the synonym from its sysnset.8 We select the first synonym from the synset which hasn’t occurred in the corpus before. On the 20-news dataset (vocab size = 18,179 words, test corpus size = 188,694 words), a total of 21,919 words (2,741 distinct words) were replaced by synonyms from PPDB and 38,687 words (2,037 distinct words) were replaced by synonyms from Wordnet. Evaluation Benchmark: As mentioned before traditional topic model algorithms cannot handle OOV words. So comparing the performance of our document with those models would be unfair. Recently (Zhai and Boyd-Graber, 2013) proposed an extension of LDA (infvoc) which can incorporate new words. They have shown better performances in a document classification task which uses the topic distribution of a document as features on the 20-news group dataset as compared to other fixed vocabulary algorithms. Even though, the infvoc model can handle OOV words, it will most likely not assign high probability to a new topical word when it encounters it for the first time since it is directly proportional to the number of times the word has been observed On the other hand, our model could assign high probability to the word i</context>
+</contexts>
+<marker>Zhai, Boyd-Graber, 2013</marker>
+<rawString>Ke Zhai and Jordan L. Boyd-Graber. 2013. Online latent dirichlet allocation with infinite vocabulary. In ICML (1), volume 28 of JMLR Proceedings, pages 561–569. JMLR.org.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

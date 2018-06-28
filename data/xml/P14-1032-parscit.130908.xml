@@ -1,0 +1,1794 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.000001">
+<title confidence="0.976429">
+Product Feature Mining: Semantic Clues versus Syntactic Constituents
+</title>
+<author confidence="0.997739">
+Liheng Xu, Kang Liu, Siwei Lai and Jun Zhao
+</author>
+<affiliation confidence="0.992114">
+National Laboratory of Pattern Recognition
+Institute of Automation, Chinese Academy of Sciences, Beijing, 100190, China
+</affiliation>
+<email confidence="0.975554">
+{lhxu, kliu, swlai, jzhao}@nlpr.ia.ac.cn
+</email>
+<sectionHeader confidence="0.99343" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.999907230769231">
+Product feature mining is a key subtask
+in fine-grained opinion mining. Previ-
+ous works often use syntax constituents in
+this task. However, syntax-based methods
+can only use discrete contextual informa-
+tion, which may suffer from data sparsity.
+This paper proposes a novel product fea-
+ture mining method which leverages lexi-
+cal and contextual semantic clues. Lexical
+semantic clue verifies whether a candidate
+term is related to the target product, and
+contextual semantic clue serves as a soft
+pattern miner to find candidates, which ex-
+ploits semantics of each word in context
+so as to alleviate the data sparsity prob-
+lem. We build a semantic similarity graph
+to encode lexical semantic clue, and em-
+ploy a convolutional neural model to cap-
+ture contextual semantic clue. Then Label
+Propagation is applied to combine both se-
+mantic clues. Experimental results show
+that our semantics-based method signif-
+icantly outperforms conventional syntax-
+based approaches, which not only mines
+product features more accurately, but also
+extracts more infrequent product features.
+</bodyText>
+<sectionHeader confidence="0.999133" genericHeader="introduction">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.999838032258064">
+In recent years, opinion mining has helped cus-
+tomers a lot to make informed purchase decisions.
+However, with the rapid growth of e-commerce,
+customers are no longer satisfied with the over-
+all opinion ratings provided by traditional senti-
+ment analysis systems. The detailed functions or
+attributes of products, which are called product
+features, receive more attention. Nevertheless, a
+product may have thousands of features, which
+makes it impractical for a customer to investigate
+them all. Therefore, mining product features au-
+tomatically from online reviews is shown to be a
+key step for opinion summarization (Hu and Liu,
+2004; Qiu et al., 2009) and fine-grained sentiment
+analysis (Jiang et al., 2011; Li et al., 2012).
+Previous works often mine product features via
+syntactic constituent matching (Popescu and Et-
+zioni, 2005; Qiu et al., 2009; Zhang et al., 2010).
+The basic idea is that reviewers tend to comment
+on product features in similar syntactic structures.
+Therefore, it is natural to mine product features by
+using syntactic patterns. For example, in Figure 1,
+the upper box shows a dependency tree produced
+by Stanford Parser (de Marneffe et al., 2006), and
+the lower box shows a common syntactic pattern
+from (Zhang et al., 2010), where &lt;feature/NN&gt;
+is a wildcard to be fit in reviews and NN denotes
+the required POS tag of the wildcard. Usually, the
+product name mp3 is specified, and when screen
+matches the wildcard, it is likely to be a product
+feature of mp3.
+</bodyText>
+<figureCaption confidence="0.8597105">
+Figure 1: An example of syntax-based prod-
+uct feature mining procedure. The word screen
+matches the wildcard &lt;feature/NN&gt;. Therefore,
+screen is likely to be a product feature of mp3.
+</figureCaption>
+<bodyText confidence="0.9834045">
+Generally, such syntactic patterns extract prod-
+uct features well but they still have some limita-
+tions. For example, the product-have-feature pat-
+tern may fail to find the fm tuner in a very similar
+case in Example 1(a), where the product is men-
+tioned by using player instead of mp3. Similarly,
+it may also fail on Example 1(b), just with have re-
+placed by support. In essence, syntactic pattern is
+</bodyText>
+<page confidence="0.98274">
+336
+</page>
+<note confidence="0.834454">
+Proceedings of the 52nd Annual Meeting of the Association for Computational Linguistics, pages 336–346,
+Baltimore, Maryland, USA, June 23-25 2014. c�2014 Association for Computational Linguistics
+</note>
+<bodyText confidence="0.997145933333333">
+a kind of one-hot representation for encoding the
+contexts, which can only use partial and discrete
+features, such as some key words (e.g., have) or
+shallow information (e.g., POS tags). Therefore,
+such a representation often suffers from the data
+sparsity problem (Turian et al., 2010).
+One possible solution for this problem is us-
+ing a more general pattern such as NP-VB-feature,
+where NP represents a noun or noun phrase and
+VB stands for any verb. However, this pattern be-
+comes too general that it may find many irrelevant
+cases such as the one in Example 1(c), which is not
+talking about the product. Consequently, it is very
+difficult for a pattern designer to balance between
+precision and generalization.
+</bodyText>
+<figure confidence="0.8775534">
+Example 1:
+(a) This player has an ✿✿fm✿✿✿✿✿ tuner.
+(b) This mp3 supports ✿✿✿✿wma✿✿✿file.
+(c) This review has helped people✿✿✿✿✿ a lot.
+(d) This mp3 has some✿✿✿✿✿ flaws.
+</figure>
+<bodyText confidence="0.999616341463414">
+To solve the problems stated above, it is ar-
+gued that deeper semantics of contexts shall be ex-
+ploited. For example, we can try to automatically
+discover that the verb have indicates a part-whole
+relation (Zhang et al., 2010) and support indicates
+a product-function relation, so that both sth. have
+and sth. support suggest that terms following them
+are product features, where sth. can be replaced
+by any terms that refer to the target product (e.g.,
+mp3, player, etc.). This is called contextual se-
+mantic clue. Nevertheless, only using contexts is
+not sufficient enough. As in Example 1(d), we can
+see that the word flaws follows mp3 have, but it
+is not a product feature. Thus, a noise term may
+be extracted even with high contextual support.
+Therefore, we shall also verify whether a candi-
+date is really related to the target product. We call
+it lexical semantic clue.
+This paper proposes a novel bootstrapping ap-
+proach for product feature mining, which lever-
+ages both semantic clues discussed above. Firstly,
+some reliable product feature seeds are automat-
+ically extracted. Then, based on the assumption
+that terms that are more semantically similar to
+the seeds are more likely to be product features,
+a graph which measures semantic similarities be-
+tween terms is built to capture lexical semantic
+clue. At the same time, a semi-supervised con-
+volutional neural model (Collobert et al., 2011) is
+employed to encode contextual semantic clue. Fi-
+nally, the two kinds of semantic clues are com-
+bined by a Label Propagation algorithm.
+In the proposed method, words are represented
+by continuous vectors, which capture latent se-
+mantic factors of the words (Turian et al., 2010).
+The vectors can be unsupervisedly trained on large
+scale corpora, and words with similar semantics
+will have similar vectors. This enables our method
+to be less sensitive to lexicon change, so that the
+data sparsity problem can be alleviated. The con-
+tributions of this paper include:
+</bodyText>
+<listItem confidence="0.9993895">
+• It uses semantics of words to encode contextual
+clues, which exploits deeper level information
+than syntactic constituents. As a result, it mines
+product features more accurately than syntax-
+based methods.
+• It exploits semantic similarity between words
+</listItem>
+<bodyText confidence="0.950214944444445">
+to capture lexical clues, which is shown to be
+more effective than co-occurrence relation be-
+tween words and syntactic patterns. In addition,
+experiments show that the semantic similarity
+has the advantage of mining infrequent product
+features, which is crucial for this task. For ex-
+ample, one may say “This hotel has low water
+pressure”, where low water pressure is seldom
+mentioned, but fatal to someone’s taste.
+• We compare the proposed semantics-based ap-
+proach with three state-of-the-art syntax-based
+methods. Experiments show that our method
+achieves significantly better results.
+The rest of this paper is organized as follows. Sec-
+tion 2 introduces related work. Section 3 describes
+the proposed method in details. Section 4 gives the
+experimental results. Lastly, we conclude this pa-
+per in Section 5.
+</bodyText>
+<sectionHeader confidence="0.999766" genericHeader="related work">
+2 Related Work
+</sectionHeader>
+<bodyText confidence="0.999868">
+In product feature mining task, Hu and Liu (2004)
+proposed a pioneer research. However, the asso-
+ciation rules they used may potentially introduce
+many noise terms. Based on the observation that
+product features are often commented on by simi-
+lar syntactic structures, it is natural to use patterns
+to capture common syntactic constituents around
+product features.
+Popescu and Etzioni (2005) designed some syn-
+tactic patterns to search for product feature candi-
+dates and then used Pointwise Mutual Information
+(PMI) to remove noise terms. Qiu et al. (2009)
+proposed eight heuristic syntactic rules to jointly
+extract product features and sentiment lexicons,
+where a bootstrapping algorithm named Double
+</bodyText>
+<page confidence="0.997265">
+337
+</page>
+<bodyText confidence="0.999939269230769">
+Propagation was applied to expand a given seed
+set. Zhang et al. (2010) improved Qiu’s work
+by adding more feasible syntactic patterns, and the
+HITS algorithm (Kleinberg, 1999) was employed
+to rank candidates. Moghaddam and Ester (2010)
+extracted product features by automatical opinion
+pattern mining. Zhuang et al. (2006) used various
+syntactic templates from an annotated movie cor-
+pus and applied them to supervised movie feature
+extraction. Wu et al. (2009) proposed a phrase
+level dependency parsing for mining aspects and
+features of products.
+As discussed in the first section, syntactic pat-
+terns often suffer from data sparsity. Further-
+more, most pattern-based methods rely on term
+frequency, which have the limitation of finding
+infrequent but important product features. A re-
+cent research (Xu et al., 2013) extracted infrequent
+product features by a semi-supervised classifier,
+which used word-syntactic pattern co-occurrence
+statistics as features for the classifier. However,
+this kind of feature is still sparse for infrequent
+candidates. Our method adopts a semantic word
+representation model, which can train dense fea-
+tures unsupervisedly on a very large corpus. Thus,
+the data sparsity problem can be alleviated.
+</bodyText>
+<sectionHeader confidence="0.992237" genericHeader="method">
+3 The Proposed Method
+</sectionHeader>
+<bodyText confidence="0.9999324">
+We propose a semantics-based bootstrapping
+method for product feature mining. Firstly, some
+product feature seeds are automatically extracted.
+Then, a semantic similarity graph is created to
+capture lexical semantic clue, and a Convolutional
+Neural Network (CNN) (Collobert et al., 2011) is
+trained in each bootstrapping iteration to encode
+contextual semantic clue. Finally we use Label
+Propagation to find some reliable new seeds for
+the training of the next bootstrapping iteration.
+</bodyText>
+<subsectionHeader confidence="0.999538">
+3.1 Automatic Seed Generation
+</subsectionHeader>
+<bodyText confidence="0.999939">
+The seed set consists of positive labeled examples
+(i.e. product features) and negative labeled exam-
+ples (i.e. noise terms). Intuitively, popular product
+features are frequently mentioned in reviews, so
+they can be extracted by simply mining frequently
+occurring nouns (Hu and Liu, 2004). However,
+this strategy will also find many noise terms (e.g.,
+commonly used nouns like thing, one, etc.). To
+produce high quality seeds, we employ a Domain
+Relevance Measure (DRM) (Jiang and Tan, 2010),
+which combines term frequency with a domain-
+specific measuring metric called Likelihood Ratio
+Test (LRT) (Dunning, 1993). Let A(t) denotes the
+LRT score of a product feature candidate t,
+</bodyText>
+<equation confidence="0.99796525">
+k1 1 − p)n1−k1 k2 1 − p)n2−k2
+A(t) =pk1
+1 (1 − p1)n1−k1pk2
+2 (1 − p2)n2−k2 (1)
+</equation>
+<bodyText confidence="0.998714">
+where k1 and k2 are the frequencies of t in the
+review corpus R and a background corpus1 B, n1
+and n2 are the total number of terms in R and B,
+</bodyText>
+<equation confidence="0.905107">
+p = (k1 + k2)/(n1 + n2), p1 = k1/n1 and p2 =
+k2/n2. Then a modified DRM2 is proposed,
+tf(t)
+DRM(t) = max[tf(·)] ×
+× max |log A(·) |− min |log A(·)|
+</equation>
+<bodyText confidence="0.9988365">
+where tf(t) is the frequency of t in R and df(t) is
+the frequency of t in B.
+All nouns in R are ranked by DRM(t) in de-
+scent order, where top N nouns are taken as the
+positive example set Vs+. On the other hand, Xu
+et al. (2013) show that a set of general nouns sel-
+dom appear to be product features. Therefore, we
+employ their General Noun Corpus to create the
+negative example set Vs−, where N most frequent
+terms are selected. Besides, it is guaranteed that
+Vs+ ∩ Vs− = ∅, i.e., conflicting terms are taken as
+negative examples.
+</bodyText>
+<subsectionHeader confidence="0.9998515">
+3.2 Capturing Lexical Semantic Clue in a
+Semantic Similarity Graph
+</subsectionHeader>
+<bodyText confidence="0.9998685">
+To capture lexical semantic clue, each word is first
+converted into word embedding, which is a con-
+tinuous vector with each dimension’s value corre-
+sponds to a semantic or grammatical interpretation
+(Turian et al., 2010). Learning large-scale word
+embeddings is very time-consuming (Collobert et
+al., 2011), we thus employ a faster method named
+Skip-gram model (Mikolov et al., 2013).
+</bodyText>
+<subsectionHeader confidence="0.9958245">
+3.2.1 Learning Word Embedding for
+Semantic Representation
+</subsectionHeader>
+<bodyText confidence="0.997715">
+Given a sequence of training words W =
+{w1, w2, ..., wm}, the goal of the Skip-gram
+model is to learn a continuous vector space EB =
+{e1, e2, ..., em}, where ei is the word embedding
+of wi. The training objective is to maximize the
+</bodyText>
+<footnote confidence="0.98887825">
+1Google-n-Gram (http://books.google.com/ngrams) is
+used as the background corpus.
+2The df(t) part of the original DRM is slightly modified
+because we want a tf × idf-like scheme (Liu et al., 2012).
+</footnote>
+<equation confidence="0.612181">
+ |log A(t) |− min |log A(·)|
+1
+log df(t)
+(2)
+</equation>
+<page confidence="0.977552">
+338
+</page>
+<bodyText confidence="0.9480655">
+average log probability of using word wt to pre-
+dict a surrounding word wt+j,
+</bodyText>
+<equation confidence="0.997539333333333">
+ˆEB = argmax
+etEEB
+(3)
+</equation>
+<bodyText confidence="0.9999091">
+where c is the size of the training window. Basi-
+cally, p(wt+j|wt; et) is defined as,
+where e&apos;i is an additional training vector associ-
+ated with ei. This basic formulation is impracti-
+cal because it is proportional to m. A hierarchical
+softmax approximation can be applied to reduce
+the computational cost to log2(m), see (Morin and
+Bengio, 2005) for details.
+To alleviate the data sparsity problem, EB is
+first trained on a very large corpus3 (denoted by
+C), and then fine-tuned on the target review cor-
+pus R. Particularly, for phrasal product features, a
+statistic-based method in (Zhu et al., 2009) is used
+to detect noun phrases in R. Then, an Unfold-
+ing Recursive Autoencoder (Socher et al., 2011) is
+trained on C to obtain embedding vectors for noun
+phrases. In this way, semantics of infrequent terms
+in R can be well captured. Finally, the phrase-
+based Skip-gram model in (Mikolov et al., 2013)
+is applied on R.
+</bodyText>
+<subsectionHeader confidence="0.971711">
+3.2.2 Building the Semantic Similarity Graph
+</subsectionHeader>
+<bodyText confidence="0.999979944444444">
+Lexical semantic clue is captured by measuring se-
+mantic similarity between terms. The underlying
+motivation is that if we have known some product
+feature seeds, then terms that are more semanti-
+cally similar to these seeds are more likely to be
+product features. For example, if screen is known
+to be a product feature of mp3, and lcd is of high
+semantic similarity with screen, we can infer that
+lcd is also a product feature. Analogously, terms
+that are semantically similar to negative labeled
+seeds are not product features.
+Word embedding naturally meets the demand
+above: words that are more semantically similar
+to each other are located closer in the embedding
+space (Collobert et al., 2011). Therefore, we can
+use cosine distance between two embedding vec-
+tors as the semantic distance measuring metric.
+Thus, our method does not rely on term frequency
+</bodyText>
+<footnote confidence="0.673784">
+3Wikipedia(http://www.wikipedia.org) is used in practice.
+</footnote>
+<bodyText confidence="0.997855888888889">
+to rank candidates. This could potentially improve
+the ability of mining infrequent product features.
+Formally, we create a semantic similarity graph
+G = (V, E, W), where V = {Vs U Vc} is the
+vertex set, which contains the labeled seed set Vs
+and the unlabeled candidate set Vc; E is the edge
+set which connects every vertex pair (u, v), where
+u, v E V ; W = {wuv : cos(EBu, EBv)} is a
+function which associates a weight to each edge.
+</bodyText>
+<subsectionHeader confidence="0.999809">
+3.3 Encoding Contextual Semantic Clue
+Using Convolutional Neural Network
+</subsectionHeader>
+<bodyText confidence="0.999943333333333">
+The CNN is trained on each occurrence of seeds
+that is found in review texts. Then for a candidate
+term t, the CNN classifies all of its occurrences.
+Since seed terms tend to have high frequency in
+review texts, only a few seeds will be enough to
+provide plenty of occurrences for the training.
+</bodyText>
+<subsectionHeader confidence="0.716089">
+3.3.1 The architecture of the Convolutional
+Neural Network
+</subsectionHeader>
+<bodyText confidence="0.9946326">
+The architecture of the Convolutional Neural Net-
+work is shown in Figure 2. For a product feature
+candidate t in sentence s, every consecutive sub-
+sequence qi of s that containing t with a window
+of length l is fed to the CNN. For example, as
+in Figure 2, if t = {screen}, and l = 3, there
+are three inputs: q1 = [the, ipod, screen], q2 =
+[ipod, screen, is], q3 = [screen, is, impressive].
+Partially, t is replaced by a token “*PF*” to re-
+move its lexicon influence4.
+</bodyText>
+<figureCaption confidence="0.8202755">
+Figure 2: The architecture of the Convolutional
+Neural Network.
+</figureCaption>
+<bodyText confidence="0.99955475">
+To get the output score, qi is first converted into
+a concatenated vector xi = [e1; e2; ...; el], where
+ej is the word embedding of the j-th word. In
+this way, the CNN serves as a soft pattern miner:
+</bodyText>
+<footnote confidence="0.699715">
+4Otherwise, the CNN will quickly get overfitting on t, be-
+cause very few seed lexicons are used for the training.
+</footnote>
+<equation confidence="0.940962666666667">
+1 m −c&lt;j&lt;c,j70 log p(wt+j|wt; et)
+m
+t=1
+p(wt+j|wt; et) =
+Emw=1 exp(e&apos;Twet) (4)
+exp(e&apos;Tt+jet)
+</equation>
+<page confidence="0.98979">
+339
+</page>
+<bodyText confidence="0.99350025">
+since words that have similar semantics have sim-
+ilar low-dimension embedding vectors, the CNN
+is less sensitive to lexicon change. The network is
+computed by,
+</bodyText>
+<equation confidence="0.9999846">
+yi = tanh(W(1)xi + b(1))
+(1) (5)
+y(2) = max(y(1)
+i ) (6)
+y(3) = W(3)y(2) + b(3) (7)
+</equation>
+<bodyText confidence="0.9996783125">
+where y(i) is the output score of the i-th layer, and
+b(i) is the bias of the i-th layer; W(1) E Rh×(nl)
+and W(3) E R2×h are parameter matrixes, where
+n is the dimension of word embedding, and h is
+the size of nodes in the hidden layer.
+In conventional neural models, the candidate
+term t is placed in the center of the window. How-
+ever, from Example 2, when l = 5, we can see that
+the best windows should be the bracketed texts
+(Because, intuitively, the windows should contain
+mp3, which is a strong evidence for finding the
+product feature), where t = {screen} is at the
+boundary. Therefore, we use Equ. 6 to formulate
+a max-convolutional layer, which is aimed to en-
+able the CNN to find more evidences in contexts
+than conventional neural models.
+</bodyText>
+<figure confidence="0.971335">
+Example 2:
+(a) The [screen of this mp3 is] great.
+(b) This [mp3 has a great screen].
+</figure>
+<subsectionHeader confidence="0.611356">
+3.3.2 Training
+</subsectionHeader>
+<bodyText confidence="0.999619666666667">
+Let θ = {EB, W(·), b(·)} denotes all the trainable
+parameters. The softmax function is used to con-
+vert the output score of the CNN to a probability,
+</bodyText>
+<equation confidence="0.99204">
+p(tjX; θ) = Ie p(y(3))(3) (8)
+ffIl exp(yj )
+</equation>
+<bodyText confidence="0.981918">
+where X is the input set for term t, and C = {0,1}
+is the label set representing product feature and
+non-product feature, respectively.
+To train the CNN, we first use Vs to collect each
+occurrence of the seeds in R to form a training
+set Ts. Then, the training criterion is to minimize
+cross-entropy over Ts,
+− log δip(tiIXi; θ) (9)
+where δi is the binomial target label distribution
+for one entry. Backpropagation algorithm with
+mini-batch stochastic gradient descent is used to
+solve this optimization problem. In addition, some
+useful tricks can be applied during the training.
+The weight matrixes W(·) are initialized by nor-
+malized initialization (Glorot and Bengio, 2010).
+W (1) is pre-trained by an autoencoder (Hinton,
+1989) to capture semantic compositionality. To
+speed up the learning, a momentum method is ap-
+plied (Sutskever et al., 2013).
+</bodyText>
+<subsectionHeader confidence="0.991622">
+3.4 Combining Lexical and Contextual
+Semantic Clues by Label Propagation
+</subsectionHeader>
+<bodyText confidence="0.999969375">
+We propose a Label Propagation algorithm to
+combine both semantic clues in a unified process.
+Each term t E V is assumed to have a label dis-
+tribution Lt = (p+t , p−t ), where p+t denotes the
+probability of the candidate being a product fea-
+ture, and on the contrary, p−t = 1 − p+t . The clas-
+sified results of the CNN which encode contextual
+semantic clue serve as the prior knowledge,
+</bodyText>
+<equation confidence="0.797141333333333">
+(1, 0), if t E Vs+
+(0, 1), if t E Vs− (10)
+(r+t , r−t ), if t E Vc
+</equation>
+<bodyText confidence="0.850096">
+where (r+t , r−t ) is estimated by,
+</bodyText>
+<equation confidence="0.908981">
++= count+(t)
+rt count+(t) + count−(t) (11)
+</equation>
+<bodyText confidence="0.998733230769231">
+where count+(t) is the number of occurrences of
+term t that are classified as positive by the CNN,
+and count−(t) represents the negative count.
+Label Propagation is applied to propagate the
+prior knowledge distribution I to the product fea-
+ture distribution L via semantic similarity graph
+G, so that a product feature candidate is deter-
+mined by exploring its semantic relations to all of
+the seeds and other candidates globally. We pro-
+pose an adapted version on the random walking
+view of the Adsorption algorithm (Baluja et al.,
+2008) by updating the following formula until L
+converges,
+</bodyText>
+<equation confidence="0.997336">
+Li+1 = (1 − α)MTLi + αDI (12)
+</equation>
+<bodyText confidence="0.996461777777778">
+where M is the semantic transition matrix built
+from G; D = Diag[log tf(t)] is a diagonal ma-
+trix of log frequencies, which is designed to as-
+sign higher “confidence” scores to more frequent
+seeds; and α is a balancing parameter. Particu-
+larly, when α = 0, we can set the prior knowledge
+I without Vc to L0 so that only lexical semantic
+clue is used; otherwise if α = 1, only contextual
+semantic clue is used.
+</bodyText>
+<equation confidence="0.93137025">
+θˆ = argmin
+θ
+� |T-|
+i=1
+⎧
+⎨
+⎩
+It =
+</equation>
+<page confidence="0.969489">
+340
+</page>
+<subsectionHeader confidence="0.873125">
+3.5 The Bootstrapping Framework
+</subsectionHeader>
+<bodyText confidence="0.9996792">
+We summarize the bootstrapping framework of the
+proposed method in Algorithm 1. During boot-
+strapping, the CNN is enhanced by Label Propaga-
+tion which finds more labeled examples for train-
+ing, and then the performance of Label Propaga-
+tion is also improved because the CNN outputs a
+more accurate prior distribution. After running for
+several iterations, the algorithm gets enough seeds,
+and a final Label Propagation is conducted to pro-
+duce the results.
+</bodyText>
+<tableCaption confidence="0.775335625">
+Algorithm 1: Bootstrapping using semantic clues
+Input: The review corpus R, a large corpus C
+Output: The mined product feature list P
+Initialization: Train word embedding set EB first on
+C, and then on R
+Step 1: Generate product feature seeds Vs (Section 3.1)
+Step 2: Build semantic similarity graph G (Section 3.2)
+while iter &lt; MAX ITER do
+</tableCaption>
+<table confidence="0.7357921875">
+Step 3: Use Vs to collect occurrence set Ts from R
+for training
+Step 4: Train a CNN N on Ts (Section 3.3)
+Apply mini-batch SGD on Equ. 9;
+Step 5: Run Label Propagation (Section 3.4)
+Classify candidates using N to setup I;
+L0 ← I;
+repeat
+Li+1 ← (1 − α)MT Li + αDI;
+until ||Li+1 − Li||2 &lt; ε;
+Step 6: Expand product feature seeds
+Move top T terms from Vc to Vs;
+iter++
+end
+Step 7: Run Label Propagation for a final result Lf
+Rank terms by L+f to get P, where L+f &gt; L−f ;
+</table>
+<sectionHeader confidence="0.999466" genericHeader="method">
+4 Experiments
+</sectionHeader>
+<subsectionHeader confidence="0.998106">
+4.1 Datasets and Evaluation Metrics
+</subsectionHeader>
+<bodyText confidence="0.99978975">
+Datasets: We select two real world datasets to
+evaluate the proposed method. The first one
+is a benchmark dataset in Wang et al. (2011),
+which contains English review sets on two do-
+mains (MP3 and Hotel)5. The second dataset is
+proposed by Chinese Opinion Analysis Evalua-
+tion 2008 (COAE 2008)6, where two review sets
+(Camera and Car) are selected. Xu et al. (2013)
+had manually annotated product features on these
+four domains, so we directly employ their annota-
+tion as the gold standard. The detailed information
+can be found in their original paper.
+</bodyText>
+<footnote confidence="0.9995645">
+5http://timan.cs.uiuc.edu/downloads.html
+6http://ir-china.org.cn/coae2008.html
+</footnote>
+<bodyText confidence="0.997623142857143">
+Evaluation Metrics: We evaluate the proposed
+method in terms of precision(P), recall(R) and F-
+measure(F). The English results are evaluated by
+exact string match. And for Chinese results, we
+use an overlap matching metric, because deter-
+mining the exact boundaries is hard even for hu-
+man (Wiebe et al., 2005).
+</bodyText>
+<subsectionHeader confidence="0.979943">
+4.2 Experimental Settings
+</subsectionHeader>
+<bodyText confidence="0.99977975">
+For English corpora, the pre-processing are the
+same as that in (Qiu et al., 2009), and for Chinese
+corpora, the Stanford Word Segmenter (Chang
+et al., 2008) is used to perform word segmenta-
+tion. We select three state-of-the-art syntax-based
+methods to be compared with our method:
+DP uses a bootstrapping algorithm named as
+Double Propagation (Qiu et al., 2009), which is
+a conventional syntax-based method.
+DP-HITS is an enhanced version of DP pro-
+posed by Zhang et al. (2010), which ranks product
+feature candidates by
+</bodyText>
+<equation confidence="0.999587">
+s(t) = log tf(t) ∗ importance(t) (13)
+</equation>
+<bodyText confidence="0.97652876">
+where importance(t) is estimated by the HITS al-
+gorithm (Kleinberg, 1999).
+SGW is the Sentiment Graph Walking algo-
+rithm proposed in (Xu et al., 2013), which first
+extracts syntactic patterns and then uses random
+walking to rank candidates. Afterwards, word-
+syntactic pattern co-occurrence statistic is used
+as feature for a semi-supervised classifier TSVM
+(Joachims, 1999) to further refine the results. This
+two-stage method is denoted as SGW-TSVM.
+LEX only uses lexical semantic clue. Label
+Propagation is applied alone in a self-training
+manner. The dimension of word embedding n =
+100, the convergence threshold ε = 10−7, and the
+number of expanded seeds T = 40. The size of
+the seed set N is 40. To output product features,
+it ranks candidates in descent order by using the
+positive score L+f (t).
+CONT only uses contextual semantic clue,
+which only contains the CNN. The window size
+l is 5. The CNN is trained with a mini-batch size
+of 50. The hidden layer size h = 250. Finally,
+importance(t) in Equ. 13 is replaced with r+t in
+Equ. 11 to rank candidates.
+LEX&amp;CONT leverages both semantic clues.
+</bodyText>
+<page confidence="0.986396">
+341
+</page>
+<table confidence="0.998464777777778">
+Method MP3 Hotel Camera Car Avg.
+P R F P R F P R F P R F F
+DP 0.66 0.57 0.61 0.66 0.60 0.63 0.71 0.70 0.70 0.72 0.65 0.68 0.66
+DP-HITS 0.65 0.62 0.63 0.64 0.66 0.65 0.71 0.78 0.74 0.69 0.68 0.68 0.68
+SGW 0.62 0.68 0.65 0.63 0.71 0.67 0.69 0.80 0.74 0.66 0.71 0.68 0.69
+LEX 0.64 0.74 0.69 0.65 0.75 0.70 0.69 0.84 0.76 0.68 0.78 0.73 0.72
+CONT 0.68 0.65 0.66 0.69 0.68 0.68 0.74 0.77 0.75 0.74 0.70 0.72 0.71
+SGW-TSVM 0.73 0.71 0.72 0.75 0.73 0.74 0.78 0.81 0.79 0.76 0.73 0.74 0.75
+LEX&amp;CONT 0.74 0.75 0.74 0.75 0.77 0.76 0.80 0.84 0.82 0.79 0.79 0.79 0.78
+</table>
+<tableCaption confidence="0.920443666666667">
+Table 1: Experimental results of product feature mining. The precision or recall of CONT is the average
+performance over five runs with different random initialization of parameters of the CNN. Avg. stands
+for the average score.
+</tableCaption>
+<subsectionHeader confidence="0.8967435">
+4.3 The Semantics-based Methods vs.
+State-of-the-art Syntax-based Methods
+</subsectionHeader>
+<bodyText confidence="0.999891">
+The experimental results are shown in Table 1,
+from which we have the following observations:
+</bodyText>
+<listItem confidence="0.981843897435897">
+(i) Our method achieves the best performance
+among all of the compared methods. We
+also equally split the dataset into five sub-
+sets, and perform one-tailed t-test (p ≤ 0.05),
+which shows that the proposed semantics-
+based method (LEX&amp;CONT) significantly out-
+performs the three syntax-based strong com-
+petitors (DP, DP-HITS and SGW-TSVM).
+(ii) LEX&amp;CONT which leverages both lexical and
+contextual semantic clues outperforms ap-
+proaches that only use one kind of semantic
+clue (LEX and CONT), showing that the com-
+bination of the semantic clues is helpful.
+(iii) Our methods which use only one kind of
+semantic clue (LEX and CONT) outperform
+syntax-based methods (DP, DP-HITS and
+SGW). Comparing DP-HITS with LEX and
+CONT, the difference between them is that
+DP-HITS uses a syntax-pattern-based algo-
+rithm to estimate importance(t) in Equ. 13,
+while our methods use lexical or contextual se-
+mantic clue instead. We believe the reason that
+LEX or CONT is better is that syntactic pat-
+terns only use discrete and local information.
+In contrast, CONT exploits latent semantics of
+each word in context, and LEX takes advantage
+of word embedding, which is induced from
+global word co-occurrence statistic. Further-
+more, comparing SGW and LEX, both methods
+are base on random surfer model, but LEX gets
+better results than SGW. Therefore, the word-
+word semantic similarity relation used in LEX
+is more reliable than the word-syntactic pattern
+relation used in SGW.
+(iv) LEX&amp;CONT achieves the highest recall
+among all of the evaluated methods. Since
+DP and DP-HITS rely on frequency for rank-
+ing product features, infrequent candidates are
+ranked low in their extracted list. As for SGW-
+</listItem>
+<bodyText confidence="0.8734185">
+TSVM, the features they used for the TSVM
+suffer from the data sparsity problem for in-
+frequent terms. In contrast, LEX&amp;CONT is
+frequency-independent to the review corpus.
+Further discussions on this observation are
+given in the next section.
+</bodyText>
+<subsectionHeader confidence="0.999574">
+4.4 The Results on Extracting Infrequent
+Product Features
+</subsectionHeader>
+<bodyText confidence="0.9999872">
+We conservatively regard 30% product features
+with the highest frequencies in R as frequent fea-
+tures, so the remaining terms in the gold standard
+are infrequent features. In product feature mining
+task, frequent features are relatively easy to find.
+Table 2 shows the recall of all the four approaches
+for mining frequent product features. We can see
+that the performance are very close among differ-
+ent methods. Therefore, the recall mainly depends
+on mining the infrequent features.
+</bodyText>
+<table confidence="0.9993846">
+Method MP3 Hotel Camera Car
+DP 0.89 0.92 0.86 0.84
+DP-HITS 0.89 0.91 0.86 0.85
+SGW-TSVM 0.87 0.92 0.88 0.87
+LEX&amp;CONT 0.89 0.91 0.89 0.87
+</table>
+<tableCaption confidence="0.999704">
+Table 2: The recall of frequent product features.
+</tableCaption>
+<bodyText confidence="0.999463571428572">
+Figure 3 gives the recall of infrequent prod-
+uct features, where LEX&amp;CONT achieves the best
+performance. So our method is less influenced
+by term frequency. Furthermore, LEX gets better
+recall than CONT and all syntax-based methods,
+which indicates that lexical semantic clue does aid
+to mine more infrequent features as expected.
+</bodyText>
+<page confidence="0.988486">
+342
+</page>
+<figure confidence="0.999441684210526">
+LEX&amp;CONT
+CONT
+LEX
+1.0
+.9
+.8
+.7
+.6
+.5
+LEX&amp;CONT
+CONT
+LEX
+1.0
+.9
+.8
+.7
+.6
+.5
+LEX&amp;CONT
+CONT
+LEX
+1.0
+.9
+.8
+.7
+.6
+.5
+LEX&amp;CONT
+CONT
+LEX
+1.0
+.9
+.8
+.7
+.6
+.5
+1 2 3 4 5 6 7 8 9 1 2 3 4 5 6 7 8 9 1 2 3 4 5 6 7 8 9 1 2 3 4 5 6 7 8 9
+(a) MP3 (b) Hotel (c) Camera (d) Car
+</figure>
+<figureCaption confidence="0.9325065">
+Figure 4: Accuracy (y-axis) of product feature seed expansion at each bootstrapping iteration (x-axis).
+The error bar shows the standard deviation over five runs.
+</figureCaption>
+<table confidence="0.9997516">
+Method MP3 Hotel Camera Car
+P R F P R F P R F P R F
+FW-5 0.62 0.63 0.62 0.64 0.64 0.64 0.68 0.73 0.70 0.67 0.66 0.66
+FW-9 0.64 0.65 0.64 0.66 0.68 0.67 0.70 0.76 0.73 0.71 0.70 0.70
+CONT 0.68 0.65 0.66 0.69 0.68 0.68 0.74 0.77 0.75 0.74 0.70 0.72
+</table>
+<tableCaption confidence="0.999724">
+Table 3: The results of convolutional method vs. the results of non-convolutional methods.
+</tableCaption>
+<note confidence="0.487987">
+MP3 Hotel Camera Car
+</note>
+<figureCaption confidence="0.908877333333333">
+Figure 3: The recall of infrequent features. The
+error bar shows the standard deviation over five
+different runs.
+</figureCaption>
+<subsectionHeader confidence="0.9993">
+4.5 Lexical Semantic Clue vs. Contextual
+Semantic Clue
+</subsectionHeader>
+<bodyText confidence="0.999861676470588">
+This section studies the effects of lexical seman-
+tic clue and contextual semantic clue during seed
+expansion (Step 6 in Algorithm 1), which is con-
+trolled by α. When α = 1, we get the CONT; and
+if α is set 0, we get the LEX. To take into account
+the correctly expanded terms for both positive and
+negative seeds, we use Accuracy as the evaluation
+metric,
+where TP denotes the true positive seeds, and TN
+denotes the true negative seeds.
+Figure 4 shows the performance of seed ex-
+pansion during bootstrapping, in which the accu-
+racy is computed on 40 seeds (20 being positive
+and 20 being negative) expanded in each itera-
+tion. We can see that the accuracies of CONT and
+LEX&amp;CONT retain at a high level, which shows
+that they can find reliable new product feature
+seeds. However, the performance of LEX oscil-
+lates sharply and it is very low for some points,
+which indicates that using lexical semantic clue
+alone is infeasible. On another hand, comparing
+CONT with LEX in Table 1, we can see that LEX
+performs generally better than CONT. Although
+LEX is not so accurate as CONT during seed ex-
+pansion, its final performance surpasses CONT.
+Consequently, we can draw conclusion that CONT
+is more suitable for the seed expansion, and LEX
+is more robust for the final result production.
+To combine advantages of the two kinds of se-
+mantic clues, we set α = 0.7 in Step 5 of Algo-
+rithm 1, so that contextual semantic clue plays a
+key role to find new seeds accurately. For Step 7,
+we set α = 0.3. Thus, lexical semantic clue is
+emphasized for producing the final results.
+</bodyText>
+<subsectionHeader confidence="0.996076">
+4.6 The Effect of Convolutional Layer
+</subsectionHeader>
+<bodyText confidence="0.999313">
+Two non-convolutional variations of the proposed
+method are used to be compared with the convo-
+lutional method in CONT. FW-5 uses a traditional
+neural network with a fixed window size of 5 to
+replace the CNN in CONT, and the candidate term
+to be classified is placed in the center of the win-
+dow. Similarly, FW-9 uses a fixed window size
+of 9. Note that CONT uses a 5-term dynamic
+window containing the candidate term, so the ex-
+ploited number of words in the context is equiva-
+lent to FW-9.
+</bodyText>
+<figure confidence="0.998734066666667">
+Recall
+.9
+.8
+.7
+.6
+.5
+.4
+DP
+DP-HITS
+SGW-TSVM
+CONT
+LEX
+LEX&amp;CONT
+Accuracy = # Extracted Seeds
+#TP + #TN
+</figure>
+<page confidence="0.997762">
+343
+</page>
+<bodyText confidence="0.999916642857143">
+Table 3 shows the experimental results. We can
+see that the performance of FW-5 is much worse
+than CONT. The reason is that FW-5 only exploits
+half of the context as that of CONT, which is not
+sufficient enough. Meanwhile, although FW-9 ex-
+ploits equivalent range of context as that of CONT,
+it gets lower precisions. It is because FW-9 has
+approximately two times parameters in the param-
+eter matrix W M than that in Equ. 5 of CONT,
+which makes it more difficult to be trained with
+the same amount of data. Also, lengths of many
+sentences in the review corpora are shorter than 9.
+Therefore, the convolutional approach in CONT is
+the most effective way among these settings.
+</bodyText>
+<subsectionHeader confidence="0.984522">
+4.7 Parameter Study
+</subsectionHeader>
+<bodyText confidence="0.935869428571429">
+We investigate two key parameters of the proposed
+method: the initial number of seeds N, and the
+size of the window l used by the CNN.
+Figure 5 shows the performance under differ-
+ent N, where the F-Measure saturates when N
+equates to 40 and beyond. Hence, very few seeds
+are needed for starting our algorithm.
+</bodyText>
+<figureCaption confidence="0.776984166666667">
+Figure 5: F-Measure vs. N for the final results.
+Figure 6 shows F-Measure under different win-
+dow size l. We can see that the performance is
+improved little when l is larger than 5. Therefore,
+l = 5 is a proper window size for these datasets.
+Figure 6: F-Measure vs. l for the final results.
+</figureCaption>
+<sectionHeader confidence="0.946483" genericHeader="conclusions">
+5 Conclusion and Future Work
+</sectionHeader>
+<bodyText confidence="0.999922666666667">
+This paper proposes a product feature mining
+method by leveraging contextual and lexical se-
+mantic clues. A semantic similarity graph is built
+to capture lexical semantic clue, and a convo-
+lutional neural network is used to encode con-
+textual semantic clue. Then, a Label Propaga-
+tion algorithm is applied to combine both seman-
+tic clues. Experimental results prove the effec-
+tiveness of the proposed method, which not only
+mines product features more accurately than con-
+ventional syntax-based method, but also extracts
+more infrequent product features.
+In future work, we plan to extend the proposed
+method to jointly mine product features along with
+customers’ opinions on them. The learnt seman-
+tic representations of words may also be utilized
+to predict fine-grained sentiment distributions over
+product features.
+</bodyText>
+<sectionHeader confidence="0.978702" genericHeader="acknowledgments">
+Acknowledgement
+</sectionHeader>
+<bodyText confidence="0.999577888888889">
+This work was sponsored by the National
+Basic Research Program of China (No.
+2012CB316300), the National Natural Sci-
+ence Foundation of China (No. 61272332 and
+No. 61202329), the National High Technol-
+ogy Development 863 Program of China (No.
+2012AA011102), and CCF-Tencent Open Re-
+search Fund. This work was also supported in
+part by Noahs Ark Lab of Huawei Tech. Ltm.
+</bodyText>
+<sectionHeader confidence="0.998368" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.99430405">
+Shumeet Baluja, Rohan Seth, D. Sivakumar, Yushi
+Jing, Jay Yagnik, Shankar Kumar, Deepak
+Ravichandran, and Mohamed Aly. 2008. Video
+suggestion and discovery for youtube: Taking ran-
+dom walks through the view graph. In Proceedings
+of the 17th International Conference on World Wide
+Web, WWW ’08, pages 895–904, New York, NY,
+USA. ACM.
+Pi-Chuan Chang, Michel Galley, and Christopher D.
+Manning. 2008. Optimizing chinese word segmen-
+tation for machine translation performance. In Pro-
+ceedings of the Third Workshop on Statistical Ma-
+chine Translation, StatMT ’08, pages 224–232.
+Ronan Collobert, Jason Weston, L´eon Bottou, Michael
+Karlen, Koray Kavukcuoglu, and Pavel Kuksa.
+2011. Natural language processing (almost) from
+scratch. J. Mach. Learn. Res., 12:2493–2537,
+November.
+Marie-Catherine de Marneffe, Bill MacCartney, and
+Christopher D. Manning. 2006. Generating typed
+</reference>
+<figure confidence="0.990244772727273">
+.85
+.80
+.75
+.70
+.65
+10 20 30 40 50 60
+N
+MP3
+Hotel
+Camera
+Car
+.s
+.8
+.7
+.6
+.5
+2 3 4 5 6 7
+l
+MP3
+Hotel
+Camera
+Car
+</figure>
+<page confidence="0.978857">
+344
+</page>
+<reference confidence="0.996650577981651">
+dependency parses from phrase structure parses. In
+Proceedings of the IEEE / ACL’06 Workshop on
+Spoken Language Technology.
+Ted Dunning. 1993. Accurate methods for the statis-
+tics of surprise and coincidence. Comput. Linguist.,
+19(1):61–74, March.
+Xavier Glorot and Yoshua Bengio. 2010. Understand-
+ing the difficulty of training deep feedforward neural
+networks. In Proceedings of the International Con-
+ference on Artificial Intelligence and Statistics.
+Geoffrey E. Hinton. 1989. Connectionist learning pro-
+cedures. Artificial Intelligence, 40(1C3):185 – 234.
+Minqing Hu and Bing Liu. 2004. Mining and summa-
+rizing customer reviews. In Proceedings of the Tenth
+ACM SIGKDD International Conference on Knowl-
+edge Discovery and Data Mining, KDD ’04, pages
+168–177, New York, NY, USA. ACM.
+Xing Jiang and Ah-Hwee Tan. 2010. Crctol: A
+semantic-based domain ontology learning system.
+Journal of the American Society for Information Sci-
+ence and Technology, 61(1):150–168.
+Long Jiang, Mo Yu, Ming Zhou, Xiaohua Liu, and
+Tiejun Zhao. 2011. Target-dependent twitter sen-
+timent classification. In Proceedings of the 49th An-
+nual Meeting of the Association for Computational
+Linguistics: Human Language Technologies - Vol-
+ume 1, HLT ’11, pages 151–160, Stroudsburg, PA,
+USA. Association for Computational Linguistics.
+Thorsten Joachims. 1999. Transductive inference for
+text classification using support vector machines. In
+Proceedings of the 16th International Conference on
+Machine Learning, pages 200–209.
+Jon M. Kleinberg. 1999. Authoritative sources in a
+hyperlinked environment. J. ACM, 46(5):604–632,
+September.
+Fangtao Li, Sinno Jialin Pan, Ou Jin, Qiang Yang, and
+Xiaoyan Zhu. 2012. Cross-domain co-extraction of
+sentiment and topic lexicons. In Proceedings of the
+50th Annual Meeting of the Association for Compu-
+tational Linguistics: Long Papers - Volume 1, ACL
+’12, pages 410–419, Stroudsburg, PA, USA. Associ-
+ation for Computational Linguistics.
+Kang Liu, Liheng Xu, and Jun Zhao. 2012. Opin-
+ion target extraction using word-based translation
+model. In Proceedings of the 2012 Joint Confer-
+ence on Empirical Methods in Natural Language
+Processing and Computational Natural Language
+Learning, pages 1346–1356, Jeju Island, Korea,
+July. Association for Computational Linguistics.
+Tomas Mikolov, Ilya Sutskever, Kai Chen, Greg S. Cor-
+rado, and Jeff Dean. 2013. Distributed representa-
+tions of words and phrases and their compositional-
+ity. In Advances in Neural Information Processing
+Systems, pages 3111–3119.
+Samaneh Moghaddam and Martin Ester. 2010. Opin-
+ion digger: An unsupervised opinion miner from
+unstructured product reviews. In Proceedings of
+the 19th ACM International Conference on Informa-
+tion and Knowledge Management, CIKM ’10, pages
+1825–1828, New York, NY, USA. ACM.
+Frederic Morin and Yoshua Bengio. 2005. Hierarchi-
+cal probabilistic neural network language model. In
+Proceedings of the international workshop on arti-
+ficial intelligence and statistics, AISTATS05, pages
+246–252.
+Ana-Maria Popescu and Oren Etzioni. 2005. Extract-
+ing product features and opinions from reviews. In
+Proceedings of the conference on Human Language
+Technology and Empirical Methods in Natural Lan-
+guage Processing, HLT ’05, pages 339–346.
+Guang Qiu, Bing Liu, Jiajun Bu, and Chun Chen.
+2009. Expanding domain sentiment lexicon through
+double propagation. In Proceedings of the 21st in-
+ternational jont conference on Artifical intelligence,
+IJCAI’09, pages 1199–1204.
+Richard Socher, Eric H Huang, Jeffrey Pennington,
+Andrew Y Ng, and Christopher D Manning. 2011.
+Dynamic pooling and unfolding recursive autoen-
+coders for paraphrase detection. In NIPS’2011, vol-
+ume 24, pages 801–809.
+Ilya Sutskever, James Martens, George Dahl, and Ge-
+offrey Hinton. 2013. Distributed representations of
+words and phrases and their compositionality. In
+Proceedings of the 30 th International Conference
+on Machine Learning.
+Joseph Turian, Lev Ratinov, and Yoshua Bengio. 2010.
+Word representations: A simple and general method
+for semi-supervised learning. In Proceedings of the
+48th Annual Meeting of the Association for Com-
+putational Linguistics, ACL ’10, pages 384–394,
+Stroudsburg, PA, USA. Association for Computa-
+tional Linguistics.
+Hongning Wang, Yue Lu, and ChengXiang Zhai. 2011.
+Latent aspect rating analysis without aspect key-
+word supervision. In Proceedings of the 17th ACM
+SIGKDD International Conference on Knowledge
+Discovery and Data Mining, KDD ’11, pages 618–
+626, New York, NY, USA. ACM.
+Janyce Wiebe, Theresa Wilson, and Claire Cardie.
+2005. Annotating expressions of opinions and emo-
+tions in language. Language Resources and Evalu-
+ation, 39(2-3):165–210.
+Yuanbin Wu, Qi Zhang, Xuanjing Huang, and Lide Wu.
+2009. Phrase dependency parsing for opinion min-
+ing. In Proceedings of the 2009 Conference on Em-
+pirical Methods in Natural Language Processing:
+Volume 3 - Volume 3, EMNLP ’09, pages 1533–
+1541, Stroudsburg, PA, USA. Association for Com-
+putational Linguistics.
+</reference>
+<page confidence="0.98799">
+345
+</page>
+<reference confidence="0.99912444">
+Liheng Xu, Kang Liu, Siwei Lai, Yubo Chen, and Jun
+Zhao. 2013. Mining opinion words and opinion tar-
+gets in a two-stage framework. In Proceedings of the
+51st Annual Meeting of the Association for Compu-
+tational Linguistics (Volume 1: Long Papers), pages
+1764–1773, Sofia, Bulgaria, August. Association for
+Computational Linguistics.
+Lei Zhang, Bing Liu, Suk Hwan Lim, and Eamonn
+O’Brien-Strain. 2010. Extracting and ranking prod-
+uct features in opinion documents. In Proceedings
+of the 23rd International Conference on Compu-
+tational Linguistics: Posters, COLING ’10, pages
+1462–1470, Stroudsburg, PA, USA. Association for
+Computational Linguistics.
+Jingbo Zhu, Huizhen Wang, Benjamin K. Tsou, and
+Muhua Zhu. 2009. Multi-aspect opinion polling
+from textual reviews. In Proceedings of the 18th
+ACM Conference on Information and Knowledge
+Management, CIKM ’09, pages 1799–1802, New
+York, NY, USA. ACM.
+Li Zhuang, Feng Jing, and Xiao-Yan Zhu. 2006.
+Movie review mining and summarization. In Pro-
+ceedings of the 15th ACM International Conference
+on Information and Knowledge Management, CIKM
+’06, pages 43–50, New York, NY, USA. ACM.
+</reference>
+<page confidence="0.999101">
+346
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.531330">
+<title confidence="0.999731">Product Feature Mining: Semantic Clues versus Syntactic Constituents</title>
+<author confidence="0.986613">Liheng Xu</author>
+<author confidence="0.986613">Kang Liu</author>
+<author confidence="0.986613">Siwei Lai</author>
+<author confidence="0.986613">Jun</author>
+<affiliation confidence="0.997558">National Laboratory of Pattern</affiliation>
+<address confidence="0.566292">Institute of Automation, Chinese Academy of Sciences, Beijing, 100190,</address>
+<email confidence="0.930907">kliu,swlai,</email>
+<abstract confidence="0.999546592592593">Product feature mining is a key subtask in fine-grained opinion mining. Previous works often use syntax constituents in this task. However, syntax-based methods can only use discrete contextual information, which may suffer from data sparsity. This paper proposes a novel product feature mining method which leverages lexical and contextual semantic clues. Lexical semantic clue verifies whether a candidate term is related to the target product, and semantic clue serves as a pattern miner to find candidates, which exploits semantics of each word in context so as to alleviate the data sparsity problem. We build a semantic similarity graph to encode lexical semantic clue, and employ a convolutional neural model to capture contextual semantic clue. Then Label Propagation is applied to combine both semantic clues. Experimental results show that our semantics-based method significantly outperforms conventional syntaxbased approaches, which not only mines product features more accurately, but also extracts more infrequent product features.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>Shumeet Baluja</author>
+<author>Rohan Seth</author>
+<author>D Sivakumar</author>
+<author>Yushi Jing</author>
+<author>Jay Yagnik</author>
+<author>Shankar Kumar</author>
+<author>Deepak Ravichandran</author>
+<author>Mohamed Aly</author>
+</authors>
+<title>Video suggestion and discovery for youtube: Taking random walks through the view graph.</title>
+<date>2008</date>
+<booktitle>In Proceedings of the 17th International Conference on World Wide Web, WWW ’08,</booktitle>
+<pages>895--904</pages>
+<publisher>ACM.</publisher>
+<location>New York, NY, USA.</location>
+<contexts>
+<context position="19635" citStr="Baluja et al., 2008" startWordPosition="3272" endWordPosition="3275"> E Vc where (r+t , r−t ) is estimated by, += count+(t) rt count+(t) + count−(t) (11) where count+(t) is the number of occurrences of term t that are classified as positive by the CNN, and count−(t) represents the negative count. Label Propagation is applied to propagate the prior knowledge distribution I to the product feature distribution L via semantic similarity graph G, so that a product feature candidate is determined by exploring its semantic relations to all of the seeds and other candidates globally. We propose an adapted version on the random walking view of the Adsorption algorithm (Baluja et al., 2008) by updating the following formula until L converges, Li+1 = (1 − α)MTLi + αDI (12) where M is the semantic transition matrix built from G; D = Diag[log tf(t)] is a diagonal matrix of log frequencies, which is designed to assign higher “confidence” scores to more frequent seeds; and α is a balancing parameter. Particularly, when α = 0, we can set the prior knowledge I without Vc to L0 so that only lexical semantic clue is used; otherwise if α = 1, only contextual semantic clue is used. θˆ = argmin θ � |T-| i=1 ⎧ ⎨ ⎩ It = 340 3.5 The Bootstrapping Framework We summarize the bootstrapping framew</context>
+</contexts>
+<marker>Baluja, Seth, Sivakumar, Jing, Yagnik, Kumar, Ravichandran, Aly, 2008</marker>
+<rawString>Shumeet Baluja, Rohan Seth, D. Sivakumar, Yushi Jing, Jay Yagnik, Shankar Kumar, Deepak Ravichandran, and Mohamed Aly. 2008. Video suggestion and discovery for youtube: Taking random walks through the view graph. In Proceedings of the 17th International Conference on World Wide Web, WWW ’08, pages 895–904, New York, NY, USA. ACM.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Pi-Chuan Chang</author>
+<author>Michel Galley</author>
+<author>Christopher D Manning</author>
+</authors>
+<title>Optimizing chinese word segmentation for machine translation performance.</title>
+<date>2008</date>
+<booktitle>In Proceedings of the Third Workshop on Statistical Machine Translation, StatMT ’08,</booktitle>
+<pages>224--232</pages>
+<contexts>
+<context position="22630" citStr="Chang et al., 2008" startWordPosition="3795" endWordPosition="3798">nformation can be found in their original paper. 5http://timan.cs.uiuc.edu/downloads.html 6http://ir-china.org.cn/coae2008.html Evaluation Metrics: We evaluate the proposed method in terms of precision(P), recall(R) and Fmeasure(F). The English results are evaluated by exact string match. And for Chinese results, we use an overlap matching metric, because determining the exact boundaries is hard even for human (Wiebe et al., 2005). 4.2 Experimental Settings For English corpora, the pre-processing are the same as that in (Qiu et al., 2009), and for Chinese corpora, the Stanford Word Segmenter (Chang et al., 2008) is used to perform word segmentation. We select three state-of-the-art syntax-based methods to be compared with our method: DP uses a bootstrapping algorithm named as Double Propagation (Qiu et al., 2009), which is a conventional syntax-based method. DP-HITS is an enhanced version of DP proposed by Zhang et al. (2010), which ranks product feature candidates by s(t) = log tf(t) ∗ importance(t) (13) where importance(t) is estimated by the HITS algorithm (Kleinberg, 1999). SGW is the Sentiment Graph Walking algorithm proposed in (Xu et al., 2013), which first extracts syntactic patterns and then</context>
+</contexts>
+<marker>Chang, Galley, Manning, 2008</marker>
+<rawString>Pi-Chuan Chang, Michel Galley, and Christopher D. Manning. 2008. Optimizing chinese word segmentation for machine translation performance. In Proceedings of the Third Workshop on Statistical Machine Translation, StatMT ’08, pages 224–232.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ronan Collobert</author>
+<author>Jason Weston</author>
+<author>L´eon Bottou</author>
+<author>Michael Karlen</author>
+<author>Koray Kavukcuoglu</author>
+<author>Pavel Kuksa</author>
+</authors>
+<title>Natural language processing (almost) from scratch.</title>
+<date>2011</date>
+<journal>J. Mach. Learn. Res.,</journal>
+<pages>12--2493</pages>
+<contexts>
+<context position="5902" citStr="Collobert et al., 2011" startWordPosition="943" endWordPosition="946">ify whether a candidate is really related to the target product. We call it lexical semantic clue. This paper proposes a novel bootstrapping approach for product feature mining, which leverages both semantic clues discussed above. Firstly, some reliable product feature seeds are automatically extracted. Then, based on the assumption that terms that are more semantically similar to the seeds are more likely to be product features, a graph which measures semantic similarities between terms is built to capture lexical semantic clue. At the same time, a semi-supervised convolutional neural model (Collobert et al., 2011) is employed to encode contextual semantic clue. Finally, the two kinds of semantic clues are combined by a Label Propagation algorithm. In the proposed method, words are represented by continuous vectors, which capture latent semantic factors of the words (Turian et al., 2010). The vectors can be unsupervisedly trained on large scale corpora, and words with similar semantics will have similar vectors. This enables our method to be less sensitive to lexicon change, so that the data sparsity problem can be alleviated. The contributions of this paper include: • It uses semantics of words to enco</context>
+<context position="9787" citStr="Collobert et al., 2011" startWordPosition="1537" endWordPosition="1540">attern co-occurrence statistics as features for the classifier. However, this kind of feature is still sparse for infrequent candidates. Our method adopts a semantic word representation model, which can train dense features unsupervisedly on a very large corpus. Thus, the data sparsity problem can be alleviated. 3 The Proposed Method We propose a semantics-based bootstrapping method for product feature mining. Firstly, some product feature seeds are automatically extracted. Then, a semantic similarity graph is created to capture lexical semantic clue, and a Convolutional Neural Network (CNN) (Collobert et al., 2011) is trained in each bootstrapping iteration to encode contextual semantic clue. Finally we use Label Propagation to find some reliable new seeds for the training of the next bootstrapping iteration. 3.1 Automatic Seed Generation The seed set consists of positive labeled examples (i.e. product features) and negative labeled examples (i.e. noise terms). Intuitively, popular product features are frequently mentioned in reviews, so they can be extracted by simply mining frequently occurring nouns (Hu and Liu, 2004). However, this strategy will also find many noise terms (e.g., commonly used nouns </context>
+<context position="11966" citStr="Collobert et al., 2011" startWordPosition="1919" endWordPosition="1922">be product features. Therefore, we employ their General Noun Corpus to create the negative example set Vs−, where N most frequent terms are selected. Besides, it is guaranteed that Vs+ ∩ Vs− = ∅, i.e., conflicting terms are taken as negative examples. 3.2 Capturing Lexical Semantic Clue in a Semantic Similarity Graph To capture lexical semantic clue, each word is first converted into word embedding, which is a continuous vector with each dimension’s value corresponds to a semantic or grammatical interpretation (Turian et al., 2010). Learning large-scale word embeddings is very time-consuming (Collobert et al., 2011), we thus employ a faster method named Skip-gram model (Mikolov et al., 2013). 3.2.1 Learning Word Embedding for Semantic Representation Given a sequence of training words W = {w1, w2, ..., wm}, the goal of the Skip-gram model is to learn a continuous vector space EB = {e1, e2, ..., em}, where ei is the word embedding of wi. The training objective is to maximize the 1Google-n-Gram (http://books.google.com/ngrams) is used as the background corpus. 2The df(t) part of the original DRM is slightly modified because we want a tf × idf-like scheme (Liu et al., 2012). |log A(t) |− min |log A(·)| 1 log</context>
+<context position="14340" citStr="Collobert et al., 2011" startWordPosition="2325" endWordPosition="2328">terms. The underlying motivation is that if we have known some product feature seeds, then terms that are more semantically similar to these seeds are more likely to be product features. For example, if screen is known to be a product feature of mp3, and lcd is of high semantic similarity with screen, we can infer that lcd is also a product feature. Analogously, terms that are semantically similar to negative labeled seeds are not product features. Word embedding naturally meets the demand above: words that are more semantically similar to each other are located closer in the embedding space (Collobert et al., 2011). Therefore, we can use cosine distance between two embedding vectors as the semantic distance measuring metric. Thus, our method does not rely on term frequency 3Wikipedia(http://www.wikipedia.org) is used in practice. to rank candidates. This could potentially improve the ability of mining infrequent product features. Formally, we create a semantic similarity graph G = (V, E, W), where V = {Vs U Vc} is the vertex set, which contains the labeled seed set Vs and the unlabeled candidate set Vc; E is the edge set which connects every vertex pair (u, v), where u, v E V ; W = {wuv : cos(EBu, EBv)}</context>
+</contexts>
+<marker>Collobert, Weston, Bottou, Karlen, Kavukcuoglu, Kuksa, 2011</marker>
+<rawString>Ronan Collobert, Jason Weston, L´eon Bottou, Michael Karlen, Koray Kavukcuoglu, and Pavel Kuksa. 2011. Natural language processing (almost) from scratch. J. Mach. Learn. Res., 12:2493–2537, November.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Marie-Catherine de Marneffe</author>
+<author>Bill MacCartney</author>
+<author>Christopher D Manning</author>
+</authors>
+<title>Generating typed dependency parses from phrase structure parses.</title>
+<date>2006</date>
+<booktitle>In Proceedings of the IEEE / ACL’06 Workshop on Spoken Language Technology.</booktitle>
+<marker>de Marneffe, MacCartney, Manning, 2006</marker>
+<rawString>Marie-Catherine de Marneffe, Bill MacCartney, and Christopher D. Manning. 2006. Generating typed dependency parses from phrase structure parses. In Proceedings of the IEEE / ACL’06 Workshop on Spoken Language Technology.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ted Dunning</author>
+</authors>
+<title>Accurate methods for the statistics of surprise and coincidence.</title>
+<date>1993</date>
+<journal>Comput. Linguist.,</journal>
+<volume>19</volume>
+<issue>1</issue>
+<contexts>
+<context position="10627" citStr="Dunning, 1993" startWordPosition="1666" endWordPosition="1667">on The seed set consists of positive labeled examples (i.e. product features) and negative labeled examples (i.e. noise terms). Intuitively, popular product features are frequently mentioned in reviews, so they can be extracted by simply mining frequently occurring nouns (Hu and Liu, 2004). However, this strategy will also find many noise terms (e.g., commonly used nouns like thing, one, etc.). To produce high quality seeds, we employ a Domain Relevance Measure (DRM) (Jiang and Tan, 2010), which combines term frequency with a domainspecific measuring metric called Likelihood Ratio Test (LRT) (Dunning, 1993). Let A(t) denotes the LRT score of a product feature candidate t, k1 1 − p)n1−k1 k2 1 − p)n2−k2 A(t) =pk1 1 (1 − p1)n1−k1pk2 2 (1 − p2)n2−k2 (1) where k1 and k2 are the frequencies of t in the review corpus R and a background corpus1 B, n1 and n2 are the total number of terms in R and B, p = (k1 + k2)/(n1 + n2), p1 = k1/n1 and p2 = k2/n2. Then a modified DRM2 is proposed, tf(t) DRM(t) = max[tf(·)] × × max |log A(·) |− min |log A(·)| where tf(t) is the frequency of t in R and df(t) is the frequency of t in B. All nouns in R are ranked by DRM(t) in descent order, where top N nouns are taken as </context>
+</contexts>
+<marker>Dunning, 1993</marker>
+<rawString>Ted Dunning. 1993. Accurate methods for the statistics of surprise and coincidence. Comput. Linguist., 19(1):61–74, March.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Xavier Glorot</author>
+<author>Yoshua Bengio</author>
+</authors>
+<title>Understanding the difficulty of training deep feedforward neural networks.</title>
+<date>2010</date>
+<booktitle>In Proceedings of the International Conference on Artificial Intelligence and Statistics.</booktitle>
+<contexts>
+<context position="18322" citStr="Glorot and Bengio, 2010" startWordPosition="3035" endWordPosition="3038">s the label set representing product feature and non-product feature, respectively. To train the CNN, we first use Vs to collect each occurrence of the seeds in R to form a training set Ts. Then, the training criterion is to minimize cross-entropy over Ts, − log δip(tiIXi; θ) (9) where δi is the binomial target label distribution for one entry. Backpropagation algorithm with mini-batch stochastic gradient descent is used to solve this optimization problem. In addition, some useful tricks can be applied during the training. The weight matrixes W(·) are initialized by normalized initialization (Glorot and Bengio, 2010). W (1) is pre-trained by an autoencoder (Hinton, 1989) to capture semantic compositionality. To speed up the learning, a momentum method is applied (Sutskever et al., 2013). 3.4 Combining Lexical and Contextual Semantic Clues by Label Propagation We propose a Label Propagation algorithm to combine both semantic clues in a unified process. Each term t E V is assumed to have a label distribution Lt = (p+t , p−t ), where p+t denotes the probability of the candidate being a product feature, and on the contrary, p−t = 1 − p+t . The classified results of the CNN which encode contextual semantic clu</context>
+</contexts>
+<marker>Glorot, Bengio, 2010</marker>
+<rawString>Xavier Glorot and Yoshua Bengio. 2010. Understanding the difficulty of training deep feedforward neural networks. In Proceedings of the International Conference on Artificial Intelligence and Statistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Geoffrey E Hinton</author>
+</authors>
+<title>Connectionist learning procedures.</title>
+<date>1989</date>
+<journal>Artificial Intelligence, 40(1C3):185 –</journal>
+<pages>234</pages>
+<contexts>
+<context position="18377" citStr="Hinton, 1989" startWordPosition="3046" endWordPosition="3047">re, respectively. To train the CNN, we first use Vs to collect each occurrence of the seeds in R to form a training set Ts. Then, the training criterion is to minimize cross-entropy over Ts, − log δip(tiIXi; θ) (9) where δi is the binomial target label distribution for one entry. Backpropagation algorithm with mini-batch stochastic gradient descent is used to solve this optimization problem. In addition, some useful tricks can be applied during the training. The weight matrixes W(·) are initialized by normalized initialization (Glorot and Bengio, 2010). W (1) is pre-trained by an autoencoder (Hinton, 1989) to capture semantic compositionality. To speed up the learning, a momentum method is applied (Sutskever et al., 2013). 3.4 Combining Lexical and Contextual Semantic Clues by Label Propagation We propose a Label Propagation algorithm to combine both semantic clues in a unified process. Each term t E V is assumed to have a label distribution Lt = (p+t , p−t ), where p+t denotes the probability of the candidate being a product feature, and on the contrary, p−t = 1 − p+t . The classified results of the CNN which encode contextual semantic clue serve as the prior knowledge, (1, 0), if t E Vs+ (0, </context>
+</contexts>
+<marker>Hinton, 1989</marker>
+<rawString>Geoffrey E. Hinton. 1989. Connectionist learning procedures. Artificial Intelligence, 40(1C3):185 – 234.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Minqing Hu</author>
+<author>Bing Liu</author>
+</authors>
+<title>Mining and summarizing customer reviews.</title>
+<date>2004</date>
+<booktitle>In Proceedings of the Tenth ACM SIGKDD International Conference on Knowledge Discovery and Data Mining, KDD ’04,</booktitle>
+<pages>168--177</pages>
+<publisher>ACM.</publisher>
+<location>New York, NY, USA.</location>
+<contexts>
+<context position="1992" citStr="Hu and Liu, 2004" startWordPosition="297" endWordPosition="300">, opinion mining has helped customers a lot to make informed purchase decisions. However, with the rapid growth of e-commerce, customers are no longer satisfied with the overall opinion ratings provided by traditional sentiment analysis systems. The detailed functions or attributes of products, which are called product features, receive more attention. Nevertheless, a product may have thousands of features, which makes it impractical for a customer to investigate them all. Therefore, mining product features automatically from online reviews is shown to be a key step for opinion summarization (Hu and Liu, 2004; Qiu et al., 2009) and fine-grained sentiment analysis (Jiang et al., 2011; Li et al., 2012). Previous works often mine product features via syntactic constituent matching (Popescu and Etzioni, 2005; Qiu et al., 2009; Zhang et al., 2010). The basic idea is that reviewers tend to comment on product features in similar syntactic structures. Therefore, it is natural to mine product features by using syntactic patterns. For example, in Figure 1, the upper box shows a dependency tree produced by Stanford Parser (de Marneffe et al., 2006), and the lower box shows a common syntactic pattern from (Zh</context>
+<context position="7594" citStr="Hu and Liu (2004)" startWordPosition="1211" endWordPosition="1214">cial for this task. For example, one may say “This hotel has low water pressure”, where low water pressure is seldom mentioned, but fatal to someone’s taste. • We compare the proposed semantics-based approach with three state-of-the-art syntax-based methods. Experiments show that our method achieves significantly better results. The rest of this paper is organized as follows. Section 2 introduces related work. Section 3 describes the proposed method in details. Section 4 gives the experimental results. Lastly, we conclude this paper in Section 5. 2 Related Work In product feature mining task, Hu and Liu (2004) proposed a pioneer research. However, the association rules they used may potentially introduce many noise terms. Based on the observation that product features are often commented on by similar syntactic structures, it is natural to use patterns to capture common syntactic constituents around product features. Popescu and Etzioni (2005) designed some syntactic patterns to search for product feature candidates and then used Pointwise Mutual Information (PMI) to remove noise terms. Qiu et al. (2009) proposed eight heuristic syntactic rules to jointly extract product features and sentiment lexi</context>
+<context position="10303" citStr="Hu and Liu, 2004" startWordPosition="1614" endWordPosition="1617">d to capture lexical semantic clue, and a Convolutional Neural Network (CNN) (Collobert et al., 2011) is trained in each bootstrapping iteration to encode contextual semantic clue. Finally we use Label Propagation to find some reliable new seeds for the training of the next bootstrapping iteration. 3.1 Automatic Seed Generation The seed set consists of positive labeled examples (i.e. product features) and negative labeled examples (i.e. noise terms). Intuitively, popular product features are frequently mentioned in reviews, so they can be extracted by simply mining frequently occurring nouns (Hu and Liu, 2004). However, this strategy will also find many noise terms (e.g., commonly used nouns like thing, one, etc.). To produce high quality seeds, we employ a Domain Relevance Measure (DRM) (Jiang and Tan, 2010), which combines term frequency with a domainspecific measuring metric called Likelihood Ratio Test (LRT) (Dunning, 1993). Let A(t) denotes the LRT score of a product feature candidate t, k1 1 − p)n1−k1 k2 1 − p)n2−k2 A(t) =pk1 1 (1 − p1)n1−k1pk2 2 (1 − p2)n2−k2 (1) where k1 and k2 are the frequencies of t in the review corpus R and a background corpus1 B, n1 and n2 are the total number of term</context>
+</contexts>
+<marker>Hu, Liu, 2004</marker>
+<rawString>Minqing Hu and Bing Liu. 2004. Mining and summarizing customer reviews. In Proceedings of the Tenth ACM SIGKDD International Conference on Knowledge Discovery and Data Mining, KDD ’04, pages 168–177, New York, NY, USA. ACM.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Xing Jiang</author>
+<author>Ah-Hwee Tan</author>
+</authors>
+<title>Crctol: A semantic-based domain ontology learning system.</title>
+<date>2010</date>
+<journal>Journal of the American Society for Information Science and Technology,</journal>
+<volume>61</volume>
+<issue>1</issue>
+<contexts>
+<context position="10506" citStr="Jiang and Tan, 2010" startWordPosition="1647" endWordPosition="1650">l Propagation to find some reliable new seeds for the training of the next bootstrapping iteration. 3.1 Automatic Seed Generation The seed set consists of positive labeled examples (i.e. product features) and negative labeled examples (i.e. noise terms). Intuitively, popular product features are frequently mentioned in reviews, so they can be extracted by simply mining frequently occurring nouns (Hu and Liu, 2004). However, this strategy will also find many noise terms (e.g., commonly used nouns like thing, one, etc.). To produce high quality seeds, we employ a Domain Relevance Measure (DRM) (Jiang and Tan, 2010), which combines term frequency with a domainspecific measuring metric called Likelihood Ratio Test (LRT) (Dunning, 1993). Let A(t) denotes the LRT score of a product feature candidate t, k1 1 − p)n1−k1 k2 1 − p)n2−k2 A(t) =pk1 1 (1 − p1)n1−k1pk2 2 (1 − p2)n2−k2 (1) where k1 and k2 are the frequencies of t in the review corpus R and a background corpus1 B, n1 and n2 are the total number of terms in R and B, p = (k1 + k2)/(n1 + n2), p1 = k1/n1 and p2 = k2/n2. Then a modified DRM2 is proposed, tf(t) DRM(t) = max[tf(·)] × × max |log A(·) |− min |log A(·)| where tf(t) is the frequency of t in R an</context>
+</contexts>
+<marker>Jiang, Tan, 2010</marker>
+<rawString>Xing Jiang and Ah-Hwee Tan. 2010. Crctol: A semantic-based domain ontology learning system. Journal of the American Society for Information Science and Technology, 61(1):150–168.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Long Jiang</author>
+<author>Mo Yu</author>
+<author>Ming Zhou</author>
+<author>Xiaohua Liu</author>
+<author>Tiejun Zhao</author>
+</authors>
+<title>Target-dependent twitter sentiment classification.</title>
+<date>2011</date>
+<booktitle>In Proceedings of the 49th Annual Meeting of the Association for Computational Linguistics: Human Language Technologies - Volume 1, HLT ’11,</booktitle>
+<pages>151--160</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<location>Stroudsburg, PA, USA.</location>
+<contexts>
+<context position="2067" citStr="Jiang et al., 2011" startWordPosition="309" endWordPosition="312">isions. However, with the rapid growth of e-commerce, customers are no longer satisfied with the overall opinion ratings provided by traditional sentiment analysis systems. The detailed functions or attributes of products, which are called product features, receive more attention. Nevertheless, a product may have thousands of features, which makes it impractical for a customer to investigate them all. Therefore, mining product features automatically from online reviews is shown to be a key step for opinion summarization (Hu and Liu, 2004; Qiu et al., 2009) and fine-grained sentiment analysis (Jiang et al., 2011; Li et al., 2012). Previous works often mine product features via syntactic constituent matching (Popescu and Etzioni, 2005; Qiu et al., 2009; Zhang et al., 2010). The basic idea is that reviewers tend to comment on product features in similar syntactic structures. Therefore, it is natural to mine product features by using syntactic patterns. For example, in Figure 1, the upper box shows a dependency tree produced by Stanford Parser (de Marneffe et al., 2006), and the lower box shows a common syntactic pattern from (Zhang et al., 2010), where &lt;feature/NN&gt; is a wildcard to be fit in reviews an</context>
+</contexts>
+<marker>Jiang, Yu, Zhou, Liu, Zhao, 2011</marker>
+<rawString>Long Jiang, Mo Yu, Ming Zhou, Xiaohua Liu, and Tiejun Zhao. 2011. Target-dependent twitter sentiment classification. In Proceedings of the 49th Annual Meeting of the Association for Computational Linguistics: Human Language Technologies - Volume 1, HLT ’11, pages 151–160, Stroudsburg, PA, USA. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Thorsten Joachims</author>
+</authors>
+<title>Transductive inference for text classification using support vector machines.</title>
+<date>1999</date>
+<booktitle>In Proceedings of the 16th International Conference on Machine Learning,</booktitle>
+<pages>200--209</pages>
+<contexts>
+<context position="23402" citStr="Joachims, 1999" startWordPosition="3917" endWordPosition="3918">m named as Double Propagation (Qiu et al., 2009), which is a conventional syntax-based method. DP-HITS is an enhanced version of DP proposed by Zhang et al. (2010), which ranks product feature candidates by s(t) = log tf(t) ∗ importance(t) (13) where importance(t) is estimated by the HITS algorithm (Kleinberg, 1999). SGW is the Sentiment Graph Walking algorithm proposed in (Xu et al., 2013), which first extracts syntactic patterns and then uses random walking to rank candidates. Afterwards, wordsyntactic pattern co-occurrence statistic is used as feature for a semi-supervised classifier TSVM (Joachims, 1999) to further refine the results. This two-stage method is denoted as SGW-TSVM. LEX only uses lexical semantic clue. Label Propagation is applied alone in a self-training manner. The dimension of word embedding n = 100, the convergence threshold ε = 10−7, and the number of expanded seeds T = 40. The size of the seed set N is 40. To output product features, it ranks candidates in descent order by using the positive score L+f (t). CONT only uses contextual semantic clue, which only contains the CNN. The window size l is 5. The CNN is trained with a mini-batch size of 50. The hidden layer size h = </context>
+</contexts>
+<marker>Joachims, 1999</marker>
+<rawString>Thorsten Joachims. 1999. Transductive inference for text classification using support vector machines. In Proceedings of the 16th International Conference on Machine Learning, pages 200–209.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jon M Kleinberg</author>
+</authors>
+<title>Authoritative sources in a hyperlinked environment.</title>
+<date>1999</date>
+<journal>J. ACM,</journal>
+<volume>46</volume>
+<issue>5</issue>
+<contexts>
+<context position="8425" citStr="Kleinberg, 1999" startWordPosition="1339" endWordPosition="1340">s, it is natural to use patterns to capture common syntactic constituents around product features. Popescu and Etzioni (2005) designed some syntactic patterns to search for product feature candidates and then used Pointwise Mutual Information (PMI) to remove noise terms. Qiu et al. (2009) proposed eight heuristic syntactic rules to jointly extract product features and sentiment lexicons, where a bootstrapping algorithm named Double 337 Propagation was applied to expand a given seed set. Zhang et al. (2010) improved Qiu’s work by adding more feasible syntactic patterns, and the HITS algorithm (Kleinberg, 1999) was employed to rank candidates. Moghaddam and Ester (2010) extracted product features by automatical opinion pattern mining. Zhuang et al. (2006) used various syntactic templates from an annotated movie corpus and applied them to supervised movie feature extraction. Wu et al. (2009) proposed a phrase level dependency parsing for mining aspects and features of products. As discussed in the first section, syntactic patterns often suffer from data sparsity. Furthermore, most pattern-based methods rely on term frequency, which have the limitation of finding infrequent but important product featu</context>
+<context position="23104" citStr="Kleinberg, 1999" startWordPosition="3873" endWordPosition="3874">pora, the pre-processing are the same as that in (Qiu et al., 2009), and for Chinese corpora, the Stanford Word Segmenter (Chang et al., 2008) is used to perform word segmentation. We select three state-of-the-art syntax-based methods to be compared with our method: DP uses a bootstrapping algorithm named as Double Propagation (Qiu et al., 2009), which is a conventional syntax-based method. DP-HITS is an enhanced version of DP proposed by Zhang et al. (2010), which ranks product feature candidates by s(t) = log tf(t) ∗ importance(t) (13) where importance(t) is estimated by the HITS algorithm (Kleinberg, 1999). SGW is the Sentiment Graph Walking algorithm proposed in (Xu et al., 2013), which first extracts syntactic patterns and then uses random walking to rank candidates. Afterwards, wordsyntactic pattern co-occurrence statistic is used as feature for a semi-supervised classifier TSVM (Joachims, 1999) to further refine the results. This two-stage method is denoted as SGW-TSVM. LEX only uses lexical semantic clue. Label Propagation is applied alone in a self-training manner. The dimension of word embedding n = 100, the convergence threshold ε = 10−7, and the number of expanded seeds T = 40. The siz</context>
+</contexts>
+<marker>Kleinberg, 1999</marker>
+<rawString>Jon M. Kleinberg. 1999. Authoritative sources in a hyperlinked environment. J. ACM, 46(5):604–632, September.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Fangtao Li</author>
+<author>Sinno Jialin Pan</author>
+<author>Ou Jin</author>
+<author>Qiang Yang</author>
+<author>Xiaoyan Zhu</author>
+</authors>
+<title>Cross-domain co-extraction of sentiment and topic lexicons.</title>
+<date>2012</date>
+<booktitle>In Proceedings of the 50th Annual Meeting of the Association for Computational Linguistics: Long Papers - Volume 1, ACL ’12,</booktitle>
+<pages>410--419</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<location>Stroudsburg, PA, USA.</location>
+<contexts>
+<context position="2085" citStr="Li et al., 2012" startWordPosition="313" endWordPosition="316">h the rapid growth of e-commerce, customers are no longer satisfied with the overall opinion ratings provided by traditional sentiment analysis systems. The detailed functions or attributes of products, which are called product features, receive more attention. Nevertheless, a product may have thousands of features, which makes it impractical for a customer to investigate them all. Therefore, mining product features automatically from online reviews is shown to be a key step for opinion summarization (Hu and Liu, 2004; Qiu et al., 2009) and fine-grained sentiment analysis (Jiang et al., 2011; Li et al., 2012). Previous works often mine product features via syntactic constituent matching (Popescu and Etzioni, 2005; Qiu et al., 2009; Zhang et al., 2010). The basic idea is that reviewers tend to comment on product features in similar syntactic structures. Therefore, it is natural to mine product features by using syntactic patterns. For example, in Figure 1, the upper box shows a dependency tree produced by Stanford Parser (de Marneffe et al., 2006), and the lower box shows a common syntactic pattern from (Zhang et al., 2010), where &lt;feature/NN&gt; is a wildcard to be fit in reviews and NN denotes the r</context>
+</contexts>
+<marker>Li, Pan, Jin, Yang, Zhu, 2012</marker>
+<rawString>Fangtao Li, Sinno Jialin Pan, Ou Jin, Qiang Yang, and Xiaoyan Zhu. 2012. Cross-domain co-extraction of sentiment and topic lexicons. In Proceedings of the 50th Annual Meeting of the Association for Computational Linguistics: Long Papers - Volume 1, ACL ’12, pages 410–419, Stroudsburg, PA, USA. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Kang Liu</author>
+<author>Liheng Xu</author>
+<author>Jun Zhao</author>
+</authors>
+<title>Opinion target extraction using word-based translation model.</title>
+<date>2012</date>
+<booktitle>In Proceedings of the 2012 Joint Conference on Empirical Methods in Natural Language Processing and Computational Natural Language Learning,</booktitle>
+<pages>1346--1356</pages>
+<institution>Jeju Island, Korea, July. Association for Computational Linguistics.</institution>
+<contexts>
+<context position="12531" citStr="Liu et al., 2012" startWordPosition="2015" endWordPosition="2018">ings is very time-consuming (Collobert et al., 2011), we thus employ a faster method named Skip-gram model (Mikolov et al., 2013). 3.2.1 Learning Word Embedding for Semantic Representation Given a sequence of training words W = {w1, w2, ..., wm}, the goal of the Skip-gram model is to learn a continuous vector space EB = {e1, e2, ..., em}, where ei is the word embedding of wi. The training objective is to maximize the 1Google-n-Gram (http://books.google.com/ngrams) is used as the background corpus. 2The df(t) part of the original DRM is slightly modified because we want a tf × idf-like scheme (Liu et al., 2012). |log A(t) |− min |log A(·)| 1 log df(t) (2) 338 average log probability of using word wt to predict a surrounding word wt+j, ˆEB = argmax etEEB (3) where c is the size of the training window. Basically, p(wt+j|wt; et) is defined as, where e&apos;i is an additional training vector associated with ei. This basic formulation is impractical because it is proportional to m. A hierarchical softmax approximation can be applied to reduce the computational cost to log2(m), see (Morin and Bengio, 2005) for details. To alleviate the data sparsity problem, EB is first trained on a very large corpus3 (denoted</context>
+</contexts>
+<marker>Liu, Xu, Zhao, 2012</marker>
+<rawString>Kang Liu, Liheng Xu, and Jun Zhao. 2012. Opinion target extraction using word-based translation model. In Proceedings of the 2012 Joint Conference on Empirical Methods in Natural Language Processing and Computational Natural Language Learning, pages 1346–1356, Jeju Island, Korea, July. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Tomas Mikolov</author>
+<author>Ilya Sutskever</author>
+<author>Kai Chen</author>
+<author>Greg S Corrado</author>
+<author>Jeff Dean</author>
+</authors>
+<title>Distributed representations of words and phrases and their compositionality.</title>
+<date>2013</date>
+<booktitle>In Advances in Neural Information Processing Systems,</booktitle>
+<pages>3111--3119</pages>
+<contexts>
+<context position="12043" citStr="Mikolov et al., 2013" startWordPosition="1932" endWordPosition="1935">he negative example set Vs−, where N most frequent terms are selected. Besides, it is guaranteed that Vs+ ∩ Vs− = ∅, i.e., conflicting terms are taken as negative examples. 3.2 Capturing Lexical Semantic Clue in a Semantic Similarity Graph To capture lexical semantic clue, each word is first converted into word embedding, which is a continuous vector with each dimension’s value corresponds to a semantic or grammatical interpretation (Turian et al., 2010). Learning large-scale word embeddings is very time-consuming (Collobert et al., 2011), we thus employ a faster method named Skip-gram model (Mikolov et al., 2013). 3.2.1 Learning Word Embedding for Semantic Representation Given a sequence of training words W = {w1, w2, ..., wm}, the goal of the Skip-gram model is to learn a continuous vector space EB = {e1, e2, ..., em}, where ei is the word embedding of wi. The training objective is to maximize the 1Google-n-Gram (http://books.google.com/ngrams) is used as the background corpus. 2The df(t) part of the original DRM is slightly modified because we want a tf × idf-like scheme (Liu et al., 2012). |log A(t) |− min |log A(·)| 1 log df(t) (2) 338 average log probability of using word wt to predict a surround</context>
+<context position="13579" citStr="Mikolov et al., 2013" startWordPosition="2199" endWordPosition="2202">uce the computational cost to log2(m), see (Morin and Bengio, 2005) for details. To alleviate the data sparsity problem, EB is first trained on a very large corpus3 (denoted by C), and then fine-tuned on the target review corpus R. Particularly, for phrasal product features, a statistic-based method in (Zhu et al., 2009) is used to detect noun phrases in R. Then, an Unfolding Recursive Autoencoder (Socher et al., 2011) is trained on C to obtain embedding vectors for noun phrases. In this way, semantics of infrequent terms in R can be well captured. Finally, the phrasebased Skip-gram model in (Mikolov et al., 2013) is applied on R. 3.2.2 Building the Semantic Similarity Graph Lexical semantic clue is captured by measuring semantic similarity between terms. The underlying motivation is that if we have known some product feature seeds, then terms that are more semantically similar to these seeds are more likely to be product features. For example, if screen is known to be a product feature of mp3, and lcd is of high semantic similarity with screen, we can infer that lcd is also a product feature. Analogously, terms that are semantically similar to negative labeled seeds are not product features. Word embe</context>
+</contexts>
+<marker>Mikolov, Sutskever, Chen, Corrado, Dean, 2013</marker>
+<rawString>Tomas Mikolov, Ilya Sutskever, Kai Chen, Greg S. Corrado, and Jeff Dean. 2013. Distributed representations of words and phrases and their compositionality. In Advances in Neural Information Processing Systems, pages 3111–3119.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Samaneh Moghaddam</author>
+<author>Martin Ester</author>
+</authors>
+<title>Opinion digger: An unsupervised opinion miner from unstructured product reviews.</title>
+<date>2010</date>
+<booktitle>In Proceedings of the 19th ACM International Conference on Information and Knowledge Management, CIKM ’10,</booktitle>
+<pages>1825--1828</pages>
+<publisher>ACM.</publisher>
+<location>New York, NY, USA.</location>
+<contexts>
+<context position="8485" citStr="Moghaddam and Ester (2010)" startWordPosition="1346" endWordPosition="1349"> syntactic constituents around product features. Popescu and Etzioni (2005) designed some syntactic patterns to search for product feature candidates and then used Pointwise Mutual Information (PMI) to remove noise terms. Qiu et al. (2009) proposed eight heuristic syntactic rules to jointly extract product features and sentiment lexicons, where a bootstrapping algorithm named Double 337 Propagation was applied to expand a given seed set. Zhang et al. (2010) improved Qiu’s work by adding more feasible syntactic patterns, and the HITS algorithm (Kleinberg, 1999) was employed to rank candidates. Moghaddam and Ester (2010) extracted product features by automatical opinion pattern mining. Zhuang et al. (2006) used various syntactic templates from an annotated movie corpus and applied them to supervised movie feature extraction. Wu et al. (2009) proposed a phrase level dependency parsing for mining aspects and features of products. As discussed in the first section, syntactic patterns often suffer from data sparsity. Furthermore, most pattern-based methods rely on term frequency, which have the limitation of finding infrequent but important product features. A recent research (Xu et al., 2013) extracted infrequen</context>
+</contexts>
+<marker>Moghaddam, Ester, 2010</marker>
+<rawString>Samaneh Moghaddam and Martin Ester. 2010. Opinion digger: An unsupervised opinion miner from unstructured product reviews. In Proceedings of the 19th ACM International Conference on Information and Knowledge Management, CIKM ’10, pages 1825–1828, New York, NY, USA. ACM.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Frederic Morin</author>
+<author>Yoshua Bengio</author>
+</authors>
+<title>Hierarchical probabilistic neural network language model.</title>
+<date>2005</date>
+<booktitle>In Proceedings of the international workshop on artificial intelligence and statistics, AISTATS05,</booktitle>
+<pages>246--252</pages>
+<contexts>
+<context position="13025" citStr="Morin and Bengio, 2005" startWordPosition="2103" endWordPosition="2106">ground corpus. 2The df(t) part of the original DRM is slightly modified because we want a tf × idf-like scheme (Liu et al., 2012). |log A(t) |− min |log A(·)| 1 log df(t) (2) 338 average log probability of using word wt to predict a surrounding word wt+j, ˆEB = argmax etEEB (3) where c is the size of the training window. Basically, p(wt+j|wt; et) is defined as, where e&apos;i is an additional training vector associated with ei. This basic formulation is impractical because it is proportional to m. A hierarchical softmax approximation can be applied to reduce the computational cost to log2(m), see (Morin and Bengio, 2005) for details. To alleviate the data sparsity problem, EB is first trained on a very large corpus3 (denoted by C), and then fine-tuned on the target review corpus R. Particularly, for phrasal product features, a statistic-based method in (Zhu et al., 2009) is used to detect noun phrases in R. Then, an Unfolding Recursive Autoencoder (Socher et al., 2011) is trained on C to obtain embedding vectors for noun phrases. In this way, semantics of infrequent terms in R can be well captured. Finally, the phrasebased Skip-gram model in (Mikolov et al., 2013) is applied on R. 3.2.2 Building the Semantic </context>
+</contexts>
+<marker>Morin, Bengio, 2005</marker>
+<rawString>Frederic Morin and Yoshua Bengio. 2005. Hierarchical probabilistic neural network language model. In Proceedings of the international workshop on artificial intelligence and statistics, AISTATS05, pages 246–252.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ana-Maria Popescu</author>
+<author>Oren Etzioni</author>
+</authors>
+<title>Extracting product features and opinions from reviews.</title>
+<date>2005</date>
+<booktitle>In Proceedings of the conference on Human Language Technology and Empirical Methods in Natural Language Processing, HLT ’05,</booktitle>
+<pages>339--346</pages>
+<contexts>
+<context position="2191" citStr="Popescu and Etzioni, 2005" startWordPosition="327" endWordPosition="331">ngs provided by traditional sentiment analysis systems. The detailed functions or attributes of products, which are called product features, receive more attention. Nevertheless, a product may have thousands of features, which makes it impractical for a customer to investigate them all. Therefore, mining product features automatically from online reviews is shown to be a key step for opinion summarization (Hu and Liu, 2004; Qiu et al., 2009) and fine-grained sentiment analysis (Jiang et al., 2011; Li et al., 2012). Previous works often mine product features via syntactic constituent matching (Popescu and Etzioni, 2005; Qiu et al., 2009; Zhang et al., 2010). The basic idea is that reviewers tend to comment on product features in similar syntactic structures. Therefore, it is natural to mine product features by using syntactic patterns. For example, in Figure 1, the upper box shows a dependency tree produced by Stanford Parser (de Marneffe et al., 2006), and the lower box shows a common syntactic pattern from (Zhang et al., 2010), where &lt;feature/NN&gt; is a wildcard to be fit in reviews and NN denotes the required POS tag of the wildcard. Usually, the product name mp3 is specified, and when screen matches the w</context>
+<context position="7934" citStr="Popescu and Etzioni (2005)" startWordPosition="1262" endWordPosition="1265">The rest of this paper is organized as follows. Section 2 introduces related work. Section 3 describes the proposed method in details. Section 4 gives the experimental results. Lastly, we conclude this paper in Section 5. 2 Related Work In product feature mining task, Hu and Liu (2004) proposed a pioneer research. However, the association rules they used may potentially introduce many noise terms. Based on the observation that product features are often commented on by similar syntactic structures, it is natural to use patterns to capture common syntactic constituents around product features. Popescu and Etzioni (2005) designed some syntactic patterns to search for product feature candidates and then used Pointwise Mutual Information (PMI) to remove noise terms. Qiu et al. (2009) proposed eight heuristic syntactic rules to jointly extract product features and sentiment lexicons, where a bootstrapping algorithm named Double 337 Propagation was applied to expand a given seed set. Zhang et al. (2010) improved Qiu’s work by adding more feasible syntactic patterns, and the HITS algorithm (Kleinberg, 1999) was employed to rank candidates. Moghaddam and Ester (2010) extracted product features by automatical opinio</context>
+</contexts>
+<marker>Popescu, Etzioni, 2005</marker>
+<rawString>Ana-Maria Popescu and Oren Etzioni. 2005. Extracting product features and opinions from reviews. In Proceedings of the conference on Human Language Technology and Empirical Methods in Natural Language Processing, HLT ’05, pages 339–346.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Guang Qiu</author>
+<author>Bing Liu</author>
+<author>Jiajun Bu</author>
+<author>Chun Chen</author>
+</authors>
+<title>Expanding domain sentiment lexicon through double propagation.</title>
+<date>2009</date>
+<booktitle>In Proceedings of the 21st international jont conference on Artifical intelligence, IJCAI’09,</booktitle>
+<pages>1199--1204</pages>
+<contexts>
+<context position="2011" citStr="Qiu et al., 2009" startWordPosition="301" endWordPosition="304">as helped customers a lot to make informed purchase decisions. However, with the rapid growth of e-commerce, customers are no longer satisfied with the overall opinion ratings provided by traditional sentiment analysis systems. The detailed functions or attributes of products, which are called product features, receive more attention. Nevertheless, a product may have thousands of features, which makes it impractical for a customer to investigate them all. Therefore, mining product features automatically from online reviews is shown to be a key step for opinion summarization (Hu and Liu, 2004; Qiu et al., 2009) and fine-grained sentiment analysis (Jiang et al., 2011; Li et al., 2012). Previous works often mine product features via syntactic constituent matching (Popescu and Etzioni, 2005; Qiu et al., 2009; Zhang et al., 2010). The basic idea is that reviewers tend to comment on product features in similar syntactic structures. Therefore, it is natural to mine product features by using syntactic patterns. For example, in Figure 1, the upper box shows a dependency tree produced by Stanford Parser (de Marneffe et al., 2006), and the lower box shows a common syntactic pattern from (Zhang et al., 2010), </context>
+<context position="8098" citStr="Qiu et al. (2009)" startWordPosition="1289" endWordPosition="1292">ts. Lastly, we conclude this paper in Section 5. 2 Related Work In product feature mining task, Hu and Liu (2004) proposed a pioneer research. However, the association rules they used may potentially introduce many noise terms. Based on the observation that product features are often commented on by similar syntactic structures, it is natural to use patterns to capture common syntactic constituents around product features. Popescu and Etzioni (2005) designed some syntactic patterns to search for product feature candidates and then used Pointwise Mutual Information (PMI) to remove noise terms. Qiu et al. (2009) proposed eight heuristic syntactic rules to jointly extract product features and sentiment lexicons, where a bootstrapping algorithm named Double 337 Propagation was applied to expand a given seed set. Zhang et al. (2010) improved Qiu’s work by adding more feasible syntactic patterns, and the HITS algorithm (Kleinberg, 1999) was employed to rank candidates. Moghaddam and Ester (2010) extracted product features by automatical opinion pattern mining. Zhuang et al. (2006) used various syntactic templates from an annotated movie corpus and applied them to supervised movie feature extraction. Wu e</context>
+<context position="22555" citStr="Qiu et al., 2009" startWordPosition="3783" endWordPosition="3786"> we directly employ their annotation as the gold standard. The detailed information can be found in their original paper. 5http://timan.cs.uiuc.edu/downloads.html 6http://ir-china.org.cn/coae2008.html Evaluation Metrics: We evaluate the proposed method in terms of precision(P), recall(R) and Fmeasure(F). The English results are evaluated by exact string match. And for Chinese results, we use an overlap matching metric, because determining the exact boundaries is hard even for human (Wiebe et al., 2005). 4.2 Experimental Settings For English corpora, the pre-processing are the same as that in (Qiu et al., 2009), and for Chinese corpora, the Stanford Word Segmenter (Chang et al., 2008) is used to perform word segmentation. We select three state-of-the-art syntax-based methods to be compared with our method: DP uses a bootstrapping algorithm named as Double Propagation (Qiu et al., 2009), which is a conventional syntax-based method. DP-HITS is an enhanced version of DP proposed by Zhang et al. (2010), which ranks product feature candidates by s(t) = log tf(t) ∗ importance(t) (13) where importance(t) is estimated by the HITS algorithm (Kleinberg, 1999). SGW is the Sentiment Graph Walking algorithm prop</context>
+</contexts>
+<marker>Qiu, Liu, Bu, Chen, 2009</marker>
+<rawString>Guang Qiu, Bing Liu, Jiajun Bu, and Chun Chen. 2009. Expanding domain sentiment lexicon through double propagation. In Proceedings of the 21st international jont conference on Artifical intelligence, IJCAI’09, pages 1199–1204.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Richard Socher</author>
+<author>Eric H Huang</author>
+<author>Jeffrey Pennington</author>
+<author>Andrew Y Ng</author>
+<author>Christopher D Manning</author>
+</authors>
+<title>Dynamic pooling and unfolding recursive autoencoders for paraphrase detection.</title>
+<date>2011</date>
+<booktitle>In NIPS’2011,</booktitle>
+<volume>24</volume>
+<pages>801--809</pages>
+<contexts>
+<context position="13380" citStr="Socher et al., 2011" startWordPosition="2164" endWordPosition="2167">d as, where e&apos;i is an additional training vector associated with ei. This basic formulation is impractical because it is proportional to m. A hierarchical softmax approximation can be applied to reduce the computational cost to log2(m), see (Morin and Bengio, 2005) for details. To alleviate the data sparsity problem, EB is first trained on a very large corpus3 (denoted by C), and then fine-tuned on the target review corpus R. Particularly, for phrasal product features, a statistic-based method in (Zhu et al., 2009) is used to detect noun phrases in R. Then, an Unfolding Recursive Autoencoder (Socher et al., 2011) is trained on C to obtain embedding vectors for noun phrases. In this way, semantics of infrequent terms in R can be well captured. Finally, the phrasebased Skip-gram model in (Mikolov et al., 2013) is applied on R. 3.2.2 Building the Semantic Similarity Graph Lexical semantic clue is captured by measuring semantic similarity between terms. The underlying motivation is that if we have known some product feature seeds, then terms that are more semantically similar to these seeds are more likely to be product features. For example, if screen is known to be a product feature of mp3, and lcd is o</context>
+</contexts>
+<marker>Socher, Huang, Pennington, Ng, Manning, 2011</marker>
+<rawString>Richard Socher, Eric H Huang, Jeffrey Pennington, Andrew Y Ng, and Christopher D Manning. 2011. Dynamic pooling and unfolding recursive autoencoders for paraphrase detection. In NIPS’2011, volume 24, pages 801–809.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ilya Sutskever</author>
+<author>James Martens</author>
+<author>George Dahl</author>
+<author>Geoffrey Hinton</author>
+</authors>
+<title>Distributed representations of words and phrases and their compositionality.</title>
+<date>2013</date>
+<booktitle>In Proceedings of the 30 th International Conference on Machine Learning.</booktitle>
+<contexts>
+<context position="18495" citStr="Sutskever et al., 2013" startWordPosition="3063" endWordPosition="3066">raining set Ts. Then, the training criterion is to minimize cross-entropy over Ts, − log δip(tiIXi; θ) (9) where δi is the binomial target label distribution for one entry. Backpropagation algorithm with mini-batch stochastic gradient descent is used to solve this optimization problem. In addition, some useful tricks can be applied during the training. The weight matrixes W(·) are initialized by normalized initialization (Glorot and Bengio, 2010). W (1) is pre-trained by an autoencoder (Hinton, 1989) to capture semantic compositionality. To speed up the learning, a momentum method is applied (Sutskever et al., 2013). 3.4 Combining Lexical and Contextual Semantic Clues by Label Propagation We propose a Label Propagation algorithm to combine both semantic clues in a unified process. Each term t E V is assumed to have a label distribution Lt = (p+t , p−t ), where p+t denotes the probability of the candidate being a product feature, and on the contrary, p−t = 1 − p+t . The classified results of the CNN which encode contextual semantic clue serve as the prior knowledge, (1, 0), if t E Vs+ (0, 1), if t E Vs− (10) (r+t , r−t ), if t E Vc where (r+t , r−t ) is estimated by, += count+(t) rt count+(t) + count−(t) </context>
+</contexts>
+<marker>Sutskever, Martens, Dahl, Hinton, 2013</marker>
+<rawString>Ilya Sutskever, James Martens, George Dahl, and Geoffrey Hinton. 2013. Distributed representations of words and phrases and their compositionality. In Proceedings of the 30 th International Conference on Machine Learning.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Joseph Turian</author>
+<author>Lev Ratinov</author>
+<author>Yoshua Bengio</author>
+</authors>
+<title>Word representations: A simple and general method for semi-supervised learning.</title>
+<date>2010</date>
+<booktitle>In Proceedings of the 48th Annual Meeting of the Association for Computational Linguistics, ACL ’10,</booktitle>
+<pages>384--394</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<location>Stroudsburg, PA, USA.</location>
+<contexts>
+<context position="3909" citStr="Turian et al., 2010" startWordPosition="611" endWordPosition="614">yer instead of mp3. Similarly, it may also fail on Example 1(b), just with have replaced by support. In essence, syntactic pattern is 336 Proceedings of the 52nd Annual Meeting of the Association for Computational Linguistics, pages 336–346, Baltimore, Maryland, USA, June 23-25 2014. c�2014 Association for Computational Linguistics a kind of one-hot representation for encoding the contexts, which can only use partial and discrete features, such as some key words (e.g., have) or shallow information (e.g., POS tags). Therefore, such a representation often suffers from the data sparsity problem (Turian et al., 2010). One possible solution for this problem is using a more general pattern such as NP-VB-feature, where NP represents a noun or noun phrase and VB stands for any verb. However, this pattern becomes too general that it may find many irrelevant cases such as the one in Example 1(c), which is not talking about the product. Consequently, it is very difficult for a pattern designer to balance between precision and generalization. Example 1: (a) This player has an ✿✿fm✿✿✿✿✿ tuner. (b) This mp3 supports ✿✿✿✿wma✿✿✿file. (c) This review has helped people✿✿✿✿✿ a lot. (d) This mp3 has some✿✿✿✿✿ flaws. To s</context>
+<context position="6180" citStr="Turian et al., 2010" startWordPosition="989" endWordPosition="992">utomatically extracted. Then, based on the assumption that terms that are more semantically similar to the seeds are more likely to be product features, a graph which measures semantic similarities between terms is built to capture lexical semantic clue. At the same time, a semi-supervised convolutional neural model (Collobert et al., 2011) is employed to encode contextual semantic clue. Finally, the two kinds of semantic clues are combined by a Label Propagation algorithm. In the proposed method, words are represented by continuous vectors, which capture latent semantic factors of the words (Turian et al., 2010). The vectors can be unsupervisedly trained on large scale corpora, and words with similar semantics will have similar vectors. This enables our method to be less sensitive to lexicon change, so that the data sparsity problem can be alleviated. The contributions of this paper include: • It uses semantics of words to encode contextual clues, which exploits deeper level information than syntactic constituents. As a result, it mines product features more accurately than syntaxbased methods. • It exploits semantic similarity between words to capture lexical clues, which is shown to be more effecti</context>
+<context position="11880" citStr="Turian et al., 2010" startWordPosition="1908" endWordPosition="1911">the other hand, Xu et al. (2013) show that a set of general nouns seldom appear to be product features. Therefore, we employ their General Noun Corpus to create the negative example set Vs−, where N most frequent terms are selected. Besides, it is guaranteed that Vs+ ∩ Vs− = ∅, i.e., conflicting terms are taken as negative examples. 3.2 Capturing Lexical Semantic Clue in a Semantic Similarity Graph To capture lexical semantic clue, each word is first converted into word embedding, which is a continuous vector with each dimension’s value corresponds to a semantic or grammatical interpretation (Turian et al., 2010). Learning large-scale word embeddings is very time-consuming (Collobert et al., 2011), we thus employ a faster method named Skip-gram model (Mikolov et al., 2013). 3.2.1 Learning Word Embedding for Semantic Representation Given a sequence of training words W = {w1, w2, ..., wm}, the goal of the Skip-gram model is to learn a continuous vector space EB = {e1, e2, ..., em}, where ei is the word embedding of wi. The training objective is to maximize the 1Google-n-Gram (http://books.google.com/ngrams) is used as the background corpus. 2The df(t) part of the original DRM is slightly modified becaus</context>
+</contexts>
+<marker>Turian, Ratinov, Bengio, 2010</marker>
+<rawString>Joseph Turian, Lev Ratinov, and Yoshua Bengio. 2010. Word representations: A simple and general method for semi-supervised learning. In Proceedings of the 48th Annual Meeting of the Association for Computational Linguistics, ACL ’10, pages 384–394, Stroudsburg, PA, USA. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Hongning Wang</author>
+<author>Yue Lu</author>
+<author>ChengXiang Zhai</author>
+</authors>
+<title>Latent aspect rating analysis without aspect keyword supervision.</title>
+<date>2011</date>
+<booktitle>In Proceedings of the 17th ACM SIGKDD International Conference on Knowledge Discovery and Data Mining, KDD ’11,</booktitle>
+<pages>618--626</pages>
+<publisher>ACM.</publisher>
+<location>New York, NY, USA.</location>
+<contexts>
+<context position="21644" citStr="Wang et al. (2011)" startWordPosition="3644" endWordPosition="3647">e set Ts from R for training Step 4: Train a CNN N on Ts (Section 3.3) Apply mini-batch SGD on Equ. 9; Step 5: Run Label Propagation (Section 3.4) Classify candidates using N to setup I; L0 ← I; repeat Li+1 ← (1 − α)MT Li + αDI; until ||Li+1 − Li||2 &lt; ε; Step 6: Expand product feature seeds Move top T terms from Vc to Vs; iter++ end Step 7: Run Label Propagation for a final result Lf Rank terms by L+f to get P, where L+f &gt; L−f ; 4 Experiments 4.1 Datasets and Evaluation Metrics Datasets: We select two real world datasets to evaluate the proposed method. The first one is a benchmark dataset in Wang et al. (2011), which contains English review sets on two domains (MP3 and Hotel)5. The second dataset is proposed by Chinese Opinion Analysis Evaluation 2008 (COAE 2008)6, where two review sets (Camera and Car) are selected. Xu et al. (2013) had manually annotated product features on these four domains, so we directly employ their annotation as the gold standard. The detailed information can be found in their original paper. 5http://timan.cs.uiuc.edu/downloads.html 6http://ir-china.org.cn/coae2008.html Evaluation Metrics: We evaluate the proposed method in terms of precision(P), recall(R) and Fmeasure(F). </context>
+</contexts>
+<marker>Wang, Lu, Zhai, 2011</marker>
+<rawString>Hongning Wang, Yue Lu, and ChengXiang Zhai. 2011. Latent aspect rating analysis without aspect keyword supervision. In Proceedings of the 17th ACM SIGKDD International Conference on Knowledge Discovery and Data Mining, KDD ’11, pages 618– 626, New York, NY, USA. ACM.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Janyce Wiebe</author>
+<author>Theresa Wilson</author>
+<author>Claire Cardie</author>
+</authors>
+<title>Annotating expressions of opinions and emotions in language. Language Resources and Evaluation,</title>
+<date>2005</date>
+<pages>39--2</pages>
+<contexts>
+<context position="22445" citStr="Wiebe et al., 2005" startWordPosition="3765" endWordPosition="3768">Camera and Car) are selected. Xu et al. (2013) had manually annotated product features on these four domains, so we directly employ their annotation as the gold standard. The detailed information can be found in their original paper. 5http://timan.cs.uiuc.edu/downloads.html 6http://ir-china.org.cn/coae2008.html Evaluation Metrics: We evaluate the proposed method in terms of precision(P), recall(R) and Fmeasure(F). The English results are evaluated by exact string match. And for Chinese results, we use an overlap matching metric, because determining the exact boundaries is hard even for human (Wiebe et al., 2005). 4.2 Experimental Settings For English corpora, the pre-processing are the same as that in (Qiu et al., 2009), and for Chinese corpora, the Stanford Word Segmenter (Chang et al., 2008) is used to perform word segmentation. We select three state-of-the-art syntax-based methods to be compared with our method: DP uses a bootstrapping algorithm named as Double Propagation (Qiu et al., 2009), which is a conventional syntax-based method. DP-HITS is an enhanced version of DP proposed by Zhang et al. (2010), which ranks product feature candidates by s(t) = log tf(t) ∗ importance(t) (13) where importa</context>
+</contexts>
+<marker>Wiebe, Wilson, Cardie, 2005</marker>
+<rawString>Janyce Wiebe, Theresa Wilson, and Claire Cardie. 2005. Annotating expressions of opinions and emotions in language. Language Resources and Evaluation, 39(2-3):165–210.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yuanbin Wu</author>
+<author>Qi Zhang</author>
+<author>Xuanjing Huang</author>
+<author>Lide Wu</author>
+</authors>
+<title>Phrase dependency parsing for opinion mining.</title>
+<date>2009</date>
+<booktitle>In Proceedings of the 2009 Conference on Empirical Methods in Natural Language Processing: Volume 3 - Volume 3, EMNLP ’09,</booktitle>
+<pages>1533--1541</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<location>Stroudsburg, PA, USA.</location>
+<contexts>
+<context position="8710" citStr="Wu et al. (2009)" startWordPosition="1380" endWordPosition="1383">009) proposed eight heuristic syntactic rules to jointly extract product features and sentiment lexicons, where a bootstrapping algorithm named Double 337 Propagation was applied to expand a given seed set. Zhang et al. (2010) improved Qiu’s work by adding more feasible syntactic patterns, and the HITS algorithm (Kleinberg, 1999) was employed to rank candidates. Moghaddam and Ester (2010) extracted product features by automatical opinion pattern mining. Zhuang et al. (2006) used various syntactic templates from an annotated movie corpus and applied them to supervised movie feature extraction. Wu et al. (2009) proposed a phrase level dependency parsing for mining aspects and features of products. As discussed in the first section, syntactic patterns often suffer from data sparsity. Furthermore, most pattern-based methods rely on term frequency, which have the limitation of finding infrequent but important product features. A recent research (Xu et al., 2013) extracted infrequent product features by a semi-supervised classifier, which used word-syntactic pattern co-occurrence statistics as features for the classifier. However, this kind of feature is still sparse for infrequent candidates. Our metho</context>
+</contexts>
+<marker>Wu, Zhang, Huang, Wu, 2009</marker>
+<rawString>Yuanbin Wu, Qi Zhang, Xuanjing Huang, and Lide Wu. 2009. Phrase dependency parsing for opinion mining. In Proceedings of the 2009 Conference on Empirical Methods in Natural Language Processing: Volume 3 - Volume 3, EMNLP ’09, pages 1533– 1541, Stroudsburg, PA, USA. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Liheng Xu</author>
+<author>Kang Liu</author>
+<author>Siwei Lai</author>
+<author>Yubo Chen</author>
+<author>Jun Zhao</author>
+</authors>
+<title>Mining opinion words and opinion targets in a two-stage framework.</title>
+<date>2013</date>
+<booktitle>In Proceedings of the 51st Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers),</booktitle>
+<pages>1764--1773</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<location>Sofia, Bulgaria,</location>
+<contexts>
+<context position="9065" citStr="Xu et al., 2013" startWordPosition="1435" endWordPosition="1438">ndidates. Moghaddam and Ester (2010) extracted product features by automatical opinion pattern mining. Zhuang et al. (2006) used various syntactic templates from an annotated movie corpus and applied them to supervised movie feature extraction. Wu et al. (2009) proposed a phrase level dependency parsing for mining aspects and features of products. As discussed in the first section, syntactic patterns often suffer from data sparsity. Furthermore, most pattern-based methods rely on term frequency, which have the limitation of finding infrequent but important product features. A recent research (Xu et al., 2013) extracted infrequent product features by a semi-supervised classifier, which used word-syntactic pattern co-occurrence statistics as features for the classifier. However, this kind of feature is still sparse for infrequent candidates. Our method adopts a semantic word representation model, which can train dense features unsupervisedly on a very large corpus. Thus, the data sparsity problem can be alleviated. 3 The Proposed Method We propose a semantics-based bootstrapping method for product feature mining. Firstly, some product feature seeds are automatically extracted. Then, a semantic simil</context>
+<context position="11292" citStr="Xu et al. (2013)" startWordPosition="1810" endWordPosition="1813">ture candidate t, k1 1 − p)n1−k1 k2 1 − p)n2−k2 A(t) =pk1 1 (1 − p1)n1−k1pk2 2 (1 − p2)n2−k2 (1) where k1 and k2 are the frequencies of t in the review corpus R and a background corpus1 B, n1 and n2 are the total number of terms in R and B, p = (k1 + k2)/(n1 + n2), p1 = k1/n1 and p2 = k2/n2. Then a modified DRM2 is proposed, tf(t) DRM(t) = max[tf(·)] × × max |log A(·) |− min |log A(·)| where tf(t) is the frequency of t in R and df(t) is the frequency of t in B. All nouns in R are ranked by DRM(t) in descent order, where top N nouns are taken as the positive example set Vs+. On the other hand, Xu et al. (2013) show that a set of general nouns seldom appear to be product features. Therefore, we employ their General Noun Corpus to create the negative example set Vs−, where N most frequent terms are selected. Besides, it is guaranteed that Vs+ ∩ Vs− = ∅, i.e., conflicting terms are taken as negative examples. 3.2 Capturing Lexical Semantic Clue in a Semantic Similarity Graph To capture lexical semantic clue, each word is first converted into word embedding, which is a continuous vector with each dimension’s value corresponds to a semantic or grammatical interpretation (Turian et al., 2010). Learning l</context>
+<context position="21872" citStr="Xu et al. (2013)" startWordPosition="3683" endWordPosition="3686">ntil ||Li+1 − Li||2 &lt; ε; Step 6: Expand product feature seeds Move top T terms from Vc to Vs; iter++ end Step 7: Run Label Propagation for a final result Lf Rank terms by L+f to get P, where L+f &gt; L−f ; 4 Experiments 4.1 Datasets and Evaluation Metrics Datasets: We select two real world datasets to evaluate the proposed method. The first one is a benchmark dataset in Wang et al. (2011), which contains English review sets on two domains (MP3 and Hotel)5. The second dataset is proposed by Chinese Opinion Analysis Evaluation 2008 (COAE 2008)6, where two review sets (Camera and Car) are selected. Xu et al. (2013) had manually annotated product features on these four domains, so we directly employ their annotation as the gold standard. The detailed information can be found in their original paper. 5http://timan.cs.uiuc.edu/downloads.html 6http://ir-china.org.cn/coae2008.html Evaluation Metrics: We evaluate the proposed method in terms of precision(P), recall(R) and Fmeasure(F). The English results are evaluated by exact string match. And for Chinese results, we use an overlap matching metric, because determining the exact boundaries is hard even for human (Wiebe et al., 2005). 4.2 Experimental Settings</context>
+<context position="23180" citStr="Xu et al., 2013" startWordPosition="3885" endWordPosition="3888"> Chinese corpora, the Stanford Word Segmenter (Chang et al., 2008) is used to perform word segmentation. We select three state-of-the-art syntax-based methods to be compared with our method: DP uses a bootstrapping algorithm named as Double Propagation (Qiu et al., 2009), which is a conventional syntax-based method. DP-HITS is an enhanced version of DP proposed by Zhang et al. (2010), which ranks product feature candidates by s(t) = log tf(t) ∗ importance(t) (13) where importance(t) is estimated by the HITS algorithm (Kleinberg, 1999). SGW is the Sentiment Graph Walking algorithm proposed in (Xu et al., 2013), which first extracts syntactic patterns and then uses random walking to rank candidates. Afterwards, wordsyntactic pattern co-occurrence statistic is used as feature for a semi-supervised classifier TSVM (Joachims, 1999) to further refine the results. This two-stage method is denoted as SGW-TSVM. LEX only uses lexical semantic clue. Label Propagation is applied alone in a self-training manner. The dimension of word embedding n = 100, the convergence threshold ε = 10−7, and the number of expanded seeds T = 40. The size of the seed set N is 40. To output product features, it ranks candidates i</context>
+</contexts>
+<marker>Xu, Liu, Lai, Chen, Zhao, 2013</marker>
+<rawString>Liheng Xu, Kang Liu, Siwei Lai, Yubo Chen, and Jun Zhao. 2013. Mining opinion words and opinion targets in a two-stage framework. In Proceedings of the 51st Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 1764–1773, Sofia, Bulgaria, August. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Lei Zhang</author>
+<author>Bing Liu</author>
+<author>Suk Hwan Lim</author>
+<author>Eamonn O’Brien-Strain</author>
+</authors>
+<title>Extracting and ranking product features in opinion documents.</title>
+<date>2010</date>
+<booktitle>In Proceedings of the 23rd International Conference on Computational Linguistics: Posters, COLING ’10,</booktitle>
+<pages>1462--1470</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<location>Stroudsburg, PA, USA.</location>
+<marker>Zhang, Liu, Lim, O’Brien-Strain, 2010</marker>
+<rawString>Lei Zhang, Bing Liu, Suk Hwan Lim, and Eamonn O’Brien-Strain. 2010. Extracting and ranking product features in opinion documents. In Proceedings of the 23rd International Conference on Computational Linguistics: Posters, COLING ’10, pages 1462–1470, Stroudsburg, PA, USA. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jingbo Zhu</author>
+<author>Huizhen Wang</author>
+<author>Benjamin K Tsou</author>
+<author>Muhua Zhu</author>
+</authors>
+<title>Multi-aspect opinion polling from textual reviews.</title>
+<date>2009</date>
+<booktitle>In Proceedings of the 18th ACM Conference on Information and Knowledge Management, CIKM ’09,</booktitle>
+<pages>1799--1802</pages>
+<publisher>ACM.</publisher>
+<location>New York, NY, USA.</location>
+<contexts>
+<context position="13280" citStr="Zhu et al., 2009" startWordPosition="2146" endWordPosition="2149"> argmax etEEB (3) where c is the size of the training window. Basically, p(wt+j|wt; et) is defined as, where e&apos;i is an additional training vector associated with ei. This basic formulation is impractical because it is proportional to m. A hierarchical softmax approximation can be applied to reduce the computational cost to log2(m), see (Morin and Bengio, 2005) for details. To alleviate the data sparsity problem, EB is first trained on a very large corpus3 (denoted by C), and then fine-tuned on the target review corpus R. Particularly, for phrasal product features, a statistic-based method in (Zhu et al., 2009) is used to detect noun phrases in R. Then, an Unfolding Recursive Autoencoder (Socher et al., 2011) is trained on C to obtain embedding vectors for noun phrases. In this way, semantics of infrequent terms in R can be well captured. Finally, the phrasebased Skip-gram model in (Mikolov et al., 2013) is applied on R. 3.2.2 Building the Semantic Similarity Graph Lexical semantic clue is captured by measuring semantic similarity between terms. The underlying motivation is that if we have known some product feature seeds, then terms that are more semantically similar to these seeds are more likely </context>
+</contexts>
+<marker>Zhu, Wang, Tsou, Zhu, 2009</marker>
+<rawString>Jingbo Zhu, Huizhen Wang, Benjamin K. Tsou, and Muhua Zhu. 2009. Multi-aspect opinion polling from textual reviews. In Proceedings of the 18th ACM Conference on Information and Knowledge Management, CIKM ’09, pages 1799–1802, New York, NY, USA. ACM.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Li Zhuang</author>
+<author>Feng Jing</author>
+<author>Xiao-Yan Zhu</author>
+</authors>
+<title>Movie review mining and summarization.</title>
+<date>2006</date>
+<booktitle>In Proceedings of the 15th ACM International Conference on Information and Knowledge Management, CIKM ’06,</booktitle>
+<pages>43--50</pages>
+<publisher>ACM.</publisher>
+<location>New York, NY, USA.</location>
+<contexts>
+<context position="8572" citStr="Zhuang et al. (2006)" startWordPosition="1358" endWordPosition="1361">tactic patterns to search for product feature candidates and then used Pointwise Mutual Information (PMI) to remove noise terms. Qiu et al. (2009) proposed eight heuristic syntactic rules to jointly extract product features and sentiment lexicons, where a bootstrapping algorithm named Double 337 Propagation was applied to expand a given seed set. Zhang et al. (2010) improved Qiu’s work by adding more feasible syntactic patterns, and the HITS algorithm (Kleinberg, 1999) was employed to rank candidates. Moghaddam and Ester (2010) extracted product features by automatical opinion pattern mining. Zhuang et al. (2006) used various syntactic templates from an annotated movie corpus and applied them to supervised movie feature extraction. Wu et al. (2009) proposed a phrase level dependency parsing for mining aspects and features of products. As discussed in the first section, syntactic patterns often suffer from data sparsity. Furthermore, most pattern-based methods rely on term frequency, which have the limitation of finding infrequent but important product features. A recent research (Xu et al., 2013) extracted infrequent product features by a semi-supervised classifier, which used word-syntactic pattern c</context>
+</contexts>
+<marker>Zhuang, Jing, Zhu, 2006</marker>
+<rawString>Li Zhuang, Feng Jing, and Xiao-Yan Zhu. 2006. Movie review mining and summarization. In Proceedings of the 15th ACM International Conference on Information and Knowledge Management, CIKM ’06, pages 43–50, New York, NY, USA. ACM.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>
