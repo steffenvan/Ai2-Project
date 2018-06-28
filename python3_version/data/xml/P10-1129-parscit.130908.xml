@@ -1,0 +1,1453 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.000068">
+<title confidence="0.6672215">
+Reading Between the Lines:
+Learning to Map High-level Instructions to Commands
+</title>
+<author confidence="0.914786">
+S.R.K. Branavan, Luke S. Zettlemoyer, Regina Barzilay
+</author>
+<affiliation confidence="0.9639795">
+Computer Science and Artificial Intelligence Laboratory
+Massachusetts Institute of Technology
+</affiliation>
+<email confidence="0.995362">
+{branavan, lsz, regina}@csail.mit.edu
+</email>
+<sectionHeader confidence="0.99477" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.999887789473685">
+In this paper, we address the task of
+mapping high-level instructions to se-
+quences of commands in an external en-
+vironment. Processing these instructions
+is challenging—they posit goals to be
+achieved without specifying the steps re-
+quired to complete them. We describe
+a method that fills in missing informa-
+tion using an automatically derived envi-
+ronment model that encodes states, tran-
+sitions, and commands that cause these
+transitions to happen. We present an ef-
+ficient approximate approach for learning
+this environment model as part of a policy-
+gradient reinforcement learning algorithm
+for text interpretation. This design enables
+learning for mapping high-level instruc-
+tions, which previous statistical methods
+cannot handle.1
+</bodyText>
+<sectionHeader confidence="0.998784" genericHeader="keywords">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.9999553125">
+In this paper, we introduce a novel method for
+mapping high-level instructions to commands in
+an external environment. These instructions spec-
+ify goals to be achieved without explicitly stat-
+ing all the required steps. For example, consider
+the first instruction in Figure 1 — “open control
+panel.” The three GUI commands required for its
+successful execution are not explicitly described
+in the text, and need to be inferred by the user.
+This dependence on domain knowledge makes the
+automatic interpretation of high-level instructions
+particularly challenging.
+The standard approach to this task is to start
+with both a manually-developed model of the en-
+vironment, and rules for interpreting high-level in-
+structions in the context of this model (Agre and
+</bodyText>
+<footnote confidence="0.8919585">
+1Code, data, and annotations used in this work are avail-
+able at http://groups.csail.mit.edu/rbg/code/rl-hli/
+</footnote>
+<bodyText confidence="0.995384634146341">
+Chapman, 1988; Di Eugenio and White, 1992;
+Di Eugenio, 1992; Webber et al., 1995). Given
+both the model and the rules, logic-based infer-
+ence is used to automatically fill in the intermedi-
+ate steps missing from the original instructions.
+Our approach, in contrast, operates directly on
+the textual instructions in the context of the in-
+teractive environment, while requiring no addi-
+tional information. By interacting with the en-
+vironment and observing the resulting feedback,
+our method automatically learns both the mapping
+between the text and the commands, and the un-
+derlying model of the environment. One partic-
+ularly noteworthy aspect of our solution is the in-
+terplay between the evolving mapping and the pro-
+gressively acquired environment model as the sys-
+tem learns how to interpret the text. Recording the
+state transitions observed during interpretation al-
+lows the algorithm to construct a relevant model
+of the environment. At the same time, the envi-
+ronment model enables the algorithm to consider
+the consequences of commands before they are ex-
+ecuted, thereby improving the accuracy of inter-
+pretation. Our method efficiently achieves both of
+these goals as part of a policy-gradient reinforce-
+ment learning algorithm.
+We apply our method to the task of mapping
+software troubleshooting guides to GUI actions in
+the Windows environment (Branavan et al., 2009;
+Kushman et al., 2009). The key findings of our
+experiments are threefold. First, the algorithm
+can accurately interpret 61.5% of high-level in-
+structions, which cannot be handled by previous
+statistical systems. Second, we demonstrate that
+explicitly modeling the environment also greatly
+improves the accuracy of processing low-level in-
+structions, yielding a 14% absolute increase in
+performance over a competitive baseline (Brana-
+van et al., 2009). Finally, we show the importance
+of constructing an environment model relevant to
+the language interpretation task — using textual
+</bodyText>
+<page confidence="0.933221">
+1268
+</page>
+<note confidence="0.9716225">
+Proceedings of the 48th Annual Meeting of the Association for Computational Linguistics, pages 1268–1277,
+Uppsala, Sweden, 11-16 July 2010. c�2010 Association for Computational Linguistics
+</note>
+<figure confidence="0.991821333333333">
+Document (input):
+&amp;quot;open control panel, double click system, then go to the advanced tab&amp;quot;
+Instructions: Command Sequence (output):
+:
+:
+:
+left-click Start
+left-click Settings
+:
+left-click
+Control Panel
+high-level
+instruction
+&amp;quot;open control panel&amp;quot;
+: &amp;quot;double click system&amp;quot; : double-click System
+low-level
+instructions
+: &amp;quot;go to the advanced tab&amp;quot; : left-click Advanced
+</figure>
+<figureCaption confidence="0.77953725">
+Figure 1: An example mapping of a document containing high-level instructions into a candidate se-
+quence of five commands. The mapping process involves segmenting the document into individual in-
+struction word spans Wa, and translating each instruction into the sequence c of one or more commands
+it describes. During learning, the correct output command sequence is not provided to the algorithm.
+</figureCaption>
+<bodyText confidence="0.9912696">
+instructions enables us to bias exploration toward
+transitions relevant for language learning. This ap-
+proach yields superior performance compared to a
+policy that relies on an environment model con-
+structed via random exploration.
+</bodyText>
+<sectionHeader confidence="0.999715" genericHeader="introduction">
+2 Related Work
+</sectionHeader>
+<bodyText confidence="0.999758280701754">
+Interpreting Instructions Our approach is most
+closely related to the reinforcement learning algo-
+rithm for mapping text instructions to commands
+developed by Branavan et al. (2009) (see Section 4
+for more detail). Their method is predicated on the
+assumption that each command to be executed is
+explicitly specified in the instruction text. This as-
+sumption of a direct correspondence between the
+text and the environment is not unique to that pa-
+per, being inherent in other work on grounded lan-
+guage learning (Siskind, 2001; Oates, 2001; Yu
+and Ballard, 2004; Fleischman and Roy, 2005;
+Mooney, 2008; Liang et al., 2009; Matuszek et
+al., 2010). A notable exception is the approach
+of Eisenstein et al. (2009), which learns how an
+environment operates by reading text, rather than
+learning an explicit mapping from the text to the
+environment. For example, their method can learn
+the rules of a card game given instructions for how
+to play.
+Many instances of work on instruction inter-
+pretation are replete with examples where in-
+structions are formulated as high-level goals, tar-
+geted at users with relevant knowledge (Winograd,
+1972; Di Eugenio, 1992; Webber et al., 1995;
+MacMahon et al., 2006). Not surprisingly, auto-
+matic approaches for processing such instructions
+have relied on hand-engineered world knowledge
+to reason about the preconditions and effects of
+environment commands. The assumption of a
+fully specified environment model is also com-
+mon in work on semantics in the linguistics lit-
+erature (Lascarides and Asher, 2004). While our
+approach learns to analyze instructions in a goal-
+directed manner, it does not require manual speci-
+fication of relevant environment knowledge.
+Reinforcement Learning Our work combines
+ideas of two traditionally disparate approaches to
+reinforcement learning (Sutton and Barto, 1998).
+The first approach, model-based learning, con-
+structs a model of the environment in which the
+learner operates (e.g., modeling location, velocity,
+and acceleration in robot navigation). It then com-
+putes a policy directly from the rich information
+represented in the induced environment model.
+In the NLP literature, model-based reinforcement
+learning techniques are commonly used for dia-
+log management (Singh et al., 2002; Lemon and
+Konstas, 2009; Schatzmann and Young, 2009).
+However, if the environment cannot be accurately
+approximated by a compact representation, these
+methods perform poorly (Boyan and Moore, 1995;
+Jong and Stone, 2007). Our instruction interpreta-
+tion task falls into this latter category,2 rendering
+standard model-based learning ineffective.
+The second approach – model-free methods
+such as policy learning – aims to select the opti-
+</bodyText>
+<footnote confidence="0.99843475">
+2For example, in the Windows GUI domain, clicking on
+the File menu will result in a different submenu depending on
+the application. Thus it is impossible to predict the effects of
+a previously unseen GUI command.
+</footnote>
+<page confidence="0.994185">
+1269
+</page>
+<figure confidence="0.986050333333333">
+State Action State
+Observed text
+and environment
+Select run after
+clicking start.
+In the open box
+type &amp;quot;dcomcnfg&amp;quot;.
+word span :
+clicking start
+command :
+LEFT_CLICK( start )
+Policy function
+Observed text
+and environment
+Select run after
+clicking start.
+In the open box
+type &amp;quot;dcomcnfg&amp;quot;.
+</figure>
+<figureCaption confidence="0.8639065">
+Figure 2: A single step in the instruction mapping process formalized as an MDP. State s is comprised of
+the state of the external environment £, and the state of the document (d, W), where W is the list of all
+</figureCaption>
+<bodyText confidence="0.946633933333333">
+word spans mapped by previous actions. An action a selects a span Wa of unused words from (d, W),
+and maps them to an environment command c. As a consequence of a, the environment state changes to
+£&apos; — p(£&apos;J£, c), and the list of mapped words is updated to W&apos; = W U Wa.
+mal action at every step, without explicitly con-
+structing a model of the environment. While pol-
+icy learners can effectively operate in complex en-
+vironments, they are not designed to benefit from
+a learned environment model. We address this
+limitation by expanding a policy learning algo-
+rithm to take advantage of a partial environment
+model estimated during learning. The approach of
+conditioning the policy function on future reach-
+able states is similar in concept to the use of post-
+decision state information in the approximate dy-
+namic programming framework (Powell, 2007).
+</bodyText>
+<sectionHeader confidence="0.981572" genericHeader="method">
+3 Problem Formulation
+</sectionHeader>
+<bodyText confidence="0.999927533333334">
+Our goal is to map instructions expressed in a nat-
+ural language document d into the corresponding
+sequence of commands c� = (ci, ... , cm) exe-
+cutable in an environment. As input, we are given
+a set of raw instruction documents, an environ-
+ment, and a reward function as described below.
+The environment is formalized as its states and
+transition function. An environment state £ spec-
+ifies the objects accessible in the environment at
+a given time step, along with the objects’ prop-
+erties. The environment state transition function
+p(£&apos;J£, c) encodes how the state changes from £
+to £&apos; in response to a command c.3 During learn-
+ing, this function is not known, but samples from it
+can be collected by executing commands and ob-
+</bodyText>
+<footnote confidence="0.636451666666667">
+3While in the general case the environment state transi-
+tions maybe stochastic, they are deterministic in the software
+GUI used in this work.
+</footnote>
+<bodyText confidence="0.999785714285714">
+serving the resulting environment state. A real-
+valued reward function measures how well a com-
+mand sequence c� achieves the task described in the
+document.
+We posit that a document d is composed of a
+sequence of instructions, each of which can take
+one of two forms:
+</bodyText>
+<listItem confidence="0.850875625">
+• Low-level instructions: these explicitly de-
+scribe single commands.4 E.g., “double click
+system” in Figure 1.
+• High-level instructions: these correspond to
+a sequence of one or more environment com-
+mands, none of which are explicitly de-
+scribed by the instruction. E.g., “open control
+panel” in Figure 1.
+</listItem>
+<sectionHeader confidence="0.98526" genericHeader="method">
+4 Background
+</sectionHeader>
+<bodyText confidence="0.9999354">
+Our innovation takes place within a previously
+established general framework for the task of
+mapping instructions to commands (Branavan
+et al., 2009). This framework formalizes the
+mapping process as a Markov Decision Process
+(MDP) (Sutton and Barto, 1998), with actions
+encoding individual instruction-to-command map-
+pings, and states representing partial interpreta-
+tions of the document. In this section, we review
+the details of this framework.
+</bodyText>
+<footnote confidence="0.749462">
+4Previous work (Branavan et al., 2009) is only able to han-
+dle low-level instructions.
+</footnote>
+<page confidence="0.863666">
+1270
+</page>
+<bodyText confidence="0.996849588235294">
+starting
+environment
+state
+parts of the environment
+state space reachable
+after commands and .
+state where a
+control panel icon was
+observed during previous
+exploration steps.
+Figure 3: Using information derived from future states to interpret the high-level instruction “open con-
+trol panel.” £d is the starting state, and c1 through c4 are candidate commands. Environment states are
+shown as circles, with previously visited environment states colored green. Dotted arrows show known
+state transitions. All else being equal, the information that the control panel icon was observed in state
+£5 during previous exploration steps can help to correctly select command c3.
+States and Actions A document is interpreted
+by incrementally constructing a sequence of ac-
+tions. Each action selects a word span from the
+document, and maps it to one environment com-
+mand. To predict actions sequentially, we track the
+states of the environment and the document over
+time as shown in Figure 2. This mapping state s is
+a tuple (£, d, W) where £ is the current environ-
+ment state, d is the document being interpreted,
+and W is the list of word spans selected by previ-
+ous actions. The mapping state s is observed prior
+to selecting each action.
+The mapping action a is a tuple (c, Wa) that
+represents the joint selection of a span of words
+Wa and an environment command c. Some of the
+candidate actions would correspond to the correct
+instruction mappings, e.g., (c = double-click sys-
+tem, Wa = “double click system”). Others such
+as (c = left-click system, Wa = “double click sys-
+tem”) would be erroneous. The algorithm learns
+to interpret instructions by learning to construct
+sequences of actions that assign the correct com-
+mands to the words.
+The interpretation of a document d begins at an
+initial mapping state s0 = (£d, d, 0), £d being the
+starting state of the environment for the document.
+Given a state s = (£, d, W), the space of possi-
+ble actions a = (c, Wa) is defined by enumerat-
+ing sub-spans of unused words in d and candidate
+commands in £.5 The action to execute, a, is se-
+lected based on a policy function p(a|s) by find-
+ing arg maxa p(a|s). Performing action a in state
+5Here, command reordering is possible. At each step, the
+span of selected words Wa is not required to be adjacent to
+the previous selections. This reordering is used to interpret
+sentences such as “Select exit after opening the File menu.”
+</bodyText>
+<equation confidence="0.953206166666667">
+s = (£, d, W) results in a new state s&apos; according
+to the distribution p(s&apos;|s, a), where:
+a = (c, Wa),
+£&apos; — p(£&apos;|£, c),
+W&apos; = W U Wa,
+s&apos; = (£&apos;, d, W&apos;).
+</equation>
+<bodyText confidence="0.9992865">
+The process of selecting and executing actions
+is repeated until all the words in d have been
+mapped.6
+A Log-Linear Parameterization The policy
+function used for action selection is defined as a
+log-linear distribution over actions:
+</bodyText>
+<equation confidence="0.988196">
+eθ·φ(s,a)
+p(a|s; θ) = eθ·φ(s,a/) , (1)
+a/
+</equation>
+<bodyText confidence="0.99986275">
+where θ E Rn is a weight vector, and φ(s, a) E Rn
+is an n-dimensional feature function. This repre-
+sentation has the flexibility to incorporate a variety
+of features computed on the states and actions.
+Reinforcement Learning Parameters of the
+policy function p(a|s; θ) are estimated to max-
+imize the expected future reward for analyzing
+each document d E D:
+</bodyText>
+<equation confidence="0.929959">
+θ = arg max Ep(h|θ) [r(h)] , (2)
+θ
+</equation>
+<bodyText confidence="0.9994952">
+where h = (s0, a0, ... , sm_1, am_1, sm) is a
+history that records the analysis of document d,
+p(h|θ) is the probability of selecting this analysis
+given policy parameters θ, and the reward r(h) is
+a real valued indication of the quality of h.
+</bodyText>
+<footnote confidence="0.9351075">
+6To account for document words that are not part of an
+instruction, c may be a null command.
+</footnote>
+<page confidence="0.990033">
+1271
+</page>
+<sectionHeader confidence="0.996727" genericHeader="method">
+5 Algorithm
+</sectionHeader>
+<bodyText confidence="0.999765875">
+We expand the scope of learning approaches for
+automatic document interpretation by enabling the
+analysis of high-level instructions. The main chal-
+lenge in processing these instructions is that, in
+contrast to their low-level counterparts, they cor-
+respond to sequences of one or more commands.
+A simple way to enable this one-to-many mapping
+is to allow actions that do not consume words (i.e.,
+|Wa |= 0). The sequence of actions can then be
+constructed incrementally using the algorithm de-
+scribed above. However, this change significantly
+complicates the interpretation problem – we need
+to be able to predict commands that are not di-
+rectly described by any words, and allowing ac-
+tion sequences significantly increases the space of
+possibilities for each instruction. Since we can-
+not enumerate all possible sequences at decision
+time, we limit the space of possibilities by learn-
+ing which sequences are likely to be relevant for
+the current instruction.
+To motivate the approach, consider the deci-
+sion problem in Figure 3, where we need to find a
+command sequence for the high-level instruction
+“open control panel.” The algorithm focuses on
+command sequences leading to environment states
+where the control panel icon was previously ob-
+served. The information about such states is ac-
+quired during exploration and is stored in a partial
+environment model q(£&apos;|£, c).
+Our goal is to map high-level instructions to
+command sequences by leveraging knowledge
+about the long-term effects of commands. We do
+this by integrating the partial environment model
+into the policy function. Specifically, we modify
+the log-linear policy p(a|s; q, 0) by adding look-
+ahead features 0(s, a, q) which complement the
+local features used in the previous model. These
+look-ahead features incorporate various measure-
+ments that characterize the potential of future
+states reachable via the selected action. Although
+primarily designed to analyze high-level instruc-
+tions, this approach is also useful for mapping
+low-level instructions.
+Below, we first describe how we estimate the
+partial environment transition model and how this
+model is used to compute the look-ahead features.
+This is followed by the details of parameter esti-
+mation for our algorithm.
+</bodyText>
+<subsectionHeader confidence="0.963745">
+5.1 Partial Environment Transition Model
+</subsectionHeader>
+<bodyText confidence="0.999955260869565">
+To compute the look-ahead features, we first need
+to collect statistics about the environment transi-
+tion function p(£&apos;|£, c). An example of an envi-
+ronment transition is the change caused by click-
+ing on the “start” button. We collect this informa-
+tion through observation, and build a partial envi-
+ronment transition model q(£&apos;|£, c).
+One possible strategy for constructing q is to ob-
+serve the effects of executing random commands
+in the environment. In a complex environment,
+however, such a strategy is unlikely to produce
+state samples relevant to our text analysis task.
+Instead, we use the training documents to guide
+the sampling process. During training, we execute
+the command sequences predicted by the policy
+function in the environment, caching the resulting
+state transitions. Initially, these commands may
+have little connection to the actual instructions. As
+learning progresses and the quality of the interpre-
+tation improves, more promising parts of the en-
+vironment will be observed. This process yields
+samples that are biased toward the content of the
+documents.
+</bodyText>
+<subsectionHeader confidence="0.988659">
+5.2 Look-Ahead Features
+</subsectionHeader>
+<bodyText confidence="0.999980947368421">
+We wish to select actions that allow for the best
+follow-up actions, thereby finding the analysis
+with the highest total reward for a given docu-
+ment. In practice, however, we do not have in-
+formation about the effects of all possible future
+actions. Instead, we capitalize on the state tran-
+sitions observed during the sampling process de-
+scribed above, allowing us to incrementally build
+an environment model of actions and their effects.
+Based on this transition information, we can es-
+timate the usefulness of actions by considering the
+properties of states they can reach. For instance,
+some states might have very low immediate re-
+ward, indicating that they are unlikely to be part
+of the best analysis for the document. While the
+usefulness of most states is hard to determine, it
+correlates with various properties of the state. We
+encode the following properties as look-ahead fea-
+tures in our policy:
+</bodyText>
+<listItem confidence="0.9558794">
+• The highest reward achievable by an action
+sequence passing through this state. This
+property is computed using the learned envi-
+ronment model, and is therefore an approxi-
+mation.
+</listItem>
+<page confidence="0.8827">
+1272
+</page>
+<listItem confidence="0.897335142857143">
+• The length of the above action sequence.
+• The average reward received at the envi-
+ronment state while interpreting any docu-
+ment. This property introduces a bias towards
+commonly visited states that frequently re-
+cur throughout multiple documents’ correct
+interpretations.
+</listItem>
+<bodyText confidence="0.999980363636364">
+Because we can never encounter all states and
+all actions, our environment model is always in-
+complete and these properties can only be com-
+puted based on partial information. Moreover, the
+predictive strength of the properties is not known
+in advance. Therefore we incorporate them as sep-
+arate features in the model, and allow the learning
+process to estimate their weights. In particular, we
+select actions a based on the current state s and
+the partial environment model q, resulting in the
+following policy definition:
+</bodyText>
+<equation confidence="0.996463333333333">
+ee·0(s,a,q)
+p(a|s; q, 0) = 1:e0·0(s,a0,q) ,(3)
+a0
+</equation>
+<bodyText confidence="0.9999445">
+where the feature representation 0(s, a, q) has
+been extended to be a function of q.
+</bodyText>
+<subsectionHeader confidence="0.994608">
+5.3 Parameter Estimation
+</subsectionHeader>
+<bodyText confidence="0.999639">
+The learning algorithm is provided with a set of
+documents d E D, an environment in which to ex-
+ecute command sequences c, and a reward func-
+tion r(h). The goal is to estimate two sets of
+parameters: 1) the parameters 0 of the policy
+function, and 2) the partial environment transition
+model q(£&apos;|£, c), which is the observed portion of
+the true model p(£&apos;|£, c). These parameters are
+mutually dependent: 0 is defined over a feature
+space dependent on q, and q is sampled according
+to the policy function parameterized by 0.
+Algorithm 1 shows the procedure for joint
+learning of these parameters. As in standard policy
+gradient learning (Sutton et al., 2000), the algo-
+rithm iterates over all documents d E D (steps 1,
+2), selecting and executing actions in the environ-
+ment (steps 3 to 6). The resulting reward is used
+to update the parameters 0 (steps 8, 9). In the new
+joint learning setting, this process also yields sam-
+ples of state transitions which are used to estimate
+q(£&apos;|£, c) (step 7). This updated q is then used
+to compute the feature functions 0(s, a, q) during
+the next iteration of learning (step 4). This pro-
+cess is repeated until the total reward on training
+documents converges.
+Input: A document set D,
+Feature function 0,
+Reward function r(h),
+Number of iterations T
+Initialization: Set 0 to small random values.
+Set q to the empty set.
+</bodyText>
+<figure confidence="0.902907636363636">
+1 for i = 1 ··· T do
+2 foreach d ∈ D do
+Sample history h ∼ p(h|0) where
+h = (s0, a0, · · · , an−1, sn) as follows:
+Initialize environment to document specific
+starting state Ed
+3 fort = 0 ··· n − 1 do
+4 Compute 0(a, st, q) based on latest q
+5 Sample action at ∼ p(a|st; q, 0)
+6 Execute at on state st: st+1 ∼ p(s|st, at)
+7 Set q = q ∪ {(E0, E, c)} where E0, E, c are the
+environment states and commands from st+1,
+st, and at
+end
+8 A ←
+0(st, at, q) − E 0(st, a0, q) p(a0 |st; q, 0)
+J
+Ja
+9 0 ← 0 + r(h)A
+end
+end
+Output: Estimate of parameters 0
+</figure>
+<figureCaption confidence="0.593365">
+Algorithm 1: A policy gradient algorithm that
+also learns a model of the environment.
+</figureCaption>
+<bodyText confidence="0.99925375">
+This algorithm capitalizes on the synergy be-
+tween 0 and q. As learning proceeds, the method
+discovers a more complete state transition function
+q, which improves the accuracy of the look-ahead
+features, and ultimately, the quality of the result-
+ing policy. An improved policy function in turn
+produces state samples that are more relevant to
+the document interpretation task.
+</bodyText>
+<sectionHeader confidence="0.991855" genericHeader="method">
+6 Applying the Model
+</sectionHeader>
+<bodyText confidence="0.997072181818182">
+We apply our algorithm to the task of interpret-
+ing help documents to perform software related
+tasks (Branavan et al., 2009; Kushman et al.,
+2009). Specifically, we consider documents from
+Microsoft’s Help and Support website.7 As in
+prior work, we use a virtual machine set-up to al-
+low our method to interact with a Windows 2000
+environment.
+Environment States and Actions In this appli-
+cation of our model, the environment state is the
+set of visible user interface (UI) objects, along
+</bodyText>
+<equation confidence="0.810676333333333">
+7http://support.microsoft.com/
+E
+t
+</equation>
+<page confidence="0.861264">
+1273
+</page>
+<bodyText confidence="0.9999353">
+with their properties (e.g., the object’s label, par-
+ent window, etc). The environment commands
+consist of the UI commands left-click, right-click,
+double-click, and type-into. Each of these commands
+requires a UI object as a parameter, while type-into
+needs an additional parameter containing the text
+to be typed. On average, at each step of the in-
+terpretation process, the branching factor is 27.14
+commands.
+Reward Function An ideal reward function
+would be to verify whether the task specified by
+the help document was correctly completed. Since
+such verification is a challenging task, we rely on
+a noisy approximation: we assume that each sen-
+tence specifies at least one command, and that the
+text describing the command has words matching
+the label of the environment object. If a history
+h has at least one such command for each sen-
+tence, the environment reward function r(h) re-
+turns a positive value, otherwise it returns a neg-
+ative value. This environment reward function is
+a simplification of the one described in Branavan
+et al. (2009), and it performs comparably in our
+experiments.
+Features In addition to the look-ahead features
+described in Section 5.2, the policy also includes
+the set of features used by Branavan et al. (2009).
+These features are functions of both the text and
+environment state, modeling local properties that
+are useful for action selection.
+</bodyText>
+<sectionHeader confidence="0.990701" genericHeader="method">
+7 Experimental Setup
+</sectionHeader>
+<bodyText confidence="0.994649313432836">
+Datasets Our model is trained on the same
+dataset used by Branavan et al. (2009). For test-
+ing we use two datasets: the first one was used
+in prior work and contains only low-level instruc-
+tions, while the second dataset is comprised of
+documents with high-level instructions. This new
+dataset was collected from the Microsoft Help
+and Support website, and has on average 1.03
+high-level instructions per document. The second
+dataset contains 60 test documents, while the first
+is split into 70, 18 and 40 document for training,
+development and testing respectively. The com-
+bined statistics for these datasets is shown below:
+Total # of documents 188
+Total # of words 7448
+Vocabulary size 739
+Avg. actions per document 10
+Reinforcement Learning Parameters Follow-
+ing common practice, we encourage exploration
+during learning with an E-greedy strategy (Sutton
+and Barto, 1998), with E set to 0.1. We also iden-
+tify dead-end states, i.e. states with the lowest pos-
+sible immediate reward, and use the induced en-
+vironment model to encourage additional explo-
+ration by lowering the likelihood of actions that
+lead to such dead-end states.
+During the early stages of learning, experience
+gathered in the environment model is extremely
+sparse, causing the look-ahead features to provide
+poor estimates. To speed convergence, we ignore
+these estimates by disabling the look-ahead fea-
+tures for a fixed number of initial training itera-
+tions.
+Finally, to guarantee convergence, stochas-
+tic gradient ascent algorithms require a learning
+rate schedule. We use a modified search-then-
+converge algorithm (Darken and Moody, 1990),
+and tie the learning rate to the ratio of training
+documents that received a positive reward in the
+current iteration.
+Baselines As a baseline, we compare our
+method against the results reported by Branavan
+et al. (2009), denoted here as BCZB09.
+As an upper bound for model performance, we
+also evaluate our method using a reward signal
+that simulates a fully-supervised training regime.
+We define a reward function that returns posi-
+tive one for histories that match the annotations,
+and zero otherwise. Performing policy-gradient
+with this function is equivalent to training a fully-
+supervised, stochastic gradient algorithm that op-
+timizes conditional likelihood (Branavan et al.,
+2009).
+Evaluation Metrics We evaluate the accuracy
+of the generated mapping by comparing it against
+manual annotations of the correct action se-
+quences. We measure the percentage of correct
+actions and the percentage of documents where
+every action is correct. In general, the sequential
+nature of the interpretation task makes it difficult
+to achieve high action accuracy. For example, ex-
+ecuting an incorrect action early on, often leads
+to an environment state from which the remaining
+instructions cannot be completed. When this hap-
+pens, it is not possible to recover the remaining
+actions, causing cascading errors that significantly
+reduce performance.
+</bodyText>
+<page confidence="0.969987">
+1274
+</page>
+<table confidence="0.9998015">
+Low-level instruction dataset High-level instruction dataset
+action document action high-level action document
+BCZB09 0.647 0.375 0.021 0.022 0.000
+BCZB09 + annotation * 0.756 0.525 0.035 0.022 0.000
+Our model 0.793 0.517 * 0.419 * 0.615 * 0.283
+Our model + annotation 0.793 0.650 * 0.357 0.492 0.333
+</table>
+<tableCaption confidence="0.9903555">
+Table 1: Accuracy of the mapping produced by our model, its variants, and the baseline. Values marked
+with * are statistically significant at p &lt; 0.01 compared to the value immediately above it.
+</tableCaption>
+<sectionHeader confidence="0.999625" genericHeader="evaluation">
+8 Results
+</sectionHeader>
+<bodyText confidence="0.9999822">
+As shown in Table 1, our model outperforms
+the baseline on the two datasets, according to
+all evaluation metrics. In contrast to the base-
+line, our model can handle high-level instructions,
+accurately interpreting 62% of them in the sec-
+ond dataset. Every document in this set con-
+tains at least one high-level action, which on av-
+erage, maps to 3.11 environment commands each.
+The overall action performance on this dataset,
+however, seems unexpectedly low at 42%. This
+discrepancy is explained by the fact that in this
+dataset, high-level instructions are often located
+towards the beginning of the document. If these
+initial challenging instructions are not processed
+correctly, the rest of the actions for the document
+cannot be interpreted.
+As the performance on the first dataset indi-
+cates, the new algorithm is also beneficial for pro-
+cessing low-level instructions. The model outper-
+forms the baseline by at least 14%, both in terms
+of the actions and the documents it can process.
+Not surprisingly, the best performance is achieved
+when the new algorithm has access to manually
+annotated data during training.
+We also performed experiments to validate the
+intuition that the partial environment model must
+contain information relevant for the language in-
+terpretation task. To test this hypothesis, we re-
+placed the learned environment model with one of
+the same size gathered by executing random com-
+mands. The model with randomly sampled envi-
+ronment transitions performs poorly: it can only
+process 4.6% of documents and 15% of actions
+on the dataset with high-level instructions, com-
+pared to 28.3% and 41.9% respectively for our al-
+gorithm. This result also explains why training
+with full supervision hurts performance on high-
+level instructions (see Table 1). Learning directly
+from annotations results in a low-quality environ-
+ment model due to the relative lack of exploration,
+</bodyText>
+<figure confidence="0.5809574">
+High-level instruction
+∘ open device manager
+Extracted low-level instruction paraphrase
+∘ double click my computer
+∘ double click control panel
+∘ double click administrative tools
+∘ double click computer management
+∘ double click device manager
+High-level instruction
+∘ open the network tool in control panel
+Extracted low-level instruction paraphrase
+∘ click start
+∘ point to settings
+∘ click control panel
+∘ double click network and dial-up connections
+</figure>
+<figureCaption confidence="0.99811">
+Figure 4: Examples of automatically generated
+</figureCaption>
+<bodyText confidence="0.981072458333333">
+paraphrases for high-level instructions. The model
+maps the high-level instruction into a sequence of
+commands, and then translates them into the cor-
+responding low-level instructions.
+hurting the model’s ability to leverage the look-
+ahead features.
+Finally, to demonstrate the quality of the
+learned word–command alignments, we evaluate
+our method’s ability to paraphrase from high-level
+instructions to low-level instructions. Here, the
+goal is to take each high-level instruction and con-
+struct a text description of the steps required to
+achieve it. We did this by finding high-level in-
+structions where each of the commands they are
+associated with is also described by a low-level
+instruction in some other document. For exam-
+ple, if the text “open control panel” was mapped
+to the three commands in Figure 1, and each of
+those commands was described by a low-level in-
+struction elsewhere, this procedure would create
+a paraphrase such as “click start, left click set-
+ting, and select control panel.” Of the 60 high-
+level instructions tagged in the test set, this ap-
+proach found paraphrases for 33 of them. 29 of
+</bodyText>
+<page confidence="0.960533">
+1275
+</page>
+<bodyText confidence="0.999858">
+these paraphrases were correct, in the sense that
+they describe all the necessary commands. Fig-
+ure 4 shows some examples of the automatically
+extracted paraphrases.
+</bodyText>
+<sectionHeader confidence="0.957986" genericHeader="conclusions">
+9 Conclusions and Future Work
+</sectionHeader>
+<bodyText confidence="0.999985208333333">
+In this paper, we demonstrate that knowledge
+about the environment can be learned and used ef-
+fectively for the task of mapping instructions to ac-
+tions. A key feature of this approach is the synergy
+between language analysis and the construction of
+the environment model: instruction text drives the
+sampling of the environment transitions, while the
+acquired environment model facilitates language
+interpretation. This design enables us to learn to
+map high-level instructions while also improving
+accuracy on low-level instructions.
+To apply the above method to process a broad
+range of natural language documents, we need to
+handle several important semantic and pragmatic
+phenomena, such as reference, quantification, and
+conditional statements. These linguistic construc-
+tions are known to be challenging to learn – exist-
+ing approaches commonly rely on large amounts
+of hand annotated data for training. An interest-
+ing avenue of future work is to explore an alter-
+native approach which learns these phenomena by
+combining linguistic information with knowledge
+gleaned from an automatically induced environ-
+ment model.
+</bodyText>
+<sectionHeader confidence="0.998436" genericHeader="acknowledgments">
+Acknowledgments
+</sectionHeader>
+<bodyText confidence="0.999950666666667">
+The authors acknowledge the support of the
+NSF (CAREER grant IIS-0448168, grant IIS-
+0835445, and grant IIS-0835652) and the Mi-
+crosoft Research New Faculty Fellowship. Thanks
+to Aria Haghighi, Leslie Pack Kaelbling, Tom
+Kwiatkowski, Martin Rinard, David Silver, Mark
+Steedman, Csaba Szepesvari, the MIT NLP group,
+and the ACL reviewers for their suggestions and
+comments. Any opinions, findings, conclusions,
+or recommendations expressed in this paper are
+those of the authors, and do not necessarily reflect
+the views of the funding organizations.
+</bodyText>
+<sectionHeader confidence="0.999224" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.999790648148148">
+Philip E. Agre and David Chapman. 1988. What are
+plans for? Technical report, Cambridge, MA, USA.
+J. A. Boyan and A. W. Moore. 1995. Generalization
+in reinforcement learning: Safely approximating the
+value function. In Advances in NIPS, pages 369–
+376.
+S.R.K Branavan, Harr Chen, Luke Zettlemoyer, and
+Regina Barzilay. 2009. Reinforcement learning for
+mapping instructions to actions. In Proceedings of
+ACL, pages 82–90.
+Christian Darken and John Moody. 1990. Note on
+learning rate schedules for stochastic optimization.
+In Advances in NIPS, pages 832–838.
+Barbara Di Eugenio and Michael White. 1992. On the
+interpretation of natural language instructions. In
+Proceedings of COLING, pages 1147–1151.
+Barbara Di Eugenio. 1992. Understanding natural lan-
+guage instructions: the case of purpose clauses. In
+Proceedings ofACL, pages 120–127.
+Jacob Eisenstein, James Clarke, Dan Goldwasser, and
+Dan Roth. 2009. Reading to learn: Constructing
+features from semantic abstracts. In Proceedings of
+EMNLP, pages 958–967.
+Michael Fleischman and Deb Roy. 2005. Intentional
+context in situated natural language learning. In
+Proceedings of CoNLL, pages 104–111.
+Nicholas K. Jong and Peter Stone. 2007. Model-based
+function approximation in reinforcement learning.
+In Proceedings ofAAMAS, pages 670–677.
+Nate Kushman, Micah Brodsky, S.R.K. Branavan,
+Dina Katabi, Regina Barzilay, and Martin Rinard.
+2009. Wikido. In Proceedings of HotNets-VIII.
+Alex Lascarides and Nicholas Asher. 2004. Impera-
+tives in dialogue. In P. Kuehnlein, H. Rieser, and
+H. Zeevat, editors, The Semantics and Pragmatics
+of Dialogue for the New Millenium. Benjamins.
+Oliver Lemon and Ioannis Konstas. 2009. User sim-
+ulations for context-sensitive speech recognition in
+spoken dialogue systems. In Proceedings of EACL,
+pages 505–513.
+Percy Liang, Michael I. Jordan, and Dan Klein. 2009.
+Learning semantic correspondences with less super-
+vision. In Proceedings of ACL, pages 91–99.
+Matt MacMahon, Brian Stankiewicz, and Benjamin
+Kuipers. 2006. Walk the talk: connecting language,
+knowledge, and action in route instructions. In Pro-
+ceedings of AAAI, pages 1475–1482.
+C. Matuszek, D. Fox, and K. Koscher. 2010. Follow-
+ing directions using statistical machine translation.
+In Proceedings of Human-Robot Interaction, pages
+251–258.
+Raymond J. Mooney. 2008. Learning to connect
+language and perception. In Proceedings of AAAI,
+pages 1598–1601.
+</reference>
+<page confidence="0.79147">
+1276
+</page>
+<reference confidence="0.999782911764706">
+James Timothy Oates. 2001. Grounding knowledge
+in sensors: Unsupervised learning for language and
+planning. Ph.D. thesis, University of Massachusetts
+Amherst.
+Warren B Powell. 2007. Approximate Dynamic Pro-
+gramming. Wiley-Interscience.
+Jost Schatzmann and Steve Young. 2009. The hidden
+agenda user simulation model. IEEE Trans. Audio,
+Speech and Language Processing, 17(4):733–747.
+Satinder Singh, Diane Litman, Michael Kearns, and
+Marilyn Walker. 2002. Optimizing dialogue man-
+agement with reinforcement learning: Experiments
+with the njfun system. Journal of Artificial Intelli-
+gence Research, 16:105–133.
+Jeffrey Mark Siskind. 2001. Grounding the lexical
+semantics of verbs in visual perception using force
+dynamics and event logic. Journal of Artificial In-
+telligence Research, 15:31–90.
+Richard S. Sutton and Andrew G. Barto. 1998. Re-
+inforcement Learning: An Introduction. The MIT
+Press.
+Richard S. Sutton, David McAllester, Satinder Singh,
+and Yishay Mansour. 2000. Policy gradient meth-
+ods for reinforcement learning with function approx-
+imation. In Advances in NIPS, pages 1057–1063.
+Bonnie Webber, Norman Badler, Barbara Di Euge-
+nio, Libby Levison Chris Geib, and Michael Moore.
+1995. Instructions, intentions and expectations. Ar-
+tificial Intelligence, 73(1-2).
+Terry Winograd. 1972. Understanding Natural Lan-
+guage. Academic Press.
+Chen Yu and Dana H. Ballard. 2004. On the integra-
+tion of grounding language and learning objects. In
+Proceedings of AAAI, pages 488–493.
+</reference>
+<page confidence="0.992368">
+1277
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.691519">
+<title confidence="0.998104">Reading Between the Lines: Learning to Map High-level Instructions to Commands</title>
+<author confidence="0.998466">S R K Branavan</author>
+<author confidence="0.998466">Luke S Zettlemoyer</author>
+<author confidence="0.998466">Regina Barzilay</author>
+<affiliation confidence="0.9999725">Computer Science and Artificial Intelligence Laboratory Massachusetts Institute of Technology</affiliation>
+<email confidence="0.934751">lsz,</email>
+<abstract confidence="0.999886111111111">In this paper, we address the task of instructions sequences of commands in an external environment. Processing these instructions is challenging—they posit goals to be achieved without specifying the steps required to complete them. We describe a method that fills in missing information using an automatically derived environment model that encodes states, transitions, and commands that cause these transitions to happen. We present an efficient approximate approach for learning this environment model as part of a policygradient reinforcement learning algorithm for text interpretation. This design enables learning for mapping high-level instruc-</abstract>
+<intro confidence="0.745066">tions, which previous statistical methods</intro>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>Philip E Agre</author>
+<author>David Chapman</author>
+</authors>
+<title>What are plans for? Technical report,</title>
+<date>1988</date>
+<location>Cambridge, MA, USA.</location>
+<marker>Agre, Chapman, 1988</marker>
+<rawString>Philip E. Agre and David Chapman. 1988. What are plans for? Technical report, Cambridge, MA, USA.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J A Boyan</author>
+<author>A W Moore</author>
+</authors>
+<title>Generalization in reinforcement learning: Safely approximating the value function.</title>
+<date>1995</date>
+<booktitle>In Advances in NIPS,</booktitle>
+<pages>369--376</pages>
+<contexts>
+<context position="7473" citStr="Boyan and Moore, 1995" startWordPosition="1119" endWordPosition="1122">). The first approach, model-based learning, constructs a model of the environment in which the learner operates (e.g., modeling location, velocity, and acceleration in robot navigation). It then computes a policy directly from the rich information represented in the induced environment model. In the NLP literature, model-based reinforcement learning techniques are commonly used for dialog management (Singh et al., 2002; Lemon and Konstas, 2009; Schatzmann and Young, 2009). However, if the environment cannot be accurately approximated by a compact representation, these methods perform poorly (Boyan and Moore, 1995; Jong and Stone, 2007). Our instruction interpretation task falls into this latter category,2 rendering standard model-based learning ineffective. The second approach – model-free methods such as policy learning – aims to select the opti2For example, in the Windows GUI domain, clicking on the File menu will result in a different submenu depending on the application. Thus it is impossible to predict the effects of a previously unseen GUI command. 1269 State Action State Observed text and environment Select run after clicking start. In the open box type &amp;quot;dcomcnfg&amp;quot;. word span : clicking start co</context>
+</contexts>
+<marker>Boyan, Moore, 1995</marker>
+<rawString>J. A. Boyan and A. W. Moore. 1995. Generalization in reinforcement learning: Safely approximating the value function. In Advances in NIPS, pages 369– 376.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>S R K Branavan</author>
+<author>Harr Chen</author>
+<author>Luke Zettlemoyer</author>
+<author>Regina Barzilay</author>
+</authors>
+<title>Reinforcement learning for mapping instructions to actions.</title>
+<date>2009</date>
+<booktitle>In Proceedings of ACL,</booktitle>
+<pages>82--90</pages>
+<contexts>
+<context position="3249" citStr="Branavan et al., 2009" startWordPosition="486" endWordPosition="489">model as the system learns how to interpret the text. Recording the state transitions observed during interpretation allows the algorithm to construct a relevant model of the environment. At the same time, the environment model enables the algorithm to consider the consequences of commands before they are executed, thereby improving the accuracy of interpretation. Our method efficiently achieves both of these goals as part of a policy-gradient reinforcement learning algorithm. We apply our method to the task of mapping software troubleshooting guides to GUI actions in the Windows environment (Branavan et al., 2009; Kushman et al., 2009). The key findings of our experiments are threefold. First, the algorithm can accurately interpret 61.5% of high-level instructions, which cannot be handled by previous statistical systems. Second, we demonstrate that explicitly modeling the environment also greatly improves the accuracy of processing low-level instructions, yielding a 14% absolute increase in performance over a competitive baseline (Branavan et al., 2009). Finally, we show the importance of constructing an environment model relevant to the language interpretation task — using textual 1268 Proceedings of</context>
+<context position="5207" citStr="Branavan et al. (2009)" startWordPosition="770" endWordPosition="773">ion word spans Wa, and translating each instruction into the sequence c of one or more commands it describes. During learning, the correct output command sequence is not provided to the algorithm. instructions enables us to bias exploration toward transitions relevant for language learning. This approach yields superior performance compared to a policy that relies on an environment model constructed via random exploration. 2 Related Work Interpreting Instructions Our approach is most closely related to the reinforcement learning algorithm for mapping text instructions to commands developed by Branavan et al. (2009) (see Section 4 for more detail). Their method is predicated on the assumption that each command to be executed is explicitly specified in the instruction text. This assumption of a direct correspondence between the text and the environment is not unique to that paper, being inherent in other work on grounded language learning (Siskind, 2001; Oates, 2001; Yu and Ballard, 2004; Fleischman and Roy, 2005; Mooney, 2008; Liang et al., 2009; Matuszek et al., 2010). A notable exception is the approach of Eisenstein et al. (2009), which learns how an environment operates by reading text, rather than l</context>
+<context position="10889" citStr="Branavan et al., 2009" startWordPosition="1695" endWordPosition="1698">chieves the task described in the document. We posit that a document d is composed of a sequence of instructions, each of which can take one of two forms: • Low-level instructions: these explicitly describe single commands.4 E.g., “double click system” in Figure 1. • High-level instructions: these correspond to a sequence of one or more environment commands, none of which are explicitly described by the instruction. E.g., “open control panel” in Figure 1. 4 Background Our innovation takes place within a previously established general framework for the task of mapping instructions to commands (Branavan et al., 2009). This framework formalizes the mapping process as a Markov Decision Process (MDP) (Sutton and Barto, 1998), with actions encoding individual instruction-to-command mappings, and states representing partial interpretations of the document. In this section, we review the details of this framework. 4Previous work (Branavan et al., 2009) is only able to handle low-level instructions. 1270 starting environment state parts of the environment state space reachable after commands and . state where a control panel icon was observed during previous exploration steps. Figure 3: Using information derived</context>
+<context position="22774" citStr="Branavan et al., 2009" startWordPosition="3710" endWordPosition="3713"> of parameters 0 Algorithm 1: A policy gradient algorithm that also learns a model of the environment. This algorithm capitalizes on the synergy between 0 and q. As learning proceeds, the method discovers a more complete state transition function q, which improves the accuracy of the look-ahead features, and ultimately, the quality of the resulting policy. An improved policy function in turn produces state samples that are more relevant to the document interpretation task. 6 Applying the Model We apply our algorithm to the task of interpreting help documents to perform software related tasks (Branavan et al., 2009; Kushman et al., 2009). Specifically, we consider documents from Microsoft’s Help and Support website.7 As in prior work, we use a virtual machine set-up to allow our method to interact with a Windows 2000 environment. Environment States and Actions In this application of our model, the environment state is the set of visible user interface (UI) objects, along 7http://support.microsoft.com/ E t 1273 with their properties (e.g., the object’s label, parent window, etc). The environment commands consist of the UI commands left-click, right-click, double-click, and type-into. Each of these comman</context>
+<context position="24226" citStr="Branavan et al. (2009)" startWordPosition="3945" endWordPosition="3948"> An ideal reward function would be to verify whether the task specified by the help document was correctly completed. Since such verification is a challenging task, we rely on a noisy approximation: we assume that each sentence specifies at least one command, and that the text describing the command has words matching the label of the environment object. If a history h has at least one such command for each sentence, the environment reward function r(h) returns a positive value, otherwise it returns a negative value. This environment reward function is a simplification of the one described in Branavan et al. (2009), and it performs comparably in our experiments. Features In addition to the look-ahead features described in Section 5.2, the policy also includes the set of features used by Branavan et al. (2009). These features are functions of both the text and environment state, modeling local properties that are useful for action selection. 7 Experimental Setup Datasets Our model is trained on the same dataset used by Branavan et al. (2009). For testing we use two datasets: the first one was used in prior work and contains only low-level instructions, while the second dataset is comprised of documents w</context>
+<context position="26408" citStr="Branavan et al. (2009)" startWordPosition="4291" endWordPosition="4294">odel is extremely sparse, causing the look-ahead features to provide poor estimates. To speed convergence, we ignore these estimates by disabling the look-ahead features for a fixed number of initial training iterations. Finally, to guarantee convergence, stochastic gradient ascent algorithms require a learning rate schedule. We use a modified search-thenconverge algorithm (Darken and Moody, 1990), and tie the learning rate to the ratio of training documents that received a positive reward in the current iteration. Baselines As a baseline, we compare our method against the results reported by Branavan et al. (2009), denoted here as BCZB09. As an upper bound for model performance, we also evaluate our method using a reward signal that simulates a fully-supervised training regime. We define a reward function that returns positive one for histories that match the annotations, and zero otherwise. Performing policy-gradient with this function is equivalent to training a fullysupervised, stochastic gradient algorithm that optimizes conditional likelihood (Branavan et al., 2009). Evaluation Metrics We evaluate the accuracy of the generated mapping by comparing it against manual annotations of the correct actio</context>
+</contexts>
+<marker>Branavan, Chen, Zettlemoyer, Barzilay, 2009</marker>
+<rawString>S.R.K Branavan, Harr Chen, Luke Zettlemoyer, and Regina Barzilay. 2009. Reinforcement learning for mapping instructions to actions. In Proceedings of ACL, pages 82–90.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Christian Darken</author>
+<author>John Moody</author>
+</authors>
+<title>Note on learning rate schedules for stochastic optimization.</title>
+<date>1990</date>
+<booktitle>In Advances in NIPS,</booktitle>
+<pages>832--838</pages>
+<contexts>
+<context position="26186" citStr="Darken and Moody, 1990" startWordPosition="4254" endWordPosition="4257">nd use the induced environment model to encourage additional exploration by lowering the likelihood of actions that lead to such dead-end states. During the early stages of learning, experience gathered in the environment model is extremely sparse, causing the look-ahead features to provide poor estimates. To speed convergence, we ignore these estimates by disabling the look-ahead features for a fixed number of initial training iterations. Finally, to guarantee convergence, stochastic gradient ascent algorithms require a learning rate schedule. We use a modified search-thenconverge algorithm (Darken and Moody, 1990), and tie the learning rate to the ratio of training documents that received a positive reward in the current iteration. Baselines As a baseline, we compare our method against the results reported by Branavan et al. (2009), denoted here as BCZB09. As an upper bound for model performance, we also evaluate our method using a reward signal that simulates a fully-supervised training regime. We define a reward function that returns positive one for histories that match the annotations, and zero otherwise. Performing policy-gradient with this function is equivalent to training a fullysupervised, sto</context>
+</contexts>
+<marker>Darken, Moody, 1990</marker>
+<rawString>Christian Darken and John Moody. 1990. Note on learning rate schedules for stochastic optimization. In Advances in NIPS, pages 832–838.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Barbara Di Eugenio</author>
+<author>Michael White</author>
+</authors>
+<title>On the interpretation of natural language instructions.</title>
+<date>1992</date>
+<booktitle>In Proceedings of COLING,</booktitle>
+<pages>1147--1151</pages>
+<marker>Di Eugenio, White, 1992</marker>
+<rawString>Barbara Di Eugenio and Michael White. 1992. On the interpretation of natural language instructions. In Proceedings of COLING, pages 1147–1151.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Barbara Di Eugenio</author>
+</authors>
+<title>Understanding natural language instructions: the case of purpose clauses.</title>
+<date>1992</date>
+<booktitle>In Proceedings ofACL,</booktitle>
+<pages>120--127</pages>
+<marker>Di Eugenio, 1992</marker>
+<rawString>Barbara Di Eugenio. 1992. Understanding natural language instructions: the case of purpose clauses. In Proceedings ofACL, pages 120–127.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jacob Eisenstein</author>
+<author>James Clarke</author>
+<author>Dan Goldwasser</author>
+<author>Dan Roth</author>
+</authors>
+<title>Reading to learn: Constructing features from semantic abstracts.</title>
+<date>2009</date>
+<booktitle>In Proceedings of EMNLP,</booktitle>
+<pages>958--967</pages>
+<contexts>
+<context position="5734" citStr="Eisenstein et al. (2009)" startWordPosition="859" endWordPosition="862"> learning algorithm for mapping text instructions to commands developed by Branavan et al. (2009) (see Section 4 for more detail). Their method is predicated on the assumption that each command to be executed is explicitly specified in the instruction text. This assumption of a direct correspondence between the text and the environment is not unique to that paper, being inherent in other work on grounded language learning (Siskind, 2001; Oates, 2001; Yu and Ballard, 2004; Fleischman and Roy, 2005; Mooney, 2008; Liang et al., 2009; Matuszek et al., 2010). A notable exception is the approach of Eisenstein et al. (2009), which learns how an environment operates by reading text, rather than learning an explicit mapping from the text to the environment. For example, their method can learn the rules of a card game given instructions for how to play. Many instances of work on instruction interpretation are replete with examples where instructions are formulated as high-level goals, targeted at users with relevant knowledge (Winograd, 1972; Di Eugenio, 1992; Webber et al., 1995; MacMahon et al., 2006). Not surprisingly, automatic approaches for processing such instructions have relied on hand-engineered world kno</context>
+</contexts>
+<marker>Eisenstein, Clarke, Goldwasser, Roth, 2009</marker>
+<rawString>Jacob Eisenstein, James Clarke, Dan Goldwasser, and Dan Roth. 2009. Reading to learn: Constructing features from semantic abstracts. In Proceedings of EMNLP, pages 958–967.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Michael Fleischman</author>
+<author>Deb Roy</author>
+</authors>
+<title>Intentional context in situated natural language learning.</title>
+<date>2005</date>
+<booktitle>In Proceedings of CoNLL,</booktitle>
+<pages>104--111</pages>
+<contexts>
+<context position="5611" citStr="Fleischman and Roy, 2005" startWordPosition="838" endWordPosition="841"> via random exploration. 2 Related Work Interpreting Instructions Our approach is most closely related to the reinforcement learning algorithm for mapping text instructions to commands developed by Branavan et al. (2009) (see Section 4 for more detail). Their method is predicated on the assumption that each command to be executed is explicitly specified in the instruction text. This assumption of a direct correspondence between the text and the environment is not unique to that paper, being inherent in other work on grounded language learning (Siskind, 2001; Oates, 2001; Yu and Ballard, 2004; Fleischman and Roy, 2005; Mooney, 2008; Liang et al., 2009; Matuszek et al., 2010). A notable exception is the approach of Eisenstein et al. (2009), which learns how an environment operates by reading text, rather than learning an explicit mapping from the text to the environment. For example, their method can learn the rules of a card game given instructions for how to play. Many instances of work on instruction interpretation are replete with examples where instructions are formulated as high-level goals, targeted at users with relevant knowledge (Winograd, 1972; Di Eugenio, 1992; Webber et al., 1995; MacMahon et a</context>
+</contexts>
+<marker>Fleischman, Roy, 2005</marker>
+<rawString>Michael Fleischman and Deb Roy. 2005. Intentional context in situated natural language learning. In Proceedings of CoNLL, pages 104–111.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Nicholas K Jong</author>
+<author>Peter Stone</author>
+</authors>
+<title>Model-based function approximation in reinforcement learning.</title>
+<date>2007</date>
+<booktitle>In Proceedings ofAAMAS,</booktitle>
+<pages>670--677</pages>
+<contexts>
+<context position="7496" citStr="Jong and Stone, 2007" startWordPosition="1123" endWordPosition="1126">model-based learning, constructs a model of the environment in which the learner operates (e.g., modeling location, velocity, and acceleration in robot navigation). It then computes a policy directly from the rich information represented in the induced environment model. In the NLP literature, model-based reinforcement learning techniques are commonly used for dialog management (Singh et al., 2002; Lemon and Konstas, 2009; Schatzmann and Young, 2009). However, if the environment cannot be accurately approximated by a compact representation, these methods perform poorly (Boyan and Moore, 1995; Jong and Stone, 2007). Our instruction interpretation task falls into this latter category,2 rendering standard model-based learning ineffective. The second approach – model-free methods such as policy learning – aims to select the opti2For example, in the Windows GUI domain, clicking on the File menu will result in a different submenu depending on the application. Thus it is impossible to predict the effects of a previously unseen GUI command. 1269 State Action State Observed text and environment Select run after clicking start. In the open box type &amp;quot;dcomcnfg&amp;quot;. word span : clicking start command : LEFT_CLICK( sta</context>
+</contexts>
+<marker>Jong, Stone, 2007</marker>
+<rawString>Nicholas K. Jong and Peter Stone. 2007. Model-based function approximation in reinforcement learning. In Proceedings ofAAMAS, pages 670–677.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Nate Kushman</author>
+<author>Micah Brodsky</author>
+<author>S R K Branavan</author>
+<author>Dina Katabi</author>
+<author>Regina Barzilay</author>
+<author>Martin Rinard</author>
+</authors>
+<date>2009</date>
+<booktitle>Wikido. In Proceedings of HotNets-VIII.</booktitle>
+<contexts>
+<context position="3272" citStr="Kushman et al., 2009" startWordPosition="490" endWordPosition="493">rns how to interpret the text. Recording the state transitions observed during interpretation allows the algorithm to construct a relevant model of the environment. At the same time, the environment model enables the algorithm to consider the consequences of commands before they are executed, thereby improving the accuracy of interpretation. Our method efficiently achieves both of these goals as part of a policy-gradient reinforcement learning algorithm. We apply our method to the task of mapping software troubleshooting guides to GUI actions in the Windows environment (Branavan et al., 2009; Kushman et al., 2009). The key findings of our experiments are threefold. First, the algorithm can accurately interpret 61.5% of high-level instructions, which cannot be handled by previous statistical systems. Second, we demonstrate that explicitly modeling the environment also greatly improves the accuracy of processing low-level instructions, yielding a 14% absolute increase in performance over a competitive baseline (Branavan et al., 2009). Finally, we show the importance of constructing an environment model relevant to the language interpretation task — using textual 1268 Proceedings of the 48th Annual Meetin</context>
+<context position="22797" citStr="Kushman et al., 2009" startWordPosition="3714" endWordPosition="3717">thm 1: A policy gradient algorithm that also learns a model of the environment. This algorithm capitalizes on the synergy between 0 and q. As learning proceeds, the method discovers a more complete state transition function q, which improves the accuracy of the look-ahead features, and ultimately, the quality of the resulting policy. An improved policy function in turn produces state samples that are more relevant to the document interpretation task. 6 Applying the Model We apply our algorithm to the task of interpreting help documents to perform software related tasks (Branavan et al., 2009; Kushman et al., 2009). Specifically, we consider documents from Microsoft’s Help and Support website.7 As in prior work, we use a virtual machine set-up to allow our method to interact with a Windows 2000 environment. Environment States and Actions In this application of our model, the environment state is the set of visible user interface (UI) objects, along 7http://support.microsoft.com/ E t 1273 with their properties (e.g., the object’s label, parent window, etc). The environment commands consist of the UI commands left-click, right-click, double-click, and type-into. Each of these commands requires a UI object</context>
+</contexts>
+<marker>Kushman, Brodsky, Branavan, Katabi, Barzilay, Rinard, 2009</marker>
+<rawString>Nate Kushman, Micah Brodsky, S.R.K. Branavan, Dina Katabi, Regina Barzilay, and Martin Rinard. 2009. Wikido. In Proceedings of HotNets-VIII.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Alex Lascarides</author>
+<author>Nicholas Asher</author>
+</authors>
+<title>Imperatives in dialogue.</title>
+<date>2004</date>
+<booktitle>The Semantics and Pragmatics of Dialogue for the</booktitle>
+<editor>In P. Kuehnlein, H. Rieser, and H. Zeevat, editors,</editor>
+<location>New Millenium. Benjamins.</location>
+<contexts>
+<context position="6560" citStr="Lascarides and Asher, 2004" startWordPosition="988" endWordPosition="991">en instructions for how to play. Many instances of work on instruction interpretation are replete with examples where instructions are formulated as high-level goals, targeted at users with relevant knowledge (Winograd, 1972; Di Eugenio, 1992; Webber et al., 1995; MacMahon et al., 2006). Not surprisingly, automatic approaches for processing such instructions have relied on hand-engineered world knowledge to reason about the preconditions and effects of environment commands. The assumption of a fully specified environment model is also common in work on semantics in the linguistics literature (Lascarides and Asher, 2004). While our approach learns to analyze instructions in a goaldirected manner, it does not require manual specification of relevant environment knowledge. Reinforcement Learning Our work combines ideas of two traditionally disparate approaches to reinforcement learning (Sutton and Barto, 1998). The first approach, model-based learning, constructs a model of the environment in which the learner operates (e.g., modeling location, velocity, and acceleration in robot navigation). It then computes a policy directly from the rich information represented in the induced environment model. In the NLP li</context>
+</contexts>
+<marker>Lascarides, Asher, 2004</marker>
+<rawString>Alex Lascarides and Nicholas Asher. 2004. Imperatives in dialogue. In P. Kuehnlein, H. Rieser, and H. Zeevat, editors, The Semantics and Pragmatics of Dialogue for the New Millenium. Benjamins.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Oliver Lemon</author>
+<author>Ioannis Konstas</author>
+</authors>
+<title>User simulations for context-sensitive speech recognition in spoken dialogue systems.</title>
+<date>2009</date>
+<booktitle>In Proceedings of EACL,</booktitle>
+<pages>505--513</pages>
+<contexts>
+<context position="7300" citStr="Lemon and Konstas, 2009" startWordPosition="1095" endWordPosition="1098">n of relevant environment knowledge. Reinforcement Learning Our work combines ideas of two traditionally disparate approaches to reinforcement learning (Sutton and Barto, 1998). The first approach, model-based learning, constructs a model of the environment in which the learner operates (e.g., modeling location, velocity, and acceleration in robot navigation). It then computes a policy directly from the rich information represented in the induced environment model. In the NLP literature, model-based reinforcement learning techniques are commonly used for dialog management (Singh et al., 2002; Lemon and Konstas, 2009; Schatzmann and Young, 2009). However, if the environment cannot be accurately approximated by a compact representation, these methods perform poorly (Boyan and Moore, 1995; Jong and Stone, 2007). Our instruction interpretation task falls into this latter category,2 rendering standard model-based learning ineffective. The second approach – model-free methods such as policy learning – aims to select the opti2For example, in the Windows GUI domain, clicking on the File menu will result in a different submenu depending on the application. Thus it is impossible to predict the effects of a previou</context>
+</contexts>
+<marker>Lemon, Konstas, 2009</marker>
+<rawString>Oliver Lemon and Ioannis Konstas. 2009. User simulations for context-sensitive speech recognition in spoken dialogue systems. In Proceedings of EACL, pages 505–513.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Percy Liang</author>
+<author>Michael I Jordan</author>
+<author>Dan Klein</author>
+</authors>
+<title>Learning semantic correspondences with less supervision.</title>
+<date>2009</date>
+<booktitle>In Proceedings of ACL,</booktitle>
+<pages>91--99</pages>
+<contexts>
+<context position="5645" citStr="Liang et al., 2009" startWordPosition="844" endWordPosition="847">Interpreting Instructions Our approach is most closely related to the reinforcement learning algorithm for mapping text instructions to commands developed by Branavan et al. (2009) (see Section 4 for more detail). Their method is predicated on the assumption that each command to be executed is explicitly specified in the instruction text. This assumption of a direct correspondence between the text and the environment is not unique to that paper, being inherent in other work on grounded language learning (Siskind, 2001; Oates, 2001; Yu and Ballard, 2004; Fleischman and Roy, 2005; Mooney, 2008; Liang et al., 2009; Matuszek et al., 2010). A notable exception is the approach of Eisenstein et al. (2009), which learns how an environment operates by reading text, rather than learning an explicit mapping from the text to the environment. For example, their method can learn the rules of a card game given instructions for how to play. Many instances of work on instruction interpretation are replete with examples where instructions are formulated as high-level goals, targeted at users with relevant knowledge (Winograd, 1972; Di Eugenio, 1992; Webber et al., 1995; MacMahon et al., 2006). Not surprisingly, autom</context>
+</contexts>
+<marker>Liang, Jordan, Klein, 2009</marker>
+<rawString>Percy Liang, Michael I. Jordan, and Dan Klein. 2009. Learning semantic correspondences with less supervision. In Proceedings of ACL, pages 91–99.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Matt MacMahon</author>
+<author>Brian Stankiewicz</author>
+<author>Benjamin Kuipers</author>
+</authors>
+<title>Walk the talk: connecting language, knowledge, and action in route instructions.</title>
+<date>2006</date>
+<booktitle>In Proceedings of AAAI,</booktitle>
+<pages>1475--1482</pages>
+<contexts>
+<context position="6220" citStr="MacMahon et al., 2006" startWordPosition="938" endWordPosition="941">and Roy, 2005; Mooney, 2008; Liang et al., 2009; Matuszek et al., 2010). A notable exception is the approach of Eisenstein et al. (2009), which learns how an environment operates by reading text, rather than learning an explicit mapping from the text to the environment. For example, their method can learn the rules of a card game given instructions for how to play. Many instances of work on instruction interpretation are replete with examples where instructions are formulated as high-level goals, targeted at users with relevant knowledge (Winograd, 1972; Di Eugenio, 1992; Webber et al., 1995; MacMahon et al., 2006). Not surprisingly, automatic approaches for processing such instructions have relied on hand-engineered world knowledge to reason about the preconditions and effects of environment commands. The assumption of a fully specified environment model is also common in work on semantics in the linguistics literature (Lascarides and Asher, 2004). While our approach learns to analyze instructions in a goaldirected manner, it does not require manual specification of relevant environment knowledge. Reinforcement Learning Our work combines ideas of two traditionally disparate approaches to reinforcement </context>
+</contexts>
+<marker>MacMahon, Stankiewicz, Kuipers, 2006</marker>
+<rawString>Matt MacMahon, Brian Stankiewicz, and Benjamin Kuipers. 2006. Walk the talk: connecting language, knowledge, and action in route instructions. In Proceedings of AAAI, pages 1475–1482.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>C Matuszek</author>
+<author>D Fox</author>
+<author>K Koscher</author>
+</authors>
+<title>Following directions using statistical machine translation.</title>
+<date>2010</date>
+<booktitle>In Proceedings of Human-Robot Interaction,</booktitle>
+<pages>251--258</pages>
+<contexts>
+<context position="5669" citStr="Matuszek et al., 2010" startWordPosition="848" endWordPosition="851">tions Our approach is most closely related to the reinforcement learning algorithm for mapping text instructions to commands developed by Branavan et al. (2009) (see Section 4 for more detail). Their method is predicated on the assumption that each command to be executed is explicitly specified in the instruction text. This assumption of a direct correspondence between the text and the environment is not unique to that paper, being inherent in other work on grounded language learning (Siskind, 2001; Oates, 2001; Yu and Ballard, 2004; Fleischman and Roy, 2005; Mooney, 2008; Liang et al., 2009; Matuszek et al., 2010). A notable exception is the approach of Eisenstein et al. (2009), which learns how an environment operates by reading text, rather than learning an explicit mapping from the text to the environment. For example, their method can learn the rules of a card game given instructions for how to play. Many instances of work on instruction interpretation are replete with examples where instructions are formulated as high-level goals, targeted at users with relevant knowledge (Winograd, 1972; Di Eugenio, 1992; Webber et al., 1995; MacMahon et al., 2006). Not surprisingly, automatic approaches for proc</context>
+</contexts>
+<marker>Matuszek, Fox, Koscher, 2010</marker>
+<rawString>C. Matuszek, D. Fox, and K. Koscher. 2010. Following directions using statistical machine translation. In Proceedings of Human-Robot Interaction, pages 251–258.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Raymond J Mooney</author>
+</authors>
+<title>Learning to connect language and perception.</title>
+<date>2008</date>
+<booktitle>In Proceedings of AAAI,</booktitle>
+<pages>1598--1601</pages>
+<contexts>
+<context position="5625" citStr="Mooney, 2008" startWordPosition="842" endWordPosition="843"> Related Work Interpreting Instructions Our approach is most closely related to the reinforcement learning algorithm for mapping text instructions to commands developed by Branavan et al. (2009) (see Section 4 for more detail). Their method is predicated on the assumption that each command to be executed is explicitly specified in the instruction text. This assumption of a direct correspondence between the text and the environment is not unique to that paper, being inherent in other work on grounded language learning (Siskind, 2001; Oates, 2001; Yu and Ballard, 2004; Fleischman and Roy, 2005; Mooney, 2008; Liang et al., 2009; Matuszek et al., 2010). A notable exception is the approach of Eisenstein et al. (2009), which learns how an environment operates by reading text, rather than learning an explicit mapping from the text to the environment. For example, their method can learn the rules of a card game given instructions for how to play. Many instances of work on instruction interpretation are replete with examples where instructions are formulated as high-level goals, targeted at users with relevant knowledge (Winograd, 1972; Di Eugenio, 1992; Webber et al., 1995; MacMahon et al., 2006). Not</context>
+</contexts>
+<marker>Mooney, 2008</marker>
+<rawString>Raymond J. Mooney. 2008. Learning to connect language and perception. In Proceedings of AAAI, pages 1598–1601.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>James Timothy Oates</author>
+</authors>
+<title>Grounding knowledge in sensors: Unsupervised learning for language and planning.</title>
+<date>2001</date>
+<tech>Ph.D. thesis,</tech>
+<institution>University of Massachusetts Amherst.</institution>
+<contexts>
+<context position="5563" citStr="Oates, 2001" startWordPosition="832" endWordPosition="833">on an environment model constructed via random exploration. 2 Related Work Interpreting Instructions Our approach is most closely related to the reinforcement learning algorithm for mapping text instructions to commands developed by Branavan et al. (2009) (see Section 4 for more detail). Their method is predicated on the assumption that each command to be executed is explicitly specified in the instruction text. This assumption of a direct correspondence between the text and the environment is not unique to that paper, being inherent in other work on grounded language learning (Siskind, 2001; Oates, 2001; Yu and Ballard, 2004; Fleischman and Roy, 2005; Mooney, 2008; Liang et al., 2009; Matuszek et al., 2010). A notable exception is the approach of Eisenstein et al. (2009), which learns how an environment operates by reading text, rather than learning an explicit mapping from the text to the environment. For example, their method can learn the rules of a card game given instructions for how to play. Many instances of work on instruction interpretation are replete with examples where instructions are formulated as high-level goals, targeted at users with relevant knowledge (Winograd, 1972; Di E</context>
+</contexts>
+<marker>Oates, 2001</marker>
+<rawString>James Timothy Oates. 2001. Grounding knowledge in sensors: Unsupervised learning for language and planning. Ph.D. thesis, University of Massachusetts Amherst.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Warren B Powell</author>
+</authors>
+<title>Approximate Dynamic Programming.</title>
+<date>2007</date>
+<publisher>Wiley-Interscience.</publisher>
+<contexts>
+<context position="9268" citStr="Powell, 2007" startWordPosition="1425" endWordPosition="1426">apped words is updated to W&apos; = W U Wa. mal action at every step, without explicitly constructing a model of the environment. While policy learners can effectively operate in complex environments, they are not designed to benefit from a learned environment model. We address this limitation by expanding a policy learning algorithm to take advantage of a partial environment model estimated during learning. The approach of conditioning the policy function on future reachable states is similar in concept to the use of postdecision state information in the approximate dynamic programming framework (Powell, 2007). 3 Problem Formulation Our goal is to map instructions expressed in a natural language document d into the corresponding sequence of commands c� = (ci, ... , cm) executable in an environment. As input, we are given a set of raw instruction documents, an environment, and a reward function as described below. The environment is formalized as its states and transition function. An environment state £ specifies the objects accessible in the environment at a given time step, along with the objects’ properties. The environment state transition function p(£&apos;J£, c) encodes how the state changes from </context>
+</contexts>
+<marker>Powell, 2007</marker>
+<rawString>Warren B Powell. 2007. Approximate Dynamic Programming. Wiley-Interscience.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jost Schatzmann</author>
+<author>Steve Young</author>
+</authors>
+<title>The hidden agenda user simulation model.</title>
+<date>2009</date>
+<journal>IEEE Trans. Audio, Speech and Language Processing,</journal>
+<volume>17</volume>
+<issue>4</issue>
+<contexts>
+<context position="7329" citStr="Schatzmann and Young, 2009" startWordPosition="1099" endWordPosition="1102"> knowledge. Reinforcement Learning Our work combines ideas of two traditionally disparate approaches to reinforcement learning (Sutton and Barto, 1998). The first approach, model-based learning, constructs a model of the environment in which the learner operates (e.g., modeling location, velocity, and acceleration in robot navigation). It then computes a policy directly from the rich information represented in the induced environment model. In the NLP literature, model-based reinforcement learning techniques are commonly used for dialog management (Singh et al., 2002; Lemon and Konstas, 2009; Schatzmann and Young, 2009). However, if the environment cannot be accurately approximated by a compact representation, these methods perform poorly (Boyan and Moore, 1995; Jong and Stone, 2007). Our instruction interpretation task falls into this latter category,2 rendering standard model-based learning ineffective. The second approach – model-free methods such as policy learning – aims to select the opti2For example, in the Windows GUI domain, clicking on the File menu will result in a different submenu depending on the application. Thus it is impossible to predict the effects of a previously unseen GUI command. 1269 </context>
+</contexts>
+<marker>Schatzmann, Young, 2009</marker>
+<rawString>Jost Schatzmann and Steve Young. 2009. The hidden agenda user simulation model. IEEE Trans. Audio, Speech and Language Processing, 17(4):733–747.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Satinder Singh</author>
+<author>Diane Litman</author>
+<author>Michael Kearns</author>
+<author>Marilyn Walker</author>
+</authors>
+<title>Optimizing dialogue management with reinforcement learning: Experiments with the njfun system.</title>
+<date>2002</date>
+<journal>Journal of Artificial Intelligence Research,</journal>
+<pages>16--105</pages>
+<contexts>
+<context position="7275" citStr="Singh et al., 2002" startWordPosition="1091" endWordPosition="1094"> manual specification of relevant environment knowledge. Reinforcement Learning Our work combines ideas of two traditionally disparate approaches to reinforcement learning (Sutton and Barto, 1998). The first approach, model-based learning, constructs a model of the environment in which the learner operates (e.g., modeling location, velocity, and acceleration in robot navigation). It then computes a policy directly from the rich information represented in the induced environment model. In the NLP literature, model-based reinforcement learning techniques are commonly used for dialog management (Singh et al., 2002; Lemon and Konstas, 2009; Schatzmann and Young, 2009). However, if the environment cannot be accurately approximated by a compact representation, these methods perform poorly (Boyan and Moore, 1995; Jong and Stone, 2007). Our instruction interpretation task falls into this latter category,2 rendering standard model-based learning ineffective. The second approach – model-free methods such as policy learning – aims to select the opti2For example, in the Windows GUI domain, clicking on the File menu will result in a different submenu depending on the application. Thus it is impossible to predict</context>
+</contexts>
+<marker>Singh, Litman, Kearns, Walker, 2002</marker>
+<rawString>Satinder Singh, Diane Litman, Michael Kearns, and Marilyn Walker. 2002. Optimizing dialogue management with reinforcement learning: Experiments with the njfun system. Journal of Artificial Intelligence Research, 16:105–133.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jeffrey Mark Siskind</author>
+</authors>
+<title>Grounding the lexical semantics of verbs in visual perception using force dynamics and event logic.</title>
+<date>2001</date>
+<journal>Journal of Artificial Intelligence Research,</journal>
+<pages>15--31</pages>
+<contexts>
+<context position="5550" citStr="Siskind, 2001" startWordPosition="830" endWordPosition="831">cy that relies on an environment model constructed via random exploration. 2 Related Work Interpreting Instructions Our approach is most closely related to the reinforcement learning algorithm for mapping text instructions to commands developed by Branavan et al. (2009) (see Section 4 for more detail). Their method is predicated on the assumption that each command to be executed is explicitly specified in the instruction text. This assumption of a direct correspondence between the text and the environment is not unique to that paper, being inherent in other work on grounded language learning (Siskind, 2001; Oates, 2001; Yu and Ballard, 2004; Fleischman and Roy, 2005; Mooney, 2008; Liang et al., 2009; Matuszek et al., 2010). A notable exception is the approach of Eisenstein et al. (2009), which learns how an environment operates by reading text, rather than learning an explicit mapping from the text to the environment. For example, their method can learn the rules of a card game given instructions for how to play. Many instances of work on instruction interpretation are replete with examples where instructions are formulated as high-level goals, targeted at users with relevant knowledge (Winogra</context>
+</contexts>
+<marker>Siskind, 2001</marker>
+<rawString>Jeffrey Mark Siskind. 2001. Grounding the lexical semantics of verbs in visual perception using force dynamics and event logic. Journal of Artificial Intelligence Research, 15:31–90.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Richard S Sutton</author>
+<author>Andrew G Barto</author>
+</authors>
+<title>Reinforcement Learning: An Introduction.</title>
+<date>1998</date>
+<publisher>The MIT Press.</publisher>
+<contexts>
+<context position="6853" citStr="Sutton and Barto, 1998" startWordPosition="1029" endWordPosition="1032">risingly, automatic approaches for processing such instructions have relied on hand-engineered world knowledge to reason about the preconditions and effects of environment commands. The assumption of a fully specified environment model is also common in work on semantics in the linguistics literature (Lascarides and Asher, 2004). While our approach learns to analyze instructions in a goaldirected manner, it does not require manual specification of relevant environment knowledge. Reinforcement Learning Our work combines ideas of two traditionally disparate approaches to reinforcement learning (Sutton and Barto, 1998). The first approach, model-based learning, constructs a model of the environment in which the learner operates (e.g., modeling location, velocity, and acceleration in robot navigation). It then computes a policy directly from the rich information represented in the induced environment model. In the NLP literature, model-based reinforcement learning techniques are commonly used for dialog management (Singh et al., 2002; Lemon and Konstas, 2009; Schatzmann and Young, 2009). However, if the environment cannot be accurately approximated by a compact representation, these methods perform poorly (B</context>
+<context position="10996" citStr="Sutton and Barto, 1998" startWordPosition="1711" endWordPosition="1714">ctions, each of which can take one of two forms: • Low-level instructions: these explicitly describe single commands.4 E.g., “double click system” in Figure 1. • High-level instructions: these correspond to a sequence of one or more environment commands, none of which are explicitly described by the instruction. E.g., “open control panel” in Figure 1. 4 Background Our innovation takes place within a previously established general framework for the task of mapping instructions to commands (Branavan et al., 2009). This framework formalizes the mapping process as a Markov Decision Process (MDP) (Sutton and Barto, 1998), with actions encoding individual instruction-to-command mappings, and states representing partial interpretations of the document. In this section, we review the details of this framework. 4Previous work (Branavan et al., 2009) is only able to handle low-level instructions. 1270 starting environment state parts of the environment state space reachable after commands and . state where a control panel icon was observed during previous exploration steps. Figure 3: Using information derived from future states to interpret the high-level instruction “open control panel.” £d is the starting state,</context>
+<context position="25452" citStr="Sutton and Barto, 1998" startWordPosition="4140" endWordPosition="4143"> high-level instructions. This new dataset was collected from the Microsoft Help and Support website, and has on average 1.03 high-level instructions per document. The second dataset contains 60 test documents, while the first is split into 70, 18 and 40 document for training, development and testing respectively. The combined statistics for these datasets is shown below: Total # of documents 188 Total # of words 7448 Vocabulary size 739 Avg. actions per document 10 Reinforcement Learning Parameters Following common practice, we encourage exploration during learning with an E-greedy strategy (Sutton and Barto, 1998), with E set to 0.1. We also identify dead-end states, i.e. states with the lowest possible immediate reward, and use the induced environment model to encourage additional exploration by lowering the likelihood of actions that lead to such dead-end states. During the early stages of learning, experience gathered in the environment model is extremely sparse, causing the look-ahead features to provide poor estimates. To speed convergence, we ignore these estimates by disabling the look-ahead features for a fixed number of initial training iterations. Finally, to guarantee convergence, stochastic</context>
+</contexts>
+<marker>Sutton, Barto, 1998</marker>
+<rawString>Richard S. Sutton and Andrew G. Barto. 1998. Reinforcement Learning: An Introduction. The MIT Press.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Richard S Sutton</author>
+<author>David McAllester</author>
+<author>Satinder Singh</author>
+<author>Yishay Mansour</author>
+</authors>
+<title>Policy gradient methods for reinforcement learning with function approximation.</title>
+<date>2000</date>
+<booktitle>In Advances in NIPS,</booktitle>
+<pages>1057--1063</pages>
+<contexts>
+<context position="20928" citStr="Sutton et al., 2000" startWordPosition="3356" endWordPosition="3359">ith a set of documents d E D, an environment in which to execute command sequences c, and a reward function r(h). The goal is to estimate two sets of parameters: 1) the parameters 0 of the policy function, and 2) the partial environment transition model q(£&apos;|£, c), which is the observed portion of the true model p(£&apos;|£, c). These parameters are mutually dependent: 0 is defined over a feature space dependent on q, and q is sampled according to the policy function parameterized by 0. Algorithm 1 shows the procedure for joint learning of these parameters. As in standard policy gradient learning (Sutton et al., 2000), the algorithm iterates over all documents d E D (steps 1, 2), selecting and executing actions in the environment (steps 3 to 6). The resulting reward is used to update the parameters 0 (steps 8, 9). In the new joint learning setting, this process also yields samples of state transitions which are used to estimate q(£&apos;|£, c) (step 7). This updated q is then used to compute the feature functions 0(s, a, q) during the next iteration of learning (step 4). This process is repeated until the total reward on training documents converges. Input: A document set D, Feature function 0, Reward function </context>
+</contexts>
+<marker>Sutton, McAllester, Singh, Mansour, 2000</marker>
+<rawString>Richard S. Sutton, David McAllester, Satinder Singh, and Yishay Mansour. 2000. Policy gradient methods for reinforcement learning with function approximation. In Advances in NIPS, pages 1057–1063.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Bonnie Webber</author>
+<author>Norman Badler</author>
+<author>Barbara Di Eugenio</author>
+<author>Libby Levison Chris Geib</author>
+<author>Michael Moore</author>
+</authors>
+<title>Instructions, intentions and expectations.</title>
+<date>1995</date>
+<journal>Artificial Intelligence,</journal>
+<pages>73--1</pages>
+<marker>Webber, Badler, Di Eugenio, Geib, Moore, 1995</marker>
+<rawString>Bonnie Webber, Norman Badler, Barbara Di Eugenio, Libby Levison Chris Geib, and Michael Moore. 1995. Instructions, intentions and expectations. Artificial Intelligence, 73(1-2).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Terry Winograd</author>
+</authors>
+<title>Understanding Natural Language.</title>
+<date>1972</date>
+<publisher>Academic Press.</publisher>
+<contexts>
+<context position="6157" citStr="Winograd, 1972" startWordPosition="929" endWordPosition="930">d, 2001; Oates, 2001; Yu and Ballard, 2004; Fleischman and Roy, 2005; Mooney, 2008; Liang et al., 2009; Matuszek et al., 2010). A notable exception is the approach of Eisenstein et al. (2009), which learns how an environment operates by reading text, rather than learning an explicit mapping from the text to the environment. For example, their method can learn the rules of a card game given instructions for how to play. Many instances of work on instruction interpretation are replete with examples where instructions are formulated as high-level goals, targeted at users with relevant knowledge (Winograd, 1972; Di Eugenio, 1992; Webber et al., 1995; MacMahon et al., 2006). Not surprisingly, automatic approaches for processing such instructions have relied on hand-engineered world knowledge to reason about the preconditions and effects of environment commands. The assumption of a fully specified environment model is also common in work on semantics in the linguistics literature (Lascarides and Asher, 2004). While our approach learns to analyze instructions in a goaldirected manner, it does not require manual specification of relevant environment knowledge. Reinforcement Learning Our work combines id</context>
+</contexts>
+<marker>Winograd, 1972</marker>
+<rawString>Terry Winograd. 1972. Understanding Natural Language. Academic Press.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Chen Yu</author>
+<author>Dana H Ballard</author>
+</authors>
+<title>On the integration of grounding language and learning objects.</title>
+<date>2004</date>
+<booktitle>In Proceedings of AAAI,</booktitle>
+<pages>488--493</pages>
+<contexts>
+<context position="5585" citStr="Yu and Ballard, 2004" startWordPosition="834" endWordPosition="837">ment model constructed via random exploration. 2 Related Work Interpreting Instructions Our approach is most closely related to the reinforcement learning algorithm for mapping text instructions to commands developed by Branavan et al. (2009) (see Section 4 for more detail). Their method is predicated on the assumption that each command to be executed is explicitly specified in the instruction text. This assumption of a direct correspondence between the text and the environment is not unique to that paper, being inherent in other work on grounded language learning (Siskind, 2001; Oates, 2001; Yu and Ballard, 2004; Fleischman and Roy, 2005; Mooney, 2008; Liang et al., 2009; Matuszek et al., 2010). A notable exception is the approach of Eisenstein et al. (2009), which learns how an environment operates by reading text, rather than learning an explicit mapping from the text to the environment. For example, their method can learn the rules of a card game given instructions for how to play. Many instances of work on instruction interpretation are replete with examples where instructions are formulated as high-level goals, targeted at users with relevant knowledge (Winograd, 1972; Di Eugenio, 1992; Webber e</context>
+</contexts>
+<marker>Yu, Ballard, 2004</marker>
+<rawString>Chen Yu and Dana H. Ballard. 2004. On the integration of grounding language and learning objects. In Proceedings of AAAI, pages 488–493.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

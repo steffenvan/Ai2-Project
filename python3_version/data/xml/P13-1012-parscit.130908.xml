@@ -1,0 +1,1966 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.000001">
+<title confidence="0.994837">
+Decentralized Entity-Level Modeling for Coreference Resolution
+</title>
+<author confidence="0.999457">
+Greg Durrett, David Hall, and Dan Klein
+</author>
+<affiliation confidence="0.998893">
+Computer Science Division
+University of California, Berkeley
+</affiliation>
+<email confidence="0.995056">
+{gdurrett,dlwh,klein}@cs.berkeley.edu
+</email>
+<sectionHeader confidence="0.997334" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.999740466666667">
+Efficiently incorporating entity-level in-
+formation is a challenge for coreference
+resolution systems due to the difficulty of
+exact inference over partitions. We de-
+scribe an end-to-end discriminative prob-
+abilistic model for coreference that, along
+with standard pairwise features, enforces
+structural agreement constraints between
+specified properties of coreferent men-
+tions. This model can be represented as
+a factor graph for each document that ad-
+mits efficient inference via belief propaga-
+tion. We show that our method can use
+entity-level information to outperform a
+basic pairwise system.
+</bodyText>
+<sectionHeader confidence="0.999395" genericHeader="keywords">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.999781450980392">
+The inclusion of entity-level features has been a
+driving force behind the development of many
+coreference resolution systems (Luo et al., 2004;
+Rahman and Ng, 2009; Haghighi and Klein, 2010;
+Lee et al., 2011). There is no polynomial-time dy-
+namic program for inference in a model with ar-
+bitrary entity-level features, so systems that use
+such features typically rely on making decisions
+in a pipelined manner and sticking with them, op-
+erating greedily in a left-to-right fashion (Rahman
+and Ng, 2009) or in a multi-pass, sieve-like man-
+ner (Raghunathan et al., 2010). However, such
+systems may be locked into bad coreference deci-
+sions and are difficult to directly optimize for stan-
+dard evaluation metrics.
+In this work, we present a new structured model
+of entity-level information designed to allow effi-
+cient inference. We use a log-linear model that can
+be expressed as a factor graph. Pairwise features
+appear in the model as unary factors, adjacent
+to nodes representing a choice of antecedent (or
+none) for each mention. Additional nodes model
+entity-level properties on a per-mention basis, and
+structural agreement factors softly drive properties
+of coreferent mentions to agree with one another.
+This is a key feature of our model: mentions man-
+age their partial membership in various corefer-
+ence chains, so that information about entity-level
+properties is decentralized and propagated across
+individual mentions, and we never need to explic-
+itly instantiate entities.
+Exact inference in this factor graph is in-
+tractable, but efficient approximate inference can
+be carried out with belief propagation. Our model
+is the first discriminatively-trained model that both
+makes joint decisions over an entire document and
+models specific entity-level properties, rather than
+simply enforcing transitivity of pairwise decisions
+(Finkel and Manning, 2008; Song et al., 2012).
+We evaluate our system on the dataset from
+the CoNLL 2011 shared task using three differ-
+ent types of properties: synthetic oracle proper-
+ties, entity phi features (number, gender, animacy,
+and NER type), and properties derived from un-
+supervised clusters targeting semantic type infor-
+mation. In all cases, our transitive model of en-
+tity properties equals or outperforms our pairwise
+system and our reimplementation of a previous
+entity-level system (Rahman and Ng, 2009). Our
+final system is competitive with the winner of the
+CoNLL 2011 shared task (Lee et al., 2011).
+</bodyText>
+<sectionHeader confidence="0.998364" genericHeader="introduction">
+2 Example
+</sectionHeader>
+<bodyText confidence="0.9996803">
+We begin with an example motivating our use of
+entity-level features. Consider the following ex-
+cerpt concerning two famous auction houses:
+When looking for [art items], [people] go
+to [Sotheby’s and Christie’s] because [they]A
+believe [they]B can get the best price for
+[them].
+The first three mentions are all distinct entities,
+theyA and theyB refer to people, and them refers to
+art items. The three pronouns are tricky to resolve
+</bodyText>
+<page confidence="0.979503">
+114
+</page>
+<note confidence="0.92503">
+Proceedings of the 51st Annual Meeting of the Association for Computational Linguistics, pages 114–124,
+Sofia, Bulgaria, August 4-9 2013. c�2013 Association for Computational Linguistics
+</note>
+<bodyText confidence="0.983042208333333">
+automatically because they could at first glance re-
+solve to any of the preceding mentions. We focus
+in particular on the resolution of theyA and them.
+In order to correctly resolve theyA to people rather
+than Sotheby’s and Christie’s, we must take ad-
+vantage of the fact that theyA appears as the sub-
+ject of the verb believe, which is much more likely
+to be attributed to people than to auction houses.
+Binding principles prevent them from attaching
+to theyB. But how do we prevent it from choos-
+ing as its antecedent the next closest agreeing pro-
+noun, theyA? One way is to exploit the correct
+coreference decision we have already made, theyA
+referring to people, since people are not as likely
+to have a price as art items are. This observa-
+tion argues for enforcing agreement of entity-level
+semantic properties during inference, specifically
+properties relating to permitted semantic roles.
+Because even these six mentions have hundreds
+of potential partitions into coreference chains, we
+cannot search over partitions exhaustively, and
+therefore we must design our model to be able to
+use this information while still admitting an effi-
+cient inference scheme.
+</bodyText>
+<sectionHeader confidence="0.978799" genericHeader="method">
+3 Models
+</sectionHeader>
+<bodyText confidence="0.999931111111111">
+We will first present our BASIC model (Sec-
+tion 3.1) and describe the features it incorporates
+(Section 3.2), then explain how to extend it to use
+transitive features (Sections 3.3 and 3.4).
+Throughout this section, let x be a variable con-
+taining the words in a document along with any
+relevant precomputed annotation (such as parse in-
+formation, semantic roles, etc.), and let n denote
+the number of mentions in a given document.
+</bodyText>
+<subsectionHeader confidence="0.777838">
+3.1 BASIC Model
+</subsectionHeader>
+<bodyText confidence="0.99954375">
+Our BASIC model is depicted in Figure 1 in stan-
+dard factor graph notation. Each mention i has
+an associated random variable ai taking values in
+the set {1, ... , i−1, &lt;new&gt;}; this variable spec-
+ifies mention i’s selected antecedent or indicates
+that it begins a new coreference chain. Let a =
+(a1, ..., an) be the vector of the ai. Note that a set
+of coreference chains C (the final desired output)
+can be uniquely determined from a, but a is not
+uniquely determined by C.
+We use a log linear model of the conditional dis-
+tribution P(a|x) as follows:
+</bodyText>
+<note confidence="0.7293475">
+P(a|x) a exp n �wT fA(i, ai, x)
+i=1
+</note>
+<bodyText confidence="0.328396">
+When looking for [art items], [people] go to [Sotheby&apos;s
+and Christie&apos;s] because [they]A believe [they]B can get
+the best price for [them].
+</bodyText>
+<figure confidence="0.7116172">
+art items 0.05 art items 0.15
+&lt;new&gt; 0.95 people 0.4
+Sotheby’s and 0.4
+Christie’s 0.05
+&lt;new&gt;
+</figure>
+<figureCaption confidence="0.971492">
+Figure 1: Our BASIC coreference model. A de-
+</figureCaption>
+<bodyText confidence="0.970391322580645">
+cision ai is made independently for each men-
+tion about what its antecedent mention should
+be or whether it should start a new coreference
+chain. Each unary factor Ai has a log-linear form
+with features examining mention i, its selected an-
+tecedent ai, and the document context x.
+where fA(i, ai, x) is a feature function that exam-
+ines the coreference decision ai for mention i with
+document context x; note that this feature function
+can include pairwise features based on mention i
+and the chosen antecedent ai, since information
+about each mention is contained in x.
+Because the model factors completely over the
+individual ai, these feature functions fA can be ex-
+pressed as unary factors Ai (see Figure 1), with
+Ai(j) a exp (wTfA(i, j, x)). Given a setting of
+w, we can determine aˆ = arg maxa P (a|x) and
+then deterministically compute C(a), the final set
+of coreference chains.
+While the features of this model factor over
+coreference links, this approach differs from clas-
+sical pairwise systems such as Bengtson and Roth
+(2008) or Stoyanov et al. (2010). Because poten-
+tial antecedents compete with each other and with
+the non-anaphoric hypothesis, the choice of ai ac-
+tually represents a joint decision about i−1 pair-
+wise links, as opposed to systems that use a pair-
+wise binary classifier and a separate agglomera-
+tion step, which consider one link at a time during
+learning. This approach is similar to the mention-
+ranking model of Rahman and Ng (2009).
+</bodyText>
+<subsectionHeader confidence="0.999451">
+3.2 Pairwise Features
+</subsectionHeader>
+<bodyText confidence="0.9993285">
+We now present the set of features fA used by our
+unary factors Ai. Each feature examines the an-
+</bodyText>
+<figure confidence="0.9821928">
+antecedent
+choices
+antecedent
+factors
+A1
+a1
+A2
+a2 a3 a4
+A3
+A4
+</figure>
+<page confidence="0.997626">
+115
+</page>
+<bodyText confidence="0.999860795454546">
+tecedent choice ai of the current mention as well
+as the observed information x in the document.
+For each of the features we present, two conjoined
+versions are included: one with an indicator of the
+type of the current mention being resolved, and
+one with an indicator of the types of the current
+and antecedent mentions. Mention types are either
+NOMINAL, PROPER, or, if the mention is pronom-
+inal, a canonicalized version of the pronoun ab-
+stracting away case.1
+Several features, especially those based on the
+precise constructs (apposition, etc.) and those in-
+corporating phi feature information, are computed
+using the machinery in Lee et al. (2011). Other
+features were inspired by Song et al. (2012) and
+Rahman and Ng (2009).
+Anaphoricity features: Indicator of anaphoric-
+ity, indicator on definiteness.
+Configurational features: Indicator on distance
+in mentions (capped at 10), indicator on dis-
+tance in sentences (capped at 10), does the an-
+tecedent c-command the current mention, are the
+two mentions in a subject/object construction, are
+the mentions nested, are the mentions in determin-
+istic appositive/role appositive/predicate nomina-
+tive/relative pronoun constructions.
+Match features: Is one mention an acronym of
+the other, head match, head contained (each way),
+string match, string contained (each way), relaxed
+head match features from Lee et al. (2011).
+Agreement features: Gender, number, ani-
+macy, and NER type of the current mention and
+the antecedent (separately and conjoined).
+Discourse features: Speaker match conjoined
+with an indicator of whether the document is an
+article or conversation.
+Because we use conjunctions of these base fea-
+tures together with the antecedent and mention
+type, our system can capture many relationships
+that previous systems hand-coded, especially re-
+garding pronouns. For example, our system has
+access to features such as “it is non-anaphoric”,
+“it has as its antecedent a geopolitical entity”, or
+“I has as its antecedent I with the same speaker.”
+</bodyText>
+<footnote confidence="0.9875615">
+1While this canonicalization could theoretically impair
+our ability to resolve, for example, reflexive pronouns, con-
+joining features with raw pronoun strings does not improve
+performance.
+</footnote>
+<bodyText confidence="0.997761333333333">
+We experimented with synonymy and hyper-
+nymy features from WordNet (Miller, 1995), but
+these did not empirically improve performance.
+</bodyText>
+<subsectionHeader confidence="0.95556">
+3.3 TRANSITIVE Model
+</subsectionHeader>
+<bodyText confidence="0.991067586956522">
+The BASIC model can capture many relationships
+between pairs of mentions, but cannot necessarily
+capture entity-level properties like those discussed
+in Section 2. We could of course model entities
+directly (Luo et al., 2004; Rahman and Ng, 2009),
+saying that each mention refers to some prior en-
+tity rather than to some prior mention. However,
+inference in this model would require reasoning
+about all possible partitions of mentions, which is
+computationally infeasible without resorting to se-
+vere approximations like a left-to-right inference
+method (Rahman and Ng, 2009).
+Instead, we would like to try to preserve the
+tractability of the BASIC model while still being
+able to exploit entity-level information. To do so,
+we will allow each mention to maintain its own
+distributions over values for a number of proper-
+ties; these properties could include gender, named-
+entity type, or semantic class. Then, we will re-
+quire each anaphoric mention to agree with its an-
+tecedent on the value of each of these properties.
+Our TRANSITIVE model which implements this
+scheme is shown in Figure 2. Each mention i
+has been augmented with a single property node
+pi E {1, ..., k}. The unary Pi factors encode prior
+knowledge about the setting of each pi; these fac-
+tors may be hard (I will not refer to a plural entity),
+soft (such as a distribution over named entity types
+output by an NER tagger), or practically uniform
+(e.g. the last name Smith does not specify a partic-
+ular gender).
+To enforce agreement of a particular property,
+we require a mention to have the same property
+value as its antecedent. That is, for mentions i and
+j, if ai = j, we want to ensure that pi and pj
+agree. We can achieve this with the following set
+of structural equality factors:
+Ei−j(ai, pi, pj) = 1 − I[ai = j ∧ pi =� pj]
+In words, this factor is zero if both ai = j and
+pi disagrees with pj. These equality factors es-
+sentially provide a mechanism by which these pri-
+ors Pi can influence the coreference decisions: if,
+for example, the factors Pi and Pj disagree very
+strongly, choosing ai =� j will be preferred in or-
+der to avoid forcing one of pi or pj to take an un-
+desirable value. Moreover, note that although ai
+</bodyText>
+<page confidence="0.986123">
+116
+</page>
+<figure confidence="0.999627215686274">
+they
+people Sotheby&apos;s
+and Christie&apos;s
+R3
+R2
+R4
+P3
+P2
+P4
+properties
+equality
+factors
+}
+}property
+factors
+antecedent
+choices
+antecedent
+factors
+}
+}
+}
+A2
+A3
+A4
+P2
+p2
+a2 a3 a4
+P3
+p3
+E4.3
+E4.2
+P4
+p4
+r3
+r2
+r4
+p2
+a2 a3 a4
+E3-1
+p3
+E4-1
+p4
+raw property
+factors
+raw properties
+projection
+factors
+projected
+properties
+A2 A3 A4
+</figure>
+<figureCaption confidence="0.99948">
+Figure 2: The factor graph for our TRANSI-
+</figureCaption>
+<bodyText confidence="0.9806633">
+TIVE coreference model. Each node ai now has
+a property pi, which is informed by its own unary
+factor Pi. In our example, a4 strongly indicates
+that mentions 2 and 4 are coreferent; the factor
+E4_2 then enforces equality between p2 and p4,
+while the factor E4_3 has no effect.
+only indicates a single antecedent, the transitive
+nature of the E factors forces pi to agree with the
+p nodes of all other mentions likely to be in the
+same entity.
+</bodyText>
+<subsectionHeader confidence="0.981148">
+3.4 Property Projection
+</subsectionHeader>
+<bodyText confidence="0.99993384">
+So far, our model as specified ensures agreement
+of our entity-level properties, but strictly enforc-
+ing agreement may not always be correct. Suppose
+that we are using named entity type as an entity-
+level property. Organizations and geo-political en-
+tities are two frequently confused and ambiguous
+tags, and in the gold-standard coreference chains
+it may be the case that a single chain contains in-
+stances of both. We might wish to learn that or-
+ganizations and geo-political entities are “compat-
+ible” in the sense that we should forgive entities
+for containing both, but without losing the ability
+to reject a chain containing both organizations and
+people, for example.
+To address these effects, we expand our model
+as indicated in Figure 3. As before, we have a
+set of properties pi and agreement factors Eij. On
+top of that, we introduce the notion of raw prop-
+erty values ri E 11, ..., k} together with priors in
+the form of the Ri factors. The ri and pi could in
+principle have different domains, but for this work
+we take them to have the same domain. The Pi
+factors now have a new structure: they now rep-
+resent a featurized projection of the ri onto the
+pi, which can now be thought of as “coreference-
+</bodyText>
+<figureCaption confidence="0.986965">
+Figure 3: The complete factor graph for our
+TRANSITIVE coreference model. Compared to
+Figure 2, the Ri contain the raw cluster posteriors,
+</figureCaption>
+<bodyText confidence="0.986406043478261">
+and the Pi factors now project raw cluster values ri
+into a set of “coreference-adapted” clusters pi that
+are used as before. This projection allows men-
+tions with different but compatible raw property
+values to coexist in the same coreference chain.
+adapted” properties. The Pi factors are defined by
+Pi(pi, ri) a exp(wTfP(pi, ri)), where fP is afea-
+ture vector over the projection of ri onto pi. While
+there are many possible choices of fP, we choose
+it to be an indicator of the values of pi and ri, so
+that we learn a fully-parameterized projection ma-
+trix.2 The Ri are constant factors, and may come
+from an upstream model or some other source de-
+pending on the property being modeled.
+Our description thus far has assumed that we
+are modeling only one type of property. In fact,
+we can use multiple properties for each mention
+by duplicating the r and p nodes and the R, P,
+and E factors across each desired property. We
+index each of these by l E 11, ... , m} for each of
+m properties.
+The final log-linear model is given by the fol-
+lowing formula:
+</bodyText>
+<equation confidence="0.9662355">
+⎡ ⎛YEl,i−j(ai, pli, plj)) ( YRli(rli)
+i,j,l i,l
+fp Cm,
+pCm, rli)! ! #
+</equation>
+<bodyText confidence="0.964819142857143">
+where i and j range over mentions, l ranges over
+2Initialized to zero (or small values), this matrix actually
+causes the transitive machinery to have no effect, since all
+posteriors over the pi are flat and completely uninformative.
+Therefore, we regularize the weights of the indicators of pi =
+ri towards 1 and all other features towards 0 to give each raw
+cluster a preference for a distinct projected cluster.
+</bodyText>
+<equation confidence="0.6504545">
+XP(a|x) ∝
+p,r
+w T X XfA(i, ai, x) +
+exp i l
+</equation>
+<page confidence="0.976522">
+117
+</page>
+<bodyText confidence="0.9971295">
+each of m properties, and the outer sum indicates
+marginalization over all p and r variables.
+</bodyText>
+<sectionHeader confidence="0.995764" genericHeader="method">
+4 Learning
+</sectionHeader>
+<bodyText confidence="0.998611444444444">
+Now that we have defined our model, we must
+decide how to train its weights w. The first
+issue to address is one of the supervision pro-
+vided. Our model traffics in sets of labels a
+which are more specified than gold coreference
+chains C, which give cluster membership for each
+mention but not antecedence. Let A(C) be the
+set of labelings a that are consistent with a set
+of coreference chains C. For example, if C =
+</bodyText>
+<construct confidence="0.77877">
+{{1, 2, 3}, {4}}, then (&lt;new&gt;,1, 2, &lt;new&gt;) ∈
+A(C) and (&lt;new&gt;,1,1, &lt;new&gt;) ∈ A(C) but
+(&lt;new&gt;, 1, &lt;new&gt;, 3) ∈/ A(C), since this im-
+plies the chains C = {{1, 2}, {3, 4}}
+</construct>
+<bodyText confidence="0.999944733333333">
+The most natural objective is a variant of
+standard conditional log-likelihood that treats the
+choice of a for the specified C as a latent variable
+to be marginalized out:
+it should be non-anaphoric, K2 denotes the event
+that ai is falsely non-anaphoric when it should be
+anaphoric, and K3 denotes the event that ai is cor-
+rectly determined to be anaphoric but. These can
+be computed based on only ai and C. By setting
+c1 low and c2 high relative to c3, we can force
+the system to be less conservative about making
+anaphoricity decisions and achieve a better bal-
+ance with the final coreference metrics.
+Finally, we incorporate L1 regularization, giv-
+ing us our final objective:
+</bodyText>
+<equation confidence="0.989261">
+log X P&apos;(a|xi) + λkwk1
+(a∈A(Ci)
+</equation>
+<bodyText confidence="0.999953666666667">
+We optimize this objective using AdaGrad
+(Duchi et al., 2011); we found this to be faster and
+give higher performance than L-BFGS using L2
+regularization (Liu and Nocedal, 1989). Note that
+because of the marginalization over A(Ci), even
+the objective for the BASIC model is not convex.
+</bodyText>
+<equation confidence="0.9676756">
+Xt
+i=1
+e(w) =
+e(w) = Xt log X P(a |xi) (1) 5 Inference
+i=1 (a∈A(Ci) Inference in the BASIC model is straightforward.
+</equation>
+<bodyText confidence="0.990927571428572">
+Given a set of weights w, we can predict
+where (xi, Ci) is the ith labeled training example.
+This optimizes for the 0-1 loss; however, we are
+much more interested in optimizing with respect
+to a coreference-specific loss function.
+To this end, we will use softmax-margin (Gim-
+pel and Smith, 2010), which augments the proba-
+bility of each example with a term proportional to
+its loss, pushing the model to assign less mass to
+highly incorrect examples. We modify Equation 1
+to use a new probability distribution P&apos; instead
+of P, where P&apos;(a|xi) ∝ P(a|xi) exp (l(a, C))
+and l(a, C) is a loss function. In order to
+perform inference efficiently, l(a, C) must de-
+compose linearly across mentions: l(a, C) =
+Pni=1 l(ai, C). Commonly-used coreference met-
+rics such as MUC (Vilain et al., 1995) and B3
+(Bagga and Baldwin, 1998) do not have this prop-
+erty, so we instead make use of a parameterized
+loss function that does and fit the parameters to
+give good performance. Specifically, we take
+</bodyText>
+<equation confidence="0.978654666666667">
+l(a, C) = Xn [c1I(K1(ai, C)) + c2I(K2(ai, C))
+i=1
++ c3ff(K3(ai, C))]
+</equation>
+<bodyText confidence="0.993455">
+where c1, c2, and c3 are real-valued weights, K1
+denotes the event that ai is falsely anaphoric when
+</bodyText>
+<equation confidence="0.9576565">
+aˆ = arg max P(a|x)
+a
+</equation>
+<bodyText confidence="0.999903421052632">
+We then report the corresponding chains C(a)
+as the system output.3 For learning, the gradi-
+ent takes the standard form of the gradient of a
+log-linear model, a difference of expected feature
+counts under the gold annotation and under no
+annotation. This requires computing marginals
+P&apos;(ai|x) for each mention i, but because the
+model already factors this way, this step is easy.
+The TRANSITIVE model is more complex. Ex-
+act inference is intractable due to the E factors that
+couple all of the ai by way of the pi nodes. How-
+ever, we can compute approximate marginals for
+the ai, pi, and ri using belief propagation. BP has
+been effectively used on other NLP tasks (Smith
+and Eisner, 2008; Burkett and Klein, 2012), and is
+effective in cases such as this where the model is
+largely driven by non-loopy factors (here, the Ai).
+From marginals over each node, we can com-
+pute the necessary gradient and decode as before:
+</bodyText>
+<equation confidence="0.580145">
+aˆ = arg max Pˆ(a|x)
+a
+</equation>
+<footnote confidence="0.986224">
+3One could use ILP-based decoding in the style of Finkel
+and Manning (2008) and Song et al. (2012) to attempt to ex-
+plicitly find the optimal C with choice of a marginalized out,
+but we did not explore this option.
+</footnote>
+<page confidence="0.989473">
+118
+</page>
+<bodyText confidence="0.999884823529412">
+This corresponds to minimum-risk decoding with
+respect to the Hamming loss over antecedence pre-
+dictions.
+Pruning. The TRANSITIVE model requires in-
+stantiating a factor for each potential setting of
+each ai. This factor graph grows quadratically in
+the size of the document, and even approximate in-
+ference becomes slow when a document contains
+over 200 mentions. Therefore, we use our BA-
+SIC model to prune antecedent choices for each
+ai in order to reduce the size of the factor graph
+that we must instantiate. Specifically, we prune
+links between pairs of mentions that are of men-
+tion distance more than 100, as well as values for
+ai that fall below a particular odds ratio threshold
+with respect to the best setting of that ai in the
+BASIC model; that is, those for which
+</bodyText>
+<equation confidence="0.6456145">
+PBASIC (ai  |x)
+maxj PBASIC (ai = j  |x) )
+</equation>
+<bodyText confidence="0.85764">
+is below a cutoff -y.
+</bodyText>
+<sectionHeader confidence="0.999875" genericHeader="method">
+6 Related Work
+</sectionHeader>
+<bodyText confidence="0.999979222222222">
+Our BASIC model is a mention-ranking approach
+resembling models used by Denis and Baldridge
+(2008) and Rahman and Ng (2009), though it is
+trained using a novel parameterized loss function.
+It is also similar to the MLN-JOINT(BF) model
+of Song et al. (2012), but we enforce the single-
+parent constraint at a deeper structural level, al-
+lowing us to treat non-anaphoricity symmetrically
+with coreference as in Denis and Baldridge (2007)
+and Stoyanov and Eisner (2012). The model of
+Fernandes et al. (2012) also uses the single-parent
+constraint structurally, but with learning via la-
+tent perceptron and ILP-based one-best decod-
+ing rather than logistic regression and BP-based
+marginal computation.
+Our TRANSITIVE model is novel; while Mc-
+Callum and Wellner (2004) proposed the idea of
+using attributes for mentions, they do not actu-
+ally implement a model that does so. Other sys-
+tems include entity-level information via hand-
+written rules (Raghunathan et al., 2010), induced
+rules (Yang et al., 2008), or features with learned
+weights (Luo et al., 2004; Rahman and Ng, 2011),
+but all of these systems freeze past coreference de-
+cisions in order to compute their entities.
+Most similar to our entity-level approach is
+the system of Haghighi and Klein (2010), which
+also uses approximate global inference; however,
+theirs is an unsupervised, generative system and
+they attempt to directly model multinomials over
+words in each mention. Their system could be ex-
+tended to handle property information like we do,
+but our system has many other advantages, such as
+freedom from a pre-specified list of entity types,
+the ability to use multiple input clusterings, and
+discriminative projection of clusters.
+</bodyText>
+<sectionHeader confidence="0.999397" genericHeader="evaluation">
+7 Experiments
+</sectionHeader>
+<bodyText confidence="0.999905176470588">
+We use the datasets, experimental setup, and scor-
+ing program from the CoNLL 2011 shared task
+(Pradhan et al., 2011), based on the OntoNotes
+corpus (Hovy et al., 2006). We use the standard
+automatic parses and NER tags for each docu-
+ment. Our mentions are those output by the sys-
+tem of Lee et al. (2011); we also use their postpro-
+cessing to remove appositives, predicate nomina-
+tives, and singletons before evaluation. For each
+experiment, we report MUC (Vilain et al., 1995),
+B3 (Bagga and Baldwin, 1998), and CEAFe (Luo,
+2005), as well as their average.
+Parameter settings. We take the regularization
+constant A = 0.001 and the parameters of our
+surrogate loss (c1, c2, c3) = (0.15, 2.5, 1) for all
+models.4 All models are trained for 20 iterations.
+We take the pruning threshold -y = −2.
+</bodyText>
+<subsectionHeader confidence="0.986564">
+7.1 Systems
+</subsectionHeader>
+<bodyText confidence="0.9999563125">
+Besides our BASIC and TRANSITIVE systems, we
+evaluate a strictly pairwise system that incorpo-
+rates property information by way of indicator fea-
+tures on the current mention’s most likely property
+value and the proposed antecedent’s most likely
+property value. We call this system PAIRPROP-
+ERTY; it is simply the BASIC system with an ex-
+panded feature set.
+Furthermore, we compare against a LEFT-
+TORIGHT entity-level system like that of Rahman
+and Ng (2009).5 Decoding now operates in a se-
+quential fashion, with BASIC features computed
+as before and entity features computed for each
+mention based on the coreference decisions made
+thus far. Following Rahman and Ng (2009), fea-
+tures for each property indicate whether the cur-
+</bodyText>
+<footnote confidence="0.391570571428571">
+4Additional tuning of these hyper parameters did not sig-
+nificantly improve any of the models under any of the exper-
+imental conditions.
+5Unfortunately, their publicly-available system is closed-
+source and performs poorly on the CoNLL shared task
+dataset, so direct comparison is difficult.
+�log
+</footnote>
+<page confidence="0.997386">
+119
+</page>
+<bodyText confidence="0.999933133333333">
+rent mention agrees with no mentions in the an-
+tecedent cluster, at least one mention, over half of
+the mentions, or all of the mentions; antecedent
+clusters of size 1 or 2 fire special-cased features.
+These additional features beyond those in Rah-
+man and Ng (2009) were helpful, but more in-
+volved conjunction schemes and fine-grained fea-
+tures were not. During training, entity features of
+both the gold and the prediction are computed us-
+ing the Viterbi clustering of preceding mentions
+under the current model parameters.6
+All systems are run in a two-pass manner:
+first, the BASIC model is run, then antecedent
+choices are pruned, then our second-round model
+is trained from scratch on the pruned data.7
+</bodyText>
+<subsectionHeader confidence="0.977596">
+7.2 Noisy Oracle Features
+</subsectionHeader>
+<bodyText confidence="0.866946378378378">
+We first evaluate our model’s ability to exploit syn-
+thetic entity-level properties. For this experiment,
+mention properties are derived from corrupted or-
+acle information about the true underlying corefer-
+ence cluster. Each coreference cluster is assumed
+to have one underlying value for each of m coref-
+erence properties, each taking values over a do-
+main D. Mentions then sample distributions over
+D from a Dirichlet distribution peaked around the
+true underlying value.8 These posteriors are taken
+as the Ri for the TRANSITIVE model.
+We choose this setup to reflect two important
+properties of entity-level information: first, that it
+may come from a variety of disparate sources, and
+second, that it may be based on the determinations
+of upstream models which produce posteriors nat-
+urally. A strength of our model is that it can accept
+such posteriors as input, naturally making use of
+this information in a model-based way.
+Table 1 shows development results averaged
+across ten train-test splits with m = 3 proper-
+ties, each taking one of IDI = 5 values. We em-
+phasize that these parameter settings give fairly
+weak oracle information: a document may have
+hundreds of clusters, so even in the absence of
+noise these oracle properties do not have high dis-
+6Using gold entities for training as in Rahman and Ng
+(2009) resulted in a lower-performing system.
+7We even do this for the BASIC model, since we found
+that performance of the pruned and retrained model was gen-
+erally higher.
+8Specifically, the distribution used is a Dirichlet with
+α = 3.5 for the true underlying cluster and α = 1 for other
+values, chosen so that 25% of samples from the distribution
+did not have the correct mode. Though these parameters af-
+fect the quality of the oracle information, varying them did
+not change the relative performance of the different models.
+</bodyText>
+<table confidence="0.997726">
+NOISY ORACLE
+MUC B3 CEAFe Avg.
+BASIC 61.96 70.66 47.30 59.97
+PAIRPROPERTY 66.31 72.68 49.08 62.69
+LEFTTORIGHT 66.49 73.14 49.46 63.03
+TRANSITIVE 67.37 74.05 49.68 63.70
+</table>
+<tableCaption confidence="0.998757">
+Table 1: CoNLL metric scores for our four dif-
+</tableCaption>
+<bodyText confidence="0.973222363636364">
+ferent systems incorporating noisy oracle data.
+This information helps substantially in all cases.
+Both entity-level models outperform the PAIR-
+PROPERTY model, but we observe that the TRAN-
+SITIVE model is more effective than the LEFT-
+TORIGHT model at using this information.
+criminating power. Still, we see that all mod-
+els are able to benefit from incorporating this in-
+formation; however, our TRANSITIVE model out-
+performs both the PAIRPROPERTY model and the
+LEFTTORIGHT model. There are a few reasons
+for this: first, our model is able to directly use soft
+posteriors, so it is able to exploit the fact that more
+peaked samples from the Dirichlet are more likely
+to be correct. Moreover, our model can propagate
+information backwards in a document as well as
+forwards, so the effects of noise can be more eas-
+ily mitigated. By contrast, in the LEFTTORIGHT
+model, if the first or second mention in a cluster
+has the wrong property value, features indicating
+high levels of property agreement will not fire on
+the next few mentions in those clusters.
+</bodyText>
+<subsectionHeader confidence="0.998686">
+7.3 Phi Features
+</subsectionHeader>
+<bodyText confidence="0.9999743">
+As we have seen, our TRANSITIVE model can ex-
+ploit high-quality entity-level features. How does
+it perform using real features that have been pro-
+posed for entity-level coreference?
+Here, we use hard phi feature determinations
+extracted from the system of Lee et al. (2011).
+Named-entity type and animacy are both com-
+puted based on the output of a named-entity tag-
+ger, while number and gender use the dataset of
+Bergsma and Lin (2006). Once this informa-
+tion is determined, the PAIRPROPERTY and LEFT-
+TORIGHT systems can compute features over it di-
+rectly. In the TRANSITIVE model, each of the Ri
+factors places 43 of its mass on the determined la-
+bel and distributes the remainder uniformly among
+the possible options.
+Table 2 shows results when adding entity-level
+phi features on top of our BASIC pairwise system
+(which already contains pairwise features) and on
+top of an ablated BASIC system without pairwise
+</bodyText>
+<page confidence="0.99069">
+120
+</page>
+<table confidence="0.9991135">
+PHI FEATURES
+MUC B3 CEAFe Avg.
+BASIC 61.96 70.66 47.30 59.97
+LEFTTORIGHT 61.34 70.41 47.64 59.80
+TRANSITIVE 62.66 70.92 46.88 60.16
+PHI FEATURES (ABLATED BASIC)
+BASIC-PHI 59.45 69.21 46.02 58.23
+PAIRPROPERTY 61.88 70.66 47.14 59.90
+LEFTTORIGHT 61.42 70.53 47.49 59.81
+TRANSITIVE 62.23 70.78 46.74 59.92
+</table>
+<tableCaption confidence="0.52513975">
+Table 2: CoNLL metric scores for our systems in-
+corporating phi features. Our standard BASIC sys-
+tem already includes phi features, so no results are
+reported for PAIRPROPERTY. Here, our TRAN-
+SITIVE system does not give substantial improve-
+ment on the averaged metric. Over a baseline
+which does not include phi features, all systems
+are able to incorporate them comparably.
+</tableCaption>
+<table confidence="0.993821666666667">
+CLUSTERS
+MUC B3 CEAFe Avg.
+BASIC 61.96 70.66 47.30 59.97
+PAIRPROPERTY 62.88 70.71 47.45 60.35
+LEFTTORIGHT 61.98 70.19 45.77 59.31
+TRANSITIVE 63.34 70.89 46.88 60.37
+</table>
+<tableCaption confidence="0.9456715">
+Table 3: CoNLL metric scores for our systems
+incorporating clustering features. These features
+are equally effectively incorporated by our PAIR-
+PROPERTY system and our TRANSITIVE system.
+</tableCaption>
+<table confidence="0.963638909090909">
+government ARG0:said way ARG1:signed
+oficials ARG0:say law ARG1:announced
+court ARG0:found agreement ARG1:set
+authorities ARG0:announced plan ARG1:approved
+... ... ... ...
+attack ARG1:cause prices ARG1:rose
+problems ARG2:following shares ARG1:fell
+attacks ARG1:reported index ARG1:cut
+... ARG1:iled rates ARG1:closed
+charges ... ... ...
+...
+</table>
+<bodyText confidence="0.9956476">
+phi features. Our entity-level systems successfully
+captures phi features when they are not present in
+the baseline, but there is only slight benefit over
+pairwise incorporation, a result which has been
+noted previously (Luo et al., 2004).
+</bodyText>
+<subsectionHeader confidence="0.999708">
+7.4 Clustering Features
+</subsectionHeader>
+<bodyText confidence="0.99981137037037">
+Finally, we consider mention properties derived
+from unsupervised clusterings; these properties
+are designed to target semantic properties of nom-
+inals that should behave more like the oracle fea-
+tures than the phi features do.
+We consider clusterings that take as input pairs
+(n, r) of a noun head n and a string r which con-
+tains the semantic role of n (or some approxima-
+tion thereof) conjoined with its governor. Two dif-
+ferent algorithms are used to cluster these pairs: a
+NAIVEBAYES model, where c generates n and r,
+and a CONDITIONAL model, where c is generated
+conditioned on r and then n is generated from c.
+Parameters for each can be learned with the ex-
+pectation maximization (EM) algorithm (Demp-
+ster et al., 1977), with symmetry broken by a small
+amount of random noise at initialization.
+Similar models have been used to learn sub-
+categorization information (Rooth et al., 1999)
+or properties of verb argument slots (Yao et al.,
+2011). We choose this kind of clustering for its rel-
+ative simplicity and because it allows pronouns to
+have more informed properties (from their verbal
+context) than would be possible using a model that
+makes type-level decisions about nominals only.
+Though these specific cluster features are novel
+to coreference, previous work has used similar
+</bodyText>
+<figureCaption confidence="0.945063333333333">
+Figure 4: Examples of clusters produced by the
+NAIVEBAYES model on SRL-tagged data with
+pronouns discarded.
+</figureCaption>
+<bodyText confidence="0.999709965517242">
+types of fine-grained semantic class information
+(Hendrickx and Daelemans, 2007; Ng, 2007; Rah-
+man and Ng, 2010). Other approaches incorpo-
+rate information from other sources (Ponzetto and
+Strube, 2006) or compute heuristic scores for real-
+valued features based on a large corpus or the web
+(Dagan and Itai, 1990; Yang et al., 2005; Bansal
+and Klein, 2012).
+We use four different clusterings in our
+experiments, each with twenty clusters:
+dependency-parse-derived NAIVEBAYES clusters,
+semantic-role-derived CONDITIONAL clusters,
+SRL-derived NAIVEBAYES clusters generating
+a NOVERB token when r cannot be determined,
+and SRL-derived NAIVEBAYES clusters with all
+pronoun tuples discarded. Examples of the latter
+clusters are shown in Figure 4. Each clustering
+is learned for 30 iterations of EM over English
+Gigaword (Graff et al., 2007), parsed with the
+Berkeley Parser (Petrov et al., 2006) and with
+SRL determined by Senna (Collobert et al., 2011).
+Table 3 shows results of modeling these cluster
+properties. As in the case of oracle features, the
+PAIRPROPERTY and LEFTTORIGHT systems use
+the modes of the cluster posteriors, and the TRAN-
+SITIVE system uses the posteriors directly as the
+RZ. We see comparable performance from incor-
+porating features in both an entity-level framework
+and a pairwise framework, though the TRANSI-
+</bodyText>
+<page confidence="0.994204">
+121
+</page>
+<table confidence="0.9999152">
+Prec. MUC F1 Prec. B3 F1 Prec. CEAFe F1 Avg.
+Rec. Rec. Rec. F1
+BASIC 69.99 55.59 61.96 80.96 62.69 70.66 41.37 55.21 47.30 59.97
+STANFORD 61.49 59.59 60.49 74.60 68.25 71.28 47.57 49.45 48.49 60.10
+NOISY ORACLE
+PAIRPROPERTY 76.49 58.53 66.31 84.98 63.48 72.68 41.84 59.36 49.08 62.69
+LEFTTORIGHT 76.92 58.55 66.49 85.68 63.81 73.14 42.07 60.01 49.46 63.03
+TRANSITIVE 76.48 60.20 *67.37 84.84 65.69 *74.05 42.89 59.01 *49.68 63.70
+PHIFEATURES
+LEFTTORIGHT 69.77 54.73 61.34 81.40 62.04 70.41 41.49 55.92 47.64 59.80
+TRANSITIVE 70.27 56.54 *62.66 79.81 63.82 *70.92 41.17 54.44 46.88 60.16
+PHI FEATURES (ABLATED BASIC)
+BASIC-PHI 67.04 53.41 59.45 78.93 61.63 69.21 40.40 53.46 46.02 58.23
+PAIRPROPERTY 70.24 55.31 61.88 81.10 62.60 70.66 41.04 55.38 47.14 59.90
+LEFTTORIGHT 69.94 54.75 61.42 81.38 62.23 70.53 41.29 55.87 47.49 59.81
+TRANSITIVE 70.06 55.98 *62.23 79.92 63.52 70.78 40.90 54.52 46.74 59.92
+CLUSTERS
+PAIRPROPERTY 71.77 55.95 62.88 81.76 62.30 70.71 40.98 56.35 47.45 60.35
+LEFTTORIGHT 69.75 54.82 61.39 81.48 62.29 70.60 41.62 55.89 47.71 59.90
+TRANSITIVE 71.54 56.83 *63.34 80.55 63.31 *70.89 40.77 55.14 46.88 60.37
+</table>
+<tableCaption confidence="0.99141">
+Table 4: CoNLL metric scores averaged across ten different splits of the training set for each experiment.
+</tableCaption>
+<bodyText confidence="0.828892333333333">
+We include precision, recall, and F1 for each metric for completeness. Starred F1 values on the individual
+metrics for the TRANSITIVE system are significantly better than all other results in the same block at the
+p = 0.01 level according to a bootstrap resampling test.
+</bodyText>
+<table confidence="0.999635285714286">
+Prec. MUC F1 Prec. B3 F1 Prec. CEAFe F1 Avg.
+Rec. Rec. Rec. F1
+BASIC 68.84 56.08 61.81 77.60 61.40 68.56 38.25 50.57 43.55 57.97
+PAIRPROPERTY 70.90 56.26 62.73 78.95 60.79 68.69 37.69 51.92 43.67 58.37
+LEFTTORIGHT 68.84 55.56 61.49 78.64 61.03 68.72 38.97 51.74 44.46 58.22
+TRANSITIVE 70.62 58.06 *63.73 76.93 62.24 68.81 38.00 50.40 43.33 58.62
+STANFORD 60.91 62.13 61.51 70.61 67.75 69.15 45.79 44.55 45.16 58.61
+</table>
+<tableCaption confidence="0.73723125">
+Table 5: CoNLL metric scores for our best systems (including clustering features) on the CoNLL blind
+test set, reported in the same manner as Table 4.
+TIVE system appears to be more effective than the
+LEFTTORIGHT system.
+</tableCaption>
+<subsectionHeader confidence="0.964027">
+7.5 Final Results
+</subsectionHeader>
+<bodyText confidence="0.9999692">
+Table 4 shows expanded results on our develop-
+ment sets for the different types of entity-level
+information we considered. We also show in in
+Table 5 the results of our system on the CoNLL
+test set, and see that it performs comparably to
+the Stanford coreference system (Lee et al., 2011).
+Here, our TRANSITIVE system provides modest
+improvements over all our other systems.
+Based on Table 4, our TRANSITIVE system ap-
+pears to do better on MUC and B3 than on CEAFe.
+However, we found no simple way to change the
+relative performance characteristics of our various
+systems; notably, modifying the parameters of the
+loss function mentioned in Section 4 or changing
+it entirely did not trade off these three metrics but
+merely increased or decreased them in lockstep.
+Therefore, the TRANSITIVE system actually sub-
+stantially improves over our baselines and is not
+merely trading off metrics in a way that could be
+easily reproduced through other means.
+</bodyText>
+<sectionHeader confidence="0.99885" genericHeader="conclusions">
+8 Conclusion
+</sectionHeader>
+<bodyText confidence="0.9999862">
+In this work, we presented a novel coreference ar-
+chitecture that can both take advantage of standard
+pairwise features as well as use transitivity to en-
+force coherence of decentralized entity-level prop-
+erties within coreference clusters. Our transitive
+system is more effective at using properties than
+a pairwise system and a previous entity-level sys-
+tem, and it achieves performance comparable to
+that of the Stanford coreference resolution system,
+the winner of the CoNLL 2011 shared task.
+</bodyText>
+<sectionHeader confidence="0.998812" genericHeader="acknowledgments">
+Acknowledgments
+</sectionHeader>
+<bodyText confidence="0.9998114">
+This work was partially supported by BBN under
+DARPA contract HR0011-12-C-0014, by an NSF
+fellowship for the first author, and by a Google fel-
+lowship for the second. Thanks to the anonymous
+reviewers for their insightful comments.
+</bodyText>
+<page confidence="0.995987">
+122
+</page>
+<sectionHeader confidence="0.996314" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.999639528301887">
+Amit Bagga and Breck Baldwin. 1998. Algorithms for
+Scoring Coreference Chains. In Proceedings of the
+Conference on Language Resources and Evaluation
+Workshop on Linguistics Coreference.
+Mohit Bansal and Dan Klein. 2012. Coreference Se-
+mantics from Web Features. In Proceedings of the
+Association for Computational Linguistics.
+Eric Bengtson and Dan Roth. 2008. Understanding
+the Value of Features for Coreference Resolution. In
+Proceedings of the Conference on Empirical Meth-
+ods in Natural Language Processing.
+Shane Bergsma and Dekang Lin. 2006. Bootstrap-
+ping Path-Based Pronoun Resolution. In Proceed-
+ings of the Conference on Computational Linguistics
+and the Association for Computational Linguistics.
+David Burkett and Dan Klein. 2012. Fast Inference in
+Phrase Extraction Models with Belief Propagation.
+In Proceedings of the North American Chapter of
+the Association for Computational Linguistics.
+Ronan Collobert, Jason Weston, L´eon Bottou, Michael
+Karlen, Koray Kavukcuoglu, and Pavel Kuksa.
+2011. Natural Language Processing (Almost) from
+Scratch. Journal of Machine Learning Research,
+12:2493–2537, November.
+Ido Dagan and Alon Itai. 1990. Automatic Process-
+ing of Large Corpora for the Resolution of Anaphora
+References. In Proceedings of the Conference on
+Computational Linguistics - Volume 3.
+Arthur P. Dempster, Nan M. Laird, and Donald B. Ru-
+bin. 1977. Maximum Likelihood from Incomplete
+Data via the EM Algorithm. Journal of the Royal
+Statistical Society, Series B, 39(1):1–38.
+Pascal Denis and Jason Baldridge. 2007. Joint Deter-
+mination of Anaphoricity and Coreference Resolu-
+tion using Integer Programming. In Proceedings of
+the North American Chapter of the Association for
+Computational Linguistics.
+Pascal Denis and Jason Baldridge. 2008. Specialized
+Models and Ranking for Coreference Resolution. In
+Proceedings of the Conference on Empirical Meth-
+ods in Natural Language Processing.
+John Duchi, Elad Hazan, and Yoram Singer. 2011.
+Adaptive Subgradient Methods for Online Learning
+and Stochastic Optimization. Journal of Machine
+Learning Research, 12:2121–2159, July.
+Eraldo Rezende Fernandes, Cicero Nogueira dos San-
+tos, and Ruy Luiz Milidi´u. 2012. Latent Structure
+Perceptron with Feature Induction for Unrestricted
+Coreference Resolution. In Proceedings of the Joint
+Conference on Empirical Methods in Natural Lan-
+guage Proceedings and Conference on Computa-
+tional Natural Language Learning - Shared Task.
+Jenny Rose Finkel and Christopher D. Manning. 2008.
+Enforcing Transitivity in Coreference Resolution.
+In Proceedings of the Association for Computational
+Linguistics: Short Papers.
+Kevin Gimpel and Noah A. Smith. 2010. Softmax-
+Margin CRFs: Training Log-Linear Models with
+Cost Functions. In Proceedings of the North Amer-
+ican Chapter for the Association for Computational
+Linguistics.
+David Graff, Junbo Kong, Ke Chen, and Kazuaki
+Maeda. 2007. English Gigaword Third Edi-
+tion. Linguistic Data Consortium, Catalog Number
+LDC2007T07.
+Aria Haghighi and Dan Klein. 2010. Coreference Res-
+olution in a Modular, Entity-Centered Model. In
+Proceedings of the North American Chapter of the
+Association for Computational Linguistics.
+Iris Hendrickx and Walter Daelemans, 2007. Adding
+Semantic Information: Unsupervised Clusters for
+Coreference Resolution.
+Eduard Hovy, Mitchell Marcus, Martha Palmer,
+Lance Ramshaw, and Ralph Weischedel. 2006.
+OntoNotes: the 90% solution. In Proceedings of
+the North American Chapter of the Association for
+Computational Linguistics: Short Papers.
+Heeyoung Lee, Yves Peirsman, Angel Chang,
+Nathanael Chambers, Mihai Surdeanu, and Dan Ju-
+rafsky. 2011. Stanford’s Multi-Pass Sieve Corefer-
+ence Resolution System at the CoNLL-2011 Shared
+Task. In Proceedings of the Conference on Compu-
+tational Natural Language Learning: Shared Task.
+Dong C. Liu and Jorge Nocedal. 1989. On the Limited
+Memory BFGS Method for Large Scale Optimiza-
+tion. Mathematical Programming, 45(3):503–528,
+December.
+Xiaoqiang Luo, Abe Ittycheriah, Hongyan Jing, Nanda
+Kambhatla, and Salim Roukos. 2004. A
+Mention-Synchronous Coreference Resolution Al-
+gorithm Based on the Bell Tree. In Proceedings of
+the Association for Computational Linguistics.
+Xiaoqiang Luo. 2005. On Coreference Resolution
+Performance Metrics. In Proceedings of the Con-
+ference on Empirical Methods in Natural Language
+Processing.
+Andrew McCallum and Ben Wellner. 2004. Condi-
+tional Models of Identity Uncertainty with Applica-
+tion to Noun Coreference. In Proceedings of Ad-
+vances in Neural Information Processing Systems.
+George A. Miller. 1995. WordNet: A Lexical
+Database for English. Communications of the ACM,
+38:39–41.
+Vincent Ng. 2007. Semantic class induction and coref-
+erence resolution. In Proceedings of the Association
+for Computational Linguistics.
+</reference>
+<page confidence="0.986673">
+123
+</page>
+<reference confidence="0.99981961038961">
+Slav Petrov, Leon Barrett, Romain Thibaux, and Dan
+Klein. 2006. Learning Accurate, Compact, and In-
+terpretable Tree Annotation. In Proceedings of the
+Conference on Computational Linguistics and the
+Association for Computational Linguistics.
+Simone Paolo Ponzetto and Michael Strube. 2006.
+Exploiting Semantic Role Labeling, WordNet and
+Wikipedia for Coreference Resolution. In Proceed-
+ings of the North American Chapter of the Associa-
+tion of Computational Linguistics.
+Sameer Pradhan, Lance Ramshaw, Mitchell Marcus,
+Martha Palmer, Ralph Weischedel, and Nianwen
+Xue. 2011. CoNLL-2011 Shared Task: Modeling
+Unrestricted Coreference in OntoNotes. In Proceed-
+ings of the Conference on Computational Natural
+Language Learning: Shared Task.
+Karthik Raghunathan, Heeyoung Lee, Sudarshan Ran-
+garajan, Nathanael Chambers, Mihai Surdeanu, Dan
+Jurafsky, and Christopher Manning. 2010. A Multi-
+Pass Sieve for Coreference Resolution. In Proceed-
+ings of the Conference on Empirical Methods in Nat-
+ural Language Processing.
+Altaf Rahman and Vincent Ng. 2009. Supervised
+Models for Coreference Resolution. In Proceedings
+of the Conference on Empirical Methods in Natural
+Language Processing.
+Altaf Rahman and Vincent Ng. 2010. Inducing Fine-
+Grained Semantic Classes via Hierarchical and Col-
+lective Classification. In Proceedings of the Interna-
+tional Conference on Computational Linguistics.
+Altaf Rahman and Vincent Ng. 2011. Narrowing
+the Modeling Gap: A Cluster-Ranking Approach to
+Coreference Resolution. Journal of Artificial Intel-
+ligence Research, 40(1):469–521, January.
+Mats Rooth, Stefan Riezler, Detlef Prescher, Glenn
+Carroll, and Franz Beil. 1999. Inducing a Semanti-
+cally Annotated Lexicon via EM-Based Clustering.
+In Proceedings of the Association for Computational
+Linguistics.
+David A. Smith and Jason Eisner. 2008. Dependency
+Parsing by Belief Propagation. In Proceedings of the
+Conference on Empirical Methods in Natural Lan-
+guage Processing.
+Yang Song, Jing Jiang, Wayne Xin Zhao, Sujian Li, and
+Houfeng Wang. 2012. Joint Learning for Corefer-
+ence Resolution with Markov Logic. In Proceedings
+of the Conference on Empirical Methods in Natural
+Language Processing.
+Veselin Stoyanov and Jason Eisner. 2012. Easy-first
+Coreference Resolution. In Proceedings of the In-
+ternational Conference on Computational Linguis-
+tics.
+Veselin Stoyanov, Claire Cardie, Nathan Gilbert, Ellen
+Riloff, David Buttler, and David Hysom. 2010.
+Coreference Resolution with Reconcile. In Pro-
+ceedings of the Association for Computational Lin-
+guistics: Short Papers.
+Marc Vilain, John Burger, John Aberdeen, Dennis Con-
+nolly, and Lynette Hirschman. 1995. A Model-
+Theoretic Coreference Scoring Scheme. In Pro-
+ceedings of the Conference on Message Understand-
+ing.
+Xiaofeng Yang, Jian Su, and Chew Lim Tan. 2005. Im-
+proving Pronoun Resolution Using Statistics-Based
+Semantic Compatibility Information. In Proceed-
+ings of the Association for Computational Linguis-
+tics.
+Xiaofeng Yang, Jian Su, Jun Lang, Chew L. Tan, Ting
+Liu, and Sheng Li. 2008. An Entity-Mention Model
+for Coreference Resolution with Inductive Logic
+Programming. In Proceedings of the Association for
+Computational Linguistics.
+Limin Yao, Aria Haghighi, Sebastian Riedel, and An-
+drew McCallum. 2011. Structured Relation Discov-
+ery Using Generative Models. In Proceedings of the
+Conference on Empirical Methods in Natural Lan-
+guage Processing.
+</reference>
+<page confidence="0.998298">
+124
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.982579">
+<title confidence="0.993935">Decentralized Entity-Level Modeling for Coreference Resolution</title>
+<author confidence="0.987133">David Hall Durrett</author>
+<affiliation confidence="0.999904">Computer Science University of California,</affiliation>
+<abstract confidence="0.9998515625">Efficiently incorporating entity-level information is a challenge for coreference resolution systems due to the difficulty of exact inference over partitions. We describe an end-to-end discriminative probabilistic model for coreference that, along with standard pairwise features, enforces structural agreement constraints between specified properties of coreferent mentions. This model can be represented as a factor graph for each document that admits efficient inference via belief propagation. We show that our method can use entity-level information to outperform a basic pairwise system.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>Amit Bagga</author>
+<author>Breck Baldwin</author>
+</authors>
+<title>Algorithms for Scoring Coreference Chains.</title>
+<date>1998</date>
+<booktitle>In Proceedings of the Conference on Language Resources and Evaluation Workshop on Linguistics Coreference.</booktitle>
+<contexts>
+<context position="18910" citStr="Bagga and Baldwin, 1998" startWordPosition="3181" endWordPosition="3184">o a coreference-specific loss function. To this end, we will use softmax-margin (Gimpel and Smith, 2010), which augments the probability of each example with a term proportional to its loss, pushing the model to assign less mass to highly incorrect examples. We modify Equation 1 to use a new probability distribution P&apos; instead of P, where P&apos;(a|xi) ∝ P(a|xi) exp (l(a, C)) and l(a, C) is a loss function. In order to perform inference efficiently, l(a, C) must decompose linearly across mentions: l(a, C) = Pni=1 l(ai, C). Commonly-used coreference metrics such as MUC (Vilain et al., 1995) and B3 (Bagga and Baldwin, 1998) do not have this property, so we instead make use of a parameterized loss function that does and fit the parameters to give good performance. Specifically, we take l(a, C) = Xn [c1I(K1(ai, C)) + c2I(K2(ai, C)) i=1 + c3ff(K3(ai, C))] where c1, c2, and c3 are real-valued weights, K1 denotes the event that ai is falsely anaphoric when aˆ = arg max P(a|x) a We then report the corresponding chains C(a) as the system output.3 For learning, the gradient takes the standard form of the gradient of a log-linear model, a difference of expected feature counts under the gold annotation and under no annota</context>
+<context position="23480" citStr="Bagga and Baldwin, 1998" startWordPosition="3961" endWordPosition="3964"> of entity types, the ability to use multiple input clusterings, and discriminative projection of clusters. 7 Experiments We use the datasets, experimental setup, and scoring program from the CoNLL 2011 shared task (Pradhan et al., 2011), based on the OntoNotes corpus (Hovy et al., 2006). We use the standard automatic parses and NER tags for each document. Our mentions are those output by the system of Lee et al. (2011); we also use their postprocessing to remove appositives, predicate nominatives, and singletons before evaluation. For each experiment, we report MUC (Vilain et al., 1995), B3 (Bagga and Baldwin, 1998), and CEAFe (Luo, 2005), as well as their average. Parameter settings. We take the regularization constant A = 0.001 and the parameters of our surrogate loss (c1, c2, c3) = (0.15, 2.5, 1) for all models.4 All models are trained for 20 iterations. We take the pruning threshold -y = −2. 7.1 Systems Besides our BASIC and TRANSITIVE systems, we evaluate a strictly pairwise system that incorporates property information by way of indicator features on the current mention’s most likely property value and the proposed antecedent’s most likely property value. We call this system PAIRPROPERTY; it is sim</context>
+</contexts>
+<marker>Bagga, Baldwin, 1998</marker>
+<rawString>Amit Bagga and Breck Baldwin. 1998. Algorithms for Scoring Coreference Chains. In Proceedings of the Conference on Language Resources and Evaluation Workshop on Linguistics Coreference.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Mohit Bansal</author>
+<author>Dan Klein</author>
+</authors>
+<title>Coreference Semantics from Web Features.</title>
+<date>2012</date>
+<booktitle>In Proceedings of the Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="32922" citStr="Bansal and Klein, 2012" startWordPosition="5490" endWordPosition="5493">sing a model that makes type-level decisions about nominals only. Though these specific cluster features are novel to coreference, previous work has used similar Figure 4: Examples of clusters produced by the NAIVEBAYES model on SRL-tagged data with pronouns discarded. types of fine-grained semantic class information (Hendrickx and Daelemans, 2007; Ng, 2007; Rahman and Ng, 2010). Other approaches incorporate information from other sources (Ponzetto and Strube, 2006) or compute heuristic scores for realvalued features based on a large corpus or the web (Dagan and Itai, 1990; Yang et al., 2005; Bansal and Klein, 2012). We use four different clusterings in our experiments, each with twenty clusters: dependency-parse-derived NAIVEBAYES clusters, semantic-role-derived CONDITIONAL clusters, SRL-derived NAIVEBAYES clusters generating a NOVERB token when r cannot be determined, and SRL-derived NAIVEBAYES clusters with all pronoun tuples discarded. Examples of the latter clusters are shown in Figure 4. Each clustering is learned for 30 iterations of EM over English Gigaword (Graff et al., 2007), parsed with the Berkeley Parser (Petrov et al., 2006) and with SRL determined by Senna (Collobert et al., 2011). Table </context>
+</contexts>
+<marker>Bansal, Klein, 2012</marker>
+<rawString>Mohit Bansal and Dan Klein. 2012. Coreference Semantics from Web Features. In Proceedings of the Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Eric Bengtson</author>
+<author>Dan Roth</author>
+</authors>
+<title>Understanding the Value of Features for Coreference Resolution.</title>
+<date>2008</date>
+<booktitle>In Proceedings of the Conference on Empirical Methods in Natural Language Processing.</booktitle>
+<contexts>
+<context position="7403" citStr="Bengtson and Roth (2008)" startWordPosition="1185" endWordPosition="1188">at this feature function can include pairwise features based on mention i and the chosen antecedent ai, since information about each mention is contained in x. Because the model factors completely over the individual ai, these feature functions fA can be expressed as unary factors Ai (see Figure 1), with Ai(j) a exp (wTfA(i, j, x)). Given a setting of w, we can determine aˆ = arg maxa P (a|x) and then deterministically compute C(a), the final set of coreference chains. While the features of this model factor over coreference links, this approach differs from classical pairwise systems such as Bengtson and Roth (2008) or Stoyanov et al. (2010). Because potential antecedents compete with each other and with the non-anaphoric hypothesis, the choice of ai actually represents a joint decision about i−1 pairwise links, as opposed to systems that use a pairwise binary classifier and a separate agglomeration step, which consider one link at a time during learning. This approach is similar to the mentionranking model of Rahman and Ng (2009). 3.2 Pairwise Features We now present the set of features fA used by our unary factors Ai. Each feature examines the anantecedent choices antecedent factors A1 a1 A2 a2 a3 a4 A</context>
+</contexts>
+<marker>Bengtson, Roth, 2008</marker>
+<rawString>Eric Bengtson and Dan Roth. 2008. Understanding the Value of Features for Coreference Resolution. In Proceedings of the Conference on Empirical Methods in Natural Language Processing.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Shane Bergsma</author>
+<author>Dekang Lin</author>
+</authors>
+<title>Bootstrapping Path-Based Pronoun Resolution.</title>
+<date>2006</date>
+<booktitle>In Proceedings of the Conference on Computational Linguistics and the Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="29069" citStr="Bergsma and Lin (2006)" startWordPosition="4887" endWordPosition="4890">or second mention in a cluster has the wrong property value, features indicating high levels of property agreement will not fire on the next few mentions in those clusters. 7.3 Phi Features As we have seen, our TRANSITIVE model can exploit high-quality entity-level features. How does it perform using real features that have been proposed for entity-level coreference? Here, we use hard phi feature determinations extracted from the system of Lee et al. (2011). Named-entity type and animacy are both computed based on the output of a named-entity tagger, while number and gender use the dataset of Bergsma and Lin (2006). Once this information is determined, the PAIRPROPERTY and LEFTTORIGHT systems can compute features over it directly. In the TRANSITIVE model, each of the Ri factors places 43 of its mass on the determined label and distributes the remainder uniformly among the possible options. Table 2 shows results when adding entity-level phi features on top of our BASIC pairwise system (which already contains pairwise features) and on top of an ablated BASIC system without pairwise 120 PHI FEATURES MUC B3 CEAFe Avg. BASIC 61.96 70.66 47.30 59.97 LEFTTORIGHT 61.34 70.41 47.64 59.80 TRANSITIVE 62.66 70.92 4</context>
+</contexts>
+<marker>Bergsma, Lin, 2006</marker>
+<rawString>Shane Bergsma and Dekang Lin. 2006. Bootstrapping Path-Based Pronoun Resolution. In Proceedings of the Conference on Computational Linguistics and the Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>David Burkett</author>
+<author>Dan Klein</author>
+</authors>
+<title>Fast Inference in Phrase Extraction Models with Belief Propagation.</title>
+<date>2012</date>
+<booktitle>In Proceedings of the North American Chapter of the Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="19978" citStr="Burkett and Klein, 2012" startWordPosition="3370" endWordPosition="3373">radient takes the standard form of the gradient of a log-linear model, a difference of expected feature counts under the gold annotation and under no annotation. This requires computing marginals P&apos;(ai|x) for each mention i, but because the model already factors this way, this step is easy. The TRANSITIVE model is more complex. Exact inference is intractable due to the E factors that couple all of the ai by way of the pi nodes. However, we can compute approximate marginals for the ai, pi, and ri using belief propagation. BP has been effectively used on other NLP tasks (Smith and Eisner, 2008; Burkett and Klein, 2012), and is effective in cases such as this where the model is largely driven by non-loopy factors (here, the Ai). From marginals over each node, we can compute the necessary gradient and decode as before: aˆ = arg max Pˆ(a|x) a 3One could use ILP-based decoding in the style of Finkel and Manning (2008) and Song et al. (2012) to attempt to explicitly find the optimal C with choice of a marginalized out, but we did not explore this option. 118 This corresponds to minimum-risk decoding with respect to the Hamming loss over antecedence predictions. Pruning. The TRANSITIVE model requires instantiatin</context>
+</contexts>
+<marker>Burkett, Klein, 2012</marker>
+<rawString>David Burkett and Dan Klein. 2012. Fast Inference in Phrase Extraction Models with Belief Propagation. In Proceedings of the North American Chapter of the Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ronan Collobert</author>
+<author>Jason Weston</author>
+<author>L´eon Bottou</author>
+<author>Michael Karlen</author>
+<author>Koray Kavukcuoglu</author>
+<author>Pavel Kuksa</author>
+</authors>
+<title>Natural Language Processing (Almost) from Scratch.</title>
+<date>2011</date>
+<journal>Journal of Machine Learning Research,</journal>
+<pages>12--2493</pages>
+<contexts>
+<context position="33514" citStr="Collobert et al., 2011" startWordPosition="5574" endWordPosition="5577">, 2005; Bansal and Klein, 2012). We use four different clusterings in our experiments, each with twenty clusters: dependency-parse-derived NAIVEBAYES clusters, semantic-role-derived CONDITIONAL clusters, SRL-derived NAIVEBAYES clusters generating a NOVERB token when r cannot be determined, and SRL-derived NAIVEBAYES clusters with all pronoun tuples discarded. Examples of the latter clusters are shown in Figure 4. Each clustering is learned for 30 iterations of EM over English Gigaword (Graff et al., 2007), parsed with the Berkeley Parser (Petrov et al., 2006) and with SRL determined by Senna (Collobert et al., 2011). Table 3 shows results of modeling these cluster properties. As in the case of oracle features, the PAIRPROPERTY and LEFTTORIGHT systems use the modes of the cluster posteriors, and the TRANSITIVE system uses the posteriors directly as the RZ. We see comparable performance from incorporating features in both an entity-level framework and a pairwise framework, though the TRANSI121 Prec. MUC F1 Prec. B3 F1 Prec. CEAFe F1 Avg. Rec. Rec. Rec. F1 BASIC 69.99 55.59 61.96 80.96 62.69 70.66 41.37 55.21 47.30 59.97 STANFORD 61.49 59.59 60.49 74.60 68.25 71.28 47.57 49.45 48.49 60.10 NOISY ORACLE PAIRP</context>
+</contexts>
+<marker>Collobert, Weston, Bottou, Karlen, Kavukcuoglu, Kuksa, 2011</marker>
+<rawString>Ronan Collobert, Jason Weston, L´eon Bottou, Michael Karlen, Koray Kavukcuoglu, and Pavel Kuksa. 2011. Natural Language Processing (Almost) from Scratch. Journal of Machine Learning Research, 12:2493–2537, November.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ido Dagan</author>
+<author>Alon Itai</author>
+</authors>
+<title>Automatic Processing of Large Corpora for the Resolution of Anaphora References.</title>
+<date>1990</date>
+<booktitle>In Proceedings of the Conference on Computational Linguistics -</booktitle>
+<volume>3</volume>
+<contexts>
+<context position="32878" citStr="Dagan and Itai, 1990" startWordPosition="5482" endWordPosition="5485"> verbal context) than would be possible using a model that makes type-level decisions about nominals only. Though these specific cluster features are novel to coreference, previous work has used similar Figure 4: Examples of clusters produced by the NAIVEBAYES model on SRL-tagged data with pronouns discarded. types of fine-grained semantic class information (Hendrickx and Daelemans, 2007; Ng, 2007; Rahman and Ng, 2010). Other approaches incorporate information from other sources (Ponzetto and Strube, 2006) or compute heuristic scores for realvalued features based on a large corpus or the web (Dagan and Itai, 1990; Yang et al., 2005; Bansal and Klein, 2012). We use four different clusterings in our experiments, each with twenty clusters: dependency-parse-derived NAIVEBAYES clusters, semantic-role-derived CONDITIONAL clusters, SRL-derived NAIVEBAYES clusters generating a NOVERB token when r cannot be determined, and SRL-derived NAIVEBAYES clusters with all pronoun tuples discarded. Examples of the latter clusters are shown in Figure 4. Each clustering is learned for 30 iterations of EM over English Gigaword (Graff et al., 2007), parsed with the Berkeley Parser (Petrov et al., 2006) and with SRL determin</context>
+</contexts>
+<marker>Dagan, Itai, 1990</marker>
+<rawString>Ido Dagan and Alon Itai. 1990. Automatic Processing of Large Corpora for the Resolution of Anaphora References. In Proceedings of the Conference on Computational Linguistics - Volume 3.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Arthur P Dempster</author>
+<author>Nan M Laird</author>
+<author>Donald B Rubin</author>
+</authors>
+<title>Maximum Likelihood from Incomplete Data via the EM Algorithm.</title>
+<date>1977</date>
+<journal>Journal of the Royal Statistical Society, Series B,</journal>
+<volume>39</volume>
+<issue>1</issue>
+<contexts>
+<context position="31898" citStr="Dempster et al., 1977" startWordPosition="5327" endWordPosition="5331">e designed to target semantic properties of nominals that should behave more like the oracle features than the phi features do. We consider clusterings that take as input pairs (n, r) of a noun head n and a string r which contains the semantic role of n (or some approximation thereof) conjoined with its governor. Two different algorithms are used to cluster these pairs: a NAIVEBAYES model, where c generates n and r, and a CONDITIONAL model, where c is generated conditioned on r and then n is generated from c. Parameters for each can be learned with the expectation maximization (EM) algorithm (Dempster et al., 1977), with symmetry broken by a small amount of random noise at initialization. Similar models have been used to learn subcategorization information (Rooth et al., 1999) or properties of verb argument slots (Yao et al., 2011). We choose this kind of clustering for its relative simplicity and because it allows pronouns to have more informed properties (from their verbal context) than would be possible using a model that makes type-level decisions about nominals only. Though these specific cluster features are novel to coreference, previous work has used similar Figure 4: Examples of clusters produc</context>
+</contexts>
+<marker>Dempster, Laird, Rubin, 1977</marker>
+<rawString>Arthur P. Dempster, Nan M. Laird, and Donald B. Rubin. 1977. Maximum Likelihood from Incomplete Data via the EM Algorithm. Journal of the Royal Statistical Society, Series B, 39(1):1–38.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Pascal Denis</author>
+<author>Jason Baldridge</author>
+</authors>
+<title>Joint Determination of Anaphoricity and Coreference Resolution using Integer Programming.</title>
+<date>2007</date>
+<booktitle>In Proceedings of the North American Chapter of the Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="21704" citStr="Denis and Baldridge (2007)" startWordPosition="3674" endWordPosition="3677">cular odds ratio threshold with respect to the best setting of that ai in the BASIC model; that is, those for which PBASIC (ai |x) maxj PBASIC (ai = j |x) ) is below a cutoff -y. 6 Related Work Our BASIC model is a mention-ranking approach resembling models used by Denis and Baldridge (2008) and Rahman and Ng (2009), though it is trained using a novel parameterized loss function. It is also similar to the MLN-JOINT(BF) model of Song et al. (2012), but we enforce the singleparent constraint at a deeper structural level, allowing us to treat non-anaphoricity symmetrically with coreference as in Denis and Baldridge (2007) and Stoyanov and Eisner (2012). The model of Fernandes et al. (2012) also uses the single-parent constraint structurally, but with learning via latent perceptron and ILP-based one-best decoding rather than logistic regression and BP-based marginal computation. Our TRANSITIVE model is novel; while McCallum and Wellner (2004) proposed the idea of using attributes for mentions, they do not actually implement a model that does so. Other systems include entity-level information via handwritten rules (Raghunathan et al., 2010), induced rules (Yang et al., 2008), or features with learned weights (Lu</context>
+</contexts>
+<marker>Denis, Baldridge, 2007</marker>
+<rawString>Pascal Denis and Jason Baldridge. 2007. Joint Determination of Anaphoricity and Coreference Resolution using Integer Programming. In Proceedings of the North American Chapter of the Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Pascal Denis</author>
+<author>Jason Baldridge</author>
+</authors>
+<title>Specialized Models and Ranking for Coreference Resolution.</title>
+<date>2008</date>
+<booktitle>In Proceedings of the Conference on Empirical Methods in Natural Language Processing.</booktitle>
+<contexts>
+<context position="21370" citStr="Denis and Baldridge (2008)" startWordPosition="3619" endWordPosition="3622">a document contains over 200 mentions. Therefore, we use our BASIC model to prune antecedent choices for each ai in order to reduce the size of the factor graph that we must instantiate. Specifically, we prune links between pairs of mentions that are of mention distance more than 100, as well as values for ai that fall below a particular odds ratio threshold with respect to the best setting of that ai in the BASIC model; that is, those for which PBASIC (ai |x) maxj PBASIC (ai = j |x) ) is below a cutoff -y. 6 Related Work Our BASIC model is a mention-ranking approach resembling models used by Denis and Baldridge (2008) and Rahman and Ng (2009), though it is trained using a novel parameterized loss function. It is also similar to the MLN-JOINT(BF) model of Song et al. (2012), but we enforce the singleparent constraint at a deeper structural level, allowing us to treat non-anaphoricity symmetrically with coreference as in Denis and Baldridge (2007) and Stoyanov and Eisner (2012). The model of Fernandes et al. (2012) also uses the single-parent constraint structurally, but with learning via latent perceptron and ILP-based one-best decoding rather than logistic regression and BP-based marginal computation. Our </context>
+</contexts>
+<marker>Denis, Baldridge, 2008</marker>
+<rawString>Pascal Denis and Jason Baldridge. 2008. Specialized Models and Ranking for Coreference Resolution. In Proceedings of the Conference on Empirical Methods in Natural Language Processing.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>John Duchi</author>
+<author>Elad Hazan</author>
+<author>Yoram Singer</author>
+</authors>
+<title>Adaptive Subgradient Methods for Online Learning and Stochastic Optimization.</title>
+<date>2011</date>
+<journal>Journal of Machine Learning Research,</journal>
+<pages>12--2121</pages>
+<contexts>
+<context position="17753" citStr="Duchi et al., 2011" startWordPosition="2979" endWordPosition="2982"> be marginalized out: it should be non-anaphoric, K2 denotes the event that ai is falsely non-anaphoric when it should be anaphoric, and K3 denotes the event that ai is correctly determined to be anaphoric but. These can be computed based on only ai and C. By setting c1 low and c2 high relative to c3, we can force the system to be less conservative about making anaphoricity decisions and achieve a better balance with the final coreference metrics. Finally, we incorporate L1 regularization, giving us our final objective: log X P&apos;(a|xi) + λkwk1 (a∈A(Ci) We optimize this objective using AdaGrad (Duchi et al., 2011); we found this to be faster and give higher performance than L-BFGS using L2 regularization (Liu and Nocedal, 1989). Note that because of the marginalization over A(Ci), even the objective for the BASIC model is not convex. Xt i=1 e(w) = e(w) = Xt log X P(a |xi) (1) 5 Inference i=1 (a∈A(Ci) Inference in the BASIC model is straightforward. Given a set of weights w, we can predict where (xi, Ci) is the ith labeled training example. This optimizes for the 0-1 loss; however, we are much more interested in optimizing with respect to a coreference-specific loss function. To this end, we will use so</context>
+</contexts>
+<marker>Duchi, Hazan, Singer, 2011</marker>
+<rawString>John Duchi, Elad Hazan, and Yoram Singer. 2011. Adaptive Subgradient Methods for Online Learning and Stochastic Optimization. Journal of Machine Learning Research, 12:2121–2159, July.</rawString>
+</citation>
+<citation valid="true">
+<title>Eraldo Rezende Fernandes, Cicero Nogueira dos Santos, and Ruy Luiz Milidi´u.</title>
+<date>2012</date>
+<booktitle>In Proceedings of the Joint Conference on Empirical Methods in Natural Language Proceedings and Conference on Computational Natural Language Learning - Shared Task.</booktitle>
+<contexts>
+<context position="8714" citStr="(2012)" startWordPosition="1412" endWordPosition="1412"> For each of the features we present, two conjoined versions are included: one with an indicator of the type of the current mention being resolved, and one with an indicator of the types of the current and antecedent mentions. Mention types are either NOMINAL, PROPER, or, if the mention is pronominal, a canonicalized version of the pronoun abstracting away case.1 Several features, especially those based on the precise constructs (apposition, etc.) and those incorporating phi feature information, are computed using the machinery in Lee et al. (2011). Other features were inspired by Song et al. (2012) and Rahman and Ng (2009). Anaphoricity features: Indicator of anaphoricity, indicator on definiteness. Configurational features: Indicator on distance in mentions (capped at 10), indicator on distance in sentences (capped at 10), does the antecedent c-command the current mention, are the two mentions in a subject/object construction, are the mentions nested, are the mentions in deterministic appositive/role appositive/predicate nominative/relative pronoun constructions. Match features: Is one mention an acronym of the other, head match, head contained (each way), string match, string containe</context>
+<context position="20302" citStr="(2012)" startWordPosition="3433" endWordPosition="3433">nce is intractable due to the E factors that couple all of the ai by way of the pi nodes. However, we can compute approximate marginals for the ai, pi, and ri using belief propagation. BP has been effectively used on other NLP tasks (Smith and Eisner, 2008; Burkett and Klein, 2012), and is effective in cases such as this where the model is largely driven by non-loopy factors (here, the Ai). From marginals over each node, we can compute the necessary gradient and decode as before: aˆ = arg max Pˆ(a|x) a 3One could use ILP-based decoding in the style of Finkel and Manning (2008) and Song et al. (2012) to attempt to explicitly find the optimal C with choice of a marginalized out, but we did not explore this option. 118 This corresponds to minimum-risk decoding with respect to the Hamming loss over antecedence predictions. Pruning. The TRANSITIVE model requires instantiating a factor for each potential setting of each ai. This factor graph grows quadratically in the size of the document, and even approximate inference becomes slow when a document contains over 200 mentions. Therefore, we use our BASIC model to prune antecedent choices for each ai in order to reduce the size of the factor gra</context>
+<context position="21528" citStr="(2012)" startWordPosition="3650" endWordPosition="3650">antiate. Specifically, we prune links between pairs of mentions that are of mention distance more than 100, as well as values for ai that fall below a particular odds ratio threshold with respect to the best setting of that ai in the BASIC model; that is, those for which PBASIC (ai |x) maxj PBASIC (ai = j |x) ) is below a cutoff -y. 6 Related Work Our BASIC model is a mention-ranking approach resembling models used by Denis and Baldridge (2008) and Rahman and Ng (2009), though it is trained using a novel parameterized loss function. It is also similar to the MLN-JOINT(BF) model of Song et al. (2012), but we enforce the singleparent constraint at a deeper structural level, allowing us to treat non-anaphoricity symmetrically with coreference as in Denis and Baldridge (2007) and Stoyanov and Eisner (2012). The model of Fernandes et al. (2012) also uses the single-parent constraint structurally, but with learning via latent perceptron and ILP-based one-best decoding rather than logistic regression and BP-based marginal computation. Our TRANSITIVE model is novel; while McCallum and Wellner (2004) proposed the idea of using attributes for mentions, they do not actually implement a model that d</context>
+</contexts>
+<marker>2012</marker>
+<rawString>Eraldo Rezende Fernandes, Cicero Nogueira dos Santos, and Ruy Luiz Milidi´u. 2012. Latent Structure Perceptron with Feature Induction for Unrestricted Coreference Resolution. In Proceedings of the Joint Conference on Empirical Methods in Natural Language Proceedings and Conference on Computational Natural Language Learning - Shared Task.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jenny Rose Finkel</author>
+<author>Christopher D Manning</author>
+</authors>
+<title>Enforcing Transitivity in Coreference Resolution.</title>
+<date>2008</date>
+<booktitle>In Proceedings of the Association for Computational Linguistics: Short Papers.</booktitle>
+<contexts>
+<context position="2673" citStr="Finkel and Manning, 2008" startWordPosition="390" endWordPosition="393">our model: mentions manage their partial membership in various coreference chains, so that information about entity-level properties is decentralized and propagated across individual mentions, and we never need to explicitly instantiate entities. Exact inference in this factor graph is intractable, but efficient approximate inference can be carried out with belief propagation. Our model is the first discriminatively-trained model that both makes joint decisions over an entire document and models specific entity-level properties, rather than simply enforcing transitivity of pairwise decisions (Finkel and Manning, 2008; Song et al., 2012). We evaluate our system on the dataset from the CoNLL 2011 shared task using three different types of properties: synthetic oracle properties, entity phi features (number, gender, animacy, and NER type), and properties derived from unsupervised clusters targeting semantic type information. In all cases, our transitive model of entity properties equals or outperforms our pairwise system and our reimplementation of a previous entity-level system (Rahman and Ng, 2009). Our final system is competitive with the winner of the CoNLL 2011 shared task (Lee et al., 2011). 2 Example </context>
+<context position="20279" citStr="Finkel and Manning (2008)" startWordPosition="3425" endWordPosition="3428">SITIVE model is more complex. Exact inference is intractable due to the E factors that couple all of the ai by way of the pi nodes. However, we can compute approximate marginals for the ai, pi, and ri using belief propagation. BP has been effectively used on other NLP tasks (Smith and Eisner, 2008; Burkett and Klein, 2012), and is effective in cases such as this where the model is largely driven by non-loopy factors (here, the Ai). From marginals over each node, we can compute the necessary gradient and decode as before: aˆ = arg max Pˆ(a|x) a 3One could use ILP-based decoding in the style of Finkel and Manning (2008) and Song et al. (2012) to attempt to explicitly find the optimal C with choice of a marginalized out, but we did not explore this option. 118 This corresponds to minimum-risk decoding with respect to the Hamming loss over antecedence predictions. Pruning. The TRANSITIVE model requires instantiating a factor for each potential setting of each ai. This factor graph grows quadratically in the size of the document, and even approximate inference becomes slow when a document contains over 200 mentions. Therefore, we use our BASIC model to prune antecedent choices for each ai in order to reduce the</context>
+</contexts>
+<marker>Finkel, Manning, 2008</marker>
+<rawString>Jenny Rose Finkel and Christopher D. Manning. 2008. Enforcing Transitivity in Coreference Resolution. In Proceedings of the Association for Computational Linguistics: Short Papers.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Kevin Gimpel</author>
+<author>Noah A Smith</author>
+</authors>
+<title>SoftmaxMargin CRFs: Training Log-Linear Models with Cost Functions.</title>
+<date>2010</date>
+<booktitle>In Proceedings of the North American Chapter for the Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="18390" citStr="Gimpel and Smith, 2010" startWordPosition="3089" endWordPosition="3093">s to be faster and give higher performance than L-BFGS using L2 regularization (Liu and Nocedal, 1989). Note that because of the marginalization over A(Ci), even the objective for the BASIC model is not convex. Xt i=1 e(w) = e(w) = Xt log X P(a |xi) (1) 5 Inference i=1 (a∈A(Ci) Inference in the BASIC model is straightforward. Given a set of weights w, we can predict where (xi, Ci) is the ith labeled training example. This optimizes for the 0-1 loss; however, we are much more interested in optimizing with respect to a coreference-specific loss function. To this end, we will use softmax-margin (Gimpel and Smith, 2010), which augments the probability of each example with a term proportional to its loss, pushing the model to assign less mass to highly incorrect examples. We modify Equation 1 to use a new probability distribution P&apos; instead of P, where P&apos;(a|xi) ∝ P(a|xi) exp (l(a, C)) and l(a, C) is a loss function. In order to perform inference efficiently, l(a, C) must decompose linearly across mentions: l(a, C) = Pni=1 l(ai, C). Commonly-used coreference metrics such as MUC (Vilain et al., 1995) and B3 (Bagga and Baldwin, 1998) do not have this property, so we instead make use of a parameterized loss funct</context>
+</contexts>
+<marker>Gimpel, Smith, 2010</marker>
+<rawString>Kevin Gimpel and Noah A. Smith. 2010. SoftmaxMargin CRFs: Training Log-Linear Models with Cost Functions. In Proceedings of the North American Chapter for the Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>David Graff</author>
+<author>Junbo Kong</author>
+<author>Ke Chen</author>
+<author>Kazuaki Maeda</author>
+</authors>
+<date>2007</date>
+<booktitle>English Gigaword Third Edition. Linguistic Data Consortium, Catalog Number LDC2007T07.</booktitle>
+<contexts>
+<context position="33401" citStr="Graff et al., 2007" startWordPosition="5555" endWordPosition="5558">euristic scores for realvalued features based on a large corpus or the web (Dagan and Itai, 1990; Yang et al., 2005; Bansal and Klein, 2012). We use four different clusterings in our experiments, each with twenty clusters: dependency-parse-derived NAIVEBAYES clusters, semantic-role-derived CONDITIONAL clusters, SRL-derived NAIVEBAYES clusters generating a NOVERB token when r cannot be determined, and SRL-derived NAIVEBAYES clusters with all pronoun tuples discarded. Examples of the latter clusters are shown in Figure 4. Each clustering is learned for 30 iterations of EM over English Gigaword (Graff et al., 2007), parsed with the Berkeley Parser (Petrov et al., 2006) and with SRL determined by Senna (Collobert et al., 2011). Table 3 shows results of modeling these cluster properties. As in the case of oracle features, the PAIRPROPERTY and LEFTTORIGHT systems use the modes of the cluster posteriors, and the TRANSITIVE system uses the posteriors directly as the RZ. We see comparable performance from incorporating features in both an entity-level framework and a pairwise framework, though the TRANSI121 Prec. MUC F1 Prec. B3 F1 Prec. CEAFe F1 Avg. Rec. Rec. Rec. F1 BASIC 69.99 55.59 61.96 80.96 62.69 70.6</context>
+</contexts>
+<marker>Graff, Kong, Chen, Maeda, 2007</marker>
+<rawString>David Graff, Junbo Kong, Ke Chen, and Kazuaki Maeda. 2007. English Gigaword Third Edition. Linguistic Data Consortium, Catalog Number LDC2007T07.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Aria Haghighi</author>
+<author>Dan Klein</author>
+</authors>
+<title>Coreference Resolution in a Modular, Entity-Centered Model.</title>
+<date>2010</date>
+<booktitle>In Proceedings of the North American Chapter of the Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="1010" citStr="Haghighi and Klein, 2010" startWordPosition="135" endWordPosition="138">nd-to-end discriminative probabilistic model for coreference that, along with standard pairwise features, enforces structural agreement constraints between specified properties of coreferent mentions. This model can be represented as a factor graph for each document that admits efficient inference via belief propagation. We show that our method can use entity-level information to outperform a basic pairwise system. 1 Introduction The inclusion of entity-level features has been a driving force behind the development of many coreference resolution systems (Luo et al., 2004; Rahman and Ng, 2009; Haghighi and Klein, 2010; Lee et al., 2011). There is no polynomial-time dynamic program for inference in a model with arbitrary entity-level features, so systems that use such features typically rely on making decisions in a pipelined manner and sticking with them, operating greedily in a left-to-right fashion (Rahman and Ng, 2009) or in a multi-pass, sieve-like manner (Raghunathan et al., 2010). However, such systems may be locked into bad coreference decisions and are difficult to directly optimize for standard evaluation metrics. In this work, we present a new structured model of entity-level information designed</context>
+<context position="22521" citStr="Haghighi and Klein (2010)" startWordPosition="3805" endWordPosition="3808">ng rather than logistic regression and BP-based marginal computation. Our TRANSITIVE model is novel; while McCallum and Wellner (2004) proposed the idea of using attributes for mentions, they do not actually implement a model that does so. Other systems include entity-level information via handwritten rules (Raghunathan et al., 2010), induced rules (Yang et al., 2008), or features with learned weights (Luo et al., 2004; Rahman and Ng, 2011), but all of these systems freeze past coreference decisions in order to compute their entities. Most similar to our entity-level approach is the system of Haghighi and Klein (2010), which also uses approximate global inference; however, theirs is an unsupervised, generative system and they attempt to directly model multinomials over words in each mention. Their system could be extended to handle property information like we do, but our system has many other advantages, such as freedom from a pre-specified list of entity types, the ability to use multiple input clusterings, and discriminative projection of clusters. 7 Experiments We use the datasets, experimental setup, and scoring program from the CoNLL 2011 shared task (Pradhan et al., 2011), based on the OntoNotes cor</context>
+</contexts>
+<marker>Haghighi, Klein, 2010</marker>
+<rawString>Aria Haghighi and Dan Klein. 2010. Coreference Resolution in a Modular, Entity-Centered Model. In Proceedings of the North American Chapter of the Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Iris Hendrickx</author>
+<author>Walter Daelemans</author>
+</authors>
+<title>Adding Semantic Information: Unsupervised Clusters for Coreference Resolution.</title>
+<date>2007</date>
+<contexts>
+<context position="32648" citStr="Hendrickx and Daelemans, 2007" startWordPosition="5443" endWordPosition="5446">egorization information (Rooth et al., 1999) or properties of verb argument slots (Yao et al., 2011). We choose this kind of clustering for its relative simplicity and because it allows pronouns to have more informed properties (from their verbal context) than would be possible using a model that makes type-level decisions about nominals only. Though these specific cluster features are novel to coreference, previous work has used similar Figure 4: Examples of clusters produced by the NAIVEBAYES model on SRL-tagged data with pronouns discarded. types of fine-grained semantic class information (Hendrickx and Daelemans, 2007; Ng, 2007; Rahman and Ng, 2010). Other approaches incorporate information from other sources (Ponzetto and Strube, 2006) or compute heuristic scores for realvalued features based on a large corpus or the web (Dagan and Itai, 1990; Yang et al., 2005; Bansal and Klein, 2012). We use four different clusterings in our experiments, each with twenty clusters: dependency-parse-derived NAIVEBAYES clusters, semantic-role-derived CONDITIONAL clusters, SRL-derived NAIVEBAYES clusters generating a NOVERB token when r cannot be determined, and SRL-derived NAIVEBAYES clusters with all pronoun tuples discar</context>
+</contexts>
+<marker>Hendrickx, Daelemans, 2007</marker>
+<rawString>Iris Hendrickx and Walter Daelemans, 2007. Adding Semantic Information: Unsupervised Clusters for Coreference Resolution.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Eduard Hovy</author>
+<author>Mitchell Marcus</author>
+<author>Martha Palmer</author>
+<author>Lance Ramshaw</author>
+<author>Ralph Weischedel</author>
+</authors>
+<title>OntoNotes: the 90% solution.</title>
+<date>2006</date>
+<booktitle>In Proceedings of the North American Chapter of the Association for Computational Linguistics: Short Papers.</booktitle>
+<contexts>
+<context position="23144" citStr="Hovy et al., 2006" startWordPosition="3903" endWordPosition="3906">ch also uses approximate global inference; however, theirs is an unsupervised, generative system and they attempt to directly model multinomials over words in each mention. Their system could be extended to handle property information like we do, but our system has many other advantages, such as freedom from a pre-specified list of entity types, the ability to use multiple input clusterings, and discriminative projection of clusters. 7 Experiments We use the datasets, experimental setup, and scoring program from the CoNLL 2011 shared task (Pradhan et al., 2011), based on the OntoNotes corpus (Hovy et al., 2006). We use the standard automatic parses and NER tags for each document. Our mentions are those output by the system of Lee et al. (2011); we also use their postprocessing to remove appositives, predicate nominatives, and singletons before evaluation. For each experiment, we report MUC (Vilain et al., 1995), B3 (Bagga and Baldwin, 1998), and CEAFe (Luo, 2005), as well as their average. Parameter settings. We take the regularization constant A = 0.001 and the parameters of our surrogate loss (c1, c2, c3) = (0.15, 2.5, 1) for all models.4 All models are trained for 20 iterations. We take the pruni</context>
+</contexts>
+<marker>Hovy, Marcus, Palmer, Ramshaw, Weischedel, 2006</marker>
+<rawString>Eduard Hovy, Mitchell Marcus, Martha Palmer, Lance Ramshaw, and Ralph Weischedel. 2006. OntoNotes: the 90% solution. In Proceedings of the North American Chapter of the Association for Computational Linguistics: Short Papers.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Heeyoung Lee</author>
+<author>Yves Peirsman</author>
+<author>Angel Chang</author>
+<author>Nathanael Chambers</author>
+<author>Mihai Surdeanu</author>
+<author>Dan Jurafsky</author>
+</authors>
+<title>Stanford’s Multi-Pass Sieve Coreference Resolution System at the CoNLL-2011 Shared Task.</title>
+<date>2011</date>
+<booktitle>In Proceedings of the Conference on Computational Natural Language Learning: Shared Task.</booktitle>
+<contexts>
+<context position="1029" citStr="Lee et al., 2011" startWordPosition="139" endWordPosition="142">robabilistic model for coreference that, along with standard pairwise features, enforces structural agreement constraints between specified properties of coreferent mentions. This model can be represented as a factor graph for each document that admits efficient inference via belief propagation. We show that our method can use entity-level information to outperform a basic pairwise system. 1 Introduction The inclusion of entity-level features has been a driving force behind the development of many coreference resolution systems (Luo et al., 2004; Rahman and Ng, 2009; Haghighi and Klein, 2010; Lee et al., 2011). There is no polynomial-time dynamic program for inference in a model with arbitrary entity-level features, so systems that use such features typically rely on making decisions in a pipelined manner and sticking with them, operating greedily in a left-to-right fashion (Rahman and Ng, 2009) or in a multi-pass, sieve-like manner (Raghunathan et al., 2010). However, such systems may be locked into bad coreference decisions and are difficult to directly optimize for standard evaluation metrics. In this work, we present a new structured model of entity-level information designed to allow efficient</context>
+<context position="3261" citStr="Lee et al., 2011" startWordPosition="485" endWordPosition="488">ons (Finkel and Manning, 2008; Song et al., 2012). We evaluate our system on the dataset from the CoNLL 2011 shared task using three different types of properties: synthetic oracle properties, entity phi features (number, gender, animacy, and NER type), and properties derived from unsupervised clusters targeting semantic type information. In all cases, our transitive model of entity properties equals or outperforms our pairwise system and our reimplementation of a previous entity-level system (Rahman and Ng, 2009). Our final system is competitive with the winner of the CoNLL 2011 shared task (Lee et al., 2011). 2 Example We begin with an example motivating our use of entity-level features. Consider the following excerpt concerning two famous auction houses: When looking for [art items], [people] go to [Sotheby’s and Christie’s] because [they]A believe [they]B can get the best price for [them]. The first three mentions are all distinct entities, theyA and theyB refer to people, and them refers to art items. The three pronouns are tricky to resolve 114 Proceedings of the 51st Annual Meeting of the Association for Computational Linguistics, pages 114–124, Sofia, Bulgaria, August 4-9 2013. c�2013 Assoc</context>
+<context position="8662" citStr="Lee et al. (2011)" startWordPosition="1400" endWordPosition="1403"> mention as well as the observed information x in the document. For each of the features we present, two conjoined versions are included: one with an indicator of the type of the current mention being resolved, and one with an indicator of the types of the current and antecedent mentions. Mention types are either NOMINAL, PROPER, or, if the mention is pronominal, a canonicalized version of the pronoun abstracting away case.1 Several features, especially those based on the precise constructs (apposition, etc.) and those incorporating phi feature information, are computed using the machinery in Lee et al. (2011). Other features were inspired by Song et al. (2012) and Rahman and Ng (2009). Anaphoricity features: Indicator of anaphoricity, indicator on definiteness. Configurational features: Indicator on distance in mentions (capped at 10), indicator on distance in sentences (capped at 10), does the antecedent c-command the current mention, are the two mentions in a subject/object construction, are the mentions nested, are the mentions in deterministic appositive/role appositive/predicate nominative/relative pronoun constructions. Match features: Is one mention an acronym of the other, head match, head</context>
+<context position="23279" citStr="Lee et al. (2011)" startWordPosition="3930" endWordPosition="3933">inomials over words in each mention. Their system could be extended to handle property information like we do, but our system has many other advantages, such as freedom from a pre-specified list of entity types, the ability to use multiple input clusterings, and discriminative projection of clusters. 7 Experiments We use the datasets, experimental setup, and scoring program from the CoNLL 2011 shared task (Pradhan et al., 2011), based on the OntoNotes corpus (Hovy et al., 2006). We use the standard automatic parses and NER tags for each document. Our mentions are those output by the system of Lee et al. (2011); we also use their postprocessing to remove appositives, predicate nominatives, and singletons before evaluation. For each experiment, we report MUC (Vilain et al., 1995), B3 (Bagga and Baldwin, 1998), and CEAFe (Luo, 2005), as well as their average. Parameter settings. We take the regularization constant A = 0.001 and the parameters of our surrogate loss (c1, c2, c3) = (0.15, 2.5, 1) for all models.4 All models are trained for 20 iterations. We take the pruning threshold -y = −2. 7.1 Systems Besides our BASIC and TRANSITIVE systems, we evaluate a strictly pairwise system that incorporates pr</context>
+<context position="28908" citStr="Lee et al. (2011)" startWordPosition="4858" endWordPosition="4861">tion backwards in a document as well as forwards, so the effects of noise can be more easily mitigated. By contrast, in the LEFTTORIGHT model, if the first or second mention in a cluster has the wrong property value, features indicating high levels of property agreement will not fire on the next few mentions in those clusters. 7.3 Phi Features As we have seen, our TRANSITIVE model can exploit high-quality entity-level features. How does it perform using real features that have been proposed for entity-level coreference? Here, we use hard phi feature determinations extracted from the system of Lee et al. (2011). Named-entity type and animacy are both computed based on the output of a named-entity tagger, while number and gender use the dataset of Bergsma and Lin (2006). Once this information is determined, the PAIRPROPERTY and LEFTTORIGHT systems can compute features over it directly. In the TRANSITIVE model, each of the Ri factors places 43 of its mass on the determined label and distributes the remainder uniformly among the possible options. Table 2 shows results when adding entity-level phi features on top of our BASIC pairwise system (which already contains pairwise features) and on top of an ab</context>
+<context position="36347" citStr="Lee et al., 2011" startWordPosition="6033" endWordPosition="6036">.00 50.40 43.33 58.62 STANFORD 60.91 62.13 61.51 70.61 67.75 69.15 45.79 44.55 45.16 58.61 Table 5: CoNLL metric scores for our best systems (including clustering features) on the CoNLL blind test set, reported in the same manner as Table 4. TIVE system appears to be more effective than the LEFTTORIGHT system. 7.5 Final Results Table 4 shows expanded results on our development sets for the different types of entity-level information we considered. We also show in in Table 5 the results of our system on the CoNLL test set, and see that it performs comparably to the Stanford coreference system (Lee et al., 2011). Here, our TRANSITIVE system provides modest improvements over all our other systems. Based on Table 4, our TRANSITIVE system appears to do better on MUC and B3 than on CEAFe. However, we found no simple way to change the relative performance characteristics of our various systems; notably, modifying the parameters of the loss function mentioned in Section 4 or changing it entirely did not trade off these three metrics but merely increased or decreased them in lockstep. Therefore, the TRANSITIVE system actually substantially improves over our baselines and is not merely trading off metrics in</context>
+</contexts>
+<marker>Lee, Peirsman, Chang, Chambers, Surdeanu, Jurafsky, 2011</marker>
+<rawString>Heeyoung Lee, Yves Peirsman, Angel Chang, Nathanael Chambers, Mihai Surdeanu, and Dan Jurafsky. 2011. Stanford’s Multi-Pass Sieve Coreference Resolution System at the CoNLL-2011 Shared Task. In Proceedings of the Conference on Computational Natural Language Learning: Shared Task.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Dong C Liu</author>
+<author>Jorge Nocedal</author>
+</authors>
+<date>1989</date>
+<booktitle>On the Limited Memory BFGS Method for Large Scale Optimization. Mathematical Programming,</booktitle>
+<volume>45</volume>
+<issue>3</issue>
+<contexts>
+<context position="17869" citStr="Liu and Nocedal, 1989" startWordPosition="2998" endWordPosition="3001">hould be anaphoric, and K3 denotes the event that ai is correctly determined to be anaphoric but. These can be computed based on only ai and C. By setting c1 low and c2 high relative to c3, we can force the system to be less conservative about making anaphoricity decisions and achieve a better balance with the final coreference metrics. Finally, we incorporate L1 regularization, giving us our final objective: log X P&apos;(a|xi) + λkwk1 (a∈A(Ci) We optimize this objective using AdaGrad (Duchi et al., 2011); we found this to be faster and give higher performance than L-BFGS using L2 regularization (Liu and Nocedal, 1989). Note that because of the marginalization over A(Ci), even the objective for the BASIC model is not convex. Xt i=1 e(w) = e(w) = Xt log X P(a |xi) (1) 5 Inference i=1 (a∈A(Ci) Inference in the BASIC model is straightforward. Given a set of weights w, we can predict where (xi, Ci) is the ith labeled training example. This optimizes for the 0-1 loss; however, we are much more interested in optimizing with respect to a coreference-specific loss function. To this end, we will use softmax-margin (Gimpel and Smith, 2010), which augments the probability of each example with a term proportional to it</context>
+</contexts>
+<marker>Liu, Nocedal, 1989</marker>
+<rawString>Dong C. Liu and Jorge Nocedal. 1989. On the Limited Memory BFGS Method for Large Scale Optimization. Mathematical Programming, 45(3):503–528, December.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Xiaoqiang Luo</author>
+<author>Abe Ittycheriah</author>
+<author>Hongyan Jing</author>
+<author>Nanda Kambhatla</author>
+<author>Salim Roukos</author>
+</authors>
+<title>A Mention-Synchronous Coreference Resolution Algorithm Based on the Bell Tree.</title>
+<date>2004</date>
+<booktitle>In Proceedings of the Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="963" citStr="Luo et al., 2004" startWordPosition="127" endWordPosition="130">rence over partitions. We describe an end-to-end discriminative probabilistic model for coreference that, along with standard pairwise features, enforces structural agreement constraints between specified properties of coreferent mentions. This model can be represented as a factor graph for each document that admits efficient inference via belief propagation. We show that our method can use entity-level information to outperform a basic pairwise system. 1 Introduction The inclusion of entity-level features has been a driving force behind the development of many coreference resolution systems (Luo et al., 2004; Rahman and Ng, 2009; Haghighi and Klein, 2010; Lee et al., 2011). There is no polynomial-time dynamic program for inference in a model with arbitrary entity-level features, so systems that use such features typically rely on making decisions in a pipelined manner and sticking with them, operating greedily in a left-to-right fashion (Rahman and Ng, 2009) or in a multi-pass, sieve-like manner (Raghunathan et al., 2010). However, such systems may be locked into bad coreference decisions and are difficult to directly optimize for standard evaluation metrics. In this work, we present a new struct</context>
+<context position="10578" citStr="Luo et al., 2004" startWordPosition="1684" endWordPosition="1687">I has as its antecedent I with the same speaker.” 1While this canonicalization could theoretically impair our ability to resolve, for example, reflexive pronouns, conjoining features with raw pronoun strings does not improve performance. We experimented with synonymy and hypernymy features from WordNet (Miller, 1995), but these did not empirically improve performance. 3.3 TRANSITIVE Model The BASIC model can capture many relationships between pairs of mentions, but cannot necessarily capture entity-level properties like those discussed in Section 2. We could of course model entities directly (Luo et al., 2004; Rahman and Ng, 2009), saying that each mention refers to some prior entity rather than to some prior mention. However, inference in this model would require reasoning about all possible partitions of mentions, which is computationally infeasible without resorting to severe approximations like a left-to-right inference method (Rahman and Ng, 2009). Instead, we would like to try to preserve the tractability of the BASIC model while still being able to exploit entity-level information. To do so, we will allow each mention to maintain its own distributions over values for a number of properties;</context>
+<context position="22318" citStr="Luo et al., 2004" startWordPosition="3771" endWordPosition="3774">7) and Stoyanov and Eisner (2012). The model of Fernandes et al. (2012) also uses the single-parent constraint structurally, but with learning via latent perceptron and ILP-based one-best decoding rather than logistic regression and BP-based marginal computation. Our TRANSITIVE model is novel; while McCallum and Wellner (2004) proposed the idea of using attributes for mentions, they do not actually implement a model that does so. Other systems include entity-level information via handwritten rules (Raghunathan et al., 2010), induced rules (Yang et al., 2008), or features with learned weights (Luo et al., 2004; Rahman and Ng, 2011), but all of these systems freeze past coreference decisions in order to compute their entities. Most similar to our entity-level approach is the system of Haghighi and Klein (2010), which also uses approximate global inference; however, theirs is an unsupervised, generative system and they attempt to directly model multinomials over words in each mention. Their system could be extended to handle property information like we do, but our system has many other advantages, such as freedom from a pre-specified list of entity types, the ability to use multiple input clustering</context>
+<context position="31152" citStr="Luo et al., 2004" startWordPosition="5200" endWordPosition="5203">RTY system and our TRANSITIVE system. government ARG0:said way ARG1:signed oficials ARG0:say law ARG1:announced court ARG0:found agreement ARG1:set authorities ARG0:announced plan ARG1:approved ... ... ... ... attack ARG1:cause prices ARG1:rose problems ARG2:following shares ARG1:fell attacks ARG1:reported index ARG1:cut ... ARG1:iled rates ARG1:closed charges ... ... ... ... phi features. Our entity-level systems successfully captures phi features when they are not present in the baseline, but there is only slight benefit over pairwise incorporation, a result which has been noted previously (Luo et al., 2004). 7.4 Clustering Features Finally, we consider mention properties derived from unsupervised clusterings; these properties are designed to target semantic properties of nominals that should behave more like the oracle features than the phi features do. We consider clusterings that take as input pairs (n, r) of a noun head n and a string r which contains the semantic role of n (or some approximation thereof) conjoined with its governor. Two different algorithms are used to cluster these pairs: a NAIVEBAYES model, where c generates n and r, and a CONDITIONAL model, where c is generated conditione</context>
+</contexts>
+<marker>Luo, Ittycheriah, Jing, Kambhatla, Roukos, 2004</marker>
+<rawString>Xiaoqiang Luo, Abe Ittycheriah, Hongyan Jing, Nanda Kambhatla, and Salim Roukos. 2004. A Mention-Synchronous Coreference Resolution Algorithm Based on the Bell Tree. In Proceedings of the Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Xiaoqiang Luo</author>
+</authors>
+<title>On Coreference Resolution Performance Metrics.</title>
+<date>2005</date>
+<booktitle>In Proceedings of the Conference on Empirical Methods in Natural Language Processing.</booktitle>
+<contexts>
+<context position="23503" citStr="Luo, 2005" startWordPosition="3967" endWordPosition="3968">multiple input clusterings, and discriminative projection of clusters. 7 Experiments We use the datasets, experimental setup, and scoring program from the CoNLL 2011 shared task (Pradhan et al., 2011), based on the OntoNotes corpus (Hovy et al., 2006). We use the standard automatic parses and NER tags for each document. Our mentions are those output by the system of Lee et al. (2011); we also use their postprocessing to remove appositives, predicate nominatives, and singletons before evaluation. For each experiment, we report MUC (Vilain et al., 1995), B3 (Bagga and Baldwin, 1998), and CEAFe (Luo, 2005), as well as their average. Parameter settings. We take the regularization constant A = 0.001 and the parameters of our surrogate loss (c1, c2, c3) = (0.15, 2.5, 1) for all models.4 All models are trained for 20 iterations. We take the pruning threshold -y = −2. 7.1 Systems Besides our BASIC and TRANSITIVE systems, we evaluate a strictly pairwise system that incorporates property information by way of indicator features on the current mention’s most likely property value and the proposed antecedent’s most likely property value. We call this system PAIRPROPERTY; it is simply the BASIC system wi</context>
+</contexts>
+<marker>Luo, 2005</marker>
+<rawString>Xiaoqiang Luo. 2005. On Coreference Resolution Performance Metrics. In Proceedings of the Conference on Empirical Methods in Natural Language Processing.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Andrew McCallum</author>
+<author>Ben Wellner</author>
+</authors>
+<title>Conditional Models of Identity Uncertainty with Application to Noun Coreference.</title>
+<date>2004</date>
+<booktitle>In Proceedings of Advances in Neural Information Processing Systems.</booktitle>
+<contexts>
+<context position="22030" citStr="McCallum and Wellner (2004)" startWordPosition="3722" endWordPosition="3726"> it is trained using a novel parameterized loss function. It is also similar to the MLN-JOINT(BF) model of Song et al. (2012), but we enforce the singleparent constraint at a deeper structural level, allowing us to treat non-anaphoricity symmetrically with coreference as in Denis and Baldridge (2007) and Stoyanov and Eisner (2012). The model of Fernandes et al. (2012) also uses the single-parent constraint structurally, but with learning via latent perceptron and ILP-based one-best decoding rather than logistic regression and BP-based marginal computation. Our TRANSITIVE model is novel; while McCallum and Wellner (2004) proposed the idea of using attributes for mentions, they do not actually implement a model that does so. Other systems include entity-level information via handwritten rules (Raghunathan et al., 2010), induced rules (Yang et al., 2008), or features with learned weights (Luo et al., 2004; Rahman and Ng, 2011), but all of these systems freeze past coreference decisions in order to compute their entities. Most similar to our entity-level approach is the system of Haghighi and Klein (2010), which also uses approximate global inference; however, theirs is an unsupervised, generative system and the</context>
+</contexts>
+<marker>McCallum, Wellner, 2004</marker>
+<rawString>Andrew McCallum and Ben Wellner. 2004. Conditional Models of Identity Uncertainty with Application to Noun Coreference. In Proceedings of Advances in Neural Information Processing Systems.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>George A Miller</author>
+</authors>
+<title>WordNet: A Lexical Database for English.</title>
+<date>1995</date>
+<journal>Communications of the ACM,</journal>
+<pages>38--39</pages>
+<contexts>
+<context position="10280" citStr="Miller, 1995" startWordPosition="1642" endWordPosition="1643">features together with the antecedent and mention type, our system can capture many relationships that previous systems hand-coded, especially regarding pronouns. For example, our system has access to features such as “it is non-anaphoric”, “it has as its antecedent a geopolitical entity”, or “I has as its antecedent I with the same speaker.” 1While this canonicalization could theoretically impair our ability to resolve, for example, reflexive pronouns, conjoining features with raw pronoun strings does not improve performance. We experimented with synonymy and hypernymy features from WordNet (Miller, 1995), but these did not empirically improve performance. 3.3 TRANSITIVE Model The BASIC model can capture many relationships between pairs of mentions, but cannot necessarily capture entity-level properties like those discussed in Section 2. We could of course model entities directly (Luo et al., 2004; Rahman and Ng, 2009), saying that each mention refers to some prior entity rather than to some prior mention. However, inference in this model would require reasoning about all possible partitions of mentions, which is computationally infeasible without resorting to severe approximations like a left</context>
+</contexts>
+<marker>Miller, 1995</marker>
+<rawString>George A. Miller. 1995. WordNet: A Lexical Database for English. Communications of the ACM, 38:39–41.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Vincent Ng</author>
+</authors>
+<title>Semantic class induction and coreference resolution.</title>
+<date>2007</date>
+<booktitle>In Proceedings of the Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="32658" citStr="Ng, 2007" startWordPosition="5447" endWordPosition="5448">et al., 1999) or properties of verb argument slots (Yao et al., 2011). We choose this kind of clustering for its relative simplicity and because it allows pronouns to have more informed properties (from their verbal context) than would be possible using a model that makes type-level decisions about nominals only. Though these specific cluster features are novel to coreference, previous work has used similar Figure 4: Examples of clusters produced by the NAIVEBAYES model on SRL-tagged data with pronouns discarded. types of fine-grained semantic class information (Hendrickx and Daelemans, 2007; Ng, 2007; Rahman and Ng, 2010). Other approaches incorporate information from other sources (Ponzetto and Strube, 2006) or compute heuristic scores for realvalued features based on a large corpus or the web (Dagan and Itai, 1990; Yang et al., 2005; Bansal and Klein, 2012). We use four different clusterings in our experiments, each with twenty clusters: dependency-parse-derived NAIVEBAYES clusters, semantic-role-derived CONDITIONAL clusters, SRL-derived NAIVEBAYES clusters generating a NOVERB token when r cannot be determined, and SRL-derived NAIVEBAYES clusters with all pronoun tuples discarded. Examp</context>
+</contexts>
+<marker>Ng, 2007</marker>
+<rawString>Vincent Ng. 2007. Semantic class induction and coreference resolution. In Proceedings of the Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Slav Petrov</author>
+<author>Leon Barrett</author>
+<author>Romain Thibaux</author>
+<author>Dan Klein</author>
+</authors>
+<title>Learning Accurate, Compact, and Interpretable Tree Annotation.</title>
+<date>2006</date>
+<booktitle>In Proceedings of the Conference on Computational Linguistics and the Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="33456" citStr="Petrov et al., 2006" startWordPosition="5564" endWordPosition="5567">ge corpus or the web (Dagan and Itai, 1990; Yang et al., 2005; Bansal and Klein, 2012). We use four different clusterings in our experiments, each with twenty clusters: dependency-parse-derived NAIVEBAYES clusters, semantic-role-derived CONDITIONAL clusters, SRL-derived NAIVEBAYES clusters generating a NOVERB token when r cannot be determined, and SRL-derived NAIVEBAYES clusters with all pronoun tuples discarded. Examples of the latter clusters are shown in Figure 4. Each clustering is learned for 30 iterations of EM over English Gigaword (Graff et al., 2007), parsed with the Berkeley Parser (Petrov et al., 2006) and with SRL determined by Senna (Collobert et al., 2011). Table 3 shows results of modeling these cluster properties. As in the case of oracle features, the PAIRPROPERTY and LEFTTORIGHT systems use the modes of the cluster posteriors, and the TRANSITIVE system uses the posteriors directly as the RZ. We see comparable performance from incorporating features in both an entity-level framework and a pairwise framework, though the TRANSI121 Prec. MUC F1 Prec. B3 F1 Prec. CEAFe F1 Avg. Rec. Rec. Rec. F1 BASIC 69.99 55.59 61.96 80.96 62.69 70.66 41.37 55.21 47.30 59.97 STANFORD 61.49 59.59 60.49 74</context>
+</contexts>
+<marker>Petrov, Barrett, Thibaux, Klein, 2006</marker>
+<rawString>Slav Petrov, Leon Barrett, Romain Thibaux, and Dan Klein. 2006. Learning Accurate, Compact, and Interpretable Tree Annotation. In Proceedings of the Conference on Computational Linguistics and the Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Simone Paolo Ponzetto</author>
+<author>Michael Strube</author>
+</authors>
+<title>Exploiting Semantic Role Labeling, WordNet and Wikipedia for Coreference Resolution.</title>
+<date>2006</date>
+<booktitle>In Proceedings of the North American Chapter of the Association of Computational Linguistics.</booktitle>
+<contexts>
+<context position="32769" citStr="Ponzetto and Strube, 2006" startWordPosition="5462" endWordPosition="5465"> clustering for its relative simplicity and because it allows pronouns to have more informed properties (from their verbal context) than would be possible using a model that makes type-level decisions about nominals only. Though these specific cluster features are novel to coreference, previous work has used similar Figure 4: Examples of clusters produced by the NAIVEBAYES model on SRL-tagged data with pronouns discarded. types of fine-grained semantic class information (Hendrickx and Daelemans, 2007; Ng, 2007; Rahman and Ng, 2010). Other approaches incorporate information from other sources (Ponzetto and Strube, 2006) or compute heuristic scores for realvalued features based on a large corpus or the web (Dagan and Itai, 1990; Yang et al., 2005; Bansal and Klein, 2012). We use four different clusterings in our experiments, each with twenty clusters: dependency-parse-derived NAIVEBAYES clusters, semantic-role-derived CONDITIONAL clusters, SRL-derived NAIVEBAYES clusters generating a NOVERB token when r cannot be determined, and SRL-derived NAIVEBAYES clusters with all pronoun tuples discarded. Examples of the latter clusters are shown in Figure 4. Each clustering is learned for 30 iterations of EM over Engli</context>
+</contexts>
+<marker>Ponzetto, Strube, 2006</marker>
+<rawString>Simone Paolo Ponzetto and Michael Strube. 2006. Exploiting Semantic Role Labeling, WordNet and Wikipedia for Coreference Resolution. In Proceedings of the North American Chapter of the Association of Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Sameer Pradhan</author>
+<author>Lance Ramshaw</author>
+<author>Mitchell Marcus</author>
+<author>Martha Palmer</author>
+<author>Ralph Weischedel</author>
+<author>Nianwen Xue</author>
+</authors>
+<title>CoNLL-2011 Shared Task: Modeling Unrestricted Coreference in OntoNotes.</title>
+<date>2011</date>
+<booktitle>In Proceedings of the Conference on Computational Natural Language Learning: Shared Task.</booktitle>
+<contexts>
+<context position="23093" citStr="Pradhan et al., 2011" startWordPosition="3894" endWordPosition="3897">proach is the system of Haghighi and Klein (2010), which also uses approximate global inference; however, theirs is an unsupervised, generative system and they attempt to directly model multinomials over words in each mention. Their system could be extended to handle property information like we do, but our system has many other advantages, such as freedom from a pre-specified list of entity types, the ability to use multiple input clusterings, and discriminative projection of clusters. 7 Experiments We use the datasets, experimental setup, and scoring program from the CoNLL 2011 shared task (Pradhan et al., 2011), based on the OntoNotes corpus (Hovy et al., 2006). We use the standard automatic parses and NER tags for each document. Our mentions are those output by the system of Lee et al. (2011); we also use their postprocessing to remove appositives, predicate nominatives, and singletons before evaluation. For each experiment, we report MUC (Vilain et al., 1995), B3 (Bagga and Baldwin, 1998), and CEAFe (Luo, 2005), as well as their average. Parameter settings. We take the regularization constant A = 0.001 and the parameters of our surrogate loss (c1, c2, c3) = (0.15, 2.5, 1) for all models.4 All mode</context>
+</contexts>
+<marker>Pradhan, Ramshaw, Marcus, Palmer, Weischedel, Xue, 2011</marker>
+<rawString>Sameer Pradhan, Lance Ramshaw, Mitchell Marcus, Martha Palmer, Ralph Weischedel, and Nianwen Xue. 2011. CoNLL-2011 Shared Task: Modeling Unrestricted Coreference in OntoNotes. In Proceedings of the Conference on Computational Natural Language Learning: Shared Task.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Karthik Raghunathan</author>
+<author>Heeyoung Lee</author>
+<author>Sudarshan Rangarajan</author>
+<author>Nathanael Chambers</author>
+<author>Mihai Surdeanu</author>
+<author>Dan Jurafsky</author>
+<author>Christopher Manning</author>
+</authors>
+<title>A MultiPass Sieve for Coreference Resolution.</title>
+<date>2010</date>
+<booktitle>In Proceedings of the Conference on Empirical Methods in Natural Language Processing.</booktitle>
+<contexts>
+<context position="1385" citStr="Raghunathan et al., 2010" startWordPosition="197" endWordPosition="200">ation to outperform a basic pairwise system. 1 Introduction The inclusion of entity-level features has been a driving force behind the development of many coreference resolution systems (Luo et al., 2004; Rahman and Ng, 2009; Haghighi and Klein, 2010; Lee et al., 2011). There is no polynomial-time dynamic program for inference in a model with arbitrary entity-level features, so systems that use such features typically rely on making decisions in a pipelined manner and sticking with them, operating greedily in a left-to-right fashion (Rahman and Ng, 2009) or in a multi-pass, sieve-like manner (Raghunathan et al., 2010). However, such systems may be locked into bad coreference decisions and are difficult to directly optimize for standard evaluation metrics. In this work, we present a new structured model of entity-level information designed to allow efficient inference. We use a log-linear model that can be expressed as a factor graph. Pairwise features appear in the model as unary factors, adjacent to nodes representing a choice of antecedent (or none) for each mention. Additional nodes model entity-level properties on a per-mention basis, and structural agreement factors softly drive properties of corefere</context>
+<context position="22231" citStr="Raghunathan et al., 2010" startWordPosition="3756" endWordPosition="3759">owing us to treat non-anaphoricity symmetrically with coreference as in Denis and Baldridge (2007) and Stoyanov and Eisner (2012). The model of Fernandes et al. (2012) also uses the single-parent constraint structurally, but with learning via latent perceptron and ILP-based one-best decoding rather than logistic regression and BP-based marginal computation. Our TRANSITIVE model is novel; while McCallum and Wellner (2004) proposed the idea of using attributes for mentions, they do not actually implement a model that does so. Other systems include entity-level information via handwritten rules (Raghunathan et al., 2010), induced rules (Yang et al., 2008), or features with learned weights (Luo et al., 2004; Rahman and Ng, 2011), but all of these systems freeze past coreference decisions in order to compute their entities. Most similar to our entity-level approach is the system of Haghighi and Klein (2010), which also uses approximate global inference; however, theirs is an unsupervised, generative system and they attempt to directly model multinomials over words in each mention. Their system could be extended to handle property information like we do, but our system has many other advantages, such as freedom </context>
+</contexts>
+<marker>Raghunathan, Lee, Rangarajan, Chambers, Surdeanu, Jurafsky, Manning, 2010</marker>
+<rawString>Karthik Raghunathan, Heeyoung Lee, Sudarshan Rangarajan, Nathanael Chambers, Mihai Surdeanu, Dan Jurafsky, and Christopher Manning. 2010. A MultiPass Sieve for Coreference Resolution. In Proceedings of the Conference on Empirical Methods in Natural Language Processing.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Altaf Rahman</author>
+<author>Vincent Ng</author>
+</authors>
+<title>Supervised Models for Coreference Resolution.</title>
+<date>2009</date>
+<booktitle>In Proceedings of the Conference on Empirical Methods in Natural Language Processing.</booktitle>
+<contexts>
+<context position="984" citStr="Rahman and Ng, 2009" startWordPosition="131" endWordPosition="134">ons. We describe an end-to-end discriminative probabilistic model for coreference that, along with standard pairwise features, enforces structural agreement constraints between specified properties of coreferent mentions. This model can be represented as a factor graph for each document that admits efficient inference via belief propagation. We show that our method can use entity-level information to outperform a basic pairwise system. 1 Introduction The inclusion of entity-level features has been a driving force behind the development of many coreference resolution systems (Luo et al., 2004; Rahman and Ng, 2009; Haghighi and Klein, 2010; Lee et al., 2011). There is no polynomial-time dynamic program for inference in a model with arbitrary entity-level features, so systems that use such features typically rely on making decisions in a pipelined manner and sticking with them, operating greedily in a left-to-right fashion (Rahman and Ng, 2009) or in a multi-pass, sieve-like manner (Raghunathan et al., 2010). However, such systems may be locked into bad coreference decisions and are difficult to directly optimize for standard evaluation metrics. In this work, we present a new structured model of entity-</context>
+<context position="3163" citStr="Rahman and Ng, 2009" startWordPosition="467" endWordPosition="470">models specific entity-level properties, rather than simply enforcing transitivity of pairwise decisions (Finkel and Manning, 2008; Song et al., 2012). We evaluate our system on the dataset from the CoNLL 2011 shared task using three different types of properties: synthetic oracle properties, entity phi features (number, gender, animacy, and NER type), and properties derived from unsupervised clusters targeting semantic type information. In all cases, our transitive model of entity properties equals or outperforms our pairwise system and our reimplementation of a previous entity-level system (Rahman and Ng, 2009). Our final system is competitive with the winner of the CoNLL 2011 shared task (Lee et al., 2011). 2 Example We begin with an example motivating our use of entity-level features. Consider the following excerpt concerning two famous auction houses: When looking for [art items], [people] go to [Sotheby’s and Christie’s] because [they]A believe [they]B can get the best price for [them]. The first three mentions are all distinct entities, theyA and theyB refer to people, and them refers to art items. The three pronouns are tricky to resolve 114 Proceedings of the 51st Annual Meeting of the Associ</context>
+<context position="7826" citStr="Rahman and Ng (2009)" startWordPosition="1258" endWordPosition="1261">ute C(a), the final set of coreference chains. While the features of this model factor over coreference links, this approach differs from classical pairwise systems such as Bengtson and Roth (2008) or Stoyanov et al. (2010). Because potential antecedents compete with each other and with the non-anaphoric hypothesis, the choice of ai actually represents a joint decision about i−1 pairwise links, as opposed to systems that use a pairwise binary classifier and a separate agglomeration step, which consider one link at a time during learning. This approach is similar to the mentionranking model of Rahman and Ng (2009). 3.2 Pairwise Features We now present the set of features fA used by our unary factors Ai. Each feature examines the anantecedent choices antecedent factors A1 a1 A2 a2 a3 a4 A3 A4 115 tecedent choice ai of the current mention as well as the observed information x in the document. For each of the features we present, two conjoined versions are included: one with an indicator of the type of the current mention being resolved, and one with an indicator of the types of the current and antecedent mentions. Mention types are either NOMINAL, PROPER, or, if the mention is pronominal, a canonicalized</context>
+<context position="10600" citStr="Rahman and Ng, 2009" startWordPosition="1688" endWordPosition="1691">edent I with the same speaker.” 1While this canonicalization could theoretically impair our ability to resolve, for example, reflexive pronouns, conjoining features with raw pronoun strings does not improve performance. We experimented with synonymy and hypernymy features from WordNet (Miller, 1995), but these did not empirically improve performance. 3.3 TRANSITIVE Model The BASIC model can capture many relationships between pairs of mentions, but cannot necessarily capture entity-level properties like those discussed in Section 2. We could of course model entities directly (Luo et al., 2004; Rahman and Ng, 2009), saying that each mention refers to some prior entity rather than to some prior mention. However, inference in this model would require reasoning about all possible partitions of mentions, which is computationally infeasible without resorting to severe approximations like a left-to-right inference method (Rahman and Ng, 2009). Instead, we would like to try to preserve the tractability of the BASIC model while still being able to exploit entity-level information. To do so, we will allow each mention to maintain its own distributions over values for a number of properties; these properties coul</context>
+<context position="21395" citStr="Rahman and Ng (2009)" startWordPosition="3624" endWordPosition="3627">ntions. Therefore, we use our BASIC model to prune antecedent choices for each ai in order to reduce the size of the factor graph that we must instantiate. Specifically, we prune links between pairs of mentions that are of mention distance more than 100, as well as values for ai that fall below a particular odds ratio threshold with respect to the best setting of that ai in the BASIC model; that is, those for which PBASIC (ai |x) maxj PBASIC (ai = j |x) ) is below a cutoff -y. 6 Related Work Our BASIC model is a mention-ranking approach resembling models used by Denis and Baldridge (2008) and Rahman and Ng (2009), though it is trained using a novel parameterized loss function. It is also similar to the MLN-JOINT(BF) model of Song et al. (2012), but we enforce the singleparent constraint at a deeper structural level, allowing us to treat non-anaphoricity symmetrically with coreference as in Denis and Baldridge (2007) and Stoyanov and Eisner (2012). The model of Fernandes et al. (2012) also uses the single-parent constraint structurally, but with learning via latent perceptron and ILP-based one-best decoding rather than logistic regression and BP-based marginal computation. Our TRANSITIVE model is novel</context>
+<context position="24230" citStr="Rahman and Ng (2009)" startWordPosition="4087" endWordPosition="4090">eters of our surrogate loss (c1, c2, c3) = (0.15, 2.5, 1) for all models.4 All models are trained for 20 iterations. We take the pruning threshold -y = −2. 7.1 Systems Besides our BASIC and TRANSITIVE systems, we evaluate a strictly pairwise system that incorporates property information by way of indicator features on the current mention’s most likely property value and the proposed antecedent’s most likely property value. We call this system PAIRPROPERTY; it is simply the BASIC system with an expanded feature set. Furthermore, we compare against a LEFTTORIGHT entity-level system like that of Rahman and Ng (2009).5 Decoding now operates in a sequential fashion, with BASIC features computed as before and entity features computed for each mention based on the coreference decisions made thus far. Following Rahman and Ng (2009), features for each property indicate whether the cur4Additional tuning of these hyper parameters did not significantly improve any of the models under any of the experimental conditions. 5Unfortunately, their publicly-available system is closedsource and performs poorly on the CoNLL shared task dataset, so direct comparison is difficult. �log 119 rent mention agrees with no mention</context>
+<context position="26838" citStr="Rahman and Ng (2009)" startWordPosition="4513" endWordPosition="4516">hat it may be based on the determinations of upstream models which produce posteriors naturally. A strength of our model is that it can accept such posteriors as input, naturally making use of this information in a model-based way. Table 1 shows development results averaged across ten train-test splits with m = 3 properties, each taking one of IDI = 5 values. We emphasize that these parameter settings give fairly weak oracle information: a document may have hundreds of clusters, so even in the absence of noise these oracle properties do not have high dis6Using gold entities for training as in Rahman and Ng (2009) resulted in a lower-performing system. 7We even do this for the BASIC model, since we found that performance of the pruned and retrained model was generally higher. 8Specifically, the distribution used is a Dirichlet with α = 3.5 for the true underlying cluster and α = 1 for other values, chosen so that 25% of samples from the distribution did not have the correct mode. Though these parameters affect the quality of the oracle information, varying them did not change the relative performance of the different models. NOISY ORACLE MUC B3 CEAFe Avg. BASIC 61.96 70.66 47.30 59.97 PAIRPROPERTY 66.3</context>
+</contexts>
+<marker>Rahman, Ng, 2009</marker>
+<rawString>Altaf Rahman and Vincent Ng. 2009. Supervised Models for Coreference Resolution. In Proceedings of the Conference on Empirical Methods in Natural Language Processing.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Altaf Rahman</author>
+<author>Vincent Ng</author>
+</authors>
+<title>Inducing FineGrained Semantic Classes via Hierarchical and Collective Classification.</title>
+<date>2010</date>
+<booktitle>In Proceedings of the International Conference on Computational Linguistics.</booktitle>
+<contexts>
+<context position="32680" citStr="Rahman and Ng, 2010" startWordPosition="5449" endWordPosition="5453">99) or properties of verb argument slots (Yao et al., 2011). We choose this kind of clustering for its relative simplicity and because it allows pronouns to have more informed properties (from their verbal context) than would be possible using a model that makes type-level decisions about nominals only. Though these specific cluster features are novel to coreference, previous work has used similar Figure 4: Examples of clusters produced by the NAIVEBAYES model on SRL-tagged data with pronouns discarded. types of fine-grained semantic class information (Hendrickx and Daelemans, 2007; Ng, 2007; Rahman and Ng, 2010). Other approaches incorporate information from other sources (Ponzetto and Strube, 2006) or compute heuristic scores for realvalued features based on a large corpus or the web (Dagan and Itai, 1990; Yang et al., 2005; Bansal and Klein, 2012). We use four different clusterings in our experiments, each with twenty clusters: dependency-parse-derived NAIVEBAYES clusters, semantic-role-derived CONDITIONAL clusters, SRL-derived NAIVEBAYES clusters generating a NOVERB token when r cannot be determined, and SRL-derived NAIVEBAYES clusters with all pronoun tuples discarded. Examples of the latter clus</context>
+</contexts>
+<marker>Rahman, Ng, 2010</marker>
+<rawString>Altaf Rahman and Vincent Ng. 2010. Inducing FineGrained Semantic Classes via Hierarchical and Collective Classification. In Proceedings of the International Conference on Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Altaf Rahman</author>
+<author>Vincent Ng</author>
+</authors>
+<title>Narrowing the Modeling Gap: A Cluster-Ranking Approach to Coreference Resolution.</title>
+<date>2011</date>
+<journal>Journal of Artificial Intelligence Research,</journal>
+<volume>40</volume>
+<issue>1</issue>
+<contexts>
+<context position="22340" citStr="Rahman and Ng, 2011" startWordPosition="3775" endWordPosition="3778">d Eisner (2012). The model of Fernandes et al. (2012) also uses the single-parent constraint structurally, but with learning via latent perceptron and ILP-based one-best decoding rather than logistic regression and BP-based marginal computation. Our TRANSITIVE model is novel; while McCallum and Wellner (2004) proposed the idea of using attributes for mentions, they do not actually implement a model that does so. Other systems include entity-level information via handwritten rules (Raghunathan et al., 2010), induced rules (Yang et al., 2008), or features with learned weights (Luo et al., 2004; Rahman and Ng, 2011), but all of these systems freeze past coreference decisions in order to compute their entities. Most similar to our entity-level approach is the system of Haghighi and Klein (2010), which also uses approximate global inference; however, theirs is an unsupervised, generative system and they attempt to directly model multinomials over words in each mention. Their system could be extended to handle property information like we do, but our system has many other advantages, such as freedom from a pre-specified list of entity types, the ability to use multiple input clusterings, and discriminative </context>
+</contexts>
+<marker>Rahman, Ng, 2011</marker>
+<rawString>Altaf Rahman and Vincent Ng. 2011. Narrowing the Modeling Gap: A Cluster-Ranking Approach to Coreference Resolution. Journal of Artificial Intelligence Research, 40(1):469–521, January.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Mats Rooth</author>
+<author>Stefan Riezler</author>
+<author>Detlef Prescher</author>
+<author>Glenn Carroll</author>
+<author>Franz Beil</author>
+</authors>
+<title>Inducing a Semantically Annotated Lexicon via EM-Based Clustering.</title>
+<date>1999</date>
+<booktitle>In Proceedings of the Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="32063" citStr="Rooth et al., 1999" startWordPosition="5354" endWordPosition="5357">ut pairs (n, r) of a noun head n and a string r which contains the semantic role of n (or some approximation thereof) conjoined with its governor. Two different algorithms are used to cluster these pairs: a NAIVEBAYES model, where c generates n and r, and a CONDITIONAL model, where c is generated conditioned on r and then n is generated from c. Parameters for each can be learned with the expectation maximization (EM) algorithm (Dempster et al., 1977), with symmetry broken by a small amount of random noise at initialization. Similar models have been used to learn subcategorization information (Rooth et al., 1999) or properties of verb argument slots (Yao et al., 2011). We choose this kind of clustering for its relative simplicity and because it allows pronouns to have more informed properties (from their verbal context) than would be possible using a model that makes type-level decisions about nominals only. Though these specific cluster features are novel to coreference, previous work has used similar Figure 4: Examples of clusters produced by the NAIVEBAYES model on SRL-tagged data with pronouns discarded. types of fine-grained semantic class information (Hendrickx and Daelemans, 2007; Ng, 2007; Rah</context>
+</contexts>
+<marker>Rooth, Riezler, Prescher, Carroll, Beil, 1999</marker>
+<rawString>Mats Rooth, Stefan Riezler, Detlef Prescher, Glenn Carroll, and Franz Beil. 1999. Inducing a Semantically Annotated Lexicon via EM-Based Clustering. In Proceedings of the Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>David A Smith</author>
+<author>Jason Eisner</author>
+</authors>
+<title>Dependency Parsing by Belief Propagation.</title>
+<date>2008</date>
+<booktitle>In Proceedings of the Conference on Empirical Methods in Natural Language Processing.</booktitle>
+<contexts>
+<context position="19952" citStr="Smith and Eisner, 2008" startWordPosition="3366" endWordPosition="3369">ut.3 For learning, the gradient takes the standard form of the gradient of a log-linear model, a difference of expected feature counts under the gold annotation and under no annotation. This requires computing marginals P&apos;(ai|x) for each mention i, but because the model already factors this way, this step is easy. The TRANSITIVE model is more complex. Exact inference is intractable due to the E factors that couple all of the ai by way of the pi nodes. However, we can compute approximate marginals for the ai, pi, and ri using belief propagation. BP has been effectively used on other NLP tasks (Smith and Eisner, 2008; Burkett and Klein, 2012), and is effective in cases such as this where the model is largely driven by non-loopy factors (here, the Ai). From marginals over each node, we can compute the necessary gradient and decode as before: aˆ = arg max Pˆ(a|x) a 3One could use ILP-based decoding in the style of Finkel and Manning (2008) and Song et al. (2012) to attempt to explicitly find the optimal C with choice of a marginalized out, but we did not explore this option. 118 This corresponds to minimum-risk decoding with respect to the Hamming loss over antecedence predictions. Pruning. The TRANSITIVE m</context>
+</contexts>
+<marker>Smith, Eisner, 2008</marker>
+<rawString>David A. Smith and Jason Eisner. 2008. Dependency Parsing by Belief Propagation. In Proceedings of the Conference on Empirical Methods in Natural Language Processing.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yang Song</author>
+<author>Jing Jiang</author>
+<author>Wayne Xin Zhao</author>
+<author>Sujian Li</author>
+<author>Houfeng Wang</author>
+</authors>
+<title>Joint Learning for Coreference Resolution with Markov Logic.</title>
+<date>2012</date>
+<booktitle>In Proceedings of the Conference on Empirical Methods in Natural Language Processing.</booktitle>
+<contexts>
+<context position="2693" citStr="Song et al., 2012" startWordPosition="394" endWordPosition="397"> their partial membership in various coreference chains, so that information about entity-level properties is decentralized and propagated across individual mentions, and we never need to explicitly instantiate entities. Exact inference in this factor graph is intractable, but efficient approximate inference can be carried out with belief propagation. Our model is the first discriminatively-trained model that both makes joint decisions over an entire document and models specific entity-level properties, rather than simply enforcing transitivity of pairwise decisions (Finkel and Manning, 2008; Song et al., 2012). We evaluate our system on the dataset from the CoNLL 2011 shared task using three different types of properties: synthetic oracle properties, entity phi features (number, gender, animacy, and NER type), and properties derived from unsupervised clusters targeting semantic type information. In all cases, our transitive model of entity properties equals or outperforms our pairwise system and our reimplementation of a previous entity-level system (Rahman and Ng, 2009). Our final system is competitive with the winner of the CoNLL 2011 shared task (Lee et al., 2011). 2 Example We begin with an exa</context>
+<context position="8714" citStr="Song et al. (2012)" startWordPosition="1409" endWordPosition="1412">he document. For each of the features we present, two conjoined versions are included: one with an indicator of the type of the current mention being resolved, and one with an indicator of the types of the current and antecedent mentions. Mention types are either NOMINAL, PROPER, or, if the mention is pronominal, a canonicalized version of the pronoun abstracting away case.1 Several features, especially those based on the precise constructs (apposition, etc.) and those incorporating phi feature information, are computed using the machinery in Lee et al. (2011). Other features were inspired by Song et al. (2012) and Rahman and Ng (2009). Anaphoricity features: Indicator of anaphoricity, indicator on definiteness. Configurational features: Indicator on distance in mentions (capped at 10), indicator on distance in sentences (capped at 10), does the antecedent c-command the current mention, are the two mentions in a subject/object construction, are the mentions nested, are the mentions in deterministic appositive/role appositive/predicate nominative/relative pronoun constructions. Match features: Is one mention an acronym of the other, head match, head contained (each way), string match, string containe</context>
+<context position="20302" citStr="Song et al. (2012)" startWordPosition="3430" endWordPosition="3433">Exact inference is intractable due to the E factors that couple all of the ai by way of the pi nodes. However, we can compute approximate marginals for the ai, pi, and ri using belief propagation. BP has been effectively used on other NLP tasks (Smith and Eisner, 2008; Burkett and Klein, 2012), and is effective in cases such as this where the model is largely driven by non-loopy factors (here, the Ai). From marginals over each node, we can compute the necessary gradient and decode as before: aˆ = arg max Pˆ(a|x) a 3One could use ILP-based decoding in the style of Finkel and Manning (2008) and Song et al. (2012) to attempt to explicitly find the optimal C with choice of a marginalized out, but we did not explore this option. 118 This corresponds to minimum-risk decoding with respect to the Hamming loss over antecedence predictions. Pruning. The TRANSITIVE model requires instantiating a factor for each potential setting of each ai. This factor graph grows quadratically in the size of the document, and even approximate inference becomes slow when a document contains over 200 mentions. Therefore, we use our BASIC model to prune antecedent choices for each ai in order to reduce the size of the factor gra</context>
+<context position="21528" citStr="Song et al. (2012)" startWordPosition="3647" endWordPosition="3650">we must instantiate. Specifically, we prune links between pairs of mentions that are of mention distance more than 100, as well as values for ai that fall below a particular odds ratio threshold with respect to the best setting of that ai in the BASIC model; that is, those for which PBASIC (ai |x) maxj PBASIC (ai = j |x) ) is below a cutoff -y. 6 Related Work Our BASIC model is a mention-ranking approach resembling models used by Denis and Baldridge (2008) and Rahman and Ng (2009), though it is trained using a novel parameterized loss function. It is also similar to the MLN-JOINT(BF) model of Song et al. (2012), but we enforce the singleparent constraint at a deeper structural level, allowing us to treat non-anaphoricity symmetrically with coreference as in Denis and Baldridge (2007) and Stoyanov and Eisner (2012). The model of Fernandes et al. (2012) also uses the single-parent constraint structurally, but with learning via latent perceptron and ILP-based one-best decoding rather than logistic regression and BP-based marginal computation. Our TRANSITIVE model is novel; while McCallum and Wellner (2004) proposed the idea of using attributes for mentions, they do not actually implement a model that d</context>
+</contexts>
+<marker>Song, Jiang, Zhao, Li, Wang, 2012</marker>
+<rawString>Yang Song, Jing Jiang, Wayne Xin Zhao, Sujian Li, and Houfeng Wang. 2012. Joint Learning for Coreference Resolution with Markov Logic. In Proceedings of the Conference on Empirical Methods in Natural Language Processing.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Veselin Stoyanov</author>
+<author>Jason Eisner</author>
+</authors>
+<title>Easy-first Coreference Resolution.</title>
+<date>2012</date>
+<booktitle>In Proceedings of the International Conference on Computational Linguistics.</booktitle>
+<contexts>
+<context position="21735" citStr="Stoyanov and Eisner (2012)" startWordPosition="3679" endWordPosition="3682"> respect to the best setting of that ai in the BASIC model; that is, those for which PBASIC (ai |x) maxj PBASIC (ai = j |x) ) is below a cutoff -y. 6 Related Work Our BASIC model is a mention-ranking approach resembling models used by Denis and Baldridge (2008) and Rahman and Ng (2009), though it is trained using a novel parameterized loss function. It is also similar to the MLN-JOINT(BF) model of Song et al. (2012), but we enforce the singleparent constraint at a deeper structural level, allowing us to treat non-anaphoricity symmetrically with coreference as in Denis and Baldridge (2007) and Stoyanov and Eisner (2012). The model of Fernandes et al. (2012) also uses the single-parent constraint structurally, but with learning via latent perceptron and ILP-based one-best decoding rather than logistic regression and BP-based marginal computation. Our TRANSITIVE model is novel; while McCallum and Wellner (2004) proposed the idea of using attributes for mentions, they do not actually implement a model that does so. Other systems include entity-level information via handwritten rules (Raghunathan et al., 2010), induced rules (Yang et al., 2008), or features with learned weights (Luo et al., 2004; Rahman and Ng, </context>
+</contexts>
+<marker>Stoyanov, Eisner, 2012</marker>
+<rawString>Veselin Stoyanov and Jason Eisner. 2012. Easy-first Coreference Resolution. In Proceedings of the International Conference on Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Veselin Stoyanov</author>
+<author>Claire Cardie</author>
+<author>Nathan Gilbert</author>
+<author>Ellen Riloff</author>
+<author>David Buttler</author>
+<author>David Hysom</author>
+</authors>
+<title>Coreference Resolution with Reconcile.</title>
+<date>2010</date>
+<booktitle>In Proceedings of the Association for Computational Linguistics: Short Papers.</booktitle>
+<contexts>
+<context position="7429" citStr="Stoyanov et al. (2010)" startWordPosition="1190" endWordPosition="1193"> include pairwise features based on mention i and the chosen antecedent ai, since information about each mention is contained in x. Because the model factors completely over the individual ai, these feature functions fA can be expressed as unary factors Ai (see Figure 1), with Ai(j) a exp (wTfA(i, j, x)). Given a setting of w, we can determine aˆ = arg maxa P (a|x) and then deterministically compute C(a), the final set of coreference chains. While the features of this model factor over coreference links, this approach differs from classical pairwise systems such as Bengtson and Roth (2008) or Stoyanov et al. (2010). Because potential antecedents compete with each other and with the non-anaphoric hypothesis, the choice of ai actually represents a joint decision about i−1 pairwise links, as opposed to systems that use a pairwise binary classifier and a separate agglomeration step, which consider one link at a time during learning. This approach is similar to the mentionranking model of Rahman and Ng (2009). 3.2 Pairwise Features We now present the set of features fA used by our unary factors Ai. Each feature examines the anantecedent choices antecedent factors A1 a1 A2 a2 a3 a4 A3 A4 115 tecedent choice a</context>
+</contexts>
+<marker>Stoyanov, Cardie, Gilbert, Riloff, Buttler, Hysom, 2010</marker>
+<rawString>Veselin Stoyanov, Claire Cardie, Nathan Gilbert, Ellen Riloff, David Buttler, and David Hysom. 2010. Coreference Resolution with Reconcile. In Proceedings of the Association for Computational Linguistics: Short Papers.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Marc Vilain</author>
+<author>John Burger</author>
+<author>John Aberdeen</author>
+<author>Dennis Connolly</author>
+<author>Lynette Hirschman</author>
+</authors>
+<title>A ModelTheoretic Coreference Scoring Scheme.</title>
+<date>1995</date>
+<booktitle>In Proceedings of the Conference on Message Understanding.</booktitle>
+<contexts>
+<context position="18877" citStr="Vilain et al., 1995" startWordPosition="3175" endWordPosition="3178"> in optimizing with respect to a coreference-specific loss function. To this end, we will use softmax-margin (Gimpel and Smith, 2010), which augments the probability of each example with a term proportional to its loss, pushing the model to assign less mass to highly incorrect examples. We modify Equation 1 to use a new probability distribution P&apos; instead of P, where P&apos;(a|xi) ∝ P(a|xi) exp (l(a, C)) and l(a, C) is a loss function. In order to perform inference efficiently, l(a, C) must decompose linearly across mentions: l(a, C) = Pni=1 l(ai, C). Commonly-used coreference metrics such as MUC (Vilain et al., 1995) and B3 (Bagga and Baldwin, 1998) do not have this property, so we instead make use of a parameterized loss function that does and fit the parameters to give good performance. Specifically, we take l(a, C) = Xn [c1I(K1(ai, C)) + c2I(K2(ai, C)) i=1 + c3ff(K3(ai, C))] where c1, c2, and c3 are real-valued weights, K1 denotes the event that ai is falsely anaphoric when aˆ = arg max P(a|x) a We then report the corresponding chains C(a) as the system output.3 For learning, the gradient takes the standard form of the gradient of a log-linear model, a difference of expected feature counts under the go</context>
+<context position="23450" citStr="Vilain et al., 1995" startWordPosition="3956" endWordPosition="3959"> from a pre-specified list of entity types, the ability to use multiple input clusterings, and discriminative projection of clusters. 7 Experiments We use the datasets, experimental setup, and scoring program from the CoNLL 2011 shared task (Pradhan et al., 2011), based on the OntoNotes corpus (Hovy et al., 2006). We use the standard automatic parses and NER tags for each document. Our mentions are those output by the system of Lee et al. (2011); we also use their postprocessing to remove appositives, predicate nominatives, and singletons before evaluation. For each experiment, we report MUC (Vilain et al., 1995), B3 (Bagga and Baldwin, 1998), and CEAFe (Luo, 2005), as well as their average. Parameter settings. We take the regularization constant A = 0.001 and the parameters of our surrogate loss (c1, c2, c3) = (0.15, 2.5, 1) for all models.4 All models are trained for 20 iterations. We take the pruning threshold -y = −2. 7.1 Systems Besides our BASIC and TRANSITIVE systems, we evaluate a strictly pairwise system that incorporates property information by way of indicator features on the current mention’s most likely property value and the proposed antecedent’s most likely property value. We call this </context>
+</contexts>
+<marker>Vilain, Burger, Aberdeen, Connolly, Hirschman, 1995</marker>
+<rawString>Marc Vilain, John Burger, John Aberdeen, Dennis Connolly, and Lynette Hirschman. 1995. A ModelTheoretic Coreference Scoring Scheme. In Proceedings of the Conference on Message Understanding.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Xiaofeng Yang</author>
+<author>Jian Su</author>
+<author>Chew Lim Tan</author>
+</authors>
+<title>Improving Pronoun Resolution Using Statistics-Based Semantic Compatibility Information.</title>
+<date>2005</date>
+<booktitle>In Proceedings of the Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="32897" citStr="Yang et al., 2005" startWordPosition="5486" endWordPosition="5489">would be possible using a model that makes type-level decisions about nominals only. Though these specific cluster features are novel to coreference, previous work has used similar Figure 4: Examples of clusters produced by the NAIVEBAYES model on SRL-tagged data with pronouns discarded. types of fine-grained semantic class information (Hendrickx and Daelemans, 2007; Ng, 2007; Rahman and Ng, 2010). Other approaches incorporate information from other sources (Ponzetto and Strube, 2006) or compute heuristic scores for realvalued features based on a large corpus or the web (Dagan and Itai, 1990; Yang et al., 2005; Bansal and Klein, 2012). We use four different clusterings in our experiments, each with twenty clusters: dependency-parse-derived NAIVEBAYES clusters, semantic-role-derived CONDITIONAL clusters, SRL-derived NAIVEBAYES clusters generating a NOVERB token when r cannot be determined, and SRL-derived NAIVEBAYES clusters with all pronoun tuples discarded. Examples of the latter clusters are shown in Figure 4. Each clustering is learned for 30 iterations of EM over English Gigaword (Graff et al., 2007), parsed with the Berkeley Parser (Petrov et al., 2006) and with SRL determined by Senna (Collob</context>
+</contexts>
+<marker>Yang, Su, Tan, 2005</marker>
+<rawString>Xiaofeng Yang, Jian Su, and Chew Lim Tan. 2005. Improving Pronoun Resolution Using Statistics-Based Semantic Compatibility Information. In Proceedings of the Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Xiaofeng Yang</author>
+<author>Jian Su</author>
+<author>Jun Lang</author>
+<author>Chew L Tan</author>
+<author>Ting Liu</author>
+<author>Sheng Li</author>
+</authors>
+<title>An Entity-Mention Model for Coreference Resolution with Inductive Logic Programming.</title>
+<date>2008</date>
+<booktitle>In Proceedings of the Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="22266" citStr="Yang et al., 2008" startWordPosition="3762" endWordPosition="3765">ically with coreference as in Denis and Baldridge (2007) and Stoyanov and Eisner (2012). The model of Fernandes et al. (2012) also uses the single-parent constraint structurally, but with learning via latent perceptron and ILP-based one-best decoding rather than logistic regression and BP-based marginal computation. Our TRANSITIVE model is novel; while McCallum and Wellner (2004) proposed the idea of using attributes for mentions, they do not actually implement a model that does so. Other systems include entity-level information via handwritten rules (Raghunathan et al., 2010), induced rules (Yang et al., 2008), or features with learned weights (Luo et al., 2004; Rahman and Ng, 2011), but all of these systems freeze past coreference decisions in order to compute their entities. Most similar to our entity-level approach is the system of Haghighi and Klein (2010), which also uses approximate global inference; however, theirs is an unsupervised, generative system and they attempt to directly model multinomials over words in each mention. Their system could be extended to handle property information like we do, but our system has many other advantages, such as freedom from a pre-specified list of entity</context>
+</contexts>
+<marker>Yang, Su, Lang, Tan, Liu, Li, 2008</marker>
+<rawString>Xiaofeng Yang, Jian Su, Jun Lang, Chew L. Tan, Ting Liu, and Sheng Li. 2008. An Entity-Mention Model for Coreference Resolution with Inductive Logic Programming. In Proceedings of the Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Limin Yao</author>
+<author>Aria Haghighi</author>
+<author>Sebastian Riedel</author>
+<author>Andrew McCallum</author>
+</authors>
+<title>Structured Relation Discovery Using Generative Models.</title>
+<date>2011</date>
+<booktitle>In Proceedings of the Conference on Empirical Methods in Natural Language Processing.</booktitle>
+<contexts>
+<context position="32119" citStr="Yao et al., 2011" startWordPosition="5364" endWordPosition="5367">ains the semantic role of n (or some approximation thereof) conjoined with its governor. Two different algorithms are used to cluster these pairs: a NAIVEBAYES model, where c generates n and r, and a CONDITIONAL model, where c is generated conditioned on r and then n is generated from c. Parameters for each can be learned with the expectation maximization (EM) algorithm (Dempster et al., 1977), with symmetry broken by a small amount of random noise at initialization. Similar models have been used to learn subcategorization information (Rooth et al., 1999) or properties of verb argument slots (Yao et al., 2011). We choose this kind of clustering for its relative simplicity and because it allows pronouns to have more informed properties (from their verbal context) than would be possible using a model that makes type-level decisions about nominals only. Though these specific cluster features are novel to coreference, previous work has used similar Figure 4: Examples of clusters produced by the NAIVEBAYES model on SRL-tagged data with pronouns discarded. types of fine-grained semantic class information (Hendrickx and Daelemans, 2007; Ng, 2007; Rahman and Ng, 2010). Other approaches incorporate informat</context>
+</contexts>
+<marker>Yao, Haghighi, Riedel, McCallum, 2011</marker>
+<rawString>Limin Yao, Aria Haghighi, Sebastian Riedel, and Andrew McCallum. 2011. Structured Relation Discovery Using Generative Models. In Proceedings of the Conference on Empirical Methods in Natural Language Processing.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

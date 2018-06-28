@@ -1,0 +1,1749 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.000000">
+<title confidence="0.999122">
+A Comparison of Loopy Belief Propagation and Dual Decomposition for
+Integrated CCG Supertagging and Parsing
+</title>
+<author confidence="0.997399">
+Michael Auli Adam Lopez
+</author>
+<affiliation confidence="0.997328">
+School of Informatics HLTCOE
+University of Edinburgh Johns Hopkins University
+</affiliation>
+<email confidence="0.996712">
+m.auli@sms.ed.ac.uk alopez@cs.jhu.edu
+</email>
+<sectionHeader confidence="0.981893" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.998630105263158">
+Via an oracle experiment, we show that the
+upper bound on accuracy of a CCG parser
+is significantly lowered when its search space
+is pruned using a supertagger, though the su-
+pertagger also prunes many bad parses. In-
+spired by this analysis, we design a single
+model with both supertagging and parsing fea-
+tures, rather than separating them into dis-
+tinct models chained together in a pipeline.
+To overcome the resulting increase in com-
+plexity, we experiment with both belief prop-
+agation and dual decomposition approaches to
+inference, the first empirical comparison of
+these algorithms that we are aware of on a
+structured natural language processing prob-
+lem. On CCGbank we achieve a labelled de-
+pendency F-measure of 88.8% on gold POS
+tags, and 86.7% on automatic part-of-speeoch
+tags, the best reported results for this task.
+</bodyText>
+<sectionHeader confidence="0.995081" genericHeader="keywords">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.999725829787234">
+Accurate and efficient parsing of Combinatorial Cat-
+egorial Grammar (CCG; Steedman, 2000) is a long-
+standing problem in computational linguistics, due
+to the complexities associated its mild context sen-
+sitivity. Even for practical CCG that are strongly
+context-free (Fowler and Penn, 2010), parsing is
+much harder than with Penn Treebank-style context-
+free grammars, with vast numbers of nonterminal
+categories leading to increased grammar constants.
+Where a typical Penn Treebank grammar may have
+fewer than 100 nonterminals (Hockenmaier and
+Steedman, 2002), we found that a CCG grammar
+derived from CCGbank contained over 1500. The
+same grammar assigns an average of 22 lexical cate-
+gories per word (Clark and Curran, 2004a), resulting
+in an enormous space of possible derivations.
+The most successful approach to CCG parsing is
+based on a pipeline strategy (§2). First, we tag (or
+multitag) each word of the sentence with a lexical
+category using a supertagger, a sequence model over
+these categories (Bangalore and Joshi, 1999; Clark,
+2002). Second, we parse the sentence under the
+requirement that the lexical categories are fixed to
+those preferred by the supertagger. Variations on
+this approach drive the widely-used, broad coverage
+C&amp;C parser (Clark and Curran, 2004a; Clark and
+Curran, 2007; Kummerfeld et al., 2010). However,
+it fails when the supertagger makes errors. We show
+experimentally that this pipeline significantly lowers
+the upper bound on parsing accuracy (§3).
+The same experiment shows that the supertag-
+ger prunes many bad parses. So, while we want to
+avoid the error propagation inherent to a pipeline,
+ideally we still want to benefit from the key insight
+of supertagging: that a sequence model over lexi-
+cal categories can be quite accurate. Our solution
+is to combine the features of both the supertagger
+and the parser into a single, less aggressively pruned
+model. The challenge with this model is its pro-
+hibitive complexity, which we address with approx-
+imate methods: dual decomposition and belief prop-
+agation (§4). We present the first side-by-side com-
+parison of these algorithms on an NLP task of this
+complexity, measuring accuracy, convergence be-
+havior, and runtime. In both cases our model signifi-
+cantly outperforms the pipeline approach, leading to
+the best published results in CCG parsing (§5).
+</bodyText>
+<page confidence="0.433159">
+470
+</page>
+<note confidence="0.9971325">
+Proceedings of the 49th Annual Meeting of the Association for Computational Linguistics, pages 470–480,
+Portland, Oregon, June 19-24, 2011. c�2011 Association for Computational Linguistics
+</note>
+<sectionHeader confidence="0.639309" genericHeader="introduction">
+2 CCG and Supertagging
+</sectionHeader>
+<bodyText confidence="0.999340941176471">
+CCG is a lexicalized grammar formalism encoding
+for each word lexical categories that are either ba-
+sic (eg. NN, JJ) or complex. Complex lexical cat-
+egories specify the number and directionality of ar-
+guments. For example, one lexical category for the
+verb like is (S\NP)/NP, specifying the first argu-
+ment as an NP to the right and the second as an NP
+to the left; there are over 100 lexical categories for
+like in our lexicon. In parsing, adjacent spans are
+combined using a small number of binary combina-
+tory rules like forward application or composition
+(Steedman, 2000; Fowler and Penn, 2010). In the
+first derivation below, (S\NP)/NP and NP com-
+bine to form the spanning category S\NP, which
+only requires an NP to its left to form a complete
+sentence-spanning S. The second derivation uses
+type-raising to change the category type of I.
+</bodyText>
+<equation confidence="0.378883666666667">
+I like tea
+S
+S
+</equation>
+<bodyText confidence="0.999918212765957">
+As can be inferred from even this small example,
+a key difficulty in parsing CCG is that the number
+of categories quickly becomes extremely large, and
+there are typically many ways to analyze every span
+of a sentence.
+Supertagging (Bangalore and Joshi, 1999; Clark,
+2002) treats the assignment of lexical categories (or
+supertags) as a sequence tagging problem. Because
+they do this with high accuracy, they are often ex-
+ploited to prune the parser’s search space: the parser
+only considers lexical categories with high posterior
+probability (or other figure of merit) under the su-
+pertagging model (Clark and Curran, 2004a). The
+posterior probabilities are then discarded; it is the
+extensive pruning of lexical categories that leads to
+substantially faster parsing times.
+Pruning the categories in advance this way has a
+specific failure mode: sometimes it is not possible
+to produce a sentence-spanning derivation from the
+tag sequences preferred by the supertagger, since it
+does not enforce grammaticality. A workaround for
+this problem is the adaptive supertagging (AST) ap-
+proach of Clark and Curran (2004a). It is based on
+a step function over supertagger beam widths, re-
+laxing the pruning threshold for lexical categories
+only if the parser fails to find an analysis. The pro-
+cess either succeeds and returns a parse after some
+iteration or gives up after a predefined number of it-
+erations. As Clark and Curran (2004a) show, most
+sentences can be parsed with a very small number of
+supertags per word. However, the technique is inher-
+ently approximate: it will return a lower probability
+parse under the parsing model if a higher probabil-
+ity parse can only be constructed from a supertag
+sequence returned by a subsequent iteration. In this
+way it prioritizes speed over exactness, although the
+tradeoff can be modified by adjusting the beam step
+function. Regardless, the effect of the approxima-
+tion is unbounded.
+We will also explore reverse adaptive supertag-
+ging, a much less aggressive pruning method that
+seeks only to make sentences parseable when they
+otherwise would not be due to an impractically large
+search space. Reverse AST starts with a wide beam,
+narrowing it at each iteration only if a maximum
+chart size is exceeded. In this way it prioritizes ex-
+actness over speed.
+</bodyText>
+<sectionHeader confidence="0.984525" genericHeader="method">
+3 Oracle Parsing
+</sectionHeader>
+<bodyText confidence="0.99650675">
+What is the effect of these approximations? To
+answer this question we computed oracle best and
+worst values for labelled dependency F-score using
+the algorithm of Huang (2008) on the hybrid model
+of Clark and Curran (2007), the best model of their
+C&amp;C parser. We computed the oracle on our devel-
+opment data, Section 00 of CCGbank (Hockenmaier
+and Steedman, 2007), using both AST and Reverse
+AST beams settings shown in Table 1.
+The results (Table 2) show that the oracle best
+accuracy for reverse AST is more than 3% higher
+than the aggressive AST pruning.1 In fact, it is al-
+most as high as the upper bound oracle accuracy of
+97.73% obtained using perfect supertags—in other
+words, the search space for reverse AST is theoreti-
+cally near-optimal.2 We also observe that the oracle
+1The numbers reported here and in later sections differ slightly
+from those in a previously circulated draft of this paper, for
+two reasons: we evaluate only on sentences for which a parse
+was returned instead of all parses, to enable direct comparison
+with Clark and Curran (2007); and we use their hybrid model
+instead of their normal-form model, except where noted. De-
+spite these changes our main findings remained unchanged.
+2This idealized oracle reproduces a result from Clark and Cur-
+</bodyText>
+<figure confidence="0.992944909090909">
+I like tea
+NP (S\NP)/NP NP
+&gt;
+S\NP
+�
+NP (S\NP)/NP NP
+&gt;�
+S/(S\NP)
+S/NP
+&gt;B
+&gt;
+</figure>
+<page confidence="0.615095">
+471
+</page>
+<table confidence="0.9969146">
+Condition Parameter Iteration 1 2 3 4 5
+AST β (beam width) 0.075 0.03 0.01 0.005 0.001
+k (dictionary cutoff) 20 20 20 20 150
+β 0.001 0.005 0.01 0.03 0.075
+Reverse k 150 20 20 20 20
+</table>
+<tableCaption confidence="0.973276">
+Table 1: Beam step function used for standard (AST) and less aggressive (Reverse) AST throughout our experiments.
+Parameter β is a beam threshold while k bounds the use of a part-of-speech tag dictionary, which is used for words
+seen less than k times.
+</tableCaption>
+<table confidence="0.999362">
+Viterbi F-score Oracle Max F-score Oracle Min F-score
+LF LP LR LF LP LR LF LP LR cat/word
+AST 87.38 87.83 86.93 94.35 95.24 93.49 54.31 54.81 53.83 1.3-3.6
+Reverse 87.36 87.55 87.17 97.65 98.21 97.09 18.09 17.75 18.43 3.6-1.3
+</table>
+<tableCaption confidence="0.931432333333333">
+Table 2: Comparison of adaptive supertagging (AST) and a less restrictive setting (Reverse) with Viterbi and oracle
+F-scores on CCGbank Section 00. The table shows the labelled F-score (LF), precision (LP) and recall (LR) and the
+the number of lexical categories per word used (from first to last parsing attempt).
+</tableCaption>
+<figure confidence="0.984055000000001">
+87400 89.8 00�� 96
+84500 .5�� 5��
+e
+ll
+e
+-­‐F
+esr
+d
+M
+87200
+95
+0��
+89.6
+87000
+95
+5��
+82
+84000 9
+.��
+89.4
+86800
+94
+0��
+89.2
+94
+5��
+85000 83
+97.5��
+96.
+86600
+89.0
+e693
+86400
+88.8
+ea s u
+83500
+86200
+Lab
+e5F-‐­
+86000
+88.6
+89700
+9sco
+85800
+del�� sore��
+88.4
+Mode
+85600
+88.2
+beam
+0��
+Labe
+leld�� F-­‐sc
+S pertagger
+Model�� score��
+re��
+regMod el CscoreiSup ertagge robea mcMod eld scorebF -­‐measur elFigur e1: Compari sonbe tween mod elscor e andVit
+</figure>
+<bodyText confidence="0.978970441176471">
+erbiF-s cor e(left);a ndbetweenmo delsc or e and ora cl eF-scor e(right )fo
+rdiff erentsup er tagg erbea ms ona subset o f CCGbank
+Se ct ion00 .wor sta ccuracyismu chloweri nth ere ver
+sesett ing.I ti s clear thatt hesupe rtag ger pipelin
+eh astwoef-f ects: w hile itbe nefic ially pr un esm
+anyb ad p arse s,i t harmf ul lyp runesso mevery good
+parse s.W ecanals o seefromt hes cores o ft heVi terbip
+arsesth atw hile t he rever secondit ion hasac cess
+tomuchb ett erpars es , them ode ldoesn ’t actu ally
+findt hem .T hismirr orst
+heresul tofClar ka ndCurran (2007) thatt heyus
+etojust ifyAST. Digging deeper, we comparedp a rse
+rmodelscore againstViterbiF-score and oracleF-score atava-
+ran(200 4b).Th er easo nthatu singthe gold-sta nd ards uper
+ta gsd oesn’tresul tin 100% or aclepa rs ingaccuracy is tha
+tsomeof thedevel
+o in
+opmen ts etpa rses cannotbe constru cte d by thelearn
+edgr amm ar.rie ty offi xedbeamsett ing s(Fig ure1)
+,c onside ring onl ythe subsetof o urd evelopm ent
+setwhichco uldbe pa rsed w ithal lbe am setti ngs.T
+hein ver sere-lation shipbetwe enm odel sc or eandF-
+scor eshows thatth e supertagg erre str icts t hepar
+sertomost lygood pars es(unde rF-m easure ) t hatthemod
+el wou ldotherw isedis prefer.E xact lyt his effect
+ise xploi t edinthe p ipe linemo del.Ho wever,wh
+e nthe supertag-
+eparsercannot recover. germakesa mistake,th
+gandParsing 4IntegratedS upe rtaggin
+notperfect Thesupertagger obviouslyhas goodbut
+exploit this predictivefeatures.An obvious way to
+without being boud by its decsions is t
+corpo-
+rate these features directly into the parsing model.
+</bodyText>
+<page confidence="0.699251">
+472
+</page>
+<bodyText confidence="0.999991566666667">
+In our case both the parser and the supertagger are
+feature-based models, so from the perspective of a
+single parse tree, the change is simple: the tree is
+simply scored by the weights corresponding to all
+of its active features. However, since the features of
+the supertagger are all Markov features on adjacent
+supertags, the change has serious implications for
+search. If we think of the supertagger as defining a
+weighted regular language consisting of all supertag
+sequences, and the parser as defining a weighted
+mildly context-sensitive language consisting of only
+a subset of these sequences, then the search prob-
+lem is equivalent to finding the optimal derivation
+in the weighted intersection of a regular and mildly
+context-sensitive language. Even allowing for the
+observation of Fowler and Penn (2010) that our prac-
+tical CCG is context-free, this problem still reduces
+to the construction of Bar-Hillel et al. (1964), mak-
+ing search very expensive. Therefore we need ap-
+proximations.
+Fortunately, recent literature has introduced two
+relevant approximations to the NLP community:
+loopy belief propagation (Pearl, 1988), applied to
+dependency parsing by Smith and Eisner (2008);
+and dual decomposition (Dantzig and Wolfe, 1960;
+Komodakis et al., 2007; Sontag et al., 2010, inter
+alia), applied to dependency parsing by Koo et al.
+(2010) and lexicalized CFG parsing by Rush et al.
+(2010). We apply both techniques to our integrated
+supertagging and parsing model.
+</bodyText>
+<subsectionHeader confidence="0.999167">
+4.1 Loopy Belief Propagation
+</subsectionHeader>
+<bodyText confidence="0.9827539375">
+Belief propagation (BP) is an algorithm for com-
+puting marginals (i.e. expectations) on structured
+models. These marginals can be used for decoding
+(parsing) in a minimum-risk framework (Smith and
+Eisner, 2008); or for training using a variety of al-
+gorithms (Sutton and McCallum, 2010). We experi-
+ment with both uses in §5. Many researchers in NLP
+are familiar with two special cases of belief prop-
+agation: the forward-backward and inside-outside
+algorithms, used for computing expectations in se-
+quence models and context-free grammars, respec-
+tively.3 Our use of belief propagation builds directly
+on these two familiar algorithms.
+3Forward-backward and inside-outside are formally shown to
+be special cases of belief propagation by Smyth et al. (1997)
+and Sato (2007), respectively.
+</bodyText>
+<figureCaption confidence="0.9964865">
+Figure 2: Supertagging factor graph with messages. Cir-
+cles are variables and filled squares are factors.
+</figureCaption>
+<bodyText confidence="0.9976375">
+BP is usually understood as an algorithm on bi-
+partite factor graphs, which structure a global func-
+tion into local functions over subsets of variables
+(Kschischang et al., 1998). Variables maintain a be-
+lief (expectation) over a distribution of values and
+BP passes messages about these beliefs between
+variables and factors. The idea is to iteratively up-
+date each variable’s beliefs based on the beliefs of
+neighboring variables (through a shared factor), us-
+ing the sum-product rule.
+This results in the following equation for a mes-
+sage mx→f(x) from a variable x to a factor f
+</bodyText>
+<equation confidence="0.953842">
+rlmx→f(x) = mh→x(x) (1)
+hEn(x)\f
+</equation>
+<bodyText confidence="0.9673005">
+where n(x) is the set of all neighbours of x. The
+message mf→x from a factor to a variable is
+</bodyText>
+<equation confidence="0.9962185">
+Emf→x(x) = f(X) rl my→f(y) (2)
+—{x} yEn(f)\x
+</equation>
+<bodyText confidence="0.9988348">
+where — {x} represents all variables other than x,
+X = n(f) and f(X) is the set of arguments of the
+factor function f.
+Making this concrete, our supertagger defines a
+distribution over tags T0...TI, based on emission
+factors e0...eI and transition factors t1...tI (Fig-
+ure 2). The message fi a variable Ti receives from its
+neighbor to the left corresponds to the forward prob-
+ability, while messages from the right correspond to
+backward probability bi.
+</bodyText>
+<equation confidence="0.99328075">
+T0
+b(T0) b(T1)
+e0 e1 e2
+t1
+f(T1) f(T2)
+T1
+t2
+T2
+fi(Ti) = E fi_1(Ti_1)ei_1(Ti_1)ti(Ti_1,Ti) (3)
+Ti_1
+bi(Ti) = E bi+1(Ti+1)ei+1(Ti+1)ti+1(Ti, Ti+1) (4)
+Ti+1
+</equation>
+<page confidence="0.776835">
+473
+</page>
+<figureCaption confidence="0.996559">
+Figure 3: Factor graph for the combined parsing and su-
+pertagging model.
+</figureCaption>
+<bodyText confidence="0.998754">
+The current belief Bx(x) for variable x can be com-
+puted by taking the normalized product of all its in-
+coming messages.
+</bodyText>
+<equation confidence="0.9993525">
+Bx(x) = 1Z ri mh→x(x) (5)
+hEn(x)
+</equation>
+<bodyText confidence="0.540632">
+In the supertagger model, this is just:
+</bodyText>
+<equation confidence="0.999089">
+1
+p(Ti) = Z fi(Ti)bi(Ti)ei(Ti) (6)
+</equation>
+<bodyText confidence="0.99952764">
+Our parsing model is also a distribution over vari-
+ables Ti, along with an additional quadratic number
+of span(i, j) variables. Though difficult to represent
+pictorially, a distribution over parses is captured by
+an extension to graphical models called case-factor
+diagrams (McAllester et al., 2008). We add this
+complex distribution to our model as a single fac-
+tor (Figure 3). This is a natural extension to the use
+of complex factors described by Smith and Eisner
+(2008) and Dreyer and Eisner (2009).
+When a factor graph is a tree as in Figure 2, BP
+converges in a single iteration to the exact marginals.
+However, when the model contains cycles, as in Fig-
+ure 3, we can iterate message passing. Under certain
+assumptions this loopy BP it will converge to ap-
+proximate marginals that are bounded under an in-
+terpretation from statistical physics (Yedidia et al.,
+2001; Sutton and McCallum, 2010).
+The TREE factor exchanges inside ni and outside
+oi messages with the tag and span variables, tak-
+ing into account beliefs from the sequence model.
+We will omit the unchanged outside recursion for
+brevity, but inside messages n(Ci,�) for category
+Ci,� in span(i, j) are computed using rule probabil-
+ities r as follows:
+</bodyText>
+<equation confidence="0.99715275">
+fi(Ci,9)bi(Ci,9)ei(Ci,9) ifj=i+1
+� n(Xi,k)n(Yk,9)r(Ci,�, Xi,k, Yk,�)
+k,X,Y
+(7)
+</equation>
+<bodyText confidence="0.99890175">
+Note that the only difference from the classic in-
+side algorithm is that the recursive base case of a cat-
+egory spanning a single word has been replaced by
+a message from the supertag that contains both for-
+ward and backward factors, along with a unary emis-
+sion factor, which doubles as a unary rule factor and
+thus contains the only shared features of the original
+models. This difference is also mirrored in the for-
+ward and backward messages, which are identical to
+Equations 3 and 4, except that they also incorporate
+outside messages from the tree factor.
+Once all forward-backward and inside-outside
+probabilities have been calculated the belief of su-
+pertag Ti can be computed as the product of all in-
+coming messages. The only difference from Equa-
+tion 6 is the addition of the outside message.
+</bodyText>
+<equation confidence="0.998375">
+1
+p(Ti) = Z fi(Ti)bi(Ti)ei(Ti)oi(Ti) (8)
+</equation>
+<bodyText confidence="0.999435333333333">
+The algorithm repeatedly runs forward-backward
+and inside-outside, passing their messages back and
+forth, until these quantities converge.
+</bodyText>
+<subsectionHeader confidence="0.955793">
+4.2 Dual Decomposition
+</subsectionHeader>
+<bodyText confidence="0.999909">
+Dual decomposition (Rush et al., 2010; Koo et al.,
+2010) is a decoding (i.e. search) algorithm for prob-
+lems that can be decomposed into exactly solvable
+subproblems: in our case, supertagging and parsing.
+Formally, given Y as the set of valid parses, Z as the
+set of valid supertag sequences, and T as the set of
+supertags, we want to solve the following optimiza-
+tion for parser f(y) and supertagger g(z).
+</bodyText>
+<equation confidence="0.9771607">
+arg max f(y) + g(z) (9)
+yEY,zEZ
+such that y(i, t) = z(i, t) for all (i, t) E I (10)
+Here y(i, t) is a binary function indicating whether
+word i is assigned supertag t by the parser, for the
+T0
+e0 e1 e2
+f(T1) f(T2)
+n(T0) o(T2)
+o(T0) n(T2)
+</equation>
+<figure confidence="0.873627333333333">
+span
+(0,2)
+b(T0) b(T1)
+t1
+TREE
+span
+(0,3)
+T1
+span
+(1,3)
+t2
+T2
+n(Ci,�) = {
+474
+set I = {(i, t) : i E 1... n, t E T} denoting
+</figure>
+<bodyText confidence="0.896790833333333">
+the set of permitted supertags for each word; sim-
+ilarly z(i, t) for the supertagger. To enforce the con-
+straint that the parser and supertagger agree on a
+tag sequence we introduce Lagrangian multipliers
+u = {u(i, t) : (i, t) E I} and construct a dual ob-
+jective over variables u(i, t).
+</bodyText>
+<equation confidence="0.964494857142857">
+�
+L(u) = max(f(y) −
+yEY Z,t
+�
++max (f(z) +
+���
+Z,t
+</equation>
+<bodyText confidence="0.99967">
+This objective is an upper bound that we want to
+make as tight as possible by solving for ming L(u).
+We optimize the values of the u(i, t) variables using
+the same algorithm as Rush et al. (2010) for their
+tagging and parsing problem (essentially a percep-
+tron update).4 An advantages of DD is that, on con-
+vergence, it recovers exact solutions to the combined
+problem. However, if it does not converge or we stop
+early, an approximation must be returned: following
+Rush et al. (2010) we used the highest scoring output
+of the parsing submodel over all iterations.
+</bodyText>
+<sectionHeader confidence="0.998729" genericHeader="method">
+5 Experiments
+</sectionHeader>
+<bodyText confidence="0.996717102564103">
+Parser. We use the C&amp;C parser (Clark and Curran,
+2007) and its supertagger (Clark, 2002). Our base-
+line is the hybrid model of Clark and Curran (2007);
+our integrated model simply adds the supertagger
+features to this model. The parser relies solely on the
+supertagger for pruning, using CKY for search over
+the pruned space. Training requires repeated calcu-
+lation of feature expectations over packed charts of
+derivations. For training, we limited the number of
+items in this chart to 0.3 million, and for testing, 1
+million. We also used a more permissive training
+supertagger beam (Table 3) than in previous work
+(Clark and Curran, 2007). Models were trained with
+the parser’s L-BFGS trainer.
+Evaluation. We evaluated on CCGbank (Hocken-
+maier and Steedman, 2007), a right-most normal-
+form CCG version of the Penn Treebank. We
+use sections 02-21 (39603 sentences) for training,
+4The u terms can be interpreted as the messages from factors
+to variables (Sontag et al., 2010) and the resulting message
+passing algorithms are similar to the max-product algorithm, a
+sister algorithm to BP.
+section 00 (1913 sentences) for development and
+section 23 (2407 sentences) for testing. We sup-
+ply gold-standard part-of-speech tags to the parsers.
+Evaluation is based on labelled and unlabelled pred-
+icate argument structure recovery and supertag ac-
+curacy. We only evaluate on sentences for which an
+analysis was returned; the coverage for all parsers is
+99.22% on section 00, and 99.63% on section 23.
+Model combination. We combine the parser and
+the supertagger over the search space defined by the
+set of supertags within the supertagger beam (see Ta-
+ble 1); this avoids having to perform inference over
+the prohibitively large set of parses spanned by all
+supertags. Hence at each beam setting, the model
+operates over the same search space as the baseline;
+the difference is that we search with our integrated
+model.
+</bodyText>
+<subsectionHeader confidence="0.999068">
+5.1 Parsing Accuracy
+</subsectionHeader>
+<bodyText confidence="0.99995725">
+We first experiment with the separately trained su-
+pertagger and parser, which are then combined us-
+ing belief propagation (BP) and dual decomposition
+(DD). We run the algorithms for many iterations,
+and irrespective of convergence, for BP we compute
+the minimum risk parse from the current marginals,
+and for DD we choose the highest-scoring parse
+seen over all iterations. We measured the evolving
+accuracy of the models on the development set (Fig-
+ure 4). In line with our oracle experiment, these re-
+sults demonstrate that we can coax more accurate
+parses from the larger search space provided by the
+reverse setting; the influence of the supertagger fea-
+tures allow us to exploit this advantage.
+One behavior we observe in the graph is that the
+DD results tend to incrementally improve in accu-
+racy while the BP results quickly stabilize, mirroring
+the result of Smith and Eisner (2008). This occurs
+because DD continues to find higher scoring parses
+at each iteration, and hence the results change. How-
+ever for BP, even if the marginals have not con-
+verged, the minimum risk solution turns out to be
+fairly stable across successive iterations.
+We next compare the algorithms against the base-
+line on our test set (Table 4). We find that the early
+stability of BP’s performance generalises to the test
+set as does DD’s improvement over several itera-
+tions. More importantly, we find that the applying
+</bodyText>
+<equation confidence="0.934077">
+u(i, t)y(i, t)) (11)
+u(i, t)z(i, t))
+</equation>
+<page confidence="0.764839">
+475
+</page>
+<table confidence="0.998208333333333">
+Parameter Iteration 1 2 3 4 5 6 7
+Q 0.001 0.001 0.0045 0.0055 0.01 0.05 0.1
+Training k 150 20 20 20 20 20 20
+</table>
+<tableCaption confidence="0.990731">
+Table 3: Beam step function used for training (cf. Table 1).
+</tableCaption>
+<table confidence="0.999905444444445">
+section 00 (dev) section 23 (test)
+LF AST ST LF Reverse ST LF AST ST LF Reverse ST
+UF UF UF UF
+Baseline 87.38 93.08 94.21 87.36 93.13 93.99 87.73 93.09 94.33 87.65 93.06 94.01
+C&amp;C ’07 87.24 93.00 94.16 - - - 87.64 93.00 94.32 - - -
+BPk=1 87.70 93.28 94.44 88.35 93.69 94.73 88.20 93.28 94.60 88.78 93.66 94.81
+BPk=25 87.70 93.31 94.44 88.33 93.72 94.71 88.19 93.27 94.59 88.80 93.68 94.81
+DDk=1 87.40 93.09 94.23 87.38 93.15 94.03 87.74 93.10 94.33 87.67 93.07 94.02
+DDk=25 87.71 93.32 94.44 88.29 93.71 94.67 88.14 93.24 94.59 88.80 93.68 94.82
+</table>
+<tableCaption confidence="0.99998325">
+Table 4: Results for individually-trained submodels combined using dual decomposition (DD) or belief propagation
+(BP) for k iterations, evaluated by labelled and unlabelled F-score (LF/UF) and supertag accuracy (ST). We compare
+against the previous best result of Clark and Curran (2007); our baseline is their model with wider training beams (cf.
+Table 3).
+</tableCaption>
+<figureCaption confidence="0.961566666666667">
+Figure 4: Labelled F-score of baseline (BL), belief prop-
+agation (BP), and dual decomposition (DD) on section
+00.
+</figureCaption>
+<bodyText confidence="0.999968631578947">
+our combined model using either algorithm consis-
+tently outperforms the baseline after only a few iter-
+ations. Overall, we improve the labelled F-measure
+by almost 1.1% and unlabelled F-measure by 0.6%
+over the baseline. To the best of our knowledge,
+the results obtained with BP and DD are the best
+reported results on this task using gold POS tags.
+Next, we evaluate performance when using au-
+tomatic part-of-speech tags as input to our parser
+and supertagger (Table 5). This enables us to com-
+pare against the results of Fowler and Penn (2010),
+who trained the Petrov parser (Petrov et al., 2006)
+on CCGbank. We outperform them on all criteria.
+Hence our combined model represents the best CCG
+parsing results under any setting.
+Finally, we revisit the oracle experiment of §3 us-
+ing our combined models (Figure 5). Both show an
+improved relationship between model score and F-
+measure.
+</bodyText>
+<subsectionHeader confidence="0.999151">
+5.2 Algorithmic Convergence
+</subsectionHeader>
+<bodyText confidence="0.999821857142857">
+Figure 4 shows that parse accuracy converges af-
+ter a few iterations. Do the algorithms converge?
+BP converges when the marginals do not change be-
+tween iterations, and DD converges when both sub-
+models agree on all supertags. We measured the
+convergence of each algorithm under these criteria
+over 1000 iterations (Figure 6). DD converges much
+faster, while BP in the reverse condition converges
+quite slowly. This is interesting when contrasted
+with its behavior on parse accuracy—its rate of con-
+vergence after one iteration is 1.5%, but its accu-
+racy is already the highest at this point. Over the
+entire 1000 iterations, most sentences converge: all
+but 3 for BP (both in AST and reverse) and all but
+</bodyText>
+<figure confidence="0.9685165">
+88.4
+88.2
+BL AST BL Rev BP AST
+BP Rev DD AST DD Rev
+Labelled F-­‐score
+88.0
+87.8
+87.6
+87.4
+87.2
+1 6 11 16 21 26 31 36 41 46
+Iterations
+</figure>
+<page confidence="0.642414">
+476
+</page>
+<table confidence="0.996390666666667">
+LF LP section 00 (dev) UP UR LF LP section 23 (test) UP UR
+LR UF LR UF
+Baseline 85.53 85.73 85.33 91.99 92.20 91.77 85.74 85.90 85.58 91.92 92.09 91.75
+Petrov I-5 85.79 86.09 85.50 92.44 92.76 92.13 86.01 86.29 85.74 92.34 92.64 92.04
+BPk=1 86.44 86.74 86.14 92.54 92.86 92.23 86.73 86.95 86.50 92.45 92.69 92.21
+DDk=25 86.35 86.65 86.05 92.52 92.85 92.20 86.68 86.90 86.46 92.44 92.67 92.21
+</table>
+<tableCaption confidence="0.997715666666667">
+Table 5: Results on automatically assigned POS tags. Petrov I-S is based on the parser output of Fowler and Penn
+(2010); we evaluate on sentences for which all parsers returned an analysis (2323 sentences for section 23 and 1834
+sentences for section 00).
+</tableCaption>
+<figure confidence="0.976254229885058">
+ellelddF--‐sc re��
+M
+Supertagger�� beam��
+200000
+89
+3��
+90.0
+86400
+00��
+8
+89
+2��
+180000
+86200
+00��
+.9��
+89.9
+160000
+e989
+85
+86000
+85
+9.��
+89.7��
+89.8
+140000
+eas u
+89.7
+85
+85800
+89.6
+120000
+e9F-‐­
+89.6
+Lab
+00
+89.
+8sco
+100000
+89.5
+��
+80000
+delELore��
+Mode
+beam
+4��
+89.4
+60000
+Labe
+leld�� F-­‐ sc
+��
+S pertagger
+Model�� score�� F-­‐measure��
+Model�� score��
+re��
+sco refortheintegratedmodelusing beliefpropagation (left) Figure5:Comparison between model scoreandViterbi F-
+i anddual decomp o 1. s
+gure
+.
+re��
+h t
+o n
+h sa e da aasF
+Model�� score��
+don
+as
+; t
+re
+r i
+ts
+t
+!&amp;quot; !&amp;quot;#
+!&amp;quot; &amp;quot;#!&amp;quot; #!!
+#! !&amp;quot;!
+%!
+&amp;&apos;%#(%) #$
+$!
+#!
+!
+&apos;!&amp;quot;(!&amp;quot;)!&amp;quot;
+*+%),- . ) /+%&amp; *0 &amp;quot;#1),-&amp;quot;./0&amp;quot; ,-&amp;quot; 123245 2&amp;quot;66&amp;quot;./0&amp;quot;66 &amp;quot;123
+245 2&amp;quot;Fi gure6: Rateofc onve rgen ceforbe l i efpro
+and dualdec om po siti o
+n(D D)withm aximu
+mecaeee .41 (2.6%)for DDin reverse (6 inAST).
+5.3Parsi ng Spe edB ecause th eC&amp;C p ars erw ithAST
+is veryfast ,we wondered abouttheeffect onspe
+</figure>
+<bodyText confidence="0.986998761904762">
+er,
+msunde rth econditi ont hatwe s toppeda tapartic
+ularit erat ion( Table 6) . Althoughou r mod el simpr
+ove sub stan -tially
+edf orourmode l.We me asured t he r untimeof th ealgorith
+ove rC&amp;C,the rei sasignifica ntcos
+ti nsp eedforthebe stresult .5 .4Tr ain ingtheI nte
+gratedModelI nthe ex peri mentsre portedso far ,th
+epar sing ands up erta gging modelswe ret raineds
+ep arate ly,andonlyc omb ined at test t im e.Althou
+gh th e outc omeoft heseexp erimentswas s uc cessful,
+wew onder edifwecoul dobtainfu
+rther imp rovements bytraini ng the mode lp
+ara meterstogeth er. edby(loopy)BP Since thegradientsp rodu c
+tswe used a areapproximate,forthesee xperimen
+in er(Bottou, stochasticgradientdescent(SGD)tra
+ersdescribed 2003). Wefound thatthe SGDp ara met
+ywell forour byFinkel etal. (2008) workedequ all
+d similar r- models, and,on thebaseline, pro duce
+sults t L-BFGS. Curiouly, we found h owv that
+the combined model does not perform as well when
+</bodyText>
+<figure confidence="0.718925857142857">
+su
+er
+&amp;!
+!
+*+%),-.)
+p a ga tion (BP)
+477
+</figure>
+<table confidence="0.996539666666667">
+AST LF Reverse
+sent/sec sent/sec LF
+Baseline 65.8 87.38 5.9 87.36
+BPk=1 60.8 87.70 5.8 88.35
+BPk=5 46.7 87.70 4.7 88.34
+BPk=25 35.3 87.70 3.5 88.33
+DDk=1 64.6 87.40 5.9 87.38
+DDk=5 41.9 87.65 3.1 88.09
+DDk=25 32.5 87.71 1.9 88.29
+</table>
+<tableCaption confidence="0.9878915">
+Table 6: Parsing time in seconds per sentence (vs. F-
+measure) on section 00.
+</tableCaption>
+<table confidence="0.9980598">
+LF AST ST LF Reverse ST
+UF UF
+Baseline 86.7 92.7 94.0 86.7 92.7 93.9
+BP inf 86.8 92.8 94.1 87.2 93.1 94.2
+BP train 86.3 92.5 93.8 85.6 92.1 93.2
+</table>
+<tableCaption confidence="0.8578615">
+Table 7: Results of training with SGD on approximate
+gradients from LPB on section 00. We test LBP in both
+inference and training (train) as well as in inference only
+(inf); a maximum number of 10 iterations is used.
+</tableCaption>
+<bodyText confidence="0.999946888888889">
+the parameters are trained together (Table 7). A pos-
+sible reason for this is that we used a stricter su-
+pertagger beam setting during training (Clark and
+Curran, 2007) to make training on a single machine
+practical. This leads to lower performance, particu-
+larly in the Reverse condition. Training a model us-
+ing DD would require a different optimization algo-
+rithm based on Viterbi results (e.g. the perceptron)
+which we will pursue in future work.
+</bodyText>
+<sectionHeader confidence="0.988892" genericHeader="conclusions">
+6 Conclusion and Future Work
+</sectionHeader>
+<bodyText confidence="0.999299027027027">
+Our approach of combining models to avoid the
+pipeline problem (Felzenszwalb and McAllester,
+2007) is very much in line with much recent work
+in NLP. Such diverse topics as machine transla-
+tion (Dyer et al., 2008; Dyer and Resnik, 2010;
+Mi et al., 2008), part-of-speech tagging (Jiang et
+al., 2008), named entity recognition (Finkel and
+Manning, 2009) semantic role labelling (Sutton and
+McCallum, 2005; Finkel et al., 2006), and oth-
+ers have also been improved by combined models.
+Our empirical comparison of BP and DD also com-
+plements the theoretically-oriented comparison of
+marginal- and margin-based variational approxima-
+tions for parsing described by Martins et al. (2010).
+We have shown that the aggressive pruning used
+in adaptive supertagging significantly harms the or-
+acle performance of the parser, though it mostly
+prunes bad parses. Based on these findings, we com-
+bined parser and supertagger features into a single
+model. Using belief propagation and dual decom-
+position, we obtained more principled—and more
+accurate—approximations than a pipeline. Mod-
+els combined using belief propagation achieve very
+good performance immediately, despite an initial
+convergence rate just over 1%, while dual decompo-
+sition produces comparable results after several iter-
+ations, and algorithmically converges more quickly.
+Our best result of 88.8% represents the state-of-the
+art in CCG parsing accuracy.
+In future work we plan to integrate the POS tag-
+ger, which is crucial to parsing accuracy (Clark and
+Curran, 2004b). We also plan to revisit the idea
+of combined training. Though we have focused on
+CCG in this work we expect these methods to be
+equally useful for other linguistically motivated but
+computationally complex formalisms such as lexi-
+calized tree adjoining grammar.
+</bodyText>
+<sectionHeader confidence="0.99345" genericHeader="acknowledgments">
+Acknowledgements
+</sectionHeader>
+<bodyText confidence="0.625505">
+We would like to thank Phil Blunsom, Prachya
+</bodyText>
+<reference confidence="0.847683333333333">
+Boonkwan, Christos Christodoulopoulos, Stephen
+Clark, Michael Collins, Chris Dyer, Timothy
+Fowler, Mark Granroth-Wilding, Philipp Koehn,
+Terry Koo, Tom Kwiatkowski, Andr´e Martins, Matt
+Post, David Smith, David Sontag, Mark Steed-
+man, and Charles Sutton for helpful discussion re-
+</reference>
+<bodyText confidence="0.9968">
+lated to this work and comments on previous drafts,
+and the anonymous reviewers for helpful comments.
+We also acknowledge funding from EPSRC grant
+EP/P504171/1 (Auli); the EuroMatrixPlus project
+funded by the European Commission, 7th Frame-
+work Programme (Lopez); and the resources pro-
+vided by the Edinburgh Compute and Data Fa-
+cility (http://www.ecdf.ed.ac.uk). The
+ECDF is partially supported by the eDIKT initiative
+(http://www.edikt.org.uk).
+</bodyText>
+<sectionHeader confidence="0.996298" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.99479">
+S. Bangalore and A. K. Joshi. 1999. Supertagging: An
+Approach to Almost Parsing. Computational Linguis-
+</reference>
+<page confidence="0.616208">
+478
+</page>
+<reference confidence="0.999873">
+tics, 25(2):238–265, June.
+Y. Bar-Hillel, M. Perles, and E. Shamir. 1964. On formal
+properties of simple phrase structure grammars. In
+Language and Information: Selected Essays on their
+Theory and Application, pages 116–150.
+L. Bottou. 2003. Stochastic learning. In Advanced Lec-
+tures in Machine Learning, pages 146–168.
+S. Clark and J. R. Curran. 2004a. The importance of su-
+pertagging for wide-coverage CCG parsing. In COL-
+ING, Morristown, NJ, USA.
+S. Clark and J. R. Curran. 2004b. Parsing the WSJ using
+CCG and log-linear models. In Proc. of ACL, pages
+104–111, Barcelona, Spain.
+S. Clark and J. R. Curran. 2007. Wide-Coverage Ef-
+ficient Statistical Parsing with CCG and Log-Linear
+Models. Computational Linguistics, 33(4):493–552.
+S. Clark. 2002. Supertagging for Combinatory Catego-
+rial Grammar. In TAG+6.
+G. B. Dantzig and P. Wolfe. 1960. Decomposition
+principle for linear programs. Operations Research,
+8(1):101–111.
+M. Dreyer and J. Eisner. 2009. Graphical models over
+multiple strings. In Proc. ofEMNLP.
+C. Dyer and P. Resnik. 2010. Context-free reordering,
+finite-state translation. In Proc. ofHLT-NAACL.
+C. J. Dyer, S. Muresan, and P. Resnik. 2008. Generaliz-
+ing word lattice translation. In Proc. ofACL.
+P. F. Felzenszwalb and D. McAllester. 2007. The Gener-
+alized A* Architecture. In Journal ofArtificial Intelli-
+gence Research, volume 29, pages 153–190.
+J. R. Finkel and C. D. Manning. 2009. Joint parsing and
+named entity recognition. In Proc. ofNAACL. Associ-
+ation for Computational Linguistics.
+J. R. Finkel, C. D. Manning, and A. Y. Ng. 2006. Solv-
+ing the problem of cascading errors: Approximate
+Bayesian inference for linguistic annotation pipelines.
+In Proc. of EMNLP.
+J. R. Finkel, A. Kleeman, and C. D. Manning. 2008.
+Feature-based, conditional random field parsing. In
+Proceedings ofACL-HLT.
+T. A. D. Fowler and G. Penn. 2010. Accurate context-
+free parsing with combinatory categorial grammar. In
+Proc. ofACL.
+J. Hockenmaier and M. Steedman. 2002. Generative
+models for statistical parsing with Combinatory Cat-
+egorial Grammar. In Proc. ofACL.
+J. Hockenmaier and M. Steedman. 2007. CCGbank:
+A corpus of CCG derivations and dependency struc-
+tures extracted from the Penn Treebank. Computa-
+tional Linguistics, 33(3):355–396.
+L. Huang. 2008. Forest Reranking: Discriminative pars-
+ing with Non-Local Features. In Proceedings ofACL-
+08: HLT.
+W. Jiang, L. Huang, Q. Liu, and Y. L¨u. 2008. A cas-
+caded linear model for joint Chinese word segmen-
+tation and part-of-speech tagging. In Proceedings of
+ACL-08: HLT.
+N. Komodakis, N. Paragios, and G. Tziritas. 2007.
+MRF optimization via dual decomposition: Message-
+passing revisited. In Proc. of Int. Conf. on Computer
+Vision (ICCV).
+T. Koo, A. M. Rush, M. Collins, T. Jaakkola, and D. Son-
+tag. 2010. Dual Decomposition for Parsing with Non-
+Projective Head Automata. In In Proc. EMNLP.
+F. R. Kschischang, B. J. Frey, and H.-A. Loeliger. 1998.
+Factor graphs and the sum-product algorithm. IEEE
+Transactions on Information Theory, 47:498–519.
+J. K. Kummerfeld, J. Rosener, T. Dawborn, J. Haggerty,
+J. R. Curran, and S. Clark. 2010. Faster parsing by
+supertagger adaptation. In Proc. ofACL.
+A. F. T. Martins, N. A. Smith, E. P. Xing, P. M. Q. Aguiar,
+and M. A. T. Figueiredo. 2010. Turbo parsers: Depen-
+dency parsing by approximate variational inference.
+In Proc. of EMNLP.
+D. McAllester, M. Collins, and F. Pereira. 2008. Case-
+factor diagrams for structured probabilistic modeling.
+Journal of Computer and System Sciences, 74(1):84–
+96.
+H. Mi, L. Huang, and Q. Liu. 2008. Forest-based trans-
+lation. In Proc. ofACL-HLT.
+J. Pearl. 1988. Probabilistic Reasoning in Intelligent
+Systems: Networks of Plausible Inference. Morgan
+Kaufmann.
+S. Petrov, L. Barrett, R. Thibaux, and D. Klein. 2006.
+Learning accurate, compact, and interpretable tree an-
+notation. In Proc. ofACL.
+A. M. Rush, D. Sontag, M. Collins, and T. Jaakkola.
+2010. On dual decomposition and linear program-
+ming relaxations for natural language processing. In
+In Proc. EMNLP.
+T. Sato. 2007. Inside-outside probability computation
+for belief propagation. In Proc. ofIJCAI.
+D. A. Smith and J. Eisner. 2008. Dependency parsing by
+belief propagation. In Proc. of EMNLP.
+P. Smyth, D. Heckerman, and M. Jordan. 1997. Prob-
+abilistic independence networks for hidden Markov
+probability models. Neural computation, 9(2):227–
+269.
+D. Sontag, A. Globerson, and T. Jaakkola. 2010. Intro-
+duction to dual decomposition. In S. Sra, S. Nowozin,
+and S. J. Wright, editors, Optimization for Machine
+Learning. MIT Press.
+M. Steedman. 2000. The syntactic process. MIT Press,
+Cambridge, MA.
+C. Sutton and A. McCallum. 2005. Joint parsing and
+semantic role labelling. In Proc. of CoNLL.
+</reference>
+<page confidence="0.694681">
+479
+</page>
+<reference confidence="0.9988845">
+C. Sutton and A. McCallum. 2010. An introduction to
+conditional random fields. arXiv:stat.ML/1011.4088.
+J. Yedidia, W. Freeman, and Y. Weiss. 2001. Generalized
+belief propagation. In Proc. ofNIPS.
+</reference>
+<page confidence="0.938582">
+480
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.972619">
+<title confidence="0.999629">A Comparison of Loopy Belief Propagation and Dual Decomposition Integrated CCG Supertagging and Parsing</title>
+<author confidence="0.999958">Michael Auli Adam Lopez</author>
+<affiliation confidence="0.999971">School of Informatics HLTCOE University of Edinburgh Johns Hopkins University</affiliation>
+<email confidence="0.995507">m.auli@sms.ed.ac.ukalopez@cs.jhu.edu</email>
+<abstract confidence="0.99882505">Via an oracle experiment, we show that the upper bound on accuracy of a CCG parser is significantly lowered when its search space is pruned using a supertagger, though the supertagger also prunes many bad parses. Inspired by this analysis, we design a single model with both supertagging and parsing features, rather than separating them into distinct models chained together in a pipeline. To overcome the resulting increase in complexity, we experiment with both belief propagation and dual decomposition approaches to inference, the first empirical comparison of these algorithms that we are aware of on a structured natural language processing problem. On CCGbank we achieve a labelled dependency F-measure of 88.8% on gold POS tags, and 86.7% on automatic part-of-speeoch tags, the best reported results for this task.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="false">
+<authors>
+<author>Christos Christodoulopoulos Boonkwan</author>
+<author>Stephen Clark</author>
+<author>Michael Collins</author>
+<author>Chris Dyer</author>
+<author>Timothy Fowler</author>
+<author>Mark Granroth-Wilding</author>
+<author>Philipp Koehn</author>
+<author>Terry Koo</author>
+<author>Tom Kwiatkowski</author>
+<author>Andr´e Martins</author>
+<author>Matt Post</author>
+<author>David Smith</author>
+<author>David Sontag</author>
+<author>Mark Steedman</author>
+</authors>
+<title>and Charles Sutton for helpful discussion reS.</title>
+<date>1999</date>
+<journal>Bangalore</journal>
+<volume>25</volume>
+<issue>2</issue>
+<marker>Boonkwan, Clark, Collins, Dyer, Fowler, Granroth-Wilding, Koehn, Koo, Kwiatkowski, Martins, Post, Smith, Sontag, Steedman, 1999</marker>
+<rawString>Boonkwan, Christos Christodoulopoulos, Stephen Clark, Michael Collins, Chris Dyer, Timothy Fowler, Mark Granroth-Wilding, Philipp Koehn, Terry Koo, Tom Kwiatkowski, Andr´e Martins, Matt Post, David Smith, David Sontag, Mark Steedman, and Charles Sutton for helpful discussion reS. Bangalore and A. K. Joshi. 1999. Supertagging: An Approach to Almost Parsing. Computational Linguistics, 25(2):238–265, June.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Y Bar-Hillel</author>
+<author>M Perles</author>
+<author>E Shamir</author>
+</authors>
+<title>On formal properties of simple phrase structure grammars.</title>
+<date>1964</date>
+<booktitle>In Language and Information: Selected Essays on their Theory and Application,</booktitle>
+<pages>116--150</pages>
+<contexts>
+<context position="12094" citStr="Bar-Hillel et al. (1964)" startWordPosition="1996" endWordPosition="1999">adjacent supertags, the change has serious implications for search. If we think of the supertagger as defining a weighted regular language consisting of all supertag sequences, and the parser as defining a weighted mildly context-sensitive language consisting of only a subset of these sequences, then the search problem is equivalent to finding the optimal derivation in the weighted intersection of a regular and mildly context-sensitive language. Even allowing for the observation of Fowler and Penn (2010) that our practical CCG is context-free, this problem still reduces to the construction of Bar-Hillel et al. (1964), making search very expensive. Therefore we need approximations. Fortunately, recent literature has introduced two relevant approximations to the NLP community: loopy belief propagation (Pearl, 1988), applied to dependency parsing by Smith and Eisner (2008); and dual decomposition (Dantzig and Wolfe, 1960; Komodakis et al., 2007; Sontag et al., 2010, inter alia), applied to dependency parsing by Koo et al. (2010) and lexicalized CFG parsing by Rush et al. (2010). We apply both techniques to our integrated supertagging and parsing model. 4.1 Loopy Belief Propagation Belief propagation (BP) is </context>
+</contexts>
+<marker>Bar-Hillel, Perles, Shamir, 1964</marker>
+<rawString>Y. Bar-Hillel, M. Perles, and E. Shamir. 1964. On formal properties of simple phrase structure grammars. In Language and Information: Selected Essays on their Theory and Application, pages 116–150.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>L Bottou</author>
+</authors>
+<title>Stochastic learning.</title>
+<date>2003</date>
+<booktitle>In Advanced Lectures in Machine Learning,</booktitle>
+<pages>146--168</pages>
+<marker>Bottou, 2003</marker>
+<rawString>L. Bottou. 2003. Stochastic learning. In Advanced Lectures in Machine Learning, pages 146–168.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>S Clark</author>
+<author>J R Curran</author>
+</authors>
+<title>The importance of supertagging for wide-coverage CCG parsing.</title>
+<date>2004</date>
+<booktitle>In COLING,</booktitle>
+<location>Morristown, NJ, USA.</location>
+<contexts>
+<context position="1816" citStr="Clark and Curran, 2004" startWordPosition="275" endWordPosition="278">standing problem in computational linguistics, due to the complexities associated its mild context sensitivity. Even for practical CCG that are strongly context-free (Fowler and Penn, 2010), parsing is much harder than with Penn Treebank-style contextfree grammars, with vast numbers of nonterminal categories leading to increased grammar constants. Where a typical Penn Treebank grammar may have fewer than 100 nonterminals (Hockenmaier and Steedman, 2002), we found that a CCG grammar derived from CCGbank contained over 1500. The same grammar assigns an average of 22 lexical categories per word (Clark and Curran, 2004a), resulting in an enormous space of possible derivations. The most successful approach to CCG parsing is based on a pipeline strategy (§2). First, we tag (or multitag) each word of the sentence with a lexical category using a supertagger, a sequence model over these categories (Bangalore and Joshi, 1999; Clark, 2002). Second, we parse the sentence under the requirement that the lexical categories are fixed to those preferred by the supertagger. Variations on this approach drive the widely-used, broad coverage C&amp;C parser (Clark and Curran, 2004a; Clark and Curran, 2007; Kummerfeld et al., 201</context>
+<context position="5117" citStr="Clark and Curran, 2004" startWordPosition="809" endWordPosition="812">S As can be inferred from even this small example, a key difficulty in parsing CCG is that the number of categories quickly becomes extremely large, and there are typically many ways to analyze every span of a sentence. Supertagging (Bangalore and Joshi, 1999; Clark, 2002) treats the assignment of lexical categories (or supertags) as a sequence tagging problem. Because they do this with high accuracy, they are often exploited to prune the parser’s search space: the parser only considers lexical categories with high posterior probability (or other figure of merit) under the supertagging model (Clark and Curran, 2004a). The posterior probabilities are then discarded; it is the extensive pruning of lexical categories that leads to substantially faster parsing times. Pruning the categories in advance this way has a specific failure mode: sometimes it is not possible to produce a sentence-spanning derivation from the tag sequences preferred by the supertagger, since it does not enforce grammaticality. A workaround for this problem is the adaptive supertagging (AST) approach of Clark and Curran (2004a). It is based on a step function over supertagger beam widths, relaxing the pruning threshold for lexical cat</context>
+</contexts>
+<marker>Clark, Curran, 2004</marker>
+<rawString>S. Clark and J. R. Curran. 2004a. The importance of supertagging for wide-coverage CCG parsing. In COLING, Morristown, NJ, USA.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>S Clark</author>
+<author>J R Curran</author>
+</authors>
+<title>Parsing the WSJ using CCG and log-linear models.</title>
+<date>2004</date>
+<booktitle>In Proc. of ACL,</booktitle>
+<pages>104--111</pages>
+<location>Barcelona,</location>
+<contexts>
+<context position="1816" citStr="Clark and Curran, 2004" startWordPosition="275" endWordPosition="278">standing problem in computational linguistics, due to the complexities associated its mild context sensitivity. Even for practical CCG that are strongly context-free (Fowler and Penn, 2010), parsing is much harder than with Penn Treebank-style contextfree grammars, with vast numbers of nonterminal categories leading to increased grammar constants. Where a typical Penn Treebank grammar may have fewer than 100 nonterminals (Hockenmaier and Steedman, 2002), we found that a CCG grammar derived from CCGbank contained over 1500. The same grammar assigns an average of 22 lexical categories per word (Clark and Curran, 2004a), resulting in an enormous space of possible derivations. The most successful approach to CCG parsing is based on a pipeline strategy (§2). First, we tag (or multitag) each word of the sentence with a lexical category using a supertagger, a sequence model over these categories (Bangalore and Joshi, 1999; Clark, 2002). Second, we parse the sentence under the requirement that the lexical categories are fixed to those preferred by the supertagger. Variations on this approach drive the widely-used, broad coverage C&amp;C parser (Clark and Curran, 2004a; Clark and Curran, 2007; Kummerfeld et al., 201</context>
+<context position="5117" citStr="Clark and Curran, 2004" startWordPosition="809" endWordPosition="812">S As can be inferred from even this small example, a key difficulty in parsing CCG is that the number of categories quickly becomes extremely large, and there are typically many ways to analyze every span of a sentence. Supertagging (Bangalore and Joshi, 1999; Clark, 2002) treats the assignment of lexical categories (or supertags) as a sequence tagging problem. Because they do this with high accuracy, they are often exploited to prune the parser’s search space: the parser only considers lexical categories with high posterior probability (or other figure of merit) under the supertagging model (Clark and Curran, 2004a). The posterior probabilities are then discarded; it is the extensive pruning of lexical categories that leads to substantially faster parsing times. Pruning the categories in advance this way has a specific failure mode: sometimes it is not possible to produce a sentence-spanning derivation from the tag sequences preferred by the supertagger, since it does not enforce grammaticality. A workaround for this problem is the adaptive supertagging (AST) approach of Clark and Curran (2004a). It is based on a step function over supertagger beam widths, relaxing the pruning threshold for lexical cat</context>
+</contexts>
+<marker>Clark, Curran, 2004</marker>
+<rawString>S. Clark and J. R. Curran. 2004b. Parsing the WSJ using CCG and log-linear models. In Proc. of ACL, pages 104–111, Barcelona, Spain.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>S Clark</author>
+<author>J R Curran</author>
+</authors>
+<title>Wide-Coverage Efficient Statistical Parsing with CCG and Log-Linear Models.</title>
+<date>2007</date>
+<journal>Computational Linguistics,</journal>
+<volume>33</volume>
+<issue>4</issue>
+<contexts>
+<context position="2392" citStr="Clark and Curran, 2007" startWordPosition="365" endWordPosition="368">al categories per word (Clark and Curran, 2004a), resulting in an enormous space of possible derivations. The most successful approach to CCG parsing is based on a pipeline strategy (§2). First, we tag (or multitag) each word of the sentence with a lexical category using a supertagger, a sequence model over these categories (Bangalore and Joshi, 1999; Clark, 2002). Second, we parse the sentence under the requirement that the lexical categories are fixed to those preferred by the supertagger. Variations on this approach drive the widely-used, broad coverage C&amp;C parser (Clark and Curran, 2004a; Clark and Curran, 2007; Kummerfeld et al., 2010). However, it fails when the supertagger makes errors. We show experimentally that this pipeline significantly lowers the upper bound on parsing accuracy (§3). The same experiment shows that the supertagger prunes many bad parses. So, while we want to avoid the error propagation inherent to a pipeline, ideally we still want to benefit from the key insight of supertagging: that a sequence model over lexical categories can be quite accurate. Our solution is to combine the features of both the supertagger and the parser into a single, less aggressively pruned model. The </context>
+<context position="7026" citStr="Clark and Curran (2007)" startWordPosition="1122" endWordPosition="1125">s unbounded. We will also explore reverse adaptive supertagging, a much less aggressive pruning method that seeks only to make sentences parseable when they otherwise would not be due to an impractically large search space. Reverse AST starts with a wide beam, narrowing it at each iteration only if a maximum chart size is exceeded. In this way it prioritizes exactness over speed. 3 Oracle Parsing What is the effect of these approximations? To answer this question we computed oracle best and worst values for labelled dependency F-score using the algorithm of Huang (2008) on the hybrid model of Clark and Curran (2007), the best model of their C&amp;C parser. We computed the oracle on our development data, Section 00 of CCGbank (Hockenmaier and Steedman, 2007), using both AST and Reverse AST beams settings shown in Table 1. The results (Table 2) show that the oracle best accuracy for reverse AST is more than 3% higher than the aggressive AST pruning.1 In fact, it is almost as high as the upper bound oracle accuracy of 97.73% obtained using perfect supertags—in other words, the search space for reverse AST is theoretically near-optimal.2 We also observe that the oracle 1The numbers reported here and in later sec</context>
+<context position="19237" citStr="Clark and Curran, 2007" startWordPosition="3206" endWordPosition="3209">ective is an upper bound that we want to make as tight as possible by solving for ming L(u). We optimize the values of the u(i, t) variables using the same algorithm as Rush et al. (2010) for their tagging and parsing problem (essentially a perceptron update).4 An advantages of DD is that, on convergence, it recovers exact solutions to the combined problem. However, if it does not converge or we stop early, an approximation must be returned: following Rush et al. (2010) we used the highest scoring output of the parsing submodel over all iterations. 5 Experiments Parser. We use the C&amp;C parser (Clark and Curran, 2007) and its supertagger (Clark, 2002). Our baseline is the hybrid model of Clark and Curran (2007); our integrated model simply adds the supertagger features to this model. The parser relies solely on the supertagger for pruning, using CKY for search over the pruned space. Training requires repeated calculation of feature expectations over packed charts of derivations. For training, we limited the number of items in this chart to 0.3 million, and for testing, 1 million. We also used a more permissive training supertagger beam (Table 3) than in previous work (Clark and Curran, 2007). Models were t</context>
+<context position="23552" citStr="Clark and Curran (2007)" startWordPosition="3930" endWordPosition="3933">.64 93.00 94.32 - - - BPk=1 87.70 93.28 94.44 88.35 93.69 94.73 88.20 93.28 94.60 88.78 93.66 94.81 BPk=25 87.70 93.31 94.44 88.33 93.72 94.71 88.19 93.27 94.59 88.80 93.68 94.81 DDk=1 87.40 93.09 94.23 87.38 93.15 94.03 87.74 93.10 94.33 87.67 93.07 94.02 DDk=25 87.71 93.32 94.44 88.29 93.71 94.67 88.14 93.24 94.59 88.80 93.68 94.82 Table 4: Results for individually-trained submodels combined using dual decomposition (DD) or belief propagation (BP) for k iterations, evaluated by labelled and unlabelled F-score (LF/UF) and supertag accuracy (ST). We compare against the previous best result of Clark and Curran (2007); our baseline is their model with wider training beams (cf. Table 3). Figure 4: Labelled F-score of baseline (BL), belief propagation (BP), and dual decomposition (DD) on section 00. our combined model using either algorithm consistently outperforms the baseline after only a few iterations. Overall, we improve the labelled F-measure by almost 1.1% and unlabelled F-measure by 0.6% over the baseline. To the best of our knowledge, the results obtained with BP and DD are the best reported results on this task using gold POS tags. Next, we evaluate performance when using automatic part-of-speech t</context>
+<context position="28886" citStr="Clark and Curran, 2007" startWordPosition="4864" endWordPosition="4867">.5 87.71 1.9 88.29 Table 6: Parsing time in seconds per sentence (vs. Fmeasure) on section 00. LF AST ST LF Reverse ST UF UF Baseline 86.7 92.7 94.0 86.7 92.7 93.9 BP inf 86.8 92.8 94.1 87.2 93.1 94.2 BP train 86.3 92.5 93.8 85.6 92.1 93.2 Table 7: Results of training with SGD on approximate gradients from LPB on section 00. We test LBP in both inference and training (train) as well as in inference only (inf); a maximum number of 10 iterations is used. the parameters are trained together (Table 7). A possible reason for this is that we used a stricter supertagger beam setting during training (Clark and Curran, 2007) to make training on a single machine practical. This leads to lower performance, particularly in the Reverse condition. Training a model using DD would require a different optimization algorithm based on Viterbi results (e.g. the perceptron) which we will pursue in future work. 6 Conclusion and Future Work Our approach of combining models to avoid the pipeline problem (Felzenszwalb and McAllester, 2007) is very much in line with much recent work in NLP. Such diverse topics as machine translation (Dyer et al., 2008; Dyer and Resnik, 2010; Mi et al., 2008), part-of-speech tagging (Jiang et al.,</context>
+</contexts>
+<marker>Clark, Curran, 2007</marker>
+<rawString>S. Clark and J. R. Curran. 2007. Wide-Coverage Efficient Statistical Parsing with CCG and Log-Linear Models. Computational Linguistics, 33(4):493–552.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>S Clark</author>
+</authors>
+<title>Supertagging for Combinatory Categorial Grammar.</title>
+<date>2002</date>
+<booktitle>In TAG+6.</booktitle>
+<contexts>
+<context position="2136" citStr="Clark, 2002" startWordPosition="328" endWordPosition="329"> grammar constants. Where a typical Penn Treebank grammar may have fewer than 100 nonterminals (Hockenmaier and Steedman, 2002), we found that a CCG grammar derived from CCGbank contained over 1500. The same grammar assigns an average of 22 lexical categories per word (Clark and Curran, 2004a), resulting in an enormous space of possible derivations. The most successful approach to CCG parsing is based on a pipeline strategy (§2). First, we tag (or multitag) each word of the sentence with a lexical category using a supertagger, a sequence model over these categories (Bangalore and Joshi, 1999; Clark, 2002). Second, we parse the sentence under the requirement that the lexical categories are fixed to those preferred by the supertagger. Variations on this approach drive the widely-used, broad coverage C&amp;C parser (Clark and Curran, 2004a; Clark and Curran, 2007; Kummerfeld et al., 2010). However, it fails when the supertagger makes errors. We show experimentally that this pipeline significantly lowers the upper bound on parsing accuracy (§3). The same experiment shows that the supertagger prunes many bad parses. So, while we want to avoid the error propagation inherent to a pipeline, ideally we sti</context>
+<context position="4768" citStr="Clark, 2002" startWordPosition="756" endWordPosition="757"> like forward application or composition (Steedman, 2000; Fowler and Penn, 2010). In the first derivation below, (S\NP)/NP and NP combine to form the spanning category S\NP, which only requires an NP to its left to form a complete sentence-spanning S. The second derivation uses type-raising to change the category type of I. I like tea S S As can be inferred from even this small example, a key difficulty in parsing CCG is that the number of categories quickly becomes extremely large, and there are typically many ways to analyze every span of a sentence. Supertagging (Bangalore and Joshi, 1999; Clark, 2002) treats the assignment of lexical categories (or supertags) as a sequence tagging problem. Because they do this with high accuracy, they are often exploited to prune the parser’s search space: the parser only considers lexical categories with high posterior probability (or other figure of merit) under the supertagging model (Clark and Curran, 2004a). The posterior probabilities are then discarded; it is the extensive pruning of lexical categories that leads to substantially faster parsing times. Pruning the categories in advance this way has a specific failure mode: sometimes it is not possibl</context>
+<context position="19271" citStr="Clark, 2002" startWordPosition="3213" endWordPosition="3214"> as tight as possible by solving for ming L(u). We optimize the values of the u(i, t) variables using the same algorithm as Rush et al. (2010) for their tagging and parsing problem (essentially a perceptron update).4 An advantages of DD is that, on convergence, it recovers exact solutions to the combined problem. However, if it does not converge or we stop early, an approximation must be returned: following Rush et al. (2010) we used the highest scoring output of the parsing submodel over all iterations. 5 Experiments Parser. We use the C&amp;C parser (Clark and Curran, 2007) and its supertagger (Clark, 2002). Our baseline is the hybrid model of Clark and Curran (2007); our integrated model simply adds the supertagger features to this model. The parser relies solely on the supertagger for pruning, using CKY for search over the pruned space. Training requires repeated calculation of feature expectations over packed charts of derivations. For training, we limited the number of items in this chart to 0.3 million, and for testing, 1 million. We also used a more permissive training supertagger beam (Table 3) than in previous work (Clark and Curran, 2007). Models were trained with the parser’s L-BFGS tr</context>
+</contexts>
+<marker>Clark, 2002</marker>
+<rawString>S. Clark. 2002. Supertagging for Combinatory Categorial Grammar. In TAG+6.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>G B Dantzig</author>
+<author>P Wolfe</author>
+</authors>
+<title>Decomposition principle for linear programs.</title>
+<date>1960</date>
+<journal>Operations Research,</journal>
+<volume>8</volume>
+<issue>1</issue>
+<contexts>
+<context position="12401" citStr="Dantzig and Wolfe, 1960" startWordPosition="2039" endWordPosition="2042">arch problem is equivalent to finding the optimal derivation in the weighted intersection of a regular and mildly context-sensitive language. Even allowing for the observation of Fowler and Penn (2010) that our practical CCG is context-free, this problem still reduces to the construction of Bar-Hillel et al. (1964), making search very expensive. Therefore we need approximations. Fortunately, recent literature has introduced two relevant approximations to the NLP community: loopy belief propagation (Pearl, 1988), applied to dependency parsing by Smith and Eisner (2008); and dual decomposition (Dantzig and Wolfe, 1960; Komodakis et al., 2007; Sontag et al., 2010, inter alia), applied to dependency parsing by Koo et al. (2010) and lexicalized CFG parsing by Rush et al. (2010). We apply both techniques to our integrated supertagging and parsing model. 4.1 Loopy Belief Propagation Belief propagation (BP) is an algorithm for computing marginals (i.e. expectations) on structured models. These marginals can be used for decoding (parsing) in a minimum-risk framework (Smith and Eisner, 2008); or for training using a variety of algorithms (Sutton and McCallum, 2010). We experiment with both uses in §5. Many researc</context>
+</contexts>
+<marker>Dantzig, Wolfe, 1960</marker>
+<rawString>G. B. Dantzig and P. Wolfe. 1960. Decomposition principle for linear programs. Operations Research, 8(1):101–111.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>M Dreyer</author>
+<author>J Eisner</author>
+</authors>
+<title>Graphical models over multiple strings. In</title>
+<date>2009</date>
+<booktitle>Proc. ofEMNLP.</booktitle>
+<contexts>
+<context position="15713" citStr="Dreyer and Eisner (2009)" startWordPosition="2583" endWordPosition="2586">oming messages. Bx(x) = 1Z ri mh→x(x) (5) hEn(x) In the supertagger model, this is just: 1 p(Ti) = Z fi(Ti)bi(Ti)ei(Ti) (6) Our parsing model is also a distribution over variables Ti, along with an additional quadratic number of span(i, j) variables. Though difficult to represent pictorially, a distribution over parses is captured by an extension to graphical models called case-factor diagrams (McAllester et al., 2008). We add this complex distribution to our model as a single factor (Figure 3). This is a natural extension to the use of complex factors described by Smith and Eisner (2008) and Dreyer and Eisner (2009). When a factor graph is a tree as in Figure 2, BP converges in a single iteration to the exact marginals. However, when the model contains cycles, as in Figure 3, we can iterate message passing. Under certain assumptions this loopy BP it will converge to approximate marginals that are bounded under an interpretation from statistical physics (Yedidia et al., 2001; Sutton and McCallum, 2010). The TREE factor exchanges inside ni and outside oi messages with the tag and span variables, taking into account beliefs from the sequence model. We will omit the unchanged outside recursion for brevity, b</context>
+</contexts>
+<marker>Dreyer, Eisner, 2009</marker>
+<rawString>M. Dreyer and J. Eisner. 2009. Graphical models over multiple strings. In Proc. ofEMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>C Dyer</author>
+<author>P Resnik</author>
+</authors>
+<title>Context-free reordering, finite-state translation.</title>
+<date>2010</date>
+<booktitle>In Proc. ofHLT-NAACL.</booktitle>
+<contexts>
+<context position="29429" citStr="Dyer and Resnik, 2010" startWordPosition="4955" endWordPosition="4958">d a stricter supertagger beam setting during training (Clark and Curran, 2007) to make training on a single machine practical. This leads to lower performance, particularly in the Reverse condition. Training a model using DD would require a different optimization algorithm based on Viterbi results (e.g. the perceptron) which we will pursue in future work. 6 Conclusion and Future Work Our approach of combining models to avoid the pipeline problem (Felzenszwalb and McAllester, 2007) is very much in line with much recent work in NLP. Such diverse topics as machine translation (Dyer et al., 2008; Dyer and Resnik, 2010; Mi et al., 2008), part-of-speech tagging (Jiang et al., 2008), named entity recognition (Finkel and Manning, 2009) semantic role labelling (Sutton and McCallum, 2005; Finkel et al., 2006), and others have also been improved by combined models. Our empirical comparison of BP and DD also complements the theoretically-oriented comparison of marginal- and margin-based variational approximations for parsing described by Martins et al. (2010). We have shown that the aggressive pruning used in adaptive supertagging significantly harms the oracle performance of the parser, though it mostly prunes ba</context>
+</contexts>
+<marker>Dyer, Resnik, 2010</marker>
+<rawString>C. Dyer and P. Resnik. 2010. Context-free reordering, finite-state translation. In Proc. ofHLT-NAACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>C J Dyer</author>
+<author>S Muresan</author>
+<author>P Resnik</author>
+</authors>
+<title>Generalizing word lattice translation.</title>
+<date>2008</date>
+<booktitle>In Proc. ofACL.</booktitle>
+<contexts>
+<context position="29406" citStr="Dyer et al., 2008" startWordPosition="4951" endWordPosition="4954">this is that we used a stricter supertagger beam setting during training (Clark and Curran, 2007) to make training on a single machine practical. This leads to lower performance, particularly in the Reverse condition. Training a model using DD would require a different optimization algorithm based on Viterbi results (e.g. the perceptron) which we will pursue in future work. 6 Conclusion and Future Work Our approach of combining models to avoid the pipeline problem (Felzenszwalb and McAllester, 2007) is very much in line with much recent work in NLP. Such diverse topics as machine translation (Dyer et al., 2008; Dyer and Resnik, 2010; Mi et al., 2008), part-of-speech tagging (Jiang et al., 2008), named entity recognition (Finkel and Manning, 2009) semantic role labelling (Sutton and McCallum, 2005; Finkel et al., 2006), and others have also been improved by combined models. Our empirical comparison of BP and DD also complements the theoretically-oriented comparison of marginal- and margin-based variational approximations for parsing described by Martins et al. (2010). We have shown that the aggressive pruning used in adaptive supertagging significantly harms the oracle performance of the parser, tho</context>
+</contexts>
+<marker>Dyer, Muresan, Resnik, 2008</marker>
+<rawString>C. J. Dyer, S. Muresan, and P. Resnik. 2008. Generalizing word lattice translation. In Proc. ofACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>P F Felzenszwalb</author>
+<author>D McAllester</author>
+</authors>
+<title>The Generalized A* Architecture.</title>
+<date>2007</date>
+<journal>In Journal ofArtificial Intelligence Research,</journal>
+<volume>29</volume>
+<pages>153--190</pages>
+<contexts>
+<context position="29293" citStr="Felzenszwalb and McAllester, 2007" startWordPosition="4929" endWordPosition="4932">rence only (inf); a maximum number of 10 iterations is used. the parameters are trained together (Table 7). A possible reason for this is that we used a stricter supertagger beam setting during training (Clark and Curran, 2007) to make training on a single machine practical. This leads to lower performance, particularly in the Reverse condition. Training a model using DD would require a different optimization algorithm based on Viterbi results (e.g. the perceptron) which we will pursue in future work. 6 Conclusion and Future Work Our approach of combining models to avoid the pipeline problem (Felzenszwalb and McAllester, 2007) is very much in line with much recent work in NLP. Such diverse topics as machine translation (Dyer et al., 2008; Dyer and Resnik, 2010; Mi et al., 2008), part-of-speech tagging (Jiang et al., 2008), named entity recognition (Finkel and Manning, 2009) semantic role labelling (Sutton and McCallum, 2005; Finkel et al., 2006), and others have also been improved by combined models. Our empirical comparison of BP and DD also complements the theoretically-oriented comparison of marginal- and margin-based variational approximations for parsing described by Martins et al. (2010). We have shown that t</context>
+</contexts>
+<marker>Felzenszwalb, McAllester, 2007</marker>
+<rawString>P. F. Felzenszwalb and D. McAllester. 2007. The Generalized A* Architecture. In Journal ofArtificial Intelligence Research, volume 29, pages 153–190.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J R Finkel</author>
+<author>C D Manning</author>
+</authors>
+<title>Joint parsing and named entity recognition.</title>
+<date>2009</date>
+<booktitle>In Proc. ofNAACL. Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="29545" citStr="Finkel and Manning, 2009" startWordPosition="4972" endWordPosition="4975">ine practical. This leads to lower performance, particularly in the Reverse condition. Training a model using DD would require a different optimization algorithm based on Viterbi results (e.g. the perceptron) which we will pursue in future work. 6 Conclusion and Future Work Our approach of combining models to avoid the pipeline problem (Felzenszwalb and McAllester, 2007) is very much in line with much recent work in NLP. Such diverse topics as machine translation (Dyer et al., 2008; Dyer and Resnik, 2010; Mi et al., 2008), part-of-speech tagging (Jiang et al., 2008), named entity recognition (Finkel and Manning, 2009) semantic role labelling (Sutton and McCallum, 2005; Finkel et al., 2006), and others have also been improved by combined models. Our empirical comparison of BP and DD also complements the theoretically-oriented comparison of marginal- and margin-based variational approximations for parsing described by Martins et al. (2010). We have shown that the aggressive pruning used in adaptive supertagging significantly harms the oracle performance of the parser, though it mostly prunes bad parses. Based on these findings, we combined parser and supertagger features into a single model. Using belief pro</context>
+</contexts>
+<marker>Finkel, Manning, 2009</marker>
+<rawString>J. R. Finkel and C. D. Manning. 2009. Joint parsing and named entity recognition. In Proc. ofNAACL. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J R Finkel</author>
+<author>C D Manning</author>
+<author>A Y Ng</author>
+</authors>
+<title>Solving the problem of cascading errors: Approximate Bayesian inference for linguistic annotation pipelines.</title>
+<date>2006</date>
+<booktitle>In Proc. of EMNLP.</booktitle>
+<contexts>
+<context position="29618" citStr="Finkel et al., 2006" startWordPosition="4983" endWordPosition="4986">ndition. Training a model using DD would require a different optimization algorithm based on Viterbi results (e.g. the perceptron) which we will pursue in future work. 6 Conclusion and Future Work Our approach of combining models to avoid the pipeline problem (Felzenszwalb and McAllester, 2007) is very much in line with much recent work in NLP. Such diverse topics as machine translation (Dyer et al., 2008; Dyer and Resnik, 2010; Mi et al., 2008), part-of-speech tagging (Jiang et al., 2008), named entity recognition (Finkel and Manning, 2009) semantic role labelling (Sutton and McCallum, 2005; Finkel et al., 2006), and others have also been improved by combined models. Our empirical comparison of BP and DD also complements the theoretically-oriented comparison of marginal- and margin-based variational approximations for parsing described by Martins et al. (2010). We have shown that the aggressive pruning used in adaptive supertagging significantly harms the oracle performance of the parser, though it mostly prunes bad parses. Based on these findings, we combined parser and supertagger features into a single model. Using belief propagation and dual decomposition, we obtained more principled—and more acc</context>
+</contexts>
+<marker>Finkel, Manning, Ng, 2006</marker>
+<rawString>J. R. Finkel, C. D. Manning, and A. Y. Ng. 2006. Solving the problem of cascading errors: Approximate Bayesian inference for linguistic annotation pipelines. In Proc. of EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J R Finkel</author>
+<author>A Kleeman</author>
+<author>C D Manning</author>
+</authors>
+<title>Feature-based, conditional random field parsing.</title>
+<date>2008</date>
+<booktitle>In Proceedings ofACL-HLT.</booktitle>
+<marker>Finkel, Kleeman, Manning, 2008</marker>
+<rawString>J. R. Finkel, A. Kleeman, and C. D. Manning. 2008. Feature-based, conditional random field parsing. In Proceedings ofACL-HLT.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>T A D Fowler</author>
+<author>G Penn</author>
+</authors>
+<title>Accurate contextfree parsing with combinatory categorial grammar.</title>
+<date>2010</date>
+<booktitle>In Proc. ofACL.</booktitle>
+<contexts>
+<context position="1383" citStr="Fowler and Penn, 2010" startWordPosition="208" endWordPosition="211">on approaches to inference, the first empirical comparison of these algorithms that we are aware of on a structured natural language processing problem. On CCGbank we achieve a labelled dependency F-measure of 88.8% on gold POS tags, and 86.7% on automatic part-of-speeoch tags, the best reported results for this task. 1 Introduction Accurate and efficient parsing of Combinatorial Categorial Grammar (CCG; Steedman, 2000) is a longstanding problem in computational linguistics, due to the complexities associated its mild context sensitivity. Even for practical CCG that are strongly context-free (Fowler and Penn, 2010), parsing is much harder than with Penn Treebank-style contextfree grammars, with vast numbers of nonterminal categories leading to increased grammar constants. Where a typical Penn Treebank grammar may have fewer than 100 nonterminals (Hockenmaier and Steedman, 2002), we found that a CCG grammar derived from CCGbank contained over 1500. The same grammar assigns an average of 22 lexical categories per word (Clark and Curran, 2004a), resulting in an enormous space of possible derivations. The most successful approach to CCG parsing is based on a pipeline strategy (§2). First, we tag (or multita</context>
+<context position="4236" citStr="Fowler and Penn, 2010" startWordPosition="662" endWordPosition="665">stics 2 CCG and Supertagging CCG is a lexicalized grammar formalism encoding for each word lexical categories that are either basic (eg. NN, JJ) or complex. Complex lexical categories specify the number and directionality of arguments. For example, one lexical category for the verb like is (S\NP)/NP, specifying the first argument as an NP to the right and the second as an NP to the left; there are over 100 lexical categories for like in our lexicon. In parsing, adjacent spans are combined using a small number of binary combinatory rules like forward application or composition (Steedman, 2000; Fowler and Penn, 2010). In the first derivation below, (S\NP)/NP and NP combine to form the spanning category S\NP, which only requires an NP to its left to form a complete sentence-spanning S. The second derivation uses type-raising to change the category type of I. I like tea S S As can be inferred from even this small example, a key difficulty in parsing CCG is that the number of categories quickly becomes extremely large, and there are typically many ways to analyze every span of a sentence. Supertagging (Bangalore and Joshi, 1999; Clark, 2002) treats the assignment of lexical categories (or supertags) as a seq</context>
+<context position="11979" citStr="Fowler and Penn (2010)" startWordPosition="1977" endWordPosition="1980">ponding to all of its active features. However, since the features of the supertagger are all Markov features on adjacent supertags, the change has serious implications for search. If we think of the supertagger as defining a weighted regular language consisting of all supertag sequences, and the parser as defining a weighted mildly context-sensitive language consisting of only a subset of these sequences, then the search problem is equivalent to finding the optimal derivation in the weighted intersection of a regular and mildly context-sensitive language. Even allowing for the observation of Fowler and Penn (2010) that our practical CCG is context-free, this problem still reduces to the construction of Bar-Hillel et al. (1964), making search very expensive. Therefore we need approximations. Fortunately, recent literature has introduced two relevant approximations to the NLP community: loopy belief propagation (Pearl, 1988), applied to dependency parsing by Smith and Eisner (2008); and dual decomposition (Dantzig and Wolfe, 1960; Komodakis et al., 2007; Sontag et al., 2010, inter alia), applied to dependency parsing by Koo et al. (2010) and lexicalized CFG parsing by Rush et al. (2010). We apply both te</context>
+<context position="24278" citStr="Fowler and Penn (2010)" startWordPosition="4052" endWordPosition="4055">eline (BL), belief propagation (BP), and dual decomposition (DD) on section 00. our combined model using either algorithm consistently outperforms the baseline after only a few iterations. Overall, we improve the labelled F-measure by almost 1.1% and unlabelled F-measure by 0.6% over the baseline. To the best of our knowledge, the results obtained with BP and DD are the best reported results on this task using gold POS tags. Next, we evaluate performance when using automatic part-of-speech tags as input to our parser and supertagger (Table 5). This enables us to compare against the results of Fowler and Penn (2010), who trained the Petrov parser (Petrov et al., 2006) on CCGbank. We outperform them on all criteria. Hence our combined model represents the best CCG parsing results under any setting. Finally, we revisit the oracle experiment of §3 using our combined models (Figure 5). Both show an improved relationship between model score and Fmeasure. 5.2 Algorithmic Convergence Figure 4 shows that parse accuracy converges after a few iterations. Do the algorithms converge? BP converges when the marginals do not change between iterations, and DD converges when both submodels agree on all supertags. We meas</context>
+<context position="25998" citStr="Fowler and Penn (2010)" startWordPosition="4354" endWordPosition="4357">ST BP Rev DD AST DD Rev Labelled F-‐score 88.0 87.8 87.6 87.4 87.2 1 6 11 16 21 26 31 36 41 46 Iterations 476 LF LP section 00 (dev) UP UR LF LP section 23 (test) UP UR LR UF LR UF Baseline 85.53 85.73 85.33 91.99 92.20 91.77 85.74 85.90 85.58 91.92 92.09 91.75 Petrov I-5 85.79 86.09 85.50 92.44 92.76 92.13 86.01 86.29 85.74 92.34 92.64 92.04 BPk=1 86.44 86.74 86.14 92.54 92.86 92.23 86.73 86.95 86.50 92.45 92.69 92.21 DDk=25 86.35 86.65 86.05 92.52 92.85 92.20 86.68 86.90 86.46 92.44 92.67 92.21 Table 5: Results on automatically assigned POS tags. Petrov I-S is based on the parser output of Fowler and Penn (2010); we evaluate on sentences for which all parsers returned an analysis (2323 sentences for section 23 and 1834 sentences for section 00). ellelddF--‐sc re�� M Supertagger�� beam�� 200000 89 3�� 90.0 86400 00�� 8 89 2�� 180000 86200 00�� .9�� 89.9 160000 e989 85 86000 85 9.�� 89.7�� 89.8 140000 eas u 89.7 85 85800 89.6 120000 e9F-‐ 89.6 Lab 00 89. 8sco 100000 89.5 �� 80000 delELore�� Mode beam 4�� 89.4 60000 Labe leld�� F-‐ sc �� S pertagger Model�� score�� F-‐measure�� Model�� score�� re�� sco refortheintegratedmodelusing beliefpropagation (left) Figure5:Comparison between model scoreandVite</context>
+</contexts>
+<marker>Fowler, Penn, 2010</marker>
+<rawString>T. A. D. Fowler and G. Penn. 2010. Accurate contextfree parsing with combinatory categorial grammar. In Proc. ofACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J Hockenmaier</author>
+<author>M Steedman</author>
+</authors>
+<title>Generative models for statistical parsing with Combinatory Categorial Grammar. In</title>
+<date>2002</date>
+<booktitle>Proc. ofACL.</booktitle>
+<contexts>
+<context position="1651" citStr="Hockenmaier and Steedman, 2002" startWordPosition="246" endWordPosition="249">rt-of-speeoch tags, the best reported results for this task. 1 Introduction Accurate and efficient parsing of Combinatorial Categorial Grammar (CCG; Steedman, 2000) is a longstanding problem in computational linguistics, due to the complexities associated its mild context sensitivity. Even for practical CCG that are strongly context-free (Fowler and Penn, 2010), parsing is much harder than with Penn Treebank-style contextfree grammars, with vast numbers of nonterminal categories leading to increased grammar constants. Where a typical Penn Treebank grammar may have fewer than 100 nonterminals (Hockenmaier and Steedman, 2002), we found that a CCG grammar derived from CCGbank contained over 1500. The same grammar assigns an average of 22 lexical categories per word (Clark and Curran, 2004a), resulting in an enormous space of possible derivations. The most successful approach to CCG parsing is based on a pipeline strategy (§2). First, we tag (or multitag) each word of the sentence with a lexical category using a supertagger, a sequence model over these categories (Bangalore and Joshi, 1999; Clark, 2002). Second, we parse the sentence under the requirement that the lexical categories are fixed to those preferred by t</context>
+</contexts>
+<marker>Hockenmaier, Steedman, 2002</marker>
+<rawString>J. Hockenmaier and M. Steedman. 2002. Generative models for statistical parsing with Combinatory Categorial Grammar. In Proc. ofACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J Hockenmaier</author>
+<author>M Steedman</author>
+</authors>
+<title>CCGbank: A corpus of CCG derivations and dependency structures extracted from the Penn Treebank.</title>
+<date>2007</date>
+<journal>Computational Linguistics,</journal>
+<volume>33</volume>
+<issue>3</issue>
+<contexts>
+<context position="7166" citStr="Hockenmaier and Steedman, 2007" startWordPosition="1146" endWordPosition="1149">nces parseable when they otherwise would not be due to an impractically large search space. Reverse AST starts with a wide beam, narrowing it at each iteration only if a maximum chart size is exceeded. In this way it prioritizes exactness over speed. 3 Oracle Parsing What is the effect of these approximations? To answer this question we computed oracle best and worst values for labelled dependency F-score using the algorithm of Huang (2008) on the hybrid model of Clark and Curran (2007), the best model of their C&amp;C parser. We computed the oracle on our development data, Section 00 of CCGbank (Hockenmaier and Steedman, 2007), using both AST and Reverse AST beams settings shown in Table 1. The results (Table 2) show that the oracle best accuracy for reverse AST is more than 3% higher than the aggressive AST pruning.1 In fact, it is almost as high as the upper bound oracle accuracy of 97.73% obtained using perfect supertags—in other words, the search space for reverse AST is theoretically near-optimal.2 We also observe that the oracle 1The numbers reported here and in later sections differ slightly from those in a previously circulated draft of this paper, for two reasons: we evaluate only on sentences for which a </context>
+<context position="19946" citStr="Hockenmaier and Steedman, 2007" startWordPosition="3319" endWordPosition="3323">and Curran (2007); our integrated model simply adds the supertagger features to this model. The parser relies solely on the supertagger for pruning, using CKY for search over the pruned space. Training requires repeated calculation of feature expectations over packed charts of derivations. For training, we limited the number of items in this chart to 0.3 million, and for testing, 1 million. We also used a more permissive training supertagger beam (Table 3) than in previous work (Clark and Curran, 2007). Models were trained with the parser’s L-BFGS trainer. Evaluation. We evaluated on CCGbank (Hockenmaier and Steedman, 2007), a right-most normalform CCG version of the Penn Treebank. We use sections 02-21 (39603 sentences) for training, 4The u terms can be interpreted as the messages from factors to variables (Sontag et al., 2010) and the resulting message passing algorithms are similar to the max-product algorithm, a sister algorithm to BP. section 00 (1913 sentences) for development and section 23 (2407 sentences) for testing. We supply gold-standard part-of-speech tags to the parsers. Evaluation is based on labelled and unlabelled predicate argument structure recovery and supertag accuracy. We only evaluate on </context>
+</contexts>
+<marker>Hockenmaier, Steedman, 2007</marker>
+<rawString>J. Hockenmaier and M. Steedman. 2007. CCGbank: A corpus of CCG derivations and dependency structures extracted from the Penn Treebank. Computational Linguistics, 33(3):355–396.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>L Huang</author>
+</authors>
+<title>Forest Reranking: Discriminative parsing with Non-Local Features.</title>
+<date>2008</date>
+<booktitle>In Proceedings ofACL08:</booktitle>
+<publisher>HLT.</publisher>
+<contexts>
+<context position="6979" citStr="Huang (2008)" startWordPosition="1115" endWordPosition="1116">s, the effect of the approximation is unbounded. We will also explore reverse adaptive supertagging, a much less aggressive pruning method that seeks only to make sentences parseable when they otherwise would not be due to an impractically large search space. Reverse AST starts with a wide beam, narrowing it at each iteration only if a maximum chart size is exceeded. In this way it prioritizes exactness over speed. 3 Oracle Parsing What is the effect of these approximations? To answer this question we computed oracle best and worst values for labelled dependency F-score using the algorithm of Huang (2008) on the hybrid model of Clark and Curran (2007), the best model of their C&amp;C parser. We computed the oracle on our development data, Section 00 of CCGbank (Hockenmaier and Steedman, 2007), using both AST and Reverse AST beams settings shown in Table 1. The results (Table 2) show that the oracle best accuracy for reverse AST is more than 3% higher than the aggressive AST pruning.1 In fact, it is almost as high as the upper bound oracle accuracy of 97.73% obtained using perfect supertags—in other words, the search space for reverse AST is theoretically near-optimal.2 We also observe that the ora</context>
+</contexts>
+<marker>Huang, 2008</marker>
+<rawString>L. Huang. 2008. Forest Reranking: Discriminative parsing with Non-Local Features. In Proceedings ofACL08: HLT.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>W Jiang</author>
+<author>L Huang</author>
+<author>Q Liu</author>
+<author>Y L¨u</author>
+</authors>
+<title>A cascaded linear model for joint Chinese word segmentation and part-of-speech tagging.</title>
+<date>2008</date>
+<booktitle>In Proceedings of ACL-08: HLT.</booktitle>
+<marker>Jiang, Huang, Liu, L¨u, 2008</marker>
+<rawString>W. Jiang, L. Huang, Q. Liu, and Y. L¨u. 2008. A cascaded linear model for joint Chinese word segmentation and part-of-speech tagging. In Proceedings of ACL-08: HLT.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>N Komodakis</author>
+<author>N Paragios</author>
+<author>G Tziritas</author>
+</authors>
+<title>MRF optimization via dual decomposition: Messagepassing revisited.</title>
+<date>2007</date>
+<booktitle>In Proc. of Int. Conf. on Computer Vision (ICCV).</booktitle>
+<contexts>
+<context position="12425" citStr="Komodakis et al., 2007" startWordPosition="2043" endWordPosition="2046">t to finding the optimal derivation in the weighted intersection of a regular and mildly context-sensitive language. Even allowing for the observation of Fowler and Penn (2010) that our practical CCG is context-free, this problem still reduces to the construction of Bar-Hillel et al. (1964), making search very expensive. Therefore we need approximations. Fortunately, recent literature has introduced two relevant approximations to the NLP community: loopy belief propagation (Pearl, 1988), applied to dependency parsing by Smith and Eisner (2008); and dual decomposition (Dantzig and Wolfe, 1960; Komodakis et al., 2007; Sontag et al., 2010, inter alia), applied to dependency parsing by Koo et al. (2010) and lexicalized CFG parsing by Rush et al. (2010). We apply both techniques to our integrated supertagging and parsing model. 4.1 Loopy Belief Propagation Belief propagation (BP) is an algorithm for computing marginals (i.e. expectations) on structured models. These marginals can be used for decoding (parsing) in a minimum-risk framework (Smith and Eisner, 2008); or for training using a variety of algorithms (Sutton and McCallum, 2010). We experiment with both uses in §5. Many researchers in NLP are familiar</context>
+</contexts>
+<marker>Komodakis, Paragios, Tziritas, 2007</marker>
+<rawString>N. Komodakis, N. Paragios, and G. Tziritas. 2007. MRF optimization via dual decomposition: Messagepassing revisited. In Proc. of Int. Conf. on Computer Vision (ICCV).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>T Koo</author>
+<author>A M Rush</author>
+<author>M Collins</author>
+<author>T Jaakkola</author>
+<author>D Sontag</author>
+</authors>
+<title>Dual Decomposition for Parsing with NonProjective Head Automata. In</title>
+<date>2010</date>
+<booktitle>In Proc. EMNLP.</booktitle>
+<contexts>
+<context position="12511" citStr="Koo et al. (2010)" startWordPosition="2058" endWordPosition="2061">ntext-sensitive language. Even allowing for the observation of Fowler and Penn (2010) that our practical CCG is context-free, this problem still reduces to the construction of Bar-Hillel et al. (1964), making search very expensive. Therefore we need approximations. Fortunately, recent literature has introduced two relevant approximations to the NLP community: loopy belief propagation (Pearl, 1988), applied to dependency parsing by Smith and Eisner (2008); and dual decomposition (Dantzig and Wolfe, 1960; Komodakis et al., 2007; Sontag et al., 2010, inter alia), applied to dependency parsing by Koo et al. (2010) and lexicalized CFG parsing by Rush et al. (2010). We apply both techniques to our integrated supertagging and parsing model. 4.1 Loopy Belief Propagation Belief propagation (BP) is an algorithm for computing marginals (i.e. expectations) on structured models. These marginals can be used for decoding (parsing) in a minimum-risk framework (Smith and Eisner, 2008); or for training using a variety of algorithms (Sutton and McCallum, 2010). We experiment with both uses in §5. Many researchers in NLP are familiar with two special cases of belief propagation: the forward-backward and inside-outside</context>
+<context position="17558" citStr="Koo et al., 2010" startWordPosition="2886" endWordPosition="2889">es, which are identical to Equations 3 and 4, except that they also incorporate outside messages from the tree factor. Once all forward-backward and inside-outside probabilities have been calculated the belief of supertag Ti can be computed as the product of all incoming messages. The only difference from Equation 6 is the addition of the outside message. 1 p(Ti) = Z fi(Ti)bi(Ti)ei(Ti)oi(Ti) (8) The algorithm repeatedly runs forward-backward and inside-outside, passing their messages back and forth, until these quantities converge. 4.2 Dual Decomposition Dual decomposition (Rush et al., 2010; Koo et al., 2010) is a decoding (i.e. search) algorithm for problems that can be decomposed into exactly solvable subproblems: in our case, supertagging and parsing. Formally, given Y as the set of valid parses, Z as the set of valid supertag sequences, and T as the set of supertags, we want to solve the following optimization for parser f(y) and supertagger g(z). arg max f(y) + g(z) (9) yEY,zEZ such that y(i, t) = z(i, t) for all (i, t) E I (10) Here y(i, t) is a binary function indicating whether word i is assigned supertag t by the parser, for the T0 e0 e1 e2 f(T1) f(T2) n(T0) o(T2) o(T0) n(T2) span (0,2) b</context>
+</contexts>
+<marker>Koo, Rush, Collins, Jaakkola, Sontag, 2010</marker>
+<rawString>T. Koo, A. M. Rush, M. Collins, T. Jaakkola, and D. Sontag. 2010. Dual Decomposition for Parsing with NonProjective Head Automata. In In Proc. EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>F R Kschischang</author>
+<author>B J Frey</author>
+<author>H-A Loeliger</author>
+</authors>
+<title>Factor graphs and the sum-product algorithm.</title>
+<date>1998</date>
+<journal>IEEE Transactions on Information Theory,</journal>
+<pages>47--498</pages>
+<contexts>
+<context position="13730" citStr="Kschischang et al., 1998" startWordPosition="2245" endWordPosition="2248">utside algorithms, used for computing expectations in sequence models and context-free grammars, respectively.3 Our use of belief propagation builds directly on these two familiar algorithms. 3Forward-backward and inside-outside are formally shown to be special cases of belief propagation by Smyth et al. (1997) and Sato (2007), respectively. Figure 2: Supertagging factor graph with messages. Circles are variables and filled squares are factors. BP is usually understood as an algorithm on bipartite factor graphs, which structure a global function into local functions over subsets of variables (Kschischang et al., 1998). Variables maintain a belief (expectation) over a distribution of values and BP passes messages about these beliefs between variables and factors. The idea is to iteratively update each variable’s beliefs based on the beliefs of neighboring variables (through a shared factor), using the sum-product rule. This results in the following equation for a message mx→f(x) from a variable x to a factor f rlmx→f(x) = mh→x(x) (1) hEn(x)\f where n(x) is the set of all neighbours of x. The message mf→x from a factor to a variable is Emf→x(x) = f(X) rl my→f(y) (2) —{x} yEn(f)\x where — {x} represents all v</context>
+</contexts>
+<marker>Kschischang, Frey, Loeliger, 1998</marker>
+<rawString>F. R. Kschischang, B. J. Frey, and H.-A. Loeliger. 1998. Factor graphs and the sum-product algorithm. IEEE Transactions on Information Theory, 47:498–519.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J K Kummerfeld</author>
+<author>J Rosener</author>
+<author>T Dawborn</author>
+<author>J Haggerty</author>
+<author>J R Curran</author>
+<author>S Clark</author>
+</authors>
+<title>Faster parsing by supertagger adaptation.</title>
+<date>2010</date>
+<booktitle>In Proc. ofACL.</booktitle>
+<contexts>
+<context position="2418" citStr="Kummerfeld et al., 2010" startWordPosition="369" endWordPosition="372">Clark and Curran, 2004a), resulting in an enormous space of possible derivations. The most successful approach to CCG parsing is based on a pipeline strategy (§2). First, we tag (or multitag) each word of the sentence with a lexical category using a supertagger, a sequence model over these categories (Bangalore and Joshi, 1999; Clark, 2002). Second, we parse the sentence under the requirement that the lexical categories are fixed to those preferred by the supertagger. Variations on this approach drive the widely-used, broad coverage C&amp;C parser (Clark and Curran, 2004a; Clark and Curran, 2007; Kummerfeld et al., 2010). However, it fails when the supertagger makes errors. We show experimentally that this pipeline significantly lowers the upper bound on parsing accuracy (§3). The same experiment shows that the supertagger prunes many bad parses. So, while we want to avoid the error propagation inherent to a pipeline, ideally we still want to benefit from the key insight of supertagging: that a sequence model over lexical categories can be quite accurate. Our solution is to combine the features of both the supertagger and the parser into a single, less aggressively pruned model. The challenge with this model </context>
+</contexts>
+<marker>Kummerfeld, Rosener, Dawborn, Haggerty, Curran, Clark, 2010</marker>
+<rawString>J. K. Kummerfeld, J. Rosener, T. Dawborn, J. Haggerty, J. R. Curran, and S. Clark. 2010. Faster parsing by supertagger adaptation. In Proc. ofACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>A F T Martins</author>
+<author>N A Smith</author>
+<author>E P Xing</author>
+<author>P M Q Aguiar</author>
+<author>M A T Figueiredo</author>
+</authors>
+<title>Turbo parsers: Dependency parsing by approximate variational inference.</title>
+<date>2010</date>
+<booktitle>In Proc. of EMNLP.</booktitle>
+<contexts>
+<context position="29871" citStr="Martins et al. (2010)" startWordPosition="5021" endWordPosition="5024">problem (Felzenszwalb and McAllester, 2007) is very much in line with much recent work in NLP. Such diverse topics as machine translation (Dyer et al., 2008; Dyer and Resnik, 2010; Mi et al., 2008), part-of-speech tagging (Jiang et al., 2008), named entity recognition (Finkel and Manning, 2009) semantic role labelling (Sutton and McCallum, 2005; Finkel et al., 2006), and others have also been improved by combined models. Our empirical comparison of BP and DD also complements the theoretically-oriented comparison of marginal- and margin-based variational approximations for parsing described by Martins et al. (2010). We have shown that the aggressive pruning used in adaptive supertagging significantly harms the oracle performance of the parser, though it mostly prunes bad parses. Based on these findings, we combined parser and supertagger features into a single model. Using belief propagation and dual decomposition, we obtained more principled—and more accurate—approximations than a pipeline. Models combined using belief propagation achieve very good performance immediately, despite an initial convergence rate just over 1%, while dual decomposition produces comparable results after several iterations, an</context>
+</contexts>
+<marker>Martins, Smith, Xing, Aguiar, Figueiredo, 2010</marker>
+<rawString>A. F. T. Martins, N. A. Smith, E. P. Xing, P. M. Q. Aguiar, and M. A. T. Figueiredo. 2010. Turbo parsers: Dependency parsing by approximate variational inference. In Proc. of EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D McAllester</author>
+<author>M Collins</author>
+<author>F Pereira</author>
+</authors>
+<title>Casefactor diagrams for structured probabilistic modeling.</title>
+<date>2008</date>
+<journal>Journal of Computer and System Sciences,</journal>
+<volume>74</volume>
+<issue>1</issue>
+<pages>96</pages>
+<contexts>
+<context position="15511" citStr="McAllester et al., 2008" startWordPosition="2546" endWordPosition="2549">i+1(Ti, Ti+1) (4) Ti+1 473 Figure 3: Factor graph for the combined parsing and supertagging model. The current belief Bx(x) for variable x can be computed by taking the normalized product of all its incoming messages. Bx(x) = 1Z ri mh→x(x) (5) hEn(x) In the supertagger model, this is just: 1 p(Ti) = Z fi(Ti)bi(Ti)ei(Ti) (6) Our parsing model is also a distribution over variables Ti, along with an additional quadratic number of span(i, j) variables. Though difficult to represent pictorially, a distribution over parses is captured by an extension to graphical models called case-factor diagrams (McAllester et al., 2008). We add this complex distribution to our model as a single factor (Figure 3). This is a natural extension to the use of complex factors described by Smith and Eisner (2008) and Dreyer and Eisner (2009). When a factor graph is a tree as in Figure 2, BP converges in a single iteration to the exact marginals. However, when the model contains cycles, as in Figure 3, we can iterate message passing. Under certain assumptions this loopy BP it will converge to approximate marginals that are bounded under an interpretation from statistical physics (Yedidia et al., 2001; Sutton and McCallum, 2010). The</context>
+</contexts>
+<marker>McAllester, Collins, Pereira, 2008</marker>
+<rawString>D. McAllester, M. Collins, and F. Pereira. 2008. Casefactor diagrams for structured probabilistic modeling. Journal of Computer and System Sciences, 74(1):84– 96.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>H Mi</author>
+<author>L Huang</author>
+<author>Q Liu</author>
+</authors>
+<title>Forest-based translation.</title>
+<date>2008</date>
+<booktitle>In Proc. ofACL-HLT.</booktitle>
+<contexts>
+<context position="29447" citStr="Mi et al., 2008" startWordPosition="4959" endWordPosition="4962">r beam setting during training (Clark and Curran, 2007) to make training on a single machine practical. This leads to lower performance, particularly in the Reverse condition. Training a model using DD would require a different optimization algorithm based on Viterbi results (e.g. the perceptron) which we will pursue in future work. 6 Conclusion and Future Work Our approach of combining models to avoid the pipeline problem (Felzenszwalb and McAllester, 2007) is very much in line with much recent work in NLP. Such diverse topics as machine translation (Dyer et al., 2008; Dyer and Resnik, 2010; Mi et al., 2008), part-of-speech tagging (Jiang et al., 2008), named entity recognition (Finkel and Manning, 2009) semantic role labelling (Sutton and McCallum, 2005; Finkel et al., 2006), and others have also been improved by combined models. Our empirical comparison of BP and DD also complements the theoretically-oriented comparison of marginal- and margin-based variational approximations for parsing described by Martins et al. (2010). We have shown that the aggressive pruning used in adaptive supertagging significantly harms the oracle performance of the parser, though it mostly prunes bad parses. Based on</context>
+</contexts>
+<marker>Mi, Huang, Liu, 2008</marker>
+<rawString>H. Mi, L. Huang, and Q. Liu. 2008. Forest-based translation. In Proc. ofACL-HLT.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J Pearl</author>
+</authors>
+<title>Probabilistic Reasoning in Intelligent Systems: Networks of Plausible Inference.</title>
+<date>1988</date>
+<publisher>Morgan Kaufmann.</publisher>
+<contexts>
+<context position="12294" citStr="Pearl, 1988" startWordPosition="2025" endWordPosition="2026">ed mildly context-sensitive language consisting of only a subset of these sequences, then the search problem is equivalent to finding the optimal derivation in the weighted intersection of a regular and mildly context-sensitive language. Even allowing for the observation of Fowler and Penn (2010) that our practical CCG is context-free, this problem still reduces to the construction of Bar-Hillel et al. (1964), making search very expensive. Therefore we need approximations. Fortunately, recent literature has introduced two relevant approximations to the NLP community: loopy belief propagation (Pearl, 1988), applied to dependency parsing by Smith and Eisner (2008); and dual decomposition (Dantzig and Wolfe, 1960; Komodakis et al., 2007; Sontag et al., 2010, inter alia), applied to dependency parsing by Koo et al. (2010) and lexicalized CFG parsing by Rush et al. (2010). We apply both techniques to our integrated supertagging and parsing model. 4.1 Loopy Belief Propagation Belief propagation (BP) is an algorithm for computing marginals (i.e. expectations) on structured models. These marginals can be used for decoding (parsing) in a minimum-risk framework (Smith and Eisner, 2008); or for training </context>
+</contexts>
+<marker>Pearl, 1988</marker>
+<rawString>J. Pearl. 1988. Probabilistic Reasoning in Intelligent Systems: Networks of Plausible Inference. Morgan Kaufmann.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>S Petrov</author>
+<author>L Barrett</author>
+<author>R Thibaux</author>
+<author>D Klein</author>
+</authors>
+<title>Learning accurate, compact, and interpretable tree annotation.</title>
+<date>2006</date>
+<booktitle>In Proc. ofACL.</booktitle>
+<contexts>
+<context position="24331" citStr="Petrov et al., 2006" startWordPosition="4061" endWordPosition="4064">tion (DD) on section 00. our combined model using either algorithm consistently outperforms the baseline after only a few iterations. Overall, we improve the labelled F-measure by almost 1.1% and unlabelled F-measure by 0.6% over the baseline. To the best of our knowledge, the results obtained with BP and DD are the best reported results on this task using gold POS tags. Next, we evaluate performance when using automatic part-of-speech tags as input to our parser and supertagger (Table 5). This enables us to compare against the results of Fowler and Penn (2010), who trained the Petrov parser (Petrov et al., 2006) on CCGbank. We outperform them on all criteria. Hence our combined model represents the best CCG parsing results under any setting. Finally, we revisit the oracle experiment of §3 using our combined models (Figure 5). Both show an improved relationship between model score and Fmeasure. 5.2 Algorithmic Convergence Figure 4 shows that parse accuracy converges after a few iterations. Do the algorithms converge? BP converges when the marginals do not change between iterations, and DD converges when both submodels agree on all supertags. We measured the convergence of each algorithm under these cr</context>
+</contexts>
+<marker>Petrov, Barrett, Thibaux, Klein, 2006</marker>
+<rawString>S. Petrov, L. Barrett, R. Thibaux, and D. Klein. 2006. Learning accurate, compact, and interpretable tree annotation. In Proc. ofACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>A M Rush</author>
+<author>D Sontag</author>
+<author>M Collins</author>
+<author>T Jaakkola</author>
+</authors>
+<title>On dual decomposition and linear programming relaxations for natural language processing. In</title>
+<date>2010</date>
+<booktitle>In Proc. EMNLP.</booktitle>
+<contexts>
+<context position="12561" citStr="Rush et al. (2010)" startWordPosition="2067" endWordPosition="2070">bservation of Fowler and Penn (2010) that our practical CCG is context-free, this problem still reduces to the construction of Bar-Hillel et al. (1964), making search very expensive. Therefore we need approximations. Fortunately, recent literature has introduced two relevant approximations to the NLP community: loopy belief propagation (Pearl, 1988), applied to dependency parsing by Smith and Eisner (2008); and dual decomposition (Dantzig and Wolfe, 1960; Komodakis et al., 2007; Sontag et al., 2010, inter alia), applied to dependency parsing by Koo et al. (2010) and lexicalized CFG parsing by Rush et al. (2010). We apply both techniques to our integrated supertagging and parsing model. 4.1 Loopy Belief Propagation Belief propagation (BP) is an algorithm for computing marginals (i.e. expectations) on structured models. These marginals can be used for decoding (parsing) in a minimum-risk framework (Smith and Eisner, 2008); or for training using a variety of algorithms (Sutton and McCallum, 2010). We experiment with both uses in §5. Many researchers in NLP are familiar with two special cases of belief propagation: the forward-backward and inside-outside algorithms, used for computing expectations in se</context>
+<context position="17539" citStr="Rush et al., 2010" startWordPosition="2882" endWordPosition="2885">and backward messages, which are identical to Equations 3 and 4, except that they also incorporate outside messages from the tree factor. Once all forward-backward and inside-outside probabilities have been calculated the belief of supertag Ti can be computed as the product of all incoming messages. The only difference from Equation 6 is the addition of the outside message. 1 p(Ti) = Z fi(Ti)bi(Ti)ei(Ti)oi(Ti) (8) The algorithm repeatedly runs forward-backward and inside-outside, passing their messages back and forth, until these quantities converge. 4.2 Dual Decomposition Dual decomposition (Rush et al., 2010; Koo et al., 2010) is a decoding (i.e. search) algorithm for problems that can be decomposed into exactly solvable subproblems: in our case, supertagging and parsing. Formally, given Y as the set of valid parses, Z as the set of valid supertag sequences, and T as the set of supertags, we want to solve the following optimization for parser f(y) and supertagger g(z). arg max f(y) + g(z) (9) yEY,zEZ such that y(i, t) = z(i, t) for all (i, t) E I (10) Here y(i, t) is a binary function indicating whether word i is assigned supertag t by the parser, for the T0 e0 e1 e2 f(T1) f(T2) n(T0) o(T2) o(T0)</context>
+<context position="18801" citStr="Rush et al. (2010)" startWordPosition="3133" endWordPosition="3136">0,3) T1 span (1,3) t2 T2 n(Ci,�) = { 474 set I = {(i, t) : i E 1... n, t E T} denoting the set of permitted supertags for each word; similarly z(i, t) for the supertagger. To enforce the constraint that the parser and supertagger agree on a tag sequence we introduce Lagrangian multipliers u = {u(i, t) : (i, t) E I} and construct a dual objective over variables u(i, t). � L(u) = max(f(y) − yEY Z,t � +max (f(z) + ��� Z,t This objective is an upper bound that we want to make as tight as possible by solving for ming L(u). We optimize the values of the u(i, t) variables using the same algorithm as Rush et al. (2010) for their tagging and parsing problem (essentially a perceptron update).4 An advantages of DD is that, on convergence, it recovers exact solutions to the combined problem. However, if it does not converge or we stop early, an approximation must be returned: following Rush et al. (2010) we used the highest scoring output of the parsing submodel over all iterations. 5 Experiments Parser. We use the C&amp;C parser (Clark and Curran, 2007) and its supertagger (Clark, 2002). Our baseline is the hybrid model of Clark and Curran (2007); our integrated model simply adds the supertagger features to this m</context>
+</contexts>
+<marker>Rush, Sontag, Collins, Jaakkola, 2010</marker>
+<rawString>A. M. Rush, D. Sontag, M. Collins, and T. Jaakkola. 2010. On dual decomposition and linear programming relaxations for natural language processing. In In Proc. EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>T Sato</author>
+</authors>
+<title>Inside-outside probability computation for belief propagation.</title>
+<date>2007</date>
+<booktitle>In Proc. ofIJCAI. D.</booktitle>
+<contexts>
+<context position="13433" citStr="Sato (2007)" startWordPosition="2201" endWordPosition="2202">) in a minimum-risk framework (Smith and Eisner, 2008); or for training using a variety of algorithms (Sutton and McCallum, 2010). We experiment with both uses in §5. Many researchers in NLP are familiar with two special cases of belief propagation: the forward-backward and inside-outside algorithms, used for computing expectations in sequence models and context-free grammars, respectively.3 Our use of belief propagation builds directly on these two familiar algorithms. 3Forward-backward and inside-outside are formally shown to be special cases of belief propagation by Smyth et al. (1997) and Sato (2007), respectively. Figure 2: Supertagging factor graph with messages. Circles are variables and filled squares are factors. BP is usually understood as an algorithm on bipartite factor graphs, which structure a global function into local functions over subsets of variables (Kschischang et al., 1998). Variables maintain a belief (expectation) over a distribution of values and BP passes messages about these beliefs between variables and factors. The idea is to iteratively update each variable’s beliefs based on the beliefs of neighboring variables (through a shared factor), using the sum-product ru</context>
+</contexts>
+<marker>Sato, 2007</marker>
+<rawString>T. Sato. 2007. Inside-outside probability computation for belief propagation. In Proc. ofIJCAI. D. A. Smith and J. Eisner. 2008. Dependency parsing by belief propagation. In Proc. of EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>P Smyth</author>
+<author>D Heckerman</author>
+<author>M Jordan</author>
+</authors>
+<title>Probabilistic independence networks for hidden Markov probability models.</title>
+<date>1997</date>
+<journal>Neural computation,</journal>
+<volume>9</volume>
+<issue>2</issue>
+<pages>269</pages>
+<contexts>
+<context position="13417" citStr="Smyth et al. (1997)" startWordPosition="2196" endWordPosition="2199">ed for decoding (parsing) in a minimum-risk framework (Smith and Eisner, 2008); or for training using a variety of algorithms (Sutton and McCallum, 2010). We experiment with both uses in §5. Many researchers in NLP are familiar with two special cases of belief propagation: the forward-backward and inside-outside algorithms, used for computing expectations in sequence models and context-free grammars, respectively.3 Our use of belief propagation builds directly on these two familiar algorithms. 3Forward-backward and inside-outside are formally shown to be special cases of belief propagation by Smyth et al. (1997) and Sato (2007), respectively. Figure 2: Supertagging factor graph with messages. Circles are variables and filled squares are factors. BP is usually understood as an algorithm on bipartite factor graphs, which structure a global function into local functions over subsets of variables (Kschischang et al., 1998). Variables maintain a belief (expectation) over a distribution of values and BP passes messages about these beliefs between variables and factors. The idea is to iteratively update each variable’s beliefs based on the beliefs of neighboring variables (through a shared factor), using th</context>
+</contexts>
+<marker>Smyth, Heckerman, Jordan, 1997</marker>
+<rawString>P. Smyth, D. Heckerman, and M. Jordan. 1997. Probabilistic independence networks for hidden Markov probability models. Neural computation, 9(2):227– 269.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D Sontag</author>
+<author>A Globerson</author>
+<author>T Jaakkola</author>
+</authors>
+<title>Introduction to dual decomposition.</title>
+<date>2010</date>
+<booktitle>Optimization for Machine Learning.</booktitle>
+<editor>In S. Sra, S. Nowozin, and S. J. Wright, editors,</editor>
+<publisher>MIT Press.</publisher>
+<contexts>
+<context position="12446" citStr="Sontag et al., 2010" startWordPosition="2047" endWordPosition="2050"> derivation in the weighted intersection of a regular and mildly context-sensitive language. Even allowing for the observation of Fowler and Penn (2010) that our practical CCG is context-free, this problem still reduces to the construction of Bar-Hillel et al. (1964), making search very expensive. Therefore we need approximations. Fortunately, recent literature has introduced two relevant approximations to the NLP community: loopy belief propagation (Pearl, 1988), applied to dependency parsing by Smith and Eisner (2008); and dual decomposition (Dantzig and Wolfe, 1960; Komodakis et al., 2007; Sontag et al., 2010, inter alia), applied to dependency parsing by Koo et al. (2010) and lexicalized CFG parsing by Rush et al. (2010). We apply both techniques to our integrated supertagging and parsing model. 4.1 Loopy Belief Propagation Belief propagation (BP) is an algorithm for computing marginals (i.e. expectations) on structured models. These marginals can be used for decoding (parsing) in a minimum-risk framework (Smith and Eisner, 2008); or for training using a variety of algorithms (Sutton and McCallum, 2010). We experiment with both uses in §5. Many researchers in NLP are familiar with two special cas</context>
+<context position="20155" citStr="Sontag et al., 2010" startWordPosition="3355" endWordPosition="3358">calculation of feature expectations over packed charts of derivations. For training, we limited the number of items in this chart to 0.3 million, and for testing, 1 million. We also used a more permissive training supertagger beam (Table 3) than in previous work (Clark and Curran, 2007). Models were trained with the parser’s L-BFGS trainer. Evaluation. We evaluated on CCGbank (Hockenmaier and Steedman, 2007), a right-most normalform CCG version of the Penn Treebank. We use sections 02-21 (39603 sentences) for training, 4The u terms can be interpreted as the messages from factors to variables (Sontag et al., 2010) and the resulting message passing algorithms are similar to the max-product algorithm, a sister algorithm to BP. section 00 (1913 sentences) for development and section 23 (2407 sentences) for testing. We supply gold-standard part-of-speech tags to the parsers. Evaluation is based on labelled and unlabelled predicate argument structure recovery and supertag accuracy. We only evaluate on sentences for which an analysis was returned; the coverage for all parsers is 99.22% on section 00, and 99.63% on section 23. Model combination. We combine the parser and the supertagger over the search space </context>
+</contexts>
+<marker>Sontag, Globerson, Jaakkola, 2010</marker>
+<rawString>D. Sontag, A. Globerson, and T. Jaakkola. 2010. Introduction to dual decomposition. In S. Sra, S. Nowozin, and S. J. Wright, editors, Optimization for Machine Learning. MIT Press.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>M Steedman</author>
+</authors>
+<title>The syntactic process.</title>
+<date>2000</date>
+<publisher>MIT Press,</publisher>
+<location>Cambridge, MA.</location>
+<contexts>
+<context position="1184" citStr="Steedman, 2000" startWordPosition="180" endWordPosition="181">ther than separating them into distinct models chained together in a pipeline. To overcome the resulting increase in complexity, we experiment with both belief propagation and dual decomposition approaches to inference, the first empirical comparison of these algorithms that we are aware of on a structured natural language processing problem. On CCGbank we achieve a labelled dependency F-measure of 88.8% on gold POS tags, and 86.7% on automatic part-of-speeoch tags, the best reported results for this task. 1 Introduction Accurate and efficient parsing of Combinatorial Categorial Grammar (CCG; Steedman, 2000) is a longstanding problem in computational linguistics, due to the complexities associated its mild context sensitivity. Even for practical CCG that are strongly context-free (Fowler and Penn, 2010), parsing is much harder than with Penn Treebank-style contextfree grammars, with vast numbers of nonterminal categories leading to increased grammar constants. Where a typical Penn Treebank grammar may have fewer than 100 nonterminals (Hockenmaier and Steedman, 2002), we found that a CCG grammar derived from CCGbank contained over 1500. The same grammar assigns an average of 22 lexical categories </context>
+<context position="4212" citStr="Steedman, 2000" startWordPosition="660" endWordPosition="661">utational Linguistics 2 CCG and Supertagging CCG is a lexicalized grammar formalism encoding for each word lexical categories that are either basic (eg. NN, JJ) or complex. Complex lexical categories specify the number and directionality of arguments. For example, one lexical category for the verb like is (S\NP)/NP, specifying the first argument as an NP to the right and the second as an NP to the left; there are over 100 lexical categories for like in our lexicon. In parsing, adjacent spans are combined using a small number of binary combinatory rules like forward application or composition (Steedman, 2000; Fowler and Penn, 2010). In the first derivation below, (S\NP)/NP and NP combine to form the spanning category S\NP, which only requires an NP to its left to form a complete sentence-spanning S. The second derivation uses type-raising to change the category type of I. I like tea S S As can be inferred from even this small example, a key difficulty in parsing CCG is that the number of categories quickly becomes extremely large, and there are typically many ways to analyze every span of a sentence. Supertagging (Bangalore and Joshi, 1999; Clark, 2002) treats the assignment of lexical categories</context>
+</contexts>
+<marker>Steedman, 2000</marker>
+<rawString>M. Steedman. 2000. The syntactic process. MIT Press, Cambridge, MA.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>C Sutton</author>
+<author>A McCallum</author>
+</authors>
+<title>Joint parsing and semantic role labelling.</title>
+<date>2005</date>
+<booktitle>In Proc. of CoNLL.</booktitle>
+<contexts>
+<context position="29596" citStr="Sutton and McCallum, 2005" startWordPosition="4979" endWordPosition="4982">ticularly in the Reverse condition. Training a model using DD would require a different optimization algorithm based on Viterbi results (e.g. the perceptron) which we will pursue in future work. 6 Conclusion and Future Work Our approach of combining models to avoid the pipeline problem (Felzenszwalb and McAllester, 2007) is very much in line with much recent work in NLP. Such diverse topics as machine translation (Dyer et al., 2008; Dyer and Resnik, 2010; Mi et al., 2008), part-of-speech tagging (Jiang et al., 2008), named entity recognition (Finkel and Manning, 2009) semantic role labelling (Sutton and McCallum, 2005; Finkel et al., 2006), and others have also been improved by combined models. Our empirical comparison of BP and DD also complements the theoretically-oriented comparison of marginal- and margin-based variational approximations for parsing described by Martins et al. (2010). We have shown that the aggressive pruning used in adaptive supertagging significantly harms the oracle performance of the parser, though it mostly prunes bad parses. Based on these findings, we combined parser and supertagger features into a single model. Using belief propagation and dual decomposition, we obtained more p</context>
+</contexts>
+<marker>Sutton, McCallum, 2005</marker>
+<rawString>C. Sutton and A. McCallum. 2005. Joint parsing and semantic role labelling. In Proc. of CoNLL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>C Sutton</author>
+<author>A McCallum</author>
+</authors>
+<title>An introduction to conditional random fields.</title>
+<date>2010</date>
+<pages>1011--4088</pages>
+<contexts>
+<context position="12951" citStr="Sutton and McCallum, 2010" startWordPosition="2126" endWordPosition="2129"> by Smith and Eisner (2008); and dual decomposition (Dantzig and Wolfe, 1960; Komodakis et al., 2007; Sontag et al., 2010, inter alia), applied to dependency parsing by Koo et al. (2010) and lexicalized CFG parsing by Rush et al. (2010). We apply both techniques to our integrated supertagging and parsing model. 4.1 Loopy Belief Propagation Belief propagation (BP) is an algorithm for computing marginals (i.e. expectations) on structured models. These marginals can be used for decoding (parsing) in a minimum-risk framework (Smith and Eisner, 2008); or for training using a variety of algorithms (Sutton and McCallum, 2010). We experiment with both uses in §5. Many researchers in NLP are familiar with two special cases of belief propagation: the forward-backward and inside-outside algorithms, used for computing expectations in sequence models and context-free grammars, respectively.3 Our use of belief propagation builds directly on these two familiar algorithms. 3Forward-backward and inside-outside are formally shown to be special cases of belief propagation by Smyth et al. (1997) and Sato (2007), respectively. Figure 2: Supertagging factor graph with messages. Circles are variables and filled squares are factor</context>
+<context position="16106" citStr="Sutton and McCallum, 2010" startWordPosition="2651" endWordPosition="2654">grams (McAllester et al., 2008). We add this complex distribution to our model as a single factor (Figure 3). This is a natural extension to the use of complex factors described by Smith and Eisner (2008) and Dreyer and Eisner (2009). When a factor graph is a tree as in Figure 2, BP converges in a single iteration to the exact marginals. However, when the model contains cycles, as in Figure 3, we can iterate message passing. Under certain assumptions this loopy BP it will converge to approximate marginals that are bounded under an interpretation from statistical physics (Yedidia et al., 2001; Sutton and McCallum, 2010). The TREE factor exchanges inside ni and outside oi messages with the tag and span variables, taking into account beliefs from the sequence model. We will omit the unchanged outside recursion for brevity, but inside messages n(Ci,�) for category Ci,� in span(i, j) are computed using rule probabilities r as follows: fi(Ci,9)bi(Ci,9)ei(Ci,9) ifj=i+1 � n(Xi,k)n(Yk,9)r(Ci,�, Xi,k, Yk,�) k,X,Y (7) Note that the only difference from the classic inside algorithm is that the recursive base case of a category spanning a single word has been replaced by a message from the supertag that contains both fo</context>
+</contexts>
+<marker>Sutton, McCallum, 2010</marker>
+<rawString>C. Sutton and A. McCallum. 2010. An introduction to conditional random fields. arXiv:stat.ML/1011.4088.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J Yedidia</author>
+<author>W Freeman</author>
+<author>Y Weiss</author>
+</authors>
+<title>Generalized belief propagation.</title>
+<date>2001</date>
+<booktitle>In Proc. ofNIPS.</booktitle>
+<contexts>
+<context position="16078" citStr="Yedidia et al., 2001" startWordPosition="2647" endWordPosition="2650">called case-factor diagrams (McAllester et al., 2008). We add this complex distribution to our model as a single factor (Figure 3). This is a natural extension to the use of complex factors described by Smith and Eisner (2008) and Dreyer and Eisner (2009). When a factor graph is a tree as in Figure 2, BP converges in a single iteration to the exact marginals. However, when the model contains cycles, as in Figure 3, we can iterate message passing. Under certain assumptions this loopy BP it will converge to approximate marginals that are bounded under an interpretation from statistical physics (Yedidia et al., 2001; Sutton and McCallum, 2010). The TREE factor exchanges inside ni and outside oi messages with the tag and span variables, taking into account beliefs from the sequence model. We will omit the unchanged outside recursion for brevity, but inside messages n(Ci,�) for category Ci,� in span(i, j) are computed using rule probabilities r as follows: fi(Ci,9)bi(Ci,9)ei(Ci,9) ifj=i+1 � n(Xi,k)n(Yk,9)r(Ci,�, Xi,k, Yk,�) k,X,Y (7) Note that the only difference from the classic inside algorithm is that the recursive base case of a category spanning a single word has been replaced by a message from the su</context>
+</contexts>
+<marker>Yedidia, Freeman, Weiss, 2001</marker>
+<rawString>J. Yedidia, W. Freeman, and Y. Weiss. 2001. Generalized belief propagation. In Proc. ofNIPS.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

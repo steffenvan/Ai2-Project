@@ -1,0 +1,1371 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.000001">
+<title confidence="0.9990695">
+Transforming Projective Bilexical Dependency Grammars into
+efficiently-parsable CFGs with Unfold-Fold
+</title>
+<author confidence="0.998782">
+Mark Johnson
+</author>
+<affiliation confidence="0.998584">
+Microsoft Research Brown University
+</affiliation>
+<address confidence="0.971291">
+Redmond, WA Providence, RI
+</address>
+<email confidence="0.996704">
+t-majoh@microsoft.com Mark Johnson@Brown.edu
+</email>
+<sectionHeader confidence="0.995582" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.9998200625">
+This paper shows how to use the Unfold-
+Fold transformation to transform Projective
+Bilexical Dependency Grammars (PBDGs)
+into ambiguity-preserving weakly equiva-
+lent Context-Free Grammars (CFGs). These
+CFGs can be parsed in O(n3) time using a
+CKY algorithm with appropriate indexing,
+rather than the O(n5) time required by a
+naive encoding. Informally, using the CKY
+algorithm with such a CFG mimics the steps
+of the Eisner-Satta O(n3) PBDG parsing al-
+gorithm. This transformation makes all of
+the techniques developed for CFGs available
+to PBDGs. We demonstrate this by describ-
+ing a maximum posterior parse decoder for
+PBDGs.
+</bodyText>
+<sectionHeader confidence="0.999073" genericHeader="introduction">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.997557156862745">
+Projective Bilexical Dependency Grammars (PB-
+DGs) have attracted attention recently for two rea-
+sons. First, because they capture bilexical head-to-
+head dependencies they are capable of producing
+extremely high-quality parses: state-of-the-art dis-
+criminatively trained PBDG parsers rival the accu-
+racy of the very best statistical parsers available to-
+day (McDonald, 2006). Second, Eisner-Satta O(n3)
+PBDG parsing algorithms are extremely fast (Eisner,
+1996; Eisner and Satta, 1999; Eisner, 2000).
+This paper investigates the relationship between
+Context-Free Grammar (CFG) parsing and the Eis-
+ner/Satta PBDG parsing algorithms, including their
+extension to second-order PBDG parsing (McDon-
+ald, 2006; McDonald and Pereira, 2006). Specifi-
+cally, we show how to use an off-line preprocessing
+step, the Unfold-Fold transformation, to transform a
+PBDG into an equivalent CFG that can be parsed in
+O(n3) time using a version of the CKY algorithm
+with suitable indexing (Younger, 1967), and extend
+this transformation so that it captures second-order
+PBDG dependencies as well. The transformations
+are ambiguity-preserving, i.e., there is a one-to-
+one mapping between dependency parses and CFG
+parses, so it is possible to map the CFG parses back
+to the PBDG parses they correspond to.
+The PBDG to CFG reductions make techniques
+developed for CFGs available to PBDGs as well. For
+example, incremental CFG parsing algorithms can
+be used with the CFGs produced by this transform,
+as can the Inside-Outside estimation algorithm (Lari
+and Young, 1990) and more exotic methods such as
+estimating adjoined hidden states (Matsuzaki et al.,
+2005; Petrov et al., 2006). As an example appli-
+cation, we describe a maximum posterior parse de-
+coder for PBDGs in Section 8.
+The Unfold-Fold transformation is a calculus for
+transforming functional and logic programs into
+equivalent but (hopefully) faster programs (Burstall
+and Darlington, 1977). We use it here to trans-
+form CFGs encoding dependency grammars into
+other CFGs that are more efficiently parsable. Since
+CFGs can be expressed as Horn-clause logic pro-
+grams (Pereira and Shieber, 1987) and the Unfold-
+Fold transformation is provably correct for such pro-
+grams (Sato, 1992; Pettorossi and Proeitti, 1992), it
+follows that its application to CFGs is provably cor-
+rect as well. The Unfold-Fold transformation is used
+here to derive the CFG schemata presented in sec-
+tions 5–7. A system that uses these schemata (such
+as the one described in section 8) can implement
+</bodyText>
+<page confidence="0.967361">
+168
+</page>
+<note confidence="0.9256835">
+Proceedings of the 45th Annual Meeting of the Association of Computational Linguistics, pages 168–175,
+Prague, Czech Republic, June 2007. c�2007 Association for Computational Linguistics
+</note>
+<bodyText confidence="0.977368333333333">
+these schemata directly, so the Unfold-Fold trans-
+formation plays a theoretical role in this work, justi-
+fying the resulting CFG schemata.
+The closest related work we are aware of
+is McAllester (1999), which also describes a re-
+duction of PBDGs to efficiently-parsable CFGs
+and directly inspired this work. However, the
+CFGs produced by McAllester’s transformation in-
+clude epsilon-productions so they require a special-
+ized CFG parsing algorithm, while the CFGs pro-
+duced by the transformations described here have
+binary productions so they can be parsed with
+standard CFG parsing algorithms. Further, our
+approach extends to second-order PBDG parsing,
+while McAllester only discusses first-order PBDGs.
+The rest of this paper is structured as follows.
+Section 2 defines projective dependency graphs and
+grammars and Section 3 reviews the “naive” encod-
+ing of PBDGs as CFGs with an O(n5) parse time,
+where n is the length of the string to be parsed. Sec-
+tion 4 introduces the “split-head” CFG encoding of
+PBDGs, which has an O(n4) parse time and serves
+as the input to the Unfold-Fold transform. Section 5
+uses the Unfold-Fold transform to obtain a weakly-
+equivalent CFG encoding of PBDGs which can be
+parsed in O(n3) time, and presents timing results
+showing that the transformation does speed parsing.
+Sections 6 and 7 apply Unfold-Fold in slightly more
+complex ways to obtain CFG encodings of PBDGs
+that also make second-order dependencies available
+in O(n3) time parsable CFGs. Section 8 applies a
+PBDG to CFG transform to obtain a maximum pos-
+terior decoding parser for PBDGs.
+2 Projective bilexical dependency parses
+and grammars
+Let E be a finite set of terminals (e.g., words),
+and let 0 be the root terminal not in E. If w =
+(w1, ... , wn) E E*, let w* = (0, w1, ... , wn), i.e.,
+w* is obtained by prefixing w with 0. A dependency
+parse G for w is a tree whose root is labeled 0 and
+whose other n vertices are labeled with each of the n
+terminals in w. If G contains an arc from u to v then
+we say that v is a dependent of u, and if G contains
+a path from u to v then we say that v is a descendant
+of u. If v is dependent of u that also precedes u in
+w* then we say that v is a left dependent of u (right
+dependent and left and right descendants are defined
+similarly).
+</bodyText>
+<figure confidence="0.605758">
+0 Sandy gave the dog a bone
+</figure>
+<figureCaption confidence="0.854551">
+Figure 1: A projective dependency parse for the sen-
+tence “Sam gave the dog a bone”.
+</figureCaption>
+<bodyText confidence="0.994977862068965">
+A dependency parse G is projective iff whenever
+there is a path from u to v then there is also a path
+from u to every word between u and v in w* as well.
+Figure 1 depicts a projective dependency parse for
+the sentence “Sam gave the dog a bone”.
+A projective dependency grammar defines a set of
+projective dependency parses. A Projective Bilexi-
+cal Dependency Grammar (PBDG) consists of two
+relations and , both defined over (E U 101) x
+E. A PBDG generates a projective dependency
+parse G iff u v for all right dependencies (u, v)
+in G and v u for all left dependencies (u, v) in
+G. The language generated by a PBDG is the set
+of strings that have projective dependency parses
+generated by the grammar. The following depen-
+dency grammar generates the dependency parse in
+Figure 1.
+This paper does not consider stochastic depen-
+dency grammars directly, but see Section 8 for an
+application involving them. However, it is straight-
+forward to associate weights with dependencies, and
+since the dependencies are preserved by the transfor-
+mations, obtain a weighted CFG. Standard methods
+for converting weighted CFGs to equivalent PCFGs
+can be used if required (Chi, 1999). Alternatively,
+one can transform a corpus of dependency parses
+into a corpus of the corresponding CFG parses, and
+estimate CFG production probabilities directly from
+that corpus.
+</bodyText>
+<sectionHeader confidence="0.964017" genericHeader="method">
+3 A naive encoding of PBDGs
+</sectionHeader>
+<bodyText confidence="0.998642666666667">
+There is a well-known method for encoding a PBDG
+as a CFG in which each terminal u E E is associated
+with a corresponding nonterminal Xu that expands
+to u and all of u’s descendants. The nonterminals of
+the naive encoding CFG consist of the start symbol
+S and symbols Xu for each terminal u E E, and
+</bodyText>
+<figure confidence="0.663916333333333">
+0 gave Sandy gave
+gave dog the dog
+gave bone a bone
+</figure>
+<page confidence="0.944379">
+169
+170
+</page>
+<figure confidence="0.896325047619048">
+Xa
+Xbone
+bone
+a
+ure 3. Each Xu
+expands to two new categories, Lu
+Lu
+or ul, which guarantees that the rightmost termi-
+→ L
+Xu
+Lu
+→ ul
+→ Xv
+Lu
+Lu
+the productions of the CFG are the instances of the
+following schemata:
+→ u
+→ Xv
+→ X
+u
+</figure>
+<bodyText confidence="0.99935228">
+The dependency annotations associated with each
+production specify how to interpret a local tree gen-
+erated by that production, and permit us to map a
+CFG parse to the corresponding dependency parse.
+For example, the top-most local tree in Figure 2 was
+generated by the production S → Xgave, and indi-
+cate that in this parse 0 gave.
+Given a terminal vocabulary of size m the CFG
+contains O(m2) productions, so it is impractical to
+enumerate all possible productions for even modest
+vocabularies. Instead productions relevant to a par-
+ticular sentence are generated on the fly.
+The naive encoding CFG in general requires
+O(n5) parsing time with a conventional CKY pars-
+ing algorithm, since tracking the head annotations u
+and v multiplies the standard O(n3) CFG parse time
+requirements by an additional factor proportional to
+the O(n2) productions expanding Xu.
+An additional problem with the naive encoding
+is that the resulting CFG in general exhibits spuri-
+ous ambiguities, i.e., a single dependency parse may
+correspond to more than one CFG parse, as shown
+in Figure 2. Informally, this is because the CFG per-
+mits left and the right dependencies to be arbitrarily
+intermingled.
+</bodyText>
+<sectionHeader confidence="0.770583" genericHeader="method">
+4 Split-head encoding of PBDGs
+</sectionHeader>
+<bodyText confidence="0.998137785714286">
+There are several ways of removing the spurious am-
+biguities in the naive CFG encoding just described.
+This section presents a method we call the “split-
+head encoding”, which removes the ambiguities and
+serves as starting point for the grammar transforms
+described below.
+The split-head encoding represents each word u
+in the input string w by two unique terminals ul
+and ur in the CFG parse. A split-head CFG’s ter-
+minal vocabulary is E′ = {ul, ur : u ∈ E},
+where E is the set of terminals of the PBDG. A
+PBDG parse with yield w = (u1, ... , un) is trans-
+formed to a split-head CFG parse with yield w′ =
+(u1,l, u1,r, ... , un,l, un,r), so |w′ |= 2|w|.
+</bodyText>
+<figure confidence="0.998855541666667">
+Sandy
+Xgave
+Xbone
+Xdog
+Xthe Xdog
+Xgave
+gave
+the dog
+Xbone
+Xgave
+S
+Xgave
+a
+bone
+Xgave
+gave
+Xa
+Xbone
+Xgave
+Xdog
+XSandy
+Sandy
+Xthe Xdog
+the dog
+</figure>
+<figureCaption confidence="0.999992333333333">
+Figure 2: Two parses using the naive CFG encod-
+ing that both correspond to the dependency parse of
+Figure 1.
+</figureCaption>
+<bodyText confidence="0.72666">
+The split-head CFG for a PBDG is given by the
+following schemata:
+</bodyText>
+<figure confidence="0.833502333333333">
+S → Xu
+R where u ∈ E
+u u
+where v u
+R → ur
+u
+</figure>
+<bodyText confidence="0.986419733333333">
+where u v
+The dependency parse shown in Figure 1 corre-
+sponds to the split-head CFG parse shown in Fig-
+consists of ul and all of u’s left descen-
+dants, while R consists of ur and all of u’s right
+u
+descendants. The spurious ambiguity present in the
+naive encoding does not arise in the split-head en-
+coding because the left and right dependents of a
+head are assembled independently and cannot inter-
+mingle.
+As can be seen by examining the split-head
+schemata, the rightmost descendant of Lu is either
+nal dominated by Lu is always ul; similarly the left-
+most terminal dominated by uR is always ur. Thus
+</bodyText>
+<figure confidence="0.977357">
+S
+Xgave
+where v u
+Xu
+Xv
+where u v
+where 0 u
+R X
+uv
+R→
+u
+and u
+R. Lu
+S → Xu
+where 0 u
+XSandy
+Xu
+Xu
+Xu
+Xgave
+</figure>
+<figureCaption confidence="0.974727666666667">
+Figure 3: The split-head parse corresponding to the dependency graph depicted in Figure 1. Notice that ul
+is always the rightmost descendant of Lu and ur is always the leftmost descendant of uR, which means that
+these indices are redundant given the constituent spans.
+</figureCaption>
+<figure confidence="0.998562093023256">
+Xbone
+Lgave
+R
+gave
+XSandy
+S
+Xgave
+Lgave
+R
+gave
+LSandy
+Sandyl
+R
+Sandy
+Sandyr
+R
+gave
+Xdog
+Lbone
+gavel gaver
+Xthe Ldog
+Ldog
+R
+dog
+Xa
+Lbone
+bonel
+La
+a
+R
+R
+bone
+boner
+ar
+al
+Lthe
+thel
+R
+the
+the
+r
+dogr
+dogl
+</figure>
+<bodyText confidence="0.967020333333333">
+these subscript indices are redundant given the string
+positions of the constituents, which means we do not
+need to track the index u in Lu
+with just the two categories L and R, and determine
+the index from the constituent’s span when required.
+It is straight-forward to extend the split-head CFG
+to encode the additional state information required
+by the head automata of Eisner and Satta (1999);
+this corresponds to splitting the non-terminals Lu
+R. For simplicity we work with PBDGs in this
+paper, but all of the Unfold-Fold transformations de-
+scribed below extend to split-head grammars with
+the additional state structure required by head au-
+tomata.
+Implementation note: it is possible to directly
+parse the “undoubled” input string w by modifying
+both the CKY algorithm and the CFGs described
+in this paper. Modify Lu and uR so they both ul-
+timately expand to the same terminal u, and special-
+case the implementation of production Xu —* Lu uR
+and all productions derived from it to permit Lu and
+u
+R to overlap by the terminal u.
+The split-head formulation explains what initially
+seem unusual properties of existing PBDG algo-
+rithms. For example, one of the standard “sanity
+checks” for the Inside-Outside algorithm—that the
+outside probability of each terminal is equal to the
+sentence’s inside probability—fails for these algo-
+rithms. In fact, the outside probability of each ter-
+minal is double the sentence’s inside probability be-
+cause these algorithms implicitly collapse the two
+terminals ul and ur into a single terminal u.
+</bodyText>
+<sectionHeader confidence="0.973787" genericHeader="method">
+5 A O(n3) split-head grammar
+</sectionHeader>
+<bodyText confidence="0.9833604">
+The split-head encoding described in the previous
+section requires O(n4) parsing time because the in-
+dex v on Xv is not redundant. We can obtain an
+equivalent grammar that only requires O(n3) pars-
+ing time by transforming the split-head grammar us-
+ing Unfold-Fold. We describe the transformation on
+L; the transformation of R is symmetric.
+uu
+We begin with the definition of Lu in the split-
+head grammar above (“|” separates the right-hand
+sides of productions).
+—* ul  |Xv Lu where v u
+Our first transformation step is to unfold Xv in Lu,
+i.e., replace Xv by its expansion, producing the fol-
+lowing definition for Lu (ignore the underlining for
+now).
+—* ul  |Lv vR Lu where v u
+This removes the offending Xv in Lu, but the result-
+ing definition of Lu contains ternary productions and
+so still incurs O(n4) parse time. To address this we
+</bodyText>
+<equation confidence="0.58997">
+define new nonterminals x My for each x, y E E:
+M y —* R L y
+x x
+</equation>
+<bodyText confidence="0.854263">
+and fold the underlined children in Lu
+where x, y E E
+—* ul  |Lv vMu where v u
+</bodyText>
+<figure confidence="0.980801166666667">
+R but can parse
+and u
+and
+u
+Lu
+Lu
+:
+into v
+Mu
+y
+M
+x
+Lu
+y
+—* R L
+x
+171
+S
+</figure>
+<figureCaption confidence="0.999315">
+Figure 4: The O(n3) split-head parse corresponding to the dependency graph of Figure 1.
+</figureCaption>
+<figure confidence="0.997351536585366">
+Lgave
+R
+gave
+LSandy
+M
+Sandygave
+gaveMb
+R
+one bone
+R
+Sandy
+Sandy, Sandy,
+gave,
+gave,
+Lthe
+the,
+theMdog
+a, a,
+bone,
+bone,
+R
+gave
+Lgave
+Lbone
+aMbone
+La
+R
+dog
+gaveMdog
+Lbone
+a
+R
+gave
+R
+Ldog
+R
+the
+the,
+Ldog
+dog,
+dog,
+</figure>
+<bodyText confidence="0.9792488">
+The O(n3) split-head grammar is obtained by un-
+folding the occurence of Xu in the S production and
+dropping the Xu schema as Xu no longer appears on
+the right-hand side of any production. The resulting
+O(n3) split-head grammar schemata are as follows:
+</bodyText>
+<equation confidence="0.506671">
+u u
+� ul
+</equation>
+<bodyText confidence="0.988141142857143">
+As before, the dependency annotations on the pro-
+duction schemata permit us to map CFG parses to
+the corresponding dependency parse. This grammar
+requires O(n3) parsing time to parse because the in-
+dices are redundant given the constituent’s string po-
+sitions for the reasons described in section 4. Specif-
+ically, the rightmost terminal of Lu is always ul, the
+leftmost terminal of u R is always ur and the left-
+most and rightmost terminals of vMu are vl and ur
+respectively.
+The O(n3) split-head grammar is closely related
+to the O(n3) PBDG parsing algorithm given by Eis-
+ner and Satta (1999). Specifically, the steps involved
+in parsing with this grammar using the CKY algo-
+rithm are essentially the same as those performed
+by the Eisner/Satta algorithm. The primary differ-
+ence is that the Eisner/Satta algorithm involves two
+separate categories that are collapsed into the single
+category M here.
+To confirm their relative performance we imple-
+mented stochastic CKY parsers for the three CFG
+schemata described so far. The production schemata
+were hard-coded for speed, and the implementation
+trick described in section 4 was used to avoid dou-
+bling the terminal string. We obtained dependency
+weights from our existing discriminatively-trained
+PBDG parser (not cited to preserve anonymity). We
+compared the parsers’ running times on section 24
+of the Penn Treebank. Because all three CFGs im-
+plement the same dependency grammar their Viterbi
+parses have the same dependency accuracy, namely
+0.8918. We precompute the dependency weights,
+so the times include just the dynamic programming
+computation on a 3.6GHz Pentium 4.
+CFG schemata sentences parsed / second
+</bodyText>
+<figure confidence="0.90341375">
+Naive O(n5) CFG 45.4
+O(n4) CFG 406.2
+O(n3) CFG 3580.0
+6 An O(n3) adjacent-head grammar
+</figure>
+<bodyText confidence="0.999927555555555">
+This section shows how to further transform the
+O(n3) grammar described above into a form that
+encodes second-order dependencies between ad-
+jacent dependent heads in much the way that a
+Markov PCFG does (McDonald, 2006; McDonald
+and Pereira, 2006). We provide a derivation for the
+Lu constituents; there is a parallel derivation for uR.
+We begin by unfolding Xv in the definition of Lu
+in the split-head grammar, producing as before:
+</bodyText>
+<equation confidence="0.586033">
+Lu —* ul  |Lv vR Lu
+</equation>
+<bodyText confidence="0.982160666666667">
+Now introduce a new nonterminal v Mu, which is a
+specialized version of M requiring that v is a left-
+dependent of u, and fold the underlined constituents
+</bodyText>
+<figure confidence="0.999216909090909">
+S L
+R where 0 u
+M
+x
+y
+y
+� R L
+x
+where x, y E E
+R ur
+u
+R �
+u
+R where u v
+M
+u
+v v
+Lu
+Lu
+where v u
+� Lv v
+Mu
+</figure>
+<page confidence="0.774424">
+172
+</page>
+<figureCaption confidence="0.969042">
+Figure 5: The O(n3) adjacent-head parse corresponding to the dependency graph of Figure 1. The boxed
+local tree indicates bone is the dependent of give following the dependent dog, i.e., give dog bone .
+</figureCaption>
+<figure confidence="0.999560717948718">
+S
+gavel
+gave
+gaver
+MR
+gave
+R
+Mdog dogM bone
+Ldog R
+dog
+L
+the Mdog
+dogl dogr
+Lgave
+LSandy
+ML
+Sandygave
+gave
+R
+L
+Mbone
+bonel boner
+R
+bone bone
+La a
+Sandyl
+R
+Sandy
+Sandyr
+Lthe
+thel
+R
+the
+ther
+al
+a
+R
+ar
+Lbone
+</figure>
+<bodyText confidence="0.998605">
+The resulting grammar schema is as below, and a
+sample parse is given in Figure 5.
+of each constituent, so they need not be computed
+or stored and the CFG can be parsed in O(n3) time.
+The steps involved in CKY parsing with this gram-
+mar correspond closely to those of the McDonald
+(2006) second-order PBDG parsing algorithm.
+</bodyText>
+<sectionHeader confidence="0.748248" genericHeader="method">
+7 An O(n3) dependent-head grammar
+</sectionHeader>
+<bodyText confidence="0.992391130434783">
+This section shows a different application of Unfold-
+Fold can capture head-to-head-to-head dependen-
+cies, i.e., “vertical” second-order dependencies,
+rather than the “horizontal” ones captured by the
+transformation described in the previous section.
+Because we expect these vertical dependencies to
+be less important linguistically than the horizontal
+ones, we only sketch the transformation here.
+The derivation differs from the one in Section 6 in
+that the dependent vR, rather than the head Lu, is un-
+folded in the initial definition of ML . This results in
+vu
+a grammar that tracks vertical, rather than horizon-
+tal, second-order dependencies. Since left-hand and
+right-hand derivations are assembled separately in a
+split-head grammar, the grammar in fact only tracks
+zig-zag type dependencies (e.g., where a grandpar-
+ent has a right dependent, which in turn has a left
+dependent).
+The resulting grammar is given below, and a sam-
+ple parse using this grammar is shown in Figure 6.
+Because the subscripts are redundant they can be
+omitted and the resulting CFG can be parsed in
+</bodyText>
+<figure confidence="0.985141333333333">
+ML.
+u
+into
+v
+Now unfold Lu
+in the definition of ML u, producing:
+v
+→ R ul  |vR Lv′ v′ML u; v v′ u
+v
+</figure>
+<bodyText confidence="0.60369925">
+Note that in the first production expanding vMLu, v
+is the closest left dependent of u, and in the second
+production v and v′ are adjacent left-dependents of
+has a ternary production, so we introduce
+as before to fold the underlined constituents
+y
+into.
+where x, y ∈ E
+</bodyText>
+<figure confidence="0.993711097222222">
+→ R ul  |vMv′ v′ML u; v v′ u
+v
+M
+x
+y
+→ R L
+x
+M
+x
+y
+v
+ML
+u
+u.
+ML
+u
+v
+v
+ML
+u
+→ R L
+vu
+→ul  |Lv vMLu where v u
+where v u
+ML
+u
+Lu
+v
+Lu
+L
+v
+u
+ML
+u
+v
+ML
+u
+u
+uR
+Mv
+MR
+uv
+y
+M
+x
+u u
+R → ur u has no right dependents
+R v is u’s last right dep.
+→ ur Lv is u’s closest right dep.
+v
+→ MRM u v′ v
+u v′ v′ v
+where x, y ∈ E
+u
+MR
+uv v
+R →
+y
+→ R L
+x
+S → L
+R where 0 u
+→ ul u has no left dependents
+v is u’s last left dep.
+→ R ul v is u’s closest left dep.
+v
+v′ v′ML u v v′ u
+→ L
+ML
+v vu
+→
+vM
+</figure>
+<bodyText confidence="0.750059">
+As before, the indices on the nonterminals are re-
+dundant, as the heads are always located at an edge
+</bodyText>
+<page confidence="0.998349">
+173
+</page>
+<figureCaption confidence="0.848255">
+Figure 6: The n3 dependent-head parse corresponding to the dependency graph of Figure 1. The boxed
+local tree indicates that a is a left-dependent of bone, which is in turn a right-dependent of gave, i.e.,
+gave a bone.
+</figureCaption>
+<figure confidence="0.999365659090909">
+a, a,
+dogR
+Lgave
+Sandy,
+Sandy,
+the,
+the,
+dog,
+dog,
+gave,
+gave,
+S
+Lgave
+ML
+Sandygave
+LSandy
+gaveM
+R L
+gave
+L
+Mbone
+Lbone
+bone, bone,
+a a
+a
+the
+gaveM
+R L
+gave
+L
+the Mdog
+Ldog
+the
+MR
+gavedog
+R
+bone
+R
+gave Mbone
+R
+gave
+O(n3) time using the CKY algorithm.
+v
+v
+</figure>
+<sectionHeader confidence="0.924968" genericHeader="method">
+8 Maximum posterior decoding
+</sectionHeader>
+<bodyText confidence="0.999979102040817">
+As noted in the introduction, one consequence of the
+PBDG to CFG reductions presented in this paper is
+that CFG parsing and estimation techniques are now
+available for PBDGs as well. As an example ap-
+plication, this section describes Maximum Posterior
+Decoding (MPD) for PBDGs.
+Goodman (1996) observed that the Viterbi parse
+is in general not the optimal parse for evaluation
+metrics such as f-score that are based on the number
+of correct constituents in a parse. He showed that
+MPD improves f-score modestly relative to Viterbi
+decoding for PCFGs.
+Since dependency parse accuracy is just the pro-
+portion of dependencies in the parse that are correct,
+Goodman’s observation should hold for PBDG pars-
+ing as well. MPD for PBDGs selects the parse that
+maximizes the sum of the marginal probabilities of
+each of the dependencies in the parse. Such a de-
+coder might plausibly produce parses that score bet-
+ter on the dependency accuracy metric than Viterbi
+parses.
+MPD is straightforward given the PBDG to CFG
+reductions described in this paper. Specifically, we
+use the Inside-Outside algorithm to compute the
+posterior probability of the CFG constituents corre-
+sponding to each PBDG dependency, and then use
+the Viterbi algorithm to find the parse tree that max-
+imizes the sum of these posterior probabilities.
+We implemented MPD for first-order PBDGs
+using dependency weights from our existing
+discriminatively-trained PBDG parser (not cited to
+preserve anonymity). These weights are estimated
+by an online procedure as in McDonald (2006), and
+are not intended to define a probability distribution.
+In an attempt to heuristically correct for this, in this
+experiment we used exp(αwu,v) as the weight of the
+dependency between head u and dependent v, where
+wu,v is the weight provided by the discriminatively-
+trained model and α is an adjustable scaling parame-
+ter tuned to optimize MPD accuracy on development
+data.
+Unfortunately we found no significant differ-
+ence between the accuracy of the MPD and Viterbi
+parses. Optimizing MPD on the development data
+(section 24 of the PTB) set the scale factor α =
+0.21 and produced MPD parses with an accuracy
+of 0.8921, which is approximately the same as the
+Viterbi accuracy of 0.8918. On the blind test data
+(section 23) the two accuracies are essentially iden-
+</bodyText>
+<figure confidence="0.99918885106383">
+u
+MR
+uv
+u
+MR
+v
+u
+R ur
+R �
+� R vl where u v
+u
+� M
+u
+MR
+uv v
+ML
+w wv
+R where u v
+where u w u
+M
+x
+y
+y
+� R L
+x
+where x, y E E
+S Lu u
+R where 0 u
+� ul
+where v u
+� vr Lwhere v u
+u
+where v w u
+� L
+ML
+v vu
+�
+MR
+vw w
+Mu
+Lu
+L
+u
+ML
+u
+ML
+u
+</figure>
+<page confidence="0.992947">
+174
+</page>
+<bodyText confidence="0.998706583333333">
+tical (0.8997).
+There are several possible explanations for the
+failure of MPD to produce more accurate parses than
+Viterbi decoding. Perhaps MPD requires weights
+that define a probability distribution (e.g., a Max-
+Ent model). It is also possible that discriminative
+training adjusts the weights in a way that ensures
+that the Viterbi parse is close to the maximum pos-
+terior parse. This was the case in our experiment,
+and if this is true with discriminative training in gen-
+eral, then maximum posterior decoding will not have
+much to offer to discriminative parsing.
+</bodyText>
+<sectionHeader confidence="0.9986" genericHeader="conclusions">
+9 Conclusion
+</sectionHeader>
+<bodyText confidence="0.999993047619048">
+This paper shows how to use the Unfold-Fold trans-
+form to translate PBDGs into CFGs that can be
+parsed in O(n3) time. A key component of this is
+the split-head construction, where each word u in the
+input is split into two terminals ul and ur of the CFG
+parse. We also showed how to systematically trans-
+form the split-head CFG into grammars which track
+second-order dependencies. We provided one gram-
+mar which captures horizontal second-order depen-
+dencies (McDonald, 2006), and another which cap-
+tures vertical second-order head-to-head-to-head de-
+pendencies.
+The grammars described here just scratch the sur-
+face of what is possible with Unfold-Fold. Notice
+that both of the second-order grammars have more
+nonterminals than the first-order grammar. If one is
+prepared to increase the number of nonterminals still
+further, it may be possible to track additional infor-
+mation about constituents (although if we insist on
+O(n3) parse time we will be unable to track the in-
+teraction of more than three heads at once).
+</bodyText>
+<sectionHeader confidence="0.999271" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.999923983333334">
+R.M. Burstall and John Darlington. 1977. A transformation
+system for developing recursive programs. Journal of the
+Association for Computing Machinery, 24(1):44–67.
+Zhiyi Chi. 1999. Statistical properties of probabilistic context-
+free grammars. Computational Linguistics, 25(1):131–160.
+Jason Eisner and Giorgio Satta. 1999. Efficient parsing for
+bilexical context-free grammars and head automaton gram-
+mars. In Proceedings of the 37th Annual Meeting of the
+Association for Computational Linguistics, pages 457–480,
+University of Maryland.
+Jason Eisner. 1996. Three new probabilistic models for depen-
+dency parsing: An exploration. In COLING96: Proceedings
+of the 16th International Conference on Computational Lin-
+guistics, pages 340–345, Copenhagen. Center for Sprogte-
+knologi.
+Jason Eisner. 2000. Bilexical grammars and their cubic-time
+parsing algorithms. In Harry Bunt and Anton Nijholt, edi-
+tors, Advances in Probabilistic and Other Parsing Technolo-
+gies, pages 29–62. Kluwer Academic Publishers.
+Joshua T. Goodman. 1996. Parsing algorithms and metrics. In
+Proceedings of the 34th Annual Meeting of the Association
+for Computational Linguistics, pages 177–183, Santa Cruz,
+Ca.
+K. Lari and S.J. Young. 1990. The estimation of Stochastic
+Context-Free Grammars using the Inside-Outside algorithm.
+Computer Speech and Language, 4(35-56).
+Takuya Matsuzaki, Yusuke Miyao, and Jun’ichi Tsujii. 2005.
+Probabilistic CFG with latent annotations. In Proceedings
+of the 43rd Annual Meeting of the Association for Com-
+putational Linguistics (ACL’05), pages 75–82, Ann Arbor,
+Michigan, June. Association for Computational Linguistics.
+David McAllester. 1999. A reformulation of Eisner and Sata’s
+cubic time parser for split head automata grammars. Avail-
+able from http://ttic.uchicago.edu/˜dmcallester/.
+Ryan McDonald and Fernando Pereira. 2006. Online learn-
+ing of approximate dependency parsing algorithms. In 11th
+Conference of the European Chapter of the Association for
+Computational Linguistics, pages 81–88, Trento, Italy.
+Ryan McDonald. 2006. Discriminative Training and Spanning
+Tree Algorithms for Dependency Parsing. Ph.D. thesis, Uni-
+versity of Pennyslvania, Philadelphia, PA.
+Fernando Pereira and Stuart M. Shieber. 1987. Prolog and Nat-
+ural Language Analysis. Center for the Study of Language
+and Information, Stanford, CA.
+Slav Petrov, Leon Barrett, Romain Thibaux, and Dan Klein.
+2006. Learning accurate, compact, and interpretable tree an-
+notation. In Proceedings of the 21st International Confer-
+ence on Computational Linguistics and 44th Annual Meet-
+ing of the Association for Computational Linguistics, pages
+433–440, Sydney, Australia, July. Association for Computa-
+tional Linguistics.
+A. Pettorossi and M. Proeitti. 1992. Transformation of logic
+programs. In Handbook of Logic in Artificial Intelligence,
+volume 5, pages 697–787. Oxford University Press.
+Taisuke Sato. 1992. Equivalence-preserving first-order un-
+fold/fold transformation systems. Theoretical Computer Sci-
+ence, 105(1):57–84.
+Daniel H. Younger. 1967. Recognition and parsing of
+context-free languages in time n3. Information and Control,
+10(2):189–208.
+</reference>
+<page confidence="0.998717">
+175
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.618922">
+<title confidence="0.996774">Transforming Projective Bilexical Dependency Grammars into efficiently-parsable CFGs with Unfold-Fold</title>
+<author confidence="0.999996">Mark Johnson</author>
+<affiliation confidence="0.999991">Microsoft Research Brown University</affiliation>
+<address confidence="0.998164">Redmond, WA Providence, RI</address>
+<author confidence="0.711217">t-majohmicrosoft com Mark JohnsonBrown edu</author>
+<abstract confidence="0.992044647058823">This paper shows how to use the Unfold- Fold transformation to transform Projective Bilexical Dependency Grammars (PBDGs) into ambiguity-preserving weakly equivalent Context-Free Grammars (CFGs). These can be parsed in using a CKY algorithm with appropriate indexing, than the required by a naive encoding. Informally, using the CKY algorithm with such a CFG mimics the steps the Eisner-Satta parsing algorithm. This transformation makes all of the techniques developed for CFGs available to PBDGs. We demonstrate this by describing a maximum posterior parse decoder for PBDGs.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>R M Burstall</author>
+<author>John Darlington</author>
+</authors>
+<title>A transformation system for developing recursive programs.</title>
+<date>1977</date>
+<journal>Journal of the Association for Computing Machinery,</journal>
+<volume>24</volume>
+<issue>1</issue>
+<contexts>
+<context position="2786" citStr="Burstall and Darlington, 1977" startWordPosition="404" endWordPosition="407">FG reductions make techniques developed for CFGs available to PBDGs as well. For example, incremental CFG parsing algorithms can be used with the CFGs produced by this transform, as can the Inside-Outside estimation algorithm (Lari and Young, 1990) and more exotic methods such as estimating adjoined hidden states (Matsuzaki et al., 2005; Petrov et al., 2006). As an example application, we describe a maximum posterior parse decoder for PBDGs in Section 8. The Unfold-Fold transformation is a calculus for transforming functional and logic programs into equivalent but (hopefully) faster programs (Burstall and Darlington, 1977). We use it here to transform CFGs encoding dependency grammars into other CFGs that are more efficiently parsable. Since CFGs can be expressed as Horn-clause logic programs (Pereira and Shieber, 1987) and the UnfoldFold transformation is provably correct for such programs (Sato, 1992; Pettorossi and Proeitti, 1992), it follows that its application to CFGs is provably correct as well. The Unfold-Fold transformation is used here to derive the CFG schemata presented in sections 5–7. A system that uses these schemata (such as the one described in section 8) can implement 168 Proceedings of the 45</context>
+</contexts>
+<marker>Burstall, Darlington, 1977</marker>
+<rawString>R.M. Burstall and John Darlington. 1977. A transformation system for developing recursive programs. Journal of the Association for Computing Machinery, 24(1):44–67.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Zhiyi Chi</author>
+</authors>
+<title>Statistical properties of probabilistic contextfree grammars.</title>
+<date>1999</date>
+<journal>Computational Linguistics,</journal>
+<volume>25</volume>
+<issue>1</issue>
+<contexts>
+<context position="7096" citStr="Chi, 1999" startWordPosition="1161" endWordPosition="1162">eft dependencies (u, v) in G. The language generated by a PBDG is the set of strings that have projective dependency parses generated by the grammar. The following dependency grammar generates the dependency parse in Figure 1. This paper does not consider stochastic dependency grammars directly, but see Section 8 for an application involving them. However, it is straightforward to associate weights with dependencies, and since the dependencies are preserved by the transformations, obtain a weighted CFG. Standard methods for converting weighted CFGs to equivalent PCFGs can be used if required (Chi, 1999). Alternatively, one can transform a corpus of dependency parses into a corpus of the corresponding CFG parses, and estimate CFG production probabilities directly from that corpus. 3 A naive encoding of PBDGs There is a well-known method for encoding a PBDG as a CFG in which each terminal u E E is associated with a corresponding nonterminal Xu that expands to u and all of u’s descendants. The nonterminals of the naive encoding CFG consist of the start symbol S and symbols Xu for each terminal u E E, and 0 gave Sandy gave gave dog the dog gave bone a bone 169 170 Xa Xbone bone a ure 3. Each Xu </context>
+</contexts>
+<marker>Chi, 1999</marker>
+<rawString>Zhiyi Chi. 1999. Statistical properties of probabilistic contextfree grammars. Computational Linguistics, 25(1):131–160.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jason Eisner</author>
+<author>Giorgio Satta</author>
+</authors>
+<title>Efficient parsing for bilexical context-free grammars and head automaton grammars.</title>
+<date>1999</date>
+<booktitle>In Proceedings of the 37th Annual Meeting of the Association for Computational Linguistics,</booktitle>
+<pages>457--480</pages>
+<institution>University of Maryland.</institution>
+<contexts>
+<context position="1347" citStr="Eisner and Satta, 1999" startWordPosition="184" endWordPosition="187">e techniques developed for CFGs available to PBDGs. We demonstrate this by describing a maximum posterior parse decoder for PBDGs. 1 Introduction Projective Bilexical Dependency Grammars (PBDGs) have attracted attention recently for two reasons. First, because they capture bilexical head-tohead dependencies they are capable of producing extremely high-quality parses: state-of-the-art discriminatively trained PBDG parsers rival the accuracy of the very best statistical parsers available today (McDonald, 2006). Second, Eisner-Satta O(n3) PBDG parsing algorithms are extremely fast (Eisner, 1996; Eisner and Satta, 1999; Eisner, 2000). This paper investigates the relationship between Context-Free Grammar (CFG) parsing and the Eisner/Satta PBDG parsing algorithms, including their extension to second-order PBDG parsing (McDonald, 2006; McDonald and Pereira, 2006). Specifically, we show how to use an off-line preprocessing step, the Unfold-Fold transformation, to transform a PBDG into an equivalent CFG that can be parsed in O(n3) time using a version of the CKY algorithm with suitable indexing (Younger, 1967), and extend this transformation so that it captures second-order PBDG dependencies as well. The transfo</context>
+<context position="11679" citStr="Eisner and Satta (1999)" startWordPosition="2012" endWordPosition="2015">ven the constituent spans. Xbone Lgave R gave XSandy S Xgave Lgave R gave LSandy Sandyl R Sandy Sandyr R gave Xdog Lbone gavel gaver Xthe Ldog Ldog R dog Xa Lbone bonel La a R R bone boner ar al Lthe thel R the the r dogr dogl these subscript indices are redundant given the string positions of the constituents, which means we do not need to track the index u in Lu with just the two categories L and R, and determine the index from the constituent’s span when required. It is straight-forward to extend the split-head CFG to encode the additional state information required by the head automata of Eisner and Satta (1999); this corresponds to splitting the non-terminals Lu R. For simplicity we work with PBDGs in this paper, but all of the Unfold-Fold transformations described below extend to split-head grammars with the additional state structure required by head automata. Implementation note: it is possible to directly parse the “undoubled” input string w by modifying both the CKY algorithm and the CFGs described in this paper. Modify Lu and uR so they both ultimately expand to the same terminal u, and specialcase the implementation of production Xu —* Lu uR and all productions derived from it to permit Lu an</context>
+<context position="15036" citStr="Eisner and Satta (1999)" startWordPosition="2617" endWordPosition="2621"> schemata are as follows: u u � ul As before, the dependency annotations on the production schemata permit us to map CFG parses to the corresponding dependency parse. This grammar requires O(n3) parsing time to parse because the indices are redundant given the constituent’s string positions for the reasons described in section 4. Specifically, the rightmost terminal of Lu is always ul, the leftmost terminal of u R is always ur and the leftmost and rightmost terminals of vMu are vl and ur respectively. The O(n3) split-head grammar is closely related to the O(n3) PBDG parsing algorithm given by Eisner and Satta (1999). Specifically, the steps involved in parsing with this grammar using the CKY algorithm are essentially the same as those performed by the Eisner/Satta algorithm. The primary difference is that the Eisner/Satta algorithm involves two separate categories that are collapsed into the single category M here. To confirm their relative performance we implemented stochastic CKY parsers for the three CFG schemata described so far. The production schemata were hard-coded for speed, and the implementation trick described in section 4 was used to avoid doubling the terminal string. We obtained dependency</context>
+</contexts>
+<marker>Eisner, Satta, 1999</marker>
+<rawString>Jason Eisner and Giorgio Satta. 1999. Efficient parsing for bilexical context-free grammars and head automaton grammars. In Proceedings of the 37th Annual Meeting of the Association for Computational Linguistics, pages 457–480, University of Maryland.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jason Eisner</author>
+</authors>
+<title>Three new probabilistic models for dependency parsing: An exploration.</title>
+<date>1996</date>
+<booktitle>In COLING96: Proceedings of the 16th International Conference on Computational Linguistics,</booktitle>
+<pages>340--345</pages>
+<institution>Copenhagen. Center for Sprogteknologi.</institution>
+<contexts>
+<context position="1323" citStr="Eisner, 1996" startWordPosition="182" endWordPosition="183">akes all of the techniques developed for CFGs available to PBDGs. We demonstrate this by describing a maximum posterior parse decoder for PBDGs. 1 Introduction Projective Bilexical Dependency Grammars (PBDGs) have attracted attention recently for two reasons. First, because they capture bilexical head-tohead dependencies they are capable of producing extremely high-quality parses: state-of-the-art discriminatively trained PBDG parsers rival the accuracy of the very best statistical parsers available today (McDonald, 2006). Second, Eisner-Satta O(n3) PBDG parsing algorithms are extremely fast (Eisner, 1996; Eisner and Satta, 1999; Eisner, 2000). This paper investigates the relationship between Context-Free Grammar (CFG) parsing and the Eisner/Satta PBDG parsing algorithms, including their extension to second-order PBDG parsing (McDonald, 2006; McDonald and Pereira, 2006). Specifically, we show how to use an off-line preprocessing step, the Unfold-Fold transformation, to transform a PBDG into an equivalent CFG that can be parsed in O(n3) time using a version of the CKY algorithm with suitable indexing (Younger, 1967), and extend this transformation so that it captures second-order PBDG dependenc</context>
+</contexts>
+<marker>Eisner, 1996</marker>
+<rawString>Jason Eisner. 1996. Three new probabilistic models for dependency parsing: An exploration. In COLING96: Proceedings of the 16th International Conference on Computational Linguistics, pages 340–345, Copenhagen. Center for Sprogteknologi.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jason Eisner</author>
+</authors>
+<title>Bilexical grammars and their cubic-time parsing algorithms.</title>
+<date>2000</date>
+<booktitle>Advances in Probabilistic and Other Parsing Technologies,</booktitle>
+<pages>29--62</pages>
+<editor>In Harry Bunt and Anton Nijholt, editors,</editor>
+<publisher>Kluwer Academic Publishers.</publisher>
+<contexts>
+<context position="1362" citStr="Eisner, 2000" startWordPosition="188" endWordPosition="189">or CFGs available to PBDGs. We demonstrate this by describing a maximum posterior parse decoder for PBDGs. 1 Introduction Projective Bilexical Dependency Grammars (PBDGs) have attracted attention recently for two reasons. First, because they capture bilexical head-tohead dependencies they are capable of producing extremely high-quality parses: state-of-the-art discriminatively trained PBDG parsers rival the accuracy of the very best statistical parsers available today (McDonald, 2006). Second, Eisner-Satta O(n3) PBDG parsing algorithms are extremely fast (Eisner, 1996; Eisner and Satta, 1999; Eisner, 2000). This paper investigates the relationship between Context-Free Grammar (CFG) parsing and the Eisner/Satta PBDG parsing algorithms, including their extension to second-order PBDG parsing (McDonald, 2006; McDonald and Pereira, 2006). Specifically, we show how to use an off-line preprocessing step, the Unfold-Fold transformation, to transform a PBDG into an equivalent CFG that can be parsed in O(n3) time using a version of the CKY algorithm with suitable indexing (Younger, 1967), and extend this transformation so that it captures second-order PBDG dependencies as well. The transformations are am</context>
+</contexts>
+<marker>Eisner, 2000</marker>
+<rawString>Jason Eisner. 2000. Bilexical grammars and their cubic-time parsing algorithms. In Harry Bunt and Anton Nijholt, editors, Advances in Probabilistic and Other Parsing Technologies, pages 29–62. Kluwer Academic Publishers.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Joshua T Goodman</author>
+</authors>
+<title>Parsing algorithms and metrics.</title>
+<date>1996</date>
+<booktitle>In Proceedings of the 34th Annual Meeting of the Association for Computational Linguistics,</booktitle>
+<pages>177--183</pages>
+<location>Santa Cruz, Ca.</location>
+<contexts>
+<context position="20486" citStr="Goodman (1996)" startWordPosition="3658" endWordPosition="3659">-dependent of gave, i.e., gave a bone. a, a, dogR Lgave Sandy, Sandy, the, the, dog, dog, gave, gave, S Lgave ML Sandygave LSandy gaveM R L gave L Mbone Lbone bone, bone, a a a the gaveM R L gave L the Mdog Ldog the MR gavedog R bone R gave Mbone R gave O(n3) time using the CKY algorithm. v v 8 Maximum posterior decoding As noted in the introduction, one consequence of the PBDG to CFG reductions presented in this paper is that CFG parsing and estimation techniques are now available for PBDGs as well. As an example application, this section describes Maximum Posterior Decoding (MPD) for PBDGs. Goodman (1996) observed that the Viterbi parse is in general not the optimal parse for evaluation metrics such as f-score that are based on the number of correct constituents in a parse. He showed that MPD improves f-score modestly relative to Viterbi decoding for PCFGs. Since dependency parse accuracy is just the proportion of dependencies in the parse that are correct, Goodman’s observation should hold for PBDG parsing as well. MPD for PBDGs selects the parse that maximizes the sum of the marginal probabilities of each of the dependencies in the parse. Such a decoder might plausibly produce parses that sc</context>
+</contexts>
+<marker>Goodman, 1996</marker>
+<rawString>Joshua T. Goodman. 1996. Parsing algorithms and metrics. In Proceedings of the 34th Annual Meeting of the Association for Computational Linguistics, pages 177–183, Santa Cruz, Ca.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>K Lari</author>
+<author>S J Young</author>
+</authors>
+<title>The estimation of Stochastic Context-Free Grammars using the Inside-Outside algorithm.</title>
+<date>1990</date>
+<journal>Computer Speech and Language,</journal>
+<pages>4--35</pages>
+<contexts>
+<context position="2404" citStr="Lari and Young, 1990" startWordPosition="346" endWordPosition="349"> of the CKY algorithm with suitable indexing (Younger, 1967), and extend this transformation so that it captures second-order PBDG dependencies as well. The transformations are ambiguity-preserving, i.e., there is a one-toone mapping between dependency parses and CFG parses, so it is possible to map the CFG parses back to the PBDG parses they correspond to. The PBDG to CFG reductions make techniques developed for CFGs available to PBDGs as well. For example, incremental CFG parsing algorithms can be used with the CFGs produced by this transform, as can the Inside-Outside estimation algorithm (Lari and Young, 1990) and more exotic methods such as estimating adjoined hidden states (Matsuzaki et al., 2005; Petrov et al., 2006). As an example application, we describe a maximum posterior parse decoder for PBDGs in Section 8. The Unfold-Fold transformation is a calculus for transforming functional and logic programs into equivalent but (hopefully) faster programs (Burstall and Darlington, 1977). We use it here to transform CFGs encoding dependency grammars into other CFGs that are more efficiently parsable. Since CFGs can be expressed as Horn-clause logic programs (Pereira and Shieber, 1987) and the UnfoldFo</context>
+</contexts>
+<marker>Lari, Young, 1990</marker>
+<rawString>K. Lari and S.J. Young. 1990. The estimation of Stochastic Context-Free Grammars using the Inside-Outside algorithm. Computer Speech and Language, 4(35-56).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Takuya Matsuzaki</author>
+<author>Yusuke Miyao</author>
+<author>Jun’ichi Tsujii</author>
+</authors>
+<title>Probabilistic CFG with latent annotations.</title>
+<date>2005</date>
+<booktitle>In Proceedings of the 43rd Annual Meeting of the Association for Computational Linguistics (ACL’05),</booktitle>
+<pages>75--82</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<location>Ann Arbor, Michigan,</location>
+<contexts>
+<context position="2494" citStr="Matsuzaki et al., 2005" startWordPosition="360" endWordPosition="363">ion so that it captures second-order PBDG dependencies as well. The transformations are ambiguity-preserving, i.e., there is a one-toone mapping between dependency parses and CFG parses, so it is possible to map the CFG parses back to the PBDG parses they correspond to. The PBDG to CFG reductions make techniques developed for CFGs available to PBDGs as well. For example, incremental CFG parsing algorithms can be used with the CFGs produced by this transform, as can the Inside-Outside estimation algorithm (Lari and Young, 1990) and more exotic methods such as estimating adjoined hidden states (Matsuzaki et al., 2005; Petrov et al., 2006). As an example application, we describe a maximum posterior parse decoder for PBDGs in Section 8. The Unfold-Fold transformation is a calculus for transforming functional and logic programs into equivalent but (hopefully) faster programs (Burstall and Darlington, 1977). We use it here to transform CFGs encoding dependency grammars into other CFGs that are more efficiently parsable. Since CFGs can be expressed as Horn-clause logic programs (Pereira and Shieber, 1987) and the UnfoldFold transformation is provably correct for such programs (Sato, 1992; Pettorossi and Proeit</context>
+</contexts>
+<marker>Matsuzaki, Miyao, Tsujii, 2005</marker>
+<rawString>Takuya Matsuzaki, Yusuke Miyao, and Jun’ichi Tsujii. 2005. Probabilistic CFG with latent annotations. In Proceedings of the 43rd Annual Meeting of the Association for Computational Linguistics (ACL’05), pages 75–82, Ann Arbor, Michigan, June. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>David McAllester</author>
+</authors>
+<title>A reformulation of Eisner and Sata’s cubic time parser for split head automata grammars. Available from http://ttic.uchicago.edu/˜dmcallester/.</title>
+<date>1999</date>
+<contexts>
+<context position="3750" citStr="McAllester (1999)" startWordPosition="559" endWordPosition="560">ion to CFGs is provably correct as well. The Unfold-Fold transformation is used here to derive the CFG schemata presented in sections 5–7. A system that uses these schemata (such as the one described in section 8) can implement 168 Proceedings of the 45th Annual Meeting of the Association of Computational Linguistics, pages 168–175, Prague, Czech Republic, June 2007. c�2007 Association for Computational Linguistics these schemata directly, so the Unfold-Fold transformation plays a theoretical role in this work, justifying the resulting CFG schemata. The closest related work we are aware of is McAllester (1999), which also describes a reduction of PBDGs to efficiently-parsable CFGs and directly inspired this work. However, the CFGs produced by McAllester’s transformation include epsilon-productions so they require a specialized CFG parsing algorithm, while the CFGs produced by the transformations described here have binary productions so they can be parsed with standard CFG parsing algorithms. Further, our approach extends to second-order PBDG parsing, while McAllester only discusses first-order PBDGs. The rest of this paper is structured as follows. Section 2 defines projective dependency graphs an</context>
+</contexts>
+<marker>McAllester, 1999</marker>
+<rawString>David McAllester. 1999. A reformulation of Eisner and Sata’s cubic time parser for split head automata grammars. Available from http://ttic.uchicago.edu/˜dmcallester/.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ryan McDonald</author>
+<author>Fernando Pereira</author>
+</authors>
+<title>Online learning of approximate dependency parsing algorithms.</title>
+<date>2006</date>
+<booktitle>In 11th Conference of the European Chapter of the Association for Computational Linguistics,</booktitle>
+<pages>81--88</pages>
+<location>Trento, Italy.</location>
+<contexts>
+<context position="1593" citStr="McDonald and Pereira, 2006" startWordPosition="217" endWordPosition="220">ons. First, because they capture bilexical head-tohead dependencies they are capable of producing extremely high-quality parses: state-of-the-art discriminatively trained PBDG parsers rival the accuracy of the very best statistical parsers available today (McDonald, 2006). Second, Eisner-Satta O(n3) PBDG parsing algorithms are extremely fast (Eisner, 1996; Eisner and Satta, 1999; Eisner, 2000). This paper investigates the relationship between Context-Free Grammar (CFG) parsing and the Eisner/Satta PBDG parsing algorithms, including their extension to second-order PBDG parsing (McDonald, 2006; McDonald and Pereira, 2006). Specifically, we show how to use an off-line preprocessing step, the Unfold-Fold transformation, to transform a PBDG into an equivalent CFG that can be parsed in O(n3) time using a version of the CKY algorithm with suitable indexing (Younger, 1967), and extend this transformation so that it captures second-order PBDG dependencies as well. The transformations are ambiguity-preserving, i.e., there is a one-toone mapping between dependency parses and CFG parses, so it is possible to map the CFG parses back to the PBDG parses they correspond to. The PBDG to CFG reductions make techniques develop</context>
+<context position="16437" citStr="McDonald and Pereira, 2006" startWordPosition="2835" endWordPosition="2838">Because all three CFGs implement the same dependency grammar their Viterbi parses have the same dependency accuracy, namely 0.8918. We precompute the dependency weights, so the times include just the dynamic programming computation on a 3.6GHz Pentium 4. CFG schemata sentences parsed / second Naive O(n5) CFG 45.4 O(n4) CFG 406.2 O(n3) CFG 3580.0 6 An O(n3) adjacent-head grammar This section shows how to further transform the O(n3) grammar described above into a form that encodes second-order dependencies between adjacent dependent heads in much the way that a Markov PCFG does (McDonald, 2006; McDonald and Pereira, 2006). We provide a derivation for the Lu constituents; there is a parallel derivation for uR. We begin by unfolding Xv in the definition of Lu in the split-head grammar, producing as before: Lu —* ul |Lv vR Lu Now introduce a new nonterminal v Mu, which is a specialized version of M requiring that v is a leftdependent of u, and fold the underlined constituents S L R where 0 u M x y y � R L x where x, y E E R ur u R � u R where u v M u v v Lu Lu where v u � Lv v Mu 172 Figure 5: The O(n3) adjacent-head parse corresponding to the dependency graph of Figure 1. The boxed local tree indicates bone is t</context>
+</contexts>
+<marker>McDonald, Pereira, 2006</marker>
+<rawString>Ryan McDonald and Fernando Pereira. 2006. Online learning of approximate dependency parsing algorithms. In 11th Conference of the European Chapter of the Association for Computational Linguistics, pages 81–88, Trento, Italy.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ryan McDonald</author>
+</authors>
+<title>Discriminative Training and Spanning Tree Algorithms for Dependency Parsing.</title>
+<date>2006</date>
+<tech>Ph.D. thesis,</tech>
+<institution>University of Pennyslvania,</institution>
+<location>Philadelphia, PA.</location>
+<contexts>
+<context position="1238" citStr="McDonald, 2006" startWordPosition="171" endWordPosition="172">mimics the steps of the Eisner-Satta O(n3) PBDG parsing algorithm. This transformation makes all of the techniques developed for CFGs available to PBDGs. We demonstrate this by describing a maximum posterior parse decoder for PBDGs. 1 Introduction Projective Bilexical Dependency Grammars (PBDGs) have attracted attention recently for two reasons. First, because they capture bilexical head-tohead dependencies they are capable of producing extremely high-quality parses: state-of-the-art discriminatively trained PBDG parsers rival the accuracy of the very best statistical parsers available today (McDonald, 2006). Second, Eisner-Satta O(n3) PBDG parsing algorithms are extremely fast (Eisner, 1996; Eisner and Satta, 1999; Eisner, 2000). This paper investigates the relationship between Context-Free Grammar (CFG) parsing and the Eisner/Satta PBDG parsing algorithms, including their extension to second-order PBDG parsing (McDonald, 2006; McDonald and Pereira, 2006). Specifically, we show how to use an off-line preprocessing step, the Unfold-Fold transformation, to transform a PBDG into an equivalent CFG that can be parsed in O(n3) time using a version of the CKY algorithm with suitable indexing (Younger, </context>
+<context position="16408" citStr="McDonald, 2006" startWordPosition="2833" endWordPosition="2834"> Penn Treebank. Because all three CFGs implement the same dependency grammar their Viterbi parses have the same dependency accuracy, namely 0.8918. We precompute the dependency weights, so the times include just the dynamic programming computation on a 3.6GHz Pentium 4. CFG schemata sentences parsed / second Naive O(n5) CFG 45.4 O(n4) CFG 406.2 O(n3) CFG 3580.0 6 An O(n3) adjacent-head grammar This section shows how to further transform the O(n3) grammar described above into a form that encodes second-order dependencies between adjacent dependent heads in much the way that a Markov PCFG does (McDonald, 2006; McDonald and Pereira, 2006). We provide a derivation for the Lu constituents; there is a parallel derivation for uR. We begin by unfolding Xv in the definition of Lu in the split-head grammar, producing as before: Lu —* ul |Lv vR Lu Now introduce a new nonterminal v Mu, which is a specialized version of M requiring that v is a leftdependent of u, and fold the underlined constituents S L R where 0 u M x y y � R L x where x, y E E R ur u R � u R where u v M u v v Lu Lu where v u � Lv v Mu 172 Figure 5: The O(n3) adjacent-head parse corresponding to the dependency graph of Figure 1. The boxed l</context>
+<context position="21726" citStr="McDonald (2006)" startWordPosition="3856" endWordPosition="3857">ncy accuracy metric than Viterbi parses. MPD is straightforward given the PBDG to CFG reductions described in this paper. Specifically, we use the Inside-Outside algorithm to compute the posterior probability of the CFG constituents corresponding to each PBDG dependency, and then use the Viterbi algorithm to find the parse tree that maximizes the sum of these posterior probabilities. We implemented MPD for first-order PBDGs using dependency weights from our existing discriminatively-trained PBDG parser (not cited to preserve anonymity). These weights are estimated by an online procedure as in McDonald (2006), and are not intended to define a probability distribution. In an attempt to heuristically correct for this, in this experiment we used exp(αwu,v) as the weight of the dependency between head u and dependent v, where wu,v is the weight provided by the discriminativelytrained model and α is an adjustable scaling parameter tuned to optimize MPD accuracy on development data. Unfortunately we found no significant difference between the accuracy of the MPD and Viterbi parses. Optimizing MPD on the development data (section 24 of the PTB) set the scale factor α = 0.21 and produced MPD parses with a</context>
+</contexts>
+<marker>McDonald, 2006</marker>
+<rawString>Ryan McDonald. 2006. Discriminative Training and Spanning Tree Algorithms for Dependency Parsing. Ph.D. thesis, University of Pennyslvania, Philadelphia, PA.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Fernando Pereira</author>
+<author>Stuart M Shieber</author>
+</authors>
+<title>Prolog and Natural Language Analysis. Center for the Study of Language and Information,</title>
+<date>1987</date>
+<location>Stanford, CA.</location>
+<contexts>
+<context position="2987" citStr="Pereira and Shieber, 1987" startWordPosition="437" endWordPosition="440">estimation algorithm (Lari and Young, 1990) and more exotic methods such as estimating adjoined hidden states (Matsuzaki et al., 2005; Petrov et al., 2006). As an example application, we describe a maximum posterior parse decoder for PBDGs in Section 8. The Unfold-Fold transformation is a calculus for transforming functional and logic programs into equivalent but (hopefully) faster programs (Burstall and Darlington, 1977). We use it here to transform CFGs encoding dependency grammars into other CFGs that are more efficiently parsable. Since CFGs can be expressed as Horn-clause logic programs (Pereira and Shieber, 1987) and the UnfoldFold transformation is provably correct for such programs (Sato, 1992; Pettorossi and Proeitti, 1992), it follows that its application to CFGs is provably correct as well. The Unfold-Fold transformation is used here to derive the CFG schemata presented in sections 5–7. A system that uses these schemata (such as the one described in section 8) can implement 168 Proceedings of the 45th Annual Meeting of the Association of Computational Linguistics, pages 168–175, Prague, Czech Republic, June 2007. c�2007 Association for Computational Linguistics these schemata directly, so the Unf</context>
+</contexts>
+<marker>Pereira, Shieber, 1987</marker>
+<rawString>Fernando Pereira and Stuart M. Shieber. 1987. Prolog and Natural Language Analysis. Center for the Study of Language and Information, Stanford, CA.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Slav Petrov</author>
+<author>Leon Barrett</author>
+<author>Romain Thibaux</author>
+<author>Dan Klein</author>
+</authors>
+<title>Learning accurate, compact, and interpretable tree annotation.</title>
+<date>2006</date>
+<booktitle>In Proceedings of the 21st International Conference on Computational Linguistics and 44th Annual Meeting of the Association for Computational Linguistics,</booktitle>
+<pages>433--440</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<location>Sydney, Australia,</location>
+<contexts>
+<context position="2516" citStr="Petrov et al., 2006" startWordPosition="364" endWordPosition="367">second-order PBDG dependencies as well. The transformations are ambiguity-preserving, i.e., there is a one-toone mapping between dependency parses and CFG parses, so it is possible to map the CFG parses back to the PBDG parses they correspond to. The PBDG to CFG reductions make techniques developed for CFGs available to PBDGs as well. For example, incremental CFG parsing algorithms can be used with the CFGs produced by this transform, as can the Inside-Outside estimation algorithm (Lari and Young, 1990) and more exotic methods such as estimating adjoined hidden states (Matsuzaki et al., 2005; Petrov et al., 2006). As an example application, we describe a maximum posterior parse decoder for PBDGs in Section 8. The Unfold-Fold transformation is a calculus for transforming functional and logic programs into equivalent but (hopefully) faster programs (Burstall and Darlington, 1977). We use it here to transform CFGs encoding dependency grammars into other CFGs that are more efficiently parsable. Since CFGs can be expressed as Horn-clause logic programs (Pereira and Shieber, 1987) and the UnfoldFold transformation is provably correct for such programs (Sato, 1992; Pettorossi and Proeitti, 1992), it follows </context>
+</contexts>
+<marker>Petrov, Barrett, Thibaux, Klein, 2006</marker>
+<rawString>Slav Petrov, Leon Barrett, Romain Thibaux, and Dan Klein. 2006. Learning accurate, compact, and interpretable tree annotation. In Proceedings of the 21st International Conference on Computational Linguistics and 44th Annual Meeting of the Association for Computational Linguistics, pages 433–440, Sydney, Australia, July. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>A Pettorossi</author>
+<author>M Proeitti</author>
+</authors>
+<title>Transformation of logic programs.</title>
+<date>1992</date>
+<booktitle>In Handbook of Logic in Artificial Intelligence,</booktitle>
+<volume>5</volume>
+<pages>697--787</pages>
+<publisher>Oxford University Press.</publisher>
+<contexts>
+<context position="3103" citStr="Pettorossi and Proeitti, 1992" startWordPosition="455" endWordPosition="458">atsuzaki et al., 2005; Petrov et al., 2006). As an example application, we describe a maximum posterior parse decoder for PBDGs in Section 8. The Unfold-Fold transformation is a calculus for transforming functional and logic programs into equivalent but (hopefully) faster programs (Burstall and Darlington, 1977). We use it here to transform CFGs encoding dependency grammars into other CFGs that are more efficiently parsable. Since CFGs can be expressed as Horn-clause logic programs (Pereira and Shieber, 1987) and the UnfoldFold transformation is provably correct for such programs (Sato, 1992; Pettorossi and Proeitti, 1992), it follows that its application to CFGs is provably correct as well. The Unfold-Fold transformation is used here to derive the CFG schemata presented in sections 5–7. A system that uses these schemata (such as the one described in section 8) can implement 168 Proceedings of the 45th Annual Meeting of the Association of Computational Linguistics, pages 168–175, Prague, Czech Republic, June 2007. c�2007 Association for Computational Linguistics these schemata directly, so the Unfold-Fold transformation plays a theoretical role in this work, justifying the resulting CFG schemata. The closest re</context>
+</contexts>
+<marker>Pettorossi, Proeitti, 1992</marker>
+<rawString>A. Pettorossi and M. Proeitti. 1992. Transformation of logic programs. In Handbook of Logic in Artificial Intelligence, volume 5, pages 697–787. Oxford University Press.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Taisuke Sato</author>
+</authors>
+<title>Equivalence-preserving first-order unfold/fold transformation systems.</title>
+<date>1992</date>
+<journal>Theoretical Computer Science,</journal>
+<volume>105</volume>
+<issue>1</issue>
+<contexts>
+<context position="3071" citStr="Sato, 1992" startWordPosition="453" endWordPosition="454">en states (Matsuzaki et al., 2005; Petrov et al., 2006). As an example application, we describe a maximum posterior parse decoder for PBDGs in Section 8. The Unfold-Fold transformation is a calculus for transforming functional and logic programs into equivalent but (hopefully) faster programs (Burstall and Darlington, 1977). We use it here to transform CFGs encoding dependency grammars into other CFGs that are more efficiently parsable. Since CFGs can be expressed as Horn-clause logic programs (Pereira and Shieber, 1987) and the UnfoldFold transformation is provably correct for such programs (Sato, 1992; Pettorossi and Proeitti, 1992), it follows that its application to CFGs is provably correct as well. The Unfold-Fold transformation is used here to derive the CFG schemata presented in sections 5–7. A system that uses these schemata (such as the one described in section 8) can implement 168 Proceedings of the 45th Annual Meeting of the Association of Computational Linguistics, pages 168–175, Prague, Czech Republic, June 2007. c�2007 Association for Computational Linguistics these schemata directly, so the Unfold-Fold transformation plays a theoretical role in this work, justifying the result</context>
+</contexts>
+<marker>Sato, 1992</marker>
+<rawString>Taisuke Sato. 1992. Equivalence-preserving first-order unfold/fold transformation systems. Theoretical Computer Science, 105(1):57–84.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Daniel H Younger</author>
+</authors>
+<title>Recognition and parsing of context-free languages in time n3.</title>
+<date>1967</date>
+<journal>Information and Control,</journal>
+<volume>10</volume>
+<issue>2</issue>
+<contexts>
+<context position="1843" citStr="Younger, 1967" startWordPosition="260" endWordPosition="261">ld, 2006). Second, Eisner-Satta O(n3) PBDG parsing algorithms are extremely fast (Eisner, 1996; Eisner and Satta, 1999; Eisner, 2000). This paper investigates the relationship between Context-Free Grammar (CFG) parsing and the Eisner/Satta PBDG parsing algorithms, including their extension to second-order PBDG parsing (McDonald, 2006; McDonald and Pereira, 2006). Specifically, we show how to use an off-line preprocessing step, the Unfold-Fold transformation, to transform a PBDG into an equivalent CFG that can be parsed in O(n3) time using a version of the CKY algorithm with suitable indexing (Younger, 1967), and extend this transformation so that it captures second-order PBDG dependencies as well. The transformations are ambiguity-preserving, i.e., there is a one-toone mapping between dependency parses and CFG parses, so it is possible to map the CFG parses back to the PBDG parses they correspond to. The PBDG to CFG reductions make techniques developed for CFGs available to PBDGs as well. For example, incremental CFG parsing algorithms can be used with the CFGs produced by this transform, as can the Inside-Outside estimation algorithm (Lari and Young, 1990) and more exotic methods such as estima</context>
+</contexts>
+<marker>Younger, 1967</marker>
+<rawString>Daniel H. Younger. 1967. Recognition and parsing of context-free languages in time n3. Information and Control, 10(2):189–208.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

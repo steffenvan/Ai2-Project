@@ -1,0 +1,931 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.000492">
+<title confidence="0.995702">
+Exponential Reservoir Sampling for Streaming Language Models
+</title>
+<author confidence="0.99458">
+Miles Osborne∗ Ashwin Lall Benjamin Van Durme
+</author>
+<affiliation confidence="0.9988685">
+School of Informatics Mathematics and Computer Science HLTCOE
+University of Edinburgh Denison University Johns Hopkins University
+</affiliation>
+<sectionHeader confidence="0.978835" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.999964769230769">
+We show how rapidly changing textual
+streams such as Twitter can be modelled in
+fixed space. Our approach is based upon
+a randomised algorithm called Exponen-
+tial Reservoir Sampling, unexplored by
+this community until now. Using language
+models over Twitter and Newswire as a
+testbed, our experimental results based on
+perplexity support the intuition that re-
+cently observed data generally outweighs
+that seen in the past, but that at times,
+the past can have valuable signals enabling
+better modelling of the present.
+</bodyText>
+<sectionHeader confidence="0.998982" genericHeader="keywords">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.999674647058824">
+Work by Talbot and Osborne (2007), Van Durme
+and Lall (2009) and Goyal et al. (2009) consid-
+ered the problem of building very large language
+models via the use of randomized data structures
+known as sketches.1 While efficient, these struc-
+tures still scale linearly in the number of items
+stored, and do not handle deletions well: if pro-
+cessing an unbounded stream of text, with new
+words and phrases being regularly added to the
+model, then with a fixed amount of space, errors
+will only increase over time. This was pointed
+out by Levenberg and Osborne (2009), who inves-
+tigated an alternate approach employing perfect-
+hashing to allow for deletions over time. Their
+deletion criterion was task-specific and based on
+how a machine translation system queried a lan-
+guage model.
+</bodyText>
+<note confidence="0.501879">
+∗Corresponding author: miles@inf.ed.ac.uk
+</note>
+<footnote confidence="0.6807874">
+1Sketches provide space efficiencies that are measured on
+the order of individual bits per item stored, but at the cost
+of being lossy: sketches trade off space for error, where the
+less space you use, the more likely you will get erroneous
+responses to queries.
+</footnote>
+<bodyText confidence="0.998703411764706">
+Here we ask what the appropriate selection
+criterion is for streaming data based on a non-
+stationary process, when concerned with an in-
+trinsic measure such as perplexity. Using Twitter
+and newswire, we pursue this via a sampling strat-
+egy: we construct models over sentences based on
+a sample of previously observed sentences, then
+measure perplexity of incoming sentences, all on
+a day by day, rolling basis. Three sampling ap-
+proaches are considered: A fixed-width sliding
+window of most recent content, uniformly at ran-
+dom over the stream and a biased sample that
+prefers recent history over the past.
+We show experimentally that a moving window
+is better than uniform sampling, and further that
+exponential (biased) sampling is best of all. For
+streaming data, recently encountered data is valu-
+able, but there is also signal in the previous stream.
+Our sampling methods are based on reser-
+voir sampling (Vitter, 1985), a popularly known
+method in some areas of computer science, but
+which has seen little use within computational lin-
+guistics.2 Standard reservoir sampling is a method
+for maintaining a uniform sample over a dynamic
+stream of elements, using constant space. Novel
+to this community, we consider a variant owing to
+Aggarwal (2006) which provides for an exponen-
+tial bias towards recently observed elements. This
+exponential reservoir sampling has all of the guar-
+antees of standard reservoir sampling, but as we
+show, is a better fit for streaming textual data. Our
+approach is fully general and can be applied to any
+streaming task where we need to model the present
+and can only use fixed space.
+</bodyText>
+<footnote confidence="0.996964">
+2Exceptions include work by Van Durme and Lall (2011)
+and Van Durme (2012), aimed at different problems than that
+explored here.
+</footnote>
+<page confidence="0.933649">
+687
+</page>
+<bodyText confidence="0.5260695">
+Proceedings of the 52nd Annual Meeting of the Association for Computational Linguistics (Short Papers), pages 687–692,
+Baltimore, Maryland, USA, June 23-25 2014. c�2014 Association for Computational Linguistics
+</bodyText>
+<sectionHeader confidence="0.957266" genericHeader="introduction">
+2 Background
+</sectionHeader>
+<bodyText confidence="0.999984242424243">
+We address two problems: language changes over
+time, and the observation that space is a problem,
+even for compact sketches.
+Statistical language models often assume either
+a local Markov property (when working with ut-
+terances, or sentences), or that content is gener-
+ated fully i.i.d. (such as in document-level topic
+models). However, language shows observable
+priming effects, sometimes called triggers, where
+the occurrence of a given term decreases the sur-
+prisal of some other term later in the same dis-
+course (Lau et al., 1993; Church and Gale, 1995;
+Beeferman et al., 1997; Church, 2000). Conven-
+tional cache and trigger models typically do not
+deal with new terms and can be seen as adjusting
+the parameters of a fixed model.
+Accounting for previously unseen entries in a
+language model can be naively simple: as they ap-
+pear in new training data, add them to the model!
+However in practice we are constrained by avail-
+able space: how many unique phrases can we
+store, given the target application environment?
+Our work is concerned with modeling language
+that might change over time, in accordance with
+current trending discourse topics, but under a strict
+space constraint. With a fixed amount of memory
+available, we cannot allow our list of unique words
+or phrases to grow over time, even while new top-
+ics give rise to novel names of people, places, and
+terms of interest. Thus we need an approach that
+keeps the size of the model constant, but that is
+geared to what is being discussed now, as com-
+pared to some time in the past.
+</bodyText>
+<sectionHeader confidence="0.998668" genericHeader="method">
+3 Reservoir Sampling
+</sectionHeader>
+<subsectionHeader confidence="0.999961">
+3.1 Uniform Reservoir Sampling
+</subsectionHeader>
+<bodyText confidence="0.952928533333333">
+The reservoir sampling algorithm (Vitter, 1985) is
+the classic method of sampling without replace-
+ment from a stream in a single pass when the
+length of the stream is of indeterminate or un-
+bounded length. Say that the size of the desired
+sample is k. The algorithm proceeds by retain-
+ing the first k items of the stream and then sam-
+pling each subsequent element with probability
+f(k, n) = k/n, where n is the length of the stream
+so far. (See Algorithm 1.) It is easy to show via in-
+duction that, at any time, all the items in the stream
+so far have equal probability of appearing in the
+reservoir.
+The algorithm processes the stream in a single
+pass—that is, once it has processed an item in the
+stream, it does not revisit that item unless it is
+stored in the reservoir. Given this restriction, the
+incredible feature of this algorithm is that it is able
+to guarantee that the samples in the reservoir are a
+uniformly random sample with no unintended bi-
+ases even as the stream evolves. This makes it an
+excellent candidate for situations when the stream
+is continuously being updated and it is computa-
+tionally infeasible to store the entire stream or to
+make more than a single pass over it. Moreover,
+it is an extremely efficient algorithm as it requires
+O(1) time (independent of the reservoir size and
+stream length) for each item in the stream.
+Algorithm 1 Reservoir Sampling Algorithm
+Parameters:
+</bodyText>
+<listItem confidence="0.985210923076923">
+k: maximum size of reservoir
+1: Initialize an empty reservoir (any container
+data type).
+2: n := 1
+3: for each item in the stream do
+4: if n &lt; k then
+5: insert current item into the reservoir
+6: else
+7: with probability f(n, k), eject an ele-
+ment of the reservoir chosen uniformly
+at random and insert current item into the
+reservoir
+8: n := n + 1
+</listItem>
+<subsectionHeader confidence="0.9989">
+3.2 Non-uniform Reservoir Sampling
+</subsectionHeader>
+<bodyText confidence="0.999986941176471">
+Here we will consider generalizations of the reser-
+voir sampling algorithm in which the sample
+items in the reservoir are more biased towards the
+present. Put another way, we will continuously
+decay the probability that an older item will ap-
+pear in the reservoir. Models produced using such
+biases put more modelling stress on the present
+than models produced using data that is selected
+uniformly from the stream. The goal here is to
+continuously update the reservoir sample in such
+a way that the decay of older items is done consis-
+tently while still maintaining the benefits of reser-
+voir sampling, including the single pass and mem-
+ory/time constraints.
+The time-decay scheme we will study in this
+paper is exponential bias towards newer items in
+the stream. More precisely, we wish for items that
+</bodyText>
+<page confidence="0.996048">
+688
+</page>
+<figureCaption confidence="0.999639">
+Figure 1: Different biases for sampling a stream
+</figureCaption>
+<bodyText confidence="0.778859">
+have age a in the stream to appear with probability
+</bodyText>
+<equation confidence="0.884528">
+g(a) = c · exp (−a/β),
+</equation>
+<bodyText confidence="0.99998715">
+where a is the age of the item, β is a scale param-
+eter indicating how rapidly older items should be
+deemphasized, and c is a normalization constant.
+To give a sense of what these time-decay proba-
+bilities look like, some exponential distributions
+are plotted (along with the uniform distribution)
+in Figure 1.
+Aggarwal (2006) studied this problem and
+showed that by altering the sampling probability
+(f(n, k) in Algorithm 1) in the reservoir sampling
+algorithm, it is possible to achieve different age-
+related biases in the sample. In particular, he
+showed that by setting the sampling probability to
+the constant function f(n, k) = k/β, it is possible
+to approximately achieve exponential bias in the
+sample with scale parameter β (Aggarwal, 2006).
+Aggarwal’s analysis relies on the parameter β be-
+ing very large. In the next section we will make
+the analysis more precise by omitting any such as-
+sumption.
+</bodyText>
+<subsectionHeader confidence="0.999592">
+3.3 Analysis
+</subsectionHeader>
+<bodyText confidence="0.999644333333333">
+In this section we will derive an expression for the
+bias introduced by an arbitrary sampling function
+f in Algorithm 1. We will then use this expression
+to derive the precise sampling function needed to
+achieve exponential decay.3 Careful selection of
+f allows us to achieve anything from zero decay
+(i.e., uniform sampling of the entire stream) to
+exponential decay. Once again, note that since
+we are only changing the sampling function, the
+</bodyText>
+<footnote confidence="0.7196505">
+3Specifying an arbitrary decay function remains an open
+problem.
+</footnote>
+<bodyText confidence="0.993662444444444">
+one-pass, memory- and time-efficient properties
+of reservoir sampling are still being preserved.
+In the following analysis, we fix n to be the size
+of the stream at some fixed time and k to be the
+size of the reservoir. We assume that the ith el-
+ement of the stream is sampled with probability
+f(i, k), for i ≤ n. We can then derive the proba-
+bility that an element of age a will still be in the
+reservoir as
+</bodyText>
+<equation confidence="0.912128">
+n f (t, k)1
+t=n−a+1 ( k
+</equation>
+<bodyText confidence="0.999927692307692">
+since it would have been sampled with probability
+f(n − a, k) and had independent chances of being
+replaced at times t = n−a+1, ... , n with proba-
+bility f(t, k)/k. For instance, when f(x, k) = kx,
+the above formula simplifies down to g(a) = kn
+(i.e., the uniform sampling case).
+For the exponential case, we fix the sampling
+rate to some constant f(n, k) = pk, and we wish
+to determine what value to use for pk to achieve
+a given exponential decay rate g(a) = ce−a/β,
+where c is the normalization constant (to make g a
+probability distribution) and β is the scale param-
+eter of the exponential distribution. Substituting
+f(n, k) = pk in the above formula and equating
+with the decay rate, we get that pk(1 − pk/k)a ≡
+ce−a/β, which must hold true for all possible val-
+ues of a. After some algebra, we get that when
+f(x, k) = pk = k(1 − e−1/β), the probability
+that an item with age a is included in the reser-
+voir is given by the exponential decay rate g(a) =
+pke−a/β. Note that, for very large values of β, this
+probability is approximately equal to pk ≈ k/β
+(by using the approximation e−x ≈ 1 − x, when
+|x |is close to zero), as given by Aggarwal, but our
+formula gives the precise sampling probability and
+works even for smaller values of β.
+</bodyText>
+<sectionHeader confidence="0.999743" genericHeader="evaluation">
+4 Experiments
+</sectionHeader>
+<bodyText confidence="0.99980825">
+Our experiments use two streams of data to illus-
+trate exponential sampling: Twitter and a more
+conventional newswire stream. The Twitter data is
+interesting as it is very multilingual, bursty (for ex-
+ample, it talks about memes, breaking news, gos-
+sip etc) and written by literally millions of differ-
+ent people. The newswire stream is a lot more well
+behaved and serves as a control.
+</bodyText>
+<subsectionHeader confidence="0.979131">
+4.1 Data, Models and Evaluation
+</subsectionHeader>
+<bodyText confidence="0.999408">
+We used one month of chronologically ordered
+Twitter data and divided it into 31 equal sized
+</bodyText>
+<figure confidence="0.972186">
+probability of appearing in reservoir
+0.8
+0.6
+0.4
+0.00 2000 4000 6000 8000 10000
+time
+0.2
+1.0
+uniform
+exponential (various beta)
+</figure>
+<page confidence="0.991959">
+689
+</page>
+<table confidence="0.998801333333333">
+Stream Interval Total (toks) Test (toks)
+Twitter Dec 2013 3282M 105M
+Giga 1994 – 2010 635.5M 12M
+</table>
+<tableCaption confidence="0.999835">
+Table 1: Stream statistics
+</tableCaption>
+<bodyText confidence="0.9997296">
+blocks (roughly corresponding with days). We
+also used the AFP portion of the Giga Word corpus
+as another source of data that evolves at a slower
+pace. This data was divided into 50 equal sized
+blocks. Table 1 gives statistics about the data. As
+can be seen, the Twitter data is vastly larger than
+newswire and arrives at a much faster rate.
+We considered the following models. Each one
+(apart from the exact model) was trained using the
+same amount of data:
+</bodyText>
+<listItem confidence="0.999462833333333">
+• Static. This model was trained using data
+from the start of the duration and never var-
+ied. It is a baseline.
+• Exact. This model was trained using all
+available data from the start of the stream and
+acts as an upper bound on performance.
+• Moving Window. This model used all data
+in a fixed-sized window immediately before
+the given test point.
+• Uniform. Here, we use uniform reservoir
+sampling to select the data.
+• Exponential. Lastly, we use exponen-
+</listItem>
+<bodyText confidence="0.9820954375">
+tial reservoir sampling to select the data.
+This model is parameterised, indicating how
+strongly biased towards the present the sam-
+ple will be. The Q parameter is a multiplier
+over the reservoir length. For example, a Q
+value of 1.1 with a sample size of 10 means
+the value is 11. In general, Q always needs to
+be bigger than the reservoir size.
+We sample over whole sentences (or Tweets)
+and not ngrams.4 Using ngrams instead would
+give us a finer-grained control over results, but
+would come at the expense of greatly complicat-
+ing the analysis. This is because we would need to
+reason about not just a set of items but a multiset
+of items. Note that because the samples are large5,
+variations across samples will be small.
+</bodyText>
+<footnote confidence="0.9991328">
+4A consequence is that we do not guarantee that each sam-
+ple uses exactly the same number of grams. This can be tack-
+led by randomly removing sampled sentences.
+5Each day consists of approximately four million Tweets
+and we evaluate on a whole day.
+</footnote>
+<table confidence="0.975685416666667">
+Day Uniform β value
+∞ 1.1 1.3 1.5 2.0
+5 619.4 619.4 619.4 619.4 619.4
+6 601.0 601.0 603.8 606.6 611.1
+7 603.0 599.4 602.7 605.6 612.1
+8 614.6 607.7 611.9 614.3 621.6
+9 623.3 611.5 615.0 620.0 628.1
+10 656.2 643.1 647.2 650.1 658.0
+12 646.6 628.9 633.0 636.5 644.6
+15 647.7 628.7 630.4 634.5 641.6
+20 636.7 605.3 608.4 610.8 618.4
+25 631.5 601.9 603.3 604.4 610.0
+</table>
+<tableCaption confidence="0.871897">
+Table 2: Perplexities for different Q values over
+Twitter (sample size = five days). Lower is better.
+</tableCaption>
+<bodyText confidence="0.999983928571429">
+We test the model on unseen data from all of the
+next day (or block). Afterwards, we advance to the
+next day (block) and repeat, potentially incorpo-
+rating the previously seen test data into the current
+training data. Evaluation is in terms of perplexity
+(which is standard for language modelling).
+We used KenLM for building models and eval-
+uating them (Heafield, 2011). Each model was
+an unpruned trigram, with Kneser-Ney smoothing.
+Increasing the language model order would not
+change the results. Here the focus is upon which
+data is used in a model (that is, which data is added
+and which data is removed) and not upon making
+it compact or making retraining efficient.
+</bodyText>
+<subsectionHeader confidence="0.997557">
+4.2 Varying the Q Parameter
+</subsectionHeader>
+<bodyText confidence="0.999996272727273">
+Table 2 shows the effect of varying the Q param-
+eter (using Twitter). The higher the Q value, the
+more uniform the sampling. As can be seen, per-
+formance improves when sampling becomes more
+biased. Not shown here, but for Twitter, even
+smaller Q values produce better results and for
+newswire, results degrade. These differences are
+small and do not affect any conclusions made here.
+In practise, this value would be set using a devel-
+opment set and to simplify the rest of the paper, all
+other experiments use the same Q value (1.1).
+</bodyText>
+<subsectionHeader confidence="0.999856">
+4.3 Varying the Amount of Data
+</subsectionHeader>
+<bodyText confidence="0.9999591">
+Does the amount of data used in a model affect re-
+sults? Table 3 shows the results for Twitter when
+varying the amount of data in the sample and us-
+ing exponential sampling (Q = 1.1). In paren-
+theses for each result, we show the corresponding
+moving window results. As expected, using more
+data improves results. We see that for each sample
+size, exponential sampling outperforms our mov-
+ing window. In the limit, all sampling methods
+would produce the same results.
+</bodyText>
+<page confidence="0.983881">
+690
+</page>
+<figure confidence="0.6933615">
+Day 1 Sample Size (Days) 3
+2
+5 652.5 (661.2) 629.1 (635.8) 624.8 (625.9)
+6 635.4 (651.6) 611.6 (620.8) 604.0 (608.7)
+7 636.0 (647.3) 611.0 (625.2) 603.7 (612.5)
+8 654.8 (672.7) 625.6 (641.6) 614.6 (626.9)
+9 653.9 (662.8) 628.3 (643.0) 618.8 (632.2)
+10 679.1 (687.8) 654.3 (666.8) 646.6 (659.7)
+12 671.1 (681.9) 645.8 (658.6) 633.8 (647.5)
+15 677.7 (697.9) 647.4 (668.0) 636.4 (652.6)
+20 648.1 (664.6) 621.4 (637.9) 612.2 (627.6)
+25 657.5 (687.5) 625.3 (664.4) 613.4 (641.8)
+</figure>
+<tableCaption confidence="0.935527">
+Table 3: Perplexities for different sample sizes
+over Twitter. Lower is better.
+</tableCaption>
+<subsectionHeader confidence="0.999252">
+4.4 Alternative Sampling Strategies
+</subsectionHeader>
+<bodyText confidence="0.99834675">
+Table 4 compares the two baselines against the two
+forms of reservoir sampling. For Twitter, we see
+a clear recency effect. The static baseline gets
+worse and worse as it recedes from the current
+test point. Uniform sampling does better, but it
+in turn is beaten by the Moving Window Model.
+However, this in turn is beaten by our exponential
+reservoir sampling.
+</bodyText>
+<figure confidence="0.915795">
+Day Static Moving Uniform Exp Exact
+5 619.4 619.4 619.4 619.4 619.4
+6 664.8 599.7 601.8 601.0 597.6
+7 684.4 602.8 603.0 599.3 595.6
+8 710.1 612.0 614.6 607.7 603.5
+9 727.0 617.9 623.3 613.0 608.7
+10 775.6 651.2 656.2 642.0 640.5
+12 776.7 639.0 646.6 628.7 627.5
+15 777.1 638.3 647.7 626.7 627.3
+20 800.9 619.1 636.7 604.9 607.3
+25 801.4 621.7 631.5 601.5 597.6
+</figure>
+<tableCaption confidence="0.61875425">
+Table 4: Perplexities for differently selected sam-
+ples over Twitter (sample size = five days, Q =
+1.1). Results in bold are the best sampling results.
+Lower is better.
+</tableCaption>
+<subsectionHeader confidence="0.902622">
+4.5 GigaWord
+</subsectionHeader>
+<bodyText confidence="0.998143076923077">
+Twitter is a fast moving, rapidly changing multi-
+lingual stream and it is not surprising that our ex-
+ponential reservoir sampling proves beneficial. Is
+it still useful for a more conventional stream that
+is drawn from a much smaller population of re-
+porters? We repeated our experiments, using the
+same rolling training and testing evaluation as be-
+fore, but this time using newswire for data.
+Table 5 shows the perplexities when using the
+Gigaword stream. We see the same general trends,
+albeit with less of a difference between exponen-
+tial sampling and our moving window. Perplexity
+values are all lower than for Twitter.
+</bodyText>
+<table confidence="0.998383857142857">
+Block Static Moving Uniform Exp
+11 416.5 381.1 382.0 382.0
+15 436.7 353.3 357.5 352.8
+20 461.8 347.0 354.4 344.6
+25 315.6 214.9 222.2 211.3
+30 319.1 200.5 213.5 199.5
+40 462.5 304.4 313.2 292.9
+</table>
+<tableCaption confidence="0.965519">
+Table 5: Perplexities for differently selected sam-
+ples over Gigaword (sample size = 10 blocks, Q =
+1.1). Lower is better.
+</tableCaption>
+<subsectionHeader confidence="0.944078">
+4.6 Why does this work for Twitter?
+</subsectionHeader>
+<bodyText confidence="0.999978842105263">
+Although the perplexity results demonstrate that
+exponential sampling is on average beneficial, it
+is useful to analyse the results in more detail. For
+a large stream size (25 days), we built models us-
+ing uniform, exponential (Q = 1.1) and our moving
+window sampling methods. Each approach used
+the same amount of data. For the same test set
+(four million Tweets), we computed per-Tweet log
+likelihoods and looked at the difference between
+the model that best explained each tweet and the
+second best model (ie the margin). This gives us
+an indication of how much a given model better
+explains a given Tweet. Analysing the results, we
+found that most gains came from short grams and
+very few came from entire Tweets being reposted
+(or retweeted). This suggests that the Twitter re-
+sults follow previously reported observations on
+how language can be bursty and not from Twitter-
+specific properties.
+</bodyText>
+<sectionHeader confidence="0.998904" genericHeader="conclusions">
+5 Conclusion
+</sectionHeader>
+<bodyText confidence="0.9974329375">
+We have introduced exponential reservoir sam-
+pling as an elegant way to model a stream of un-
+bounded size, yet using fixed space. It naturally al-
+lows one to take account of recency effects present
+in many natural streams. We expect that our lan-
+guage model could improve other Social Media
+tasks, for example lexical normalisation (Han and
+Baldwin, 2011) or even event detection (Lin et
+al., 2011). The approach is fully general and not
+just limited to language modelling. Future work
+should look at other distributions for sampling and
+consider tasks such as machine translation over
+Social Media.
+Acknowledgments This work was carried out
+when MO was on sabbatical at the HLTCOE and
+CLSP.
+</bodyText>
+<page confidence="0.998053">
+691
+</page>
+<sectionHeader confidence="0.989036" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.998972611111111">
+Charu C Aggarwal. 2006. On biased reservoir sam-
+pling in the presence of stream evolution. In Pro-
+ceedings of the 32nd international conference on
+Very large data bases, pages 607–618. VLDB En-
+dowment.
+Doug Beeferman, Adam Berger, and John Lafferty.
+1997. A model of lexical attractions and repulsion.
+In Proceedings of the 35th Annual Meeting of the As-
+sociation for Computational Linguistics and Eighth
+Conference of the European Chapter of the Associa-
+tion for Computational Linguistics, pages 373–380.
+Association for Computational Linguistics.
+K. Church and W. A. Gale. 1995. Poisson mixtures.
+Natural Language Engineering, 1:163–190.
+Kenneth W Church. 2000. Empirical estimates of
+adaptation: the chance of two noriegas is closer to
+p/2 than p 2. In Proceedings of the 18th conference
+on Computational linguistics-Volume 1, pages 180–
+186. Association for Computational Linguistics.
+Amit Goyal, Hal Daum´e III, and Suresh Venkatasub-
+ramanian. 2009. Streaming for large scale NLP:
+Language Modeling. In Proceedings of NAACL.
+Bo Han and Timothy Baldwin. 2011. Lexical normal-
+isation of short text messages: Makn sens a #twit-
+ter. In Proceedings of the 49th Annual Meeting of
+the Association for Computational Linguistics: Hu-
+man Language Technologies - Volume 1, HLT ’11,
+pages 368–378, Stroudsburg, PA, USA. Association
+for Computational Linguistics.
+Kenneth Heafield. 2011. KenLM: faster and smaller
+language model queries. In Proceedings of the
+EMNLP 2011 Sixth Workshop on Statistical Ma-
+chine Translation, pages 187–197, Edinburgh, Scot-
+land, United Kingdom, July.
+Raymond Lau, Ronald Rosenfeld, and SaIim Roukos.
+1993. Trigger-based language models: A maximum
+entropy approach. In Acoustics, Speech, and Signal
+Processing, 1993. ICASSP-93., 1993 IEEE Interna-
+tional Conference on, volume 2, pages 45–48. IEEE.
+Abby Levenberg and Miles Osborne. 2009. Stream-
+based randomised language models for smt. In Pro-
+ceedings of the 2009 Conference on Empirical Meth-
+ods in Natural Language Processing: Volume 2-
+Volume 2, pages 756–764. Association for Compu-
+tational Linguistics.
+Jimmy Lin, Rion Snow, and William Morgan. 2011.
+Smoothing techniques for adaptive online language
+models: topic tracking in tweet streams. In Proceed-
+ings of the 17th ACM SIGKDD international con-
+ference on Knowledge discovery and data mining,
+pages 422–429. ACM.
+David Talbot and Miles Osborne. 2007. Randomised
+language modelling for statistical machine transla-
+tion. In Proceedings of ACL.
+Benjamin Van Durme and Ashwin Lall. 2009. Proba-
+bilistic Counting with Randomized Storage. In Pro-
+ceedings of IJCAI.
+Benjamin Van Durme and Ashwin Lall. 2011. Effi-
+cient online locality sensitive hashing via reservoir
+counting. In Proceedings of the 49th Annual Meet-
+ing of the Association for Computational Linguis-
+tics: Human Language Technologies: short papers-
+Volume 2, pages 18–23. Association for Computa-
+tional Linguistics.
+Benjamin Van Durme. 2012. Streaming analysis of
+discourse participants. In Proceedings of the 2012
+Joint Conference on Empirical Methods in Natural
+Language Processing and Computational Natural
+Language Learning, pages 48–58. Association for
+Computational Linguistics.
+Jeffrey S. Vitter. 1985. Random sampling with a reser-
+voir. ACM Trans. Math. Softw., 11:37–57, March.
+</reference>
+<page confidence="0.997918">
+692
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.988263">
+<title confidence="0.998672">Exponential Reservoir Sampling for Streaming Language Models</title>
+<author confidence="0.999908">Lall Benjamin Van_Durme</author>
+<affiliation confidence="0.9999655">School of Informatics Mathematics and Computer Science HLTCOE University of Edinburgh Denison University Johns Hopkins University</affiliation>
+<abstract confidence="0.9992265">We show how rapidly changing textual streams such as Twitter can be modelled in fixed space. Our approach is based upon randomised algorithm called Exponen- Reservoir unexplored by this community until now. Using language models over Twitter and Newswire as a testbed, our experimental results based on perplexity support the intuition that recently observed data generally outweighs that seen in the past, but that at times, the past can have valuable signals enabling better modelling of the present.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>Charu C Aggarwal</author>
+</authors>
+<title>On biased reservoir sampling in the presence of stream evolution.</title>
+<date>2006</date>
+<booktitle>In Proceedings of the 32nd international conference on Very large data bases,</booktitle>
+<pages>607--618</pages>
+<publisher>VLDB Endowment.</publisher>
+<contexts>
+<context position="3103" citStr="Aggarwal (2006)" startWordPosition="493" endWordPosition="494">a moving window is better than uniform sampling, and further that exponential (biased) sampling is best of all. For streaming data, recently encountered data is valuable, but there is also signal in the previous stream. Our sampling methods are based on reservoir sampling (Vitter, 1985), a popularly known method in some areas of computer science, but which has seen little use within computational linguistics.2 Standard reservoir sampling is a method for maintaining a uniform sample over a dynamic stream of elements, using constant space. Novel to this community, we consider a variant owing to Aggarwal (2006) which provides for an exponential bias towards recently observed elements. This exponential reservoir sampling has all of the guarantees of standard reservoir sampling, but as we show, is a better fit for streaming textual data. Our approach is fully general and can be applied to any streaming task where we need to model the present and can only use fixed space. 2Exceptions include work by Van Durme and Lall (2011) and Van Durme (2012), aimed at different problems than that explored here. 687 Proceedings of the 52nd Annual Meeting of the Association for Computational Linguistics (Short Papers</context>
+<context position="8450" citStr="Aggarwal (2006)" startWordPosition="1414" endWordPosition="1415">/time constraints. The time-decay scheme we will study in this paper is exponential bias towards newer items in the stream. More precisely, we wish for items that 688 Figure 1: Different biases for sampling a stream have age a in the stream to appear with probability g(a) = c · exp (−a/β), where a is the age of the item, β is a scale parameter indicating how rapidly older items should be deemphasized, and c is a normalization constant. To give a sense of what these time-decay probabilities look like, some exponential distributions are plotted (along with the uniform distribution) in Figure 1. Aggarwal (2006) studied this problem and showed that by altering the sampling probability (f(n, k) in Algorithm 1) in the reservoir sampling algorithm, it is possible to achieve different agerelated biases in the sample. In particular, he showed that by setting the sampling probability to the constant function f(n, k) = k/β, it is possible to approximately achieve exponential bias in the sample with scale parameter β (Aggarwal, 2006). Aggarwal’s analysis relies on the parameter β being very large. In the next section we will make the analysis more precise by omitting any such assumption. 3.3 Analysis In this</context>
+</contexts>
+<marker>Aggarwal, 2006</marker>
+<rawString>Charu C Aggarwal. 2006. On biased reservoir sampling in the presence of stream evolution. In Proceedings of the 32nd international conference on Very large data bases, pages 607–618. VLDB Endowment.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Doug Beeferman</author>
+<author>Adam Berger</author>
+<author>John Lafferty</author>
+</authors>
+<title>A model of lexical attractions and repulsion.</title>
+<date>1997</date>
+<booktitle>In Proceedings of the 35th Annual Meeting of the Association for Computational Linguistics and Eighth Conference of the European Chapter of the Association for Computational Linguistics,</booktitle>
+<pages>373--380</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<contexts>
+<context position="4404" citStr="Beeferman et al., 1997" startWordPosition="698" endWordPosition="701"> for Computational Linguistics 2 Background We address two problems: language changes over time, and the observation that space is a problem, even for compact sketches. Statistical language models often assume either a local Markov property (when working with utterances, or sentences), or that content is generated fully i.i.d. (such as in document-level topic models). However, language shows observable priming effects, sometimes called triggers, where the occurrence of a given term decreases the surprisal of some other term later in the same discourse (Lau et al., 1993; Church and Gale, 1995; Beeferman et al., 1997; Church, 2000). Conventional cache and trigger models typically do not deal with new terms and can be seen as adjusting the parameters of a fixed model. Accounting for previously unseen entries in a language model can be naively simple: as they appear in new training data, add them to the model! However in practice we are constrained by available space: how many unique phrases can we store, given the target application environment? Our work is concerned with modeling language that might change over time, in accordance with current trending discourse topics, but under a strict space constraint</context>
+</contexts>
+<marker>Beeferman, Berger, Lafferty, 1997</marker>
+<rawString>Doug Beeferman, Adam Berger, and John Lafferty. 1997. A model of lexical attractions and repulsion. In Proceedings of the 35th Annual Meeting of the Association for Computational Linguistics and Eighth Conference of the European Chapter of the Association for Computational Linguistics, pages 373–380. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>K Church</author>
+<author>W A Gale</author>
+</authors>
+<title>Poisson mixtures.</title>
+<date>1995</date>
+<journal>Natural Language Engineering,</journal>
+<pages>1--163</pages>
+<contexts>
+<context position="4380" citStr="Church and Gale, 1995" startWordPosition="694" endWordPosition="697">014. c�2014 Association for Computational Linguistics 2 Background We address two problems: language changes over time, and the observation that space is a problem, even for compact sketches. Statistical language models often assume either a local Markov property (when working with utterances, or sentences), or that content is generated fully i.i.d. (such as in document-level topic models). However, language shows observable priming effects, sometimes called triggers, where the occurrence of a given term decreases the surprisal of some other term later in the same discourse (Lau et al., 1993; Church and Gale, 1995; Beeferman et al., 1997; Church, 2000). Conventional cache and trigger models typically do not deal with new terms and can be seen as adjusting the parameters of a fixed model. Accounting for previously unseen entries in a language model can be naively simple: as they appear in new training data, add them to the model! However in practice we are constrained by available space: how many unique phrases can we store, given the target application environment? Our work is concerned with modeling language that might change over time, in accordance with current trending discourse topics, but under a</context>
+</contexts>
+<marker>Church, Gale, 1995</marker>
+<rawString>K. Church and W. A. Gale. 1995. Poisson mixtures. Natural Language Engineering, 1:163–190.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Kenneth W Church</author>
+</authors>
+<title>Empirical estimates of adaptation: the chance of two noriegas is closer to p/2 than p 2.</title>
+<date>2000</date>
+<booktitle>In Proceedings of the 18th conference on Computational linguistics-Volume 1,</booktitle>
+<pages>180--186</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<contexts>
+<context position="4419" citStr="Church, 2000" startWordPosition="702" endWordPosition="703">istics 2 Background We address two problems: language changes over time, and the observation that space is a problem, even for compact sketches. Statistical language models often assume either a local Markov property (when working with utterances, or sentences), or that content is generated fully i.i.d. (such as in document-level topic models). However, language shows observable priming effects, sometimes called triggers, where the occurrence of a given term decreases the surprisal of some other term later in the same discourse (Lau et al., 1993; Church and Gale, 1995; Beeferman et al., 1997; Church, 2000). Conventional cache and trigger models typically do not deal with new terms and can be seen as adjusting the parameters of a fixed model. Accounting for previously unseen entries in a language model can be naively simple: as they appear in new training data, add them to the model! However in practice we are constrained by available space: how many unique phrases can we store, given the target application environment? Our work is concerned with modeling language that might change over time, in accordance with current trending discourse topics, but under a strict space constraint. With a fixed </context>
+</contexts>
+<marker>Church, 2000</marker>
+<rawString>Kenneth W Church. 2000. Empirical estimates of adaptation: the chance of two noriegas is closer to p/2 than p 2. In Proceedings of the 18th conference on Computational linguistics-Volume 1, pages 180– 186. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Amit Goyal</author>
+<author>Hal Daum´e</author>
+<author>Suresh Venkatasubramanian</author>
+</authors>
+<title>Streaming for large scale NLP: Language Modeling.</title>
+<date>2009</date>
+<booktitle>In Proceedings of NAACL.</booktitle>
+<marker>Goyal, Daum´e, Venkatasubramanian, 2009</marker>
+<rawString>Amit Goyal, Hal Daum´e III, and Suresh Venkatasubramanian. 2009. Streaming for large scale NLP: Language Modeling. In Proceedings of NAACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Bo Han</author>
+<author>Timothy Baldwin</author>
+</authors>
+<title>Lexical normalisation of short text messages: Makn sens a #twitter.</title>
+<date>2011</date>
+<booktitle>In Proceedings of the 49th Annual Meeting of the Association for Computational Linguistics: Human Language Technologies - Volume 1, HLT ’11,</booktitle>
+<pages>368--378</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<location>Stroudsburg, PA, USA.</location>
+<marker>Han, Baldwin, 2011</marker>
+<rawString>Bo Han and Timothy Baldwin. 2011. Lexical normalisation of short text messages: Makn sens a #twitter. In Proceedings of the 49th Annual Meeting of the Association for Computational Linguistics: Human Language Technologies - Volume 1, HLT ’11, pages 368–378, Stroudsburg, PA, USA. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Kenneth Heafield</author>
+</authors>
+<title>KenLM: faster and smaller language model queries.</title>
+<date>2011</date>
+<booktitle>In Proceedings of the EMNLP 2011 Sixth Workshop on Statistical Machine Translation,</booktitle>
+<pages>187--197</pages>
+<location>Edinburgh, Scotland, United Kingdom,</location>
+<contexts>
+<context position="14723" citStr="Heafield, 2011" startWordPosition="2534" endWordPosition="2535"> 650.1 658.0 12 646.6 628.9 633.0 636.5 644.6 15 647.7 628.7 630.4 634.5 641.6 20 636.7 605.3 608.4 610.8 618.4 25 631.5 601.9 603.3 604.4 610.0 Table 2: Perplexities for different Q values over Twitter (sample size = five days). Lower is better. We test the model on unseen data from all of the next day (or block). Afterwards, we advance to the next day (block) and repeat, potentially incorporating the previously seen test data into the current training data. Evaluation is in terms of perplexity (which is standard for language modelling). We used KenLM for building models and evaluating them (Heafield, 2011). Each model was an unpruned trigram, with Kneser-Ney smoothing. Increasing the language model order would not change the results. Here the focus is upon which data is used in a model (that is, which data is added and which data is removed) and not upon making it compact or making retraining efficient. 4.2 Varying the Q Parameter Table 2 shows the effect of varying the Q parameter (using Twitter). The higher the Q value, the more uniform the sampling. As can be seen, performance improves when sampling becomes more biased. Not shown here, but for Twitter, even smaller Q values produce better re</context>
+</contexts>
+<marker>Heafield, 2011</marker>
+<rawString>Kenneth Heafield. 2011. KenLM: faster and smaller language model queries. In Proceedings of the EMNLP 2011 Sixth Workshop on Statistical Machine Translation, pages 187–197, Edinburgh, Scotland, United Kingdom, July.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Raymond Lau</author>
+<author>Ronald Rosenfeld</author>
+<author>SaIim Roukos</author>
+</authors>
+<title>Trigger-based language models: A maximum entropy approach.</title>
+<date>1993</date>
+<booktitle>In Acoustics, Speech, and Signal Processing,</booktitle>
+<volume>2</volume>
+<pages>45--48</pages>
+<publisher>IEEE.</publisher>
+<contexts>
+<context position="4357" citStr="Lau et al., 1993" startWordPosition="690" endWordPosition="693"> USA, June 23-25 2014. c�2014 Association for Computational Linguistics 2 Background We address two problems: language changes over time, and the observation that space is a problem, even for compact sketches. Statistical language models often assume either a local Markov property (when working with utterances, or sentences), or that content is generated fully i.i.d. (such as in document-level topic models). However, language shows observable priming effects, sometimes called triggers, where the occurrence of a given term decreases the surprisal of some other term later in the same discourse (Lau et al., 1993; Church and Gale, 1995; Beeferman et al., 1997; Church, 2000). Conventional cache and trigger models typically do not deal with new terms and can be seen as adjusting the parameters of a fixed model. Accounting for previously unseen entries in a language model can be naively simple: as they appear in new training data, add them to the model! However in practice we are constrained by available space: how many unique phrases can we store, given the target application environment? Our work is concerned with modeling language that might change over time, in accordance with current trending discou</context>
+</contexts>
+<marker>Lau, Rosenfeld, Roukos, 1993</marker>
+<rawString>Raymond Lau, Ronald Rosenfeld, and SaIim Roukos. 1993. Trigger-based language models: A maximum entropy approach. In Acoustics, Speech, and Signal Processing, 1993. ICASSP-93., 1993 IEEE International Conference on, volume 2, pages 45–48. IEEE.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Abby Levenberg</author>
+<author>Miles Osborne</author>
+</authors>
+<title>Streambased randomised language models for smt.</title>
+<date>2009</date>
+<booktitle>In Proceedings of the 2009 Conference on Empirical Methods in Natural Language Processing: Volume</booktitle>
+<volume>2</volume>
+<pages>756--764</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<contexts>
+<context position="1338" citStr="Levenberg and Osborne (2009)" startWordPosition="208" endWordPosition="211">ble signals enabling better modelling of the present. 1 Introduction Work by Talbot and Osborne (2007), Van Durme and Lall (2009) and Goyal et al. (2009) considered the problem of building very large language models via the use of randomized data structures known as sketches.1 While efficient, these structures still scale linearly in the number of items stored, and do not handle deletions well: if processing an unbounded stream of text, with new words and phrases being regularly added to the model, then with a fixed amount of space, errors will only increase over time. This was pointed out by Levenberg and Osborne (2009), who investigated an alternate approach employing perfecthashing to allow for deletions over time. Their deletion criterion was task-specific and based on how a machine translation system queried a language model. ∗Corresponding author: miles@inf.ed.ac.uk 1Sketches provide space efficiencies that are measured on the order of individual bits per item stored, but at the cost of being lossy: sketches trade off space for error, where the less space you use, the more likely you will get erroneous responses to queries. Here we ask what the appropriate selection criterion is for streaming data based</context>
+</contexts>
+<marker>Levenberg, Osborne, 2009</marker>
+<rawString>Abby Levenberg and Miles Osborne. 2009. Streambased randomised language models for smt. In Proceedings of the 2009 Conference on Empirical Methods in Natural Language Processing: Volume 2-Volume 2, pages 756–764. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jimmy Lin</author>
+<author>Rion Snow</author>
+<author>William Morgan</author>
+</authors>
+<title>Smoothing techniques for adaptive online language models: topic tracking in tweet streams.</title>
+<date>2011</date>
+<booktitle>In Proceedings of the 17th ACM SIGKDD international conference on Knowledge discovery and data mining,</booktitle>
+<pages>422--429</pages>
+<publisher>ACM.</publisher>
+<marker>Lin, Snow, Morgan, 2011</marker>
+<rawString>Jimmy Lin, Rion Snow, and William Morgan. 2011. Smoothing techniques for adaptive online language models: topic tracking in tweet streams. In Proceedings of the 17th ACM SIGKDD international conference on Knowledge discovery and data mining, pages 422–429. ACM.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>David Talbot</author>
+<author>Miles Osborne</author>
+</authors>
+<title>Randomised language modelling for statistical machine translation.</title>
+<date>2007</date>
+<booktitle>In Proceedings of ACL.</booktitle>
+<contexts>
+<context position="812" citStr="Talbot and Osborne (2007)" startWordPosition="117" endWordPosition="120">burgh Denison University Johns Hopkins University Abstract We show how rapidly changing textual streams such as Twitter can be modelled in fixed space. Our approach is based upon a randomised algorithm called Exponential Reservoir Sampling, unexplored by this community until now. Using language models over Twitter and Newswire as a testbed, our experimental results based on perplexity support the intuition that recently observed data generally outweighs that seen in the past, but that at times, the past can have valuable signals enabling better modelling of the present. 1 Introduction Work by Talbot and Osborne (2007), Van Durme and Lall (2009) and Goyal et al. (2009) considered the problem of building very large language models via the use of randomized data structures known as sketches.1 While efficient, these structures still scale linearly in the number of items stored, and do not handle deletions well: if processing an unbounded stream of text, with new words and phrases being regularly added to the model, then with a fixed amount of space, errors will only increase over time. This was pointed out by Levenberg and Osborne (2009), who investigated an alternate approach employing perfecthashing to allow</context>
+</contexts>
+<marker>Talbot, Osborne, 2007</marker>
+<rawString>David Talbot and Miles Osborne. 2007. Randomised language modelling for statistical machine translation. In Proceedings of ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Benjamin Van Durme</author>
+<author>Ashwin Lall</author>
+</authors>
+<title>Probabilistic Counting with Randomized Storage.</title>
+<date>2009</date>
+<booktitle>In Proceedings of IJCAI.</booktitle>
+<marker>Van Durme, Lall, 2009</marker>
+<rawString>Benjamin Van Durme and Ashwin Lall. 2009. Probabilistic Counting with Randomized Storage. In Proceedings of IJCAI.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Benjamin Van Durme</author>
+<author>Ashwin Lall</author>
+</authors>
+<title>Efficient online locality sensitive hashing via reservoir counting.</title>
+<date>2011</date>
+<booktitle>In Proceedings of the 49th Annual Meeting of the Association for Computational Linguistics: Human Language Technologies: short papersVolume 2,</booktitle>
+<pages>18--23</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<marker>Van Durme, Lall, 2011</marker>
+<rawString>Benjamin Van Durme and Ashwin Lall. 2011. Efficient online locality sensitive hashing via reservoir counting. In Proceedings of the 49th Annual Meeting of the Association for Computational Linguistics: Human Language Technologies: short papersVolume 2, pages 18–23. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Benjamin Van Durme</author>
+</authors>
+<title>Streaming analysis of discourse participants.</title>
+<date>2012</date>
+<booktitle>In Proceedings of the 2012 Joint Conference on Empirical Methods in Natural Language Processing and Computational Natural Language Learning,</booktitle>
+<pages>48--58</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<marker>Van Durme, 2012</marker>
+<rawString>Benjamin Van Durme. 2012. Streaming analysis of discourse participants. In Proceedings of the 2012 Joint Conference on Empirical Methods in Natural Language Processing and Computational Natural Language Learning, pages 48–58. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jeffrey S Vitter</author>
+</authors>
+<title>Random sampling with a reservoir.</title>
+<date>1985</date>
+<journal>ACM Trans. Math. Softw.,</journal>
+<pages>11--37</pages>
+<contexts>
+<context position="2775" citStr="Vitter, 1985" startWordPosition="441" endWordPosition="442"> observed sentences, then measure perplexity of incoming sentences, all on a day by day, rolling basis. Three sampling approaches are considered: A fixed-width sliding window of most recent content, uniformly at random over the stream and a biased sample that prefers recent history over the past. We show experimentally that a moving window is better than uniform sampling, and further that exponential (biased) sampling is best of all. For streaming data, recently encountered data is valuable, but there is also signal in the previous stream. Our sampling methods are based on reservoir sampling (Vitter, 1985), a popularly known method in some areas of computer science, but which has seen little use within computational linguistics.2 Standard reservoir sampling is a method for maintaining a uniform sample over a dynamic stream of elements, using constant space. Novel to this community, we consider a variant owing to Aggarwal (2006) which provides for an exponential bias towards recently observed elements. This exponential reservoir sampling has all of the guarantees of standard reservoir sampling, but as we show, is a better fit for streaming textual data. Our approach is fully general and can be a</context>
+<context position="5463" citStr="Vitter, 1985" startWordPosition="883" endWordPosition="884">is concerned with modeling language that might change over time, in accordance with current trending discourse topics, but under a strict space constraint. With a fixed amount of memory available, we cannot allow our list of unique words or phrases to grow over time, even while new topics give rise to novel names of people, places, and terms of interest. Thus we need an approach that keeps the size of the model constant, but that is geared to what is being discussed now, as compared to some time in the past. 3 Reservoir Sampling 3.1 Uniform Reservoir Sampling The reservoir sampling algorithm (Vitter, 1985) is the classic method of sampling without replacement from a stream in a single pass when the length of the stream is of indeterminate or unbounded length. Say that the size of the desired sample is k. The algorithm proceeds by retaining the first k items of the stream and then sampling each subsequent element with probability f(k, n) = k/n, where n is the length of the stream so far. (See Algorithm 1.) It is easy to show via induction that, at any time, all the items in the stream so far have equal probability of appearing in the reservoir. The algorithm processes the stream in a single pass</context>
+</contexts>
+<marker>Vitter, 1985</marker>
+<rawString>Jeffrey S. Vitter. 1985. Random sampling with a reservoir. ACM Trans. Math. Softw., 11:37–57, March.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

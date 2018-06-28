@@ -1,0 +1,1637 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.000000">
+<title confidence="0.980414">
+Semi-Supervised Frame-Semantic Parsing for Unknown Predicates
+</title>
+<author confidence="0.987953">
+Dipanjan Das and Noah A. Smith
+</author>
+<affiliation confidence="0.882151333333333">
+Language Technologies Institute
+Carnegie Mellon University
+Pittsburgh, PA 15213, USA
+</affiliation>
+<email confidence="0.997868">
+{dipanjan,nasmith}@cs.cmu.edu
+</email>
+<sectionHeader confidence="0.984868" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.999796764705882">
+We describe a new approach to disambiguat-
+ing semantic frames evoked by lexical predi-
+cates previously unseen in a lexicon or anno-
+tated data. Our approach makes use of large
+amounts of unlabeled data in a graph-based
+semi-supervised learning framework. We con-
+struct a large graph where vertices correspond
+to potential predicates and use label propa-
+gation to learn possible semantic frames for
+new ones. The label-propagated graph is used
+within a frame-semantic parser and, for un-
+known predicates, results in over 15% abso-
+lute improvement in frame identification ac-
+curacy and over 13% absolute improvement
+in full frame-semantic parsing Fl score on a
+blind test set, over a state-of-the-art supervised
+baseline.
+</bodyText>
+<sectionHeader confidence="0.992533" genericHeader="keywords">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.983176551020408">
+Frame-semantic parsing aims to extract a shallow se-
+mantic structure from text, as shown in Figure 1.
+The FrameNet lexicon (Fillmore et al., 2003) is
+a rich linguistic resource containing expert knowl-
+edge about lexical and predicate-argument seman-
+tics. The lexicon suggests an analysis based on the
+theory of frame semantics (Fillmore, 1982). Recent
+approaches to frame-semantic parsing have broadly
+focused on the use of two statistical classifiers cor-
+responding to the aforementioned subtasks: the first
+one to identify the most suitable semantic frame for
+a marked lexical predicate (target, henceforth) in a
+sentence, and the second for performing semantic
+role labeling (SRL) given the frame.
+The FrameNet lexicon, its exemplar sentences
+containing instantiations of semantic frames, and
+full-text annotations provide supervision for learn-
+ing frame-semantic parsers. Yet these annotations
+lack coverage, including only 9,300 annotated tar-
+get types. Recent papers have tried to address the
+coverage problem. Johansson and Nugues (2007)
+used WordNet (Fellbaum, 1998) to expand the list of
+targets that can evoke frames and trained classifiers
+to identify the best-suited frame for the newly cre-
+ated targets. In past work, we described an approach
+where latent variables were used in a probabilistic
+model to predict frames for unseen targets (Das et
+al., 2010a).1 Relatedly, for the argument identifica-
+tion subtask, Matsubayashi et al. (2009) proposed
+a technique for generalization of semantic roles to
+overcome data sparseness. Unseen targets continue
+to present a major obstacle to domain-general se-
+mantic analysis.
+In this paper, we address the problem of idenfi-
+fying the semantic frames for targets unseen either
+in FrameNet (including the exemplar sentences) or
+the collection of full-text annotations released along
+with the lexicon. Using a standard model for the ar-
+gument identification stage (Das et al., 2010a), our
+proposed method improves overall frame-semantic
+parsing, especially for unseen targets. To better han-
+dle these unseen targets, we adopt a graph-based
+semi-supervised learning stategy (§4). We construct
+a large graph over potential targets, most of which
+1Notwithstanding state-of-the-art results, that approach was
+only able to identify the correct frame for 1.9% of unseen tar-
+gets in the test data available at that time. That system achieves
+about 23% on the test set used in this paper.
+1435
+</bodyText>
+<note confidence="0.995542">
+Proceedings of the 49th Annual Meeting of the Association for Computational Linguistics, pages 1435–1444,
+Portland, Oregon, June 19-24, 2011. c�2011 Association for Computational Linguistics
+</note>
+<figure confidence="0.9655784">
+But there still are n&apos;t enough ringers to ring more than six of the eight bells . Frame LU
+NOISE_MAKERS
+N_m
+CAUSE_TO_MAKE_NOISE
+bell.n
+ring.v
+Agent
+enough.a
+SUFFICIENCY
+Item
+Sound_maker
+Enabled_situation
+EXISTENCE
+there be.v
+Entity
+</figure>
+<figureCaption confidence="0.8604925">
+Figure 1: An example sentence from the PropBank section of the full-text annotations released as part of FrameNet
+1.5. Each row under the sentence correponds to a semantic frame and its set of corresponding arguments. Thick lines
+</figureCaption>
+<bodyText confidence="0.955067705882353">
+indicate targets that evoke frames; thin solid/dotted lines with labels indicate arguments. N m under “bells” is short
+for the Noise maker role of the NOISE MAKERS frame.
+are drawn from unannotated data, and a fraction
+of which come from seen FrameNet annotations.
+Next, we perform label propagation on the graph,
+which is initialized by frame distributions over the
+seen targets. The resulting smoothed graph con-
+sists of posterior distributions over semantic frames
+for each target in the graph, thus increasing cover-
+age. These distributions are then evaluated within
+a frame-semantic parser (§5). Considering unseen
+targets in test data (although few because the test
+data is also drawn from the training domain), sig-
+nificant absolute improvements of 15.7% and 13.7%
+are observed for frame identification and full frame-
+semantic parsing, respectively, indicating improved
+coverage for hitherto unobserved predicates (§6).
+</bodyText>
+<sectionHeader confidence="0.972746" genericHeader="introduction">
+2 Background
+</sectionHeader>
+<bodyText confidence="0.99986625">
+Before going into the details of our model, we pro-
+vide some background on two topics relevant to
+this paper: frame-semantic parsing and graph-based
+learning applied to natural language tasks.
+</bodyText>
+<subsectionHeader confidence="0.986155">
+2.1 Frame-semantic Parsing
+</subsectionHeader>
+<bodyText confidence="0.999246959183673">
+Gildea and Jurafsky (2002) pioneered SRL, and
+since then there has been much applied research
+on predicate-argument semantics. Early work on
+frame-semantic role labeling made use of the ex-
+emplar sentences in the FrameNet corpus, each of
+which is annotated for a single frame and its argu-
+ments (Thompson et al., 2003; Fleischman et al.,
+2003; Shi and Mihalcea, 2004; Erk and Pad´o, 2006,
+inter alia). Most of this work was done on an older,
+smaller version of FrameNet. Recently, since the re-
+lease of full-text annotations in SemEval’07 (Baker
+et al., 2007), there has been work on identifying
+multiple frames and their corresponding sets of ar-
+guments in a sentence. The LTH system of Jo-
+hansson and Nugues (2007) performed the best in
+the SemEval’07 shared task on frame-semantic pars-
+ing. Our probabilistic frame-semantic parser out-
+performs LTH on that task and dataset (Das et al.,
+2010a). The current paper builds on those proba-
+bilistic models to improve coverage on unseen pred-
+icates.2
+Expert resources have limited coverage, and
+FrameNet is no exception. Automatic induction of
+semantic resources has been a major effort in re-
+cent years (Snow et al., 2006; Ponzetto and Strube,
+2007, inter alia). In the domain of frame semantics,
+previous work has sought to extend the coverage
+of FrameNet by exploiting resources like VerbNet,
+WordNet, or Wikipedia (Shi and Mihalcea, 2005;
+Giuglea and Moschitti, 2006; Pennacchiotti et al.,
+2008; Tonelli and Giuliano, 2009), and projecting
+entries and annotations within and across languages
+(Boas, 2002; Fung and Chen, 2004; Pad´o and La-
+pata, 2005). Although these approaches have in-
+creased coverage to various degrees, they rely on
+other lexicons and resources created by experts.
+F¨urstenau and Lapata (2009) proposed the use of un-
+labeled data to improve coverage, but their work was
+limited to verbs. Bejan (2009) used self-training to
+improve frame identification and reported improve-
+ments, but did not explicitly model unknown tar-
+gets. In contrast, we use statistics gathered from
+large volumes of unlabeled data to improve the cov-
+erage of a frame-semantic parser on several syntactic
+categories, in a novel framework that makes use of
+graph-based semi-supervised learning.
+2SEMAFOR, the system presented by Das et al. (2010a) is
+publicly available at http://www.ark.cs.cmu.edu/
+SEMAFOR and has been extended in this work.
+</bodyText>
+<page confidence="0.557457">
+1436
+</page>
+<subsectionHeader confidence="0.997101">
+2.2 Graph-based Semi-Supervised Learning
+</subsectionHeader>
+<bodyText confidence="0.999997793103448">
+In graph-based semi-supervised learning, one con-
+structs a graph whose vertices are labeled and unla-
+beled examples. Weighted edges in the graph, con-
+necting pairs of examples/vertices, encode the de-
+gree to which they are expected to have the same
+label (Zhu et al., 2003). Variants of label propaga-
+tion are used to transfer labels from the labeled to the
+unlabeled examples. There are several instances of
+the use of graph-based methods for natural language
+tasks. Most relevant to our work an approach to
+word-sense disambiguation due to Niu et al. (2005).
+Their formulation was transductive, so that the test
+data was part of the constructed graph, and they did
+not consider predicate-argument analysis. In con-
+trast, we make use of the smoothed graph during in-
+ference in a probabilistic setting, in turn using it for
+the full frame-semantic parsing task. Recently, Sub-
+ramanya et al. (2010) proposed the use of a graph
+over substructures of an underlying sequence model,
+and used a smoothed graph for domain adaptation of
+part-of-speech taggers. Subramanya et al.’s model
+was extended by Das and Petrov (2011) to induce
+part-of-speech dictionaries for unsupervised learn-
+ing of taggers. Our semi-supervised learning setting
+is similar to these two lines of work and, like them,
+we use the graph to arrive at better final structures, in
+an inductive setting (i.e., where a parametric model
+is learned and then separately applied to test data,
+following most NLP research).
+</bodyText>
+<sectionHeader confidence="0.944561" genericHeader="method">
+3 Approach Overview
+</sectionHeader>
+<bodyText confidence="0.950874428571428">
+Our overall approach to handling unobserved targets
+consists of four distinct stages. Before going into the
+details of each stage individually, we provide their
+overview here:
+Graph Construction: A graph consisting of ver-
+tices corresponding to targets is constructed us-
+ing a combination of frame similarity (for ob-
+served targets) and distributional similarity as
+edge weights. This stage also determines a
+fixed set of nearest neighbors for each vertex
+in the graph.
+Label Propagation: The observed targets (a small
+subset of the vertices) are initialized with
+empirical frame distributions extracted from
+FrameNet annotations. Label propagation re-
+sults in a distribution of frames for each vertex
+in the graph.
+Supervised Learning: Frame identification and ar-
+gument identification models are trained fol-
+lowing Das et al. (2010a). The graph is used
+to define the set of candidate frames for unseen
+targets.
+Parsing: The frame identification model of
+Das et al. disambiguated among only those
+frames associated with a seen target in the
+annotated data. For an unseen target, all frames
+in the FrameNet lexicon were considered (a
+large number). The current work replaces that
+strategy, considering only the top M frames in
+the distribution produced by label propagation.
+This strategy results in large improvements
+in frame identification for the unseen targets
+and makes inference much faster. Argument
+identification is done exactly like Das et al.
+(2010a).
+</bodyText>
+<sectionHeader confidence="0.991014" genericHeader="method">
+4 Semi-Supervised Learning
+</sectionHeader>
+<bodyText confidence="0.99998975">
+We perform semi-supervised learning by construct-
+ing a graph of vertices representing a large number
+of targets, and learn frame distributions for those
+which were not observed in FrameNet annotations.
+</bodyText>
+<subsectionHeader confidence="0.994239">
+4.1 Graph Construction
+</subsectionHeader>
+<bodyText confidence="0.9996866875">
+We construct a graph with targets as vertices. For
+us, each target corresponds to a lemmatized word
+or phrase appended with a coarse POS tag, and it
+resembles the lexical units in the FrameNet lexicon.
+For example, two targets corresponding to the same
+lemma would look like boast.N and boast.V. Here,
+the first target is a noun, while the second is a verb.
+An example multiword target is chemical weapon.N.
+We use two resources for graph construction.
+First, we take all the words and phrases present in
+the dependency-based thesaurus constructed using
+syntactic cooccurrence statistics (Lin, 1998).3 To
+construct this resource, a corpus containing 64 mil-
+lion words was parsed with a fast dependency parser
+(Lin, 1993; Lin, 1994), and syntactic contexts were
+used to find similar lexical items for a given word
+</bodyText>
+<figure confidence="0.98674715625">
+3This resource is available at http://webdocs.cs.
+ualberta.ca/˜lindek/Downloads/sim.tgz
+1437
+powerlessness.N
+POVERTY POVERTY
+rich.A
+SIMILARITY
+variant.N
+SIMILARITY
+similarity.N
+wealthy.A
+SIMILARITY
+resemblance.N
+difference.N
+SIMILARITY
+divergence.N
+deprivation.N
+destitution.N
+unemployment
+rate.N
+joblessness.N
+unemployment.N employment.N
+UNEMPLOYMENT_RATE UNEMPLOYMENT_RATE
+poverty.N
+homelessness.N
+UNEMPLOYMENT_RATE
+POVERTY
+inequality.N
+discrepancy.N
+disparity.N
+resemble.V
+SIMILARITY
+</figure>
+<figureCaption confidence="0.996788">
+Figure 2: Excerpt from a graph
+</figureCaption>
+<bodyText confidence="0.982744761904762">
+over targets. Green targets are
+observed in the FrameNet data.
+Above/below them are shown the
+most frequently observed frame
+that these targets evoke. The black
+targets are unobserved and label
+propagation produces a distribution
+over most likely frames that they
+could evoke.
+or phrase. Lin separately treated nouns, verbs and
+adjectives/adverbs and the thesaurus contains three
+parts for each of these categories. For each item in
+the thesaurus, 200 nearest neighbors are listed with a
+symmetric similarity score between 0 and 1. We pro-
+cessed this thesaurus in two ways: first, we lower-
+cased and lemmatized each word/phrase and merged
+entries which shared the same lemma; second, we
+separated the adjectives and adverbs into two lists
+from Lin’s original list by scanning a POS-tagged
+version of the Gigaword corpus (Graff, 2003) and
+categorizing each item into an adjective or an ad-
+verb depending on which category the item associ-
+ated with more often in the data. The second step
+was necessary because FrameNet treats adjectives
+and adverbs separately. At the end of this processing
+step, we were left with 61,702 units—approximately
+six times more than the targets found in FrameNet
+annotations—each labeled with one of 4 coarse tags.
+We considered only the top 20 most similar targets
+for each target, and noted Lin’s similarity between
+two targets t and u, which we call simDL(t, u).
+The second component of graph construction
+comes from FrameNet itself. We scanned the exem-
+plar sentences in FrameNet 1.54 and the training sec-
+tion of the full-text annotations that we use to train
+the probabilistic frame parser (see §6.1), and gath-
+ered a distribution over frames for each target. For
+a pair of targets t and u, we measured the Euclidean
+distance5 between their frame distributions. This
+distance was next converted to a similarity score,
+namely, simFN(t, u) between 0 and 1 by subtract-
+ing each one from the maximum distance found in
+</bodyText>
+<footnote confidence="0.435669">
+4http://framenet.icsi.berkeley.edu
+5This could have been replaced by an entropic distance metric
+</footnote>
+<bodyText confidence="0.969132739130435">
+like KL- or JS-divergence, but we leave that exploration to fu-
+ture work.
+the whole data, followed by normalization. Like
+simDL(t, u), this score is symmetric. This resulted
+in 9,263 targets, and again for each, we considered
+the 20 most similar targets. Finally, the overall sim-
+ilarity between two given targets t and u was com-
+puted as:
+sim(t, u) = α · simFN(t, u) + (1 − α) · simDL(t, u)
+Note that this score is symmetric because its two
+components are symmetric. The intuition behind
+taking a linear combination of the two types of sim-
+ilarity functions is as follows. We hope that distri-
+butionally similar targets would have the same se-
+mantic frames because ideally, lexical units evoking
+the same set of frames appear in similar syntactic
+contexts. We would also like to involve the anno-
+tated data in graph construction so that it can elim-
+inate some noise in the automatically constructed
+thesaurus.6 Let 1C(t) denote the K most similar tar-
+gets to target t, under the score sim. We link vertices
+t and u in the graph with edge weight wtu, defined
+as:
+</bodyText>
+<equation confidence="0.96464575">
+�
+sim(t, u) if t E 1C(u) or u E 1C(t)
+wtu = 1
+0 otherwise ( )
+</equation>
+<bodyText confidence="0.998778">
+The hyperparameters α and K are tuned by cross-
+validation (§6.3).
+</bodyText>
+<subsectionHeader confidence="0.977614">
+4.2 Label Propagation
+</subsectionHeader>
+<bodyText confidence="0.945284366666667">
+First, we softly label those vertices of the con-
+structed graph for which frame distributions are
+available from the FrameNet data (the same distri-
+butions that are used to compute simFN). Thus, ini-
+tially, a small fraction of the vertices in the graph
+6In future work, one might consider learning a similarity metric
+from the annotated data, so as to exactly suit the frame identi-
+fication task.
+1438
+have soft frame labels on them. Figure 2 shows an
+excerpt from a constructed graph. For simplicity,
+only the most probable frames under the empirical
+distribution for the observed targets are shown; we
+actually label each vertex with the full empirical dis-
+tribution over frames for the corresponding observed
+target in the data. The dotted lines demarcate parts
+of the graph that associate with different frames. La-
+bel propagation helps propagate the initial soft labels
+throughout the graph. To this end, we use a vari-
+ant of the quadratic cost criterion of Bengio et al.
+(2006), also used by Subramanya et al. (2010) and
+Das and Petrov (2011).7
+Let V denote the set of all vertices in the graph,
+Vl ⊂ V be the set of known targets and F denote the
+set of all frames. Let N(t) denote the set of neigh-
+bors of vertex t ∈ V . Let q = {q1, q2, ... , q|V |}
+be the set of frame distributions, one per vertex. For
+each known target t ∈ Vl, we have an initial frame
+distribution rt. For every edge in the graph, weights
+are defined as in Eq. 1. We find q by solving:
+</bodyText>
+<equation confidence="0.795683666666667">
+arg minq &amp;∈ v `I rt − qt k2
++ µ &amp;EV,u∈N(t) wtu k qt − qu k2
++ ν &amp;∈V kqt − 1
+|F|k2
+s.t. ∀t ∈ V, P f∈F qt(f) = 1
+∀t ∈ V,f ∈ F, qt(f) ≥ 0
+</equation>
+<bodyText confidence="0.995509583333333">
+(2)
+We use a squared loss to penalize various pairs of
+distributions over frames: ka−bk2 = Pf∈F(a(f)−
+b(f))2. The first term in Eq. 2 requires that, for
+known targets, we stay close to the initial frame dis-
+tributions. The second term is the graph smooth-
+ness regularizer, which encourages the distributions
+of similar nodes (large wtu) to be similar. The fi-
+nal term is a regularizer encouraging all distributions
+to be uniform to the extent allowed by the first two
+terms. (If an unlabeled vertex does not have a path
+to any labeled vertex, this term ensures that its con-
+verged marginal will be uniform over all frames.) µ
+and ν are hyperparameters whose choice we discuss
+in §6.3.
+Note that Eq. 2 is convex in q. While it is possible
+to derive a closed form solution for this objective
+7Instead of a quadratic cost, an entropic distance measure could
+have been used, e.g., KL-divergence, considered by Subra-
+manya and Bilmes (2009). We do not explore that direction
+in the current paper.
+function, it would require the inversion of a |V |×|V |
+matrix. Hence, like Subramanya et al. (2010), we
+employ an iterative method with updates defined as:
+</bodyText>
+<equation confidence="0.9987306">
+γt(f) ← rt(f)1{t ∈ Vl} (3)
++ µ
+u∈N(t)
+X wtuq(m−1)
+u (f) + ν
+|F|
+κt ← 1{t ∈ Vl} + ν + µ X wtu (4)
+u∈N(t)
+qt (f) ← γt(f)/κt
+(m) (5)
+</equation>
+<bodyText confidence="0.991716666666667">
+Here, 1{·} is an indicator function. The iterative
+procedure starts with a uniform distribution for each
+qt . For all our experiments, we run 10 iterations
+</bodyText>
+<equation confidence="0.733368">
+(0)
+</equation>
+<bodyText confidence="0.986038">
+of the updates. The final distribution of frames for a
+target t is denoted by q∗t.
+</bodyText>
+<sectionHeader confidence="0.620318" genericHeader="method">
+5 Learning and Inference for
+Frame-Semantic Parsing
+</sectionHeader>
+<bodyText confidence="0.999990444444445">
+In this section, we briefly review learning and infer-
+ence techniques used in the frame-semantic parser,
+which are largely similar to Das et al. (2010a), ex-
+cept the handling of unknown targets. Note that in
+all our experiments, we assume that the targets are
+marked in a given sentence of which we want to ex-
+tract a frame-semantic analysis. Therefore, unlike
+the systems presented in SemEval’07, we do not de-
+fine a target identification module.
+</bodyText>
+<subsectionHeader confidence="0.983667">
+5.1 Frame Identification
+</subsectionHeader>
+<bodyText confidence="0.999952538461538">
+For a given sentence x with frame-evoking targets
+t, let ti denote the ith target (a word sequence). We
+seek a list f = hf1, ... , fmi of frames, one per tar-
+get. Let L be the set of targets found in the FrameNet
+annotations. Let Lf ⊆ L be the subset of these tar-
+gets annotated as evoking a particular frame f.
+The set of candidate frames Fi for ti is defined to
+include every frame f such that ti ∈ Lf. If ti ∈6 L
+(in other words, ti is unseen), then Das et al. (2010a)
+considered all frames F in FrameNet as candidates.
+Instead, in our work, we check whether ti ∈ V ,
+where V are the vertices of the constructed graph,
+and set:
+</bodyText>
+<equation confidence="0.763321">
+Fi = {f : f ∈ M-best frames under q∗tz} (6)
+</equation>
+<bodyText confidence="0.7205945">
+The integer M is set using cross-validation (§6.3).
+If ti ∈6 V , then all frames F are considered as Fi.
+</bodyText>
+<page confidence="0.494732">
+1439
+</page>
+<bodyText confidence="0.9996655">
+The frame prediction rule uses a probabilistic model
+over frames for a target:
+</bodyText>
+<equation confidence="0.989042">
+E
+fi � arg maxf∈Fi `∈Lf p(f, `  |ti, x) (7)
+</equation>
+<bodyText confidence="0.997766333333333">
+Note that a latent variable ` E Lf is used, which
+is marginalized out. Broadly, lexical semantic re-
+lationships between the “prototype” variable ` (be-
+longing to the set of seen targets for a frame f) and
+the target ti are used as features for frame identifi-
+cation, but since ` is unobserved, it is summed out
+both during inference and training. A conditional
+log-linear model is used to model this probability:
+for f E Fi and ` E Lf, pθ(f, `  |ti, x) =
+</bodyText>
+<equation confidence="0.7699605">
+exp θ&gt;g(f,`, ti, x) (8)
+Ef&apos;∈Fi E`&apos;∈Lf&apos; exp θ&gt;g(f0, `0, ti, x)
+</equation>
+<bodyText confidence="0.992995794117647">
+where θ are the model weights, and g is a vector-
+valued feature function. This discriminative formu-
+lation is very flexible, allowing for a variety of (pos-
+sibly overlapping) features; e.g., a feature might re-
+late a frame f to a prototype `, represent a lexical-
+semantic relationship between ` and ti, or encode
+part of the syntax of the sentence (Das et al., 2010b).
+Given some training data, which is of the form
+((x(j), t(j), f(j), A(j)))N(where N is the number
+of sentences in the data 1 and A is the set of argu-
+ment in a sentence), we discriminatively train the
+frame identification model by maximizing the fol-
+lowing log-likelihood:8
+f = (f1, ... , fm) corresponding to each target, ar-
+gument identification or SRL is the task of choos-
+ing which of each fi’s roles are filled, and by which
+parts of x. We directly adopt the model of Das et
+al. (2010a) for the argument identification stage and
+briefly describe it here.
+Let Rfi = {r1, ... , r|Rfi|} denote frame fi’s
+roles observed in FrameNet annotations. A set S of
+spans that are candidates for filling any role r E Rfi
+are identified in the sentence. In principle, S could
+contain any subsequence of x, but we consider only
+the set of contiguous spans that (a) contain a sin-
+gle word or (b) comprise a valid subtree of a word
+and all its descendants in a dependency parse. The
+empty span is also included in S, since some roles
+are not explicitly filled. During training, if an argu-
+ment is not a valid subtree of the dependency parse
+(this happens due to parse errors), we add its span
+to S. Let Ai denote the mapping of roles in Rfi to
+spans in S. The model makes a prediction for each
+Ai(rk) (for all roles rk E Rfi):
+</bodyText>
+<equation confidence="0.927275">
+Ai(rk) +— arg maxs∈S p(s  |rk, fi, ti, x) (10)
+</equation>
+<bodyText confidence="0.9982205">
+A conditional log-linear model over spans for each
+role of each evoked frame is defined as:
+</bodyText>
+<equation confidence="0.998221375">
+pψ(Ai(rk) = s  |fi, ti, x) = (11)
+exp ψ&gt;h(s, rk, fi, ti, x)
+Es&apos;∈S exp ψ&gt;h(s0, rk, fi, ti, x)
+This model is trained by optimizing:
+max �N �mj � pθ(f(j) i, `  |t(j) max N �mj |R |fu) log pψ(A(j)
+θ j=1 i=1 log i , x(j)) (9) ψ j=1 i=1 � i i (rk)  |f(j)
+`∈Lf�j) k=1 i ,t(j)
+i i , x(j))
+</equation>
+<bodyText confidence="0.998343333333333">
+This non-convex objective function is locally op-
+timized using a distributed implementation of L-
+BFGS (Liu and Nocedal, 1989).9
+</bodyText>
+<subsectionHeader confidence="0.998273">
+5.2 Argument Identification
+</subsectionHeader>
+<bodyText confidence="0.961169157894737">
+Given a sentence x = (x1,... , xn), the set of tar-
+gets t = (t1, ... , tm), and a list of evoked frames
+8We found no benefit from using an L2 regularizer.
+9While training, in the partition function of the log-linear
+model, all frames F in FrameNet are summed up for a target ti
+instead of only Fi (as in Eq. 8), to learn interactions between
+the latent variables and different sentential contexts.
+This objective function is convex, and we globally
+optimize it using the distributed implementation of
+L-BFGS. We regularize by including −110Iψ�22 in
+the objective (the strength is not tuned). Naive pre-
+diction of roles using Equation 10 may result in
+overlap among arguments filling different roles of a
+frame, since the argument identification model fills
+each role independently of the others. We want
+to enforce the constraint that two roles of a sin-
+gle frame cannot be filled by overlapping spans.
+Hence, illegal overlap is disallowed using a 10,000-
+hypothesis beam search.
+</bodyText>
+<table confidence="0.920363">
+1440
+UNKNOWN TARGETS ALL TARGETS
+Model Exact Partial Exact Partial
+Match Match Match Match
+SEMAFOR 23.08 46.62 82.97 90.51
+Self-training 18.88 42.67 82.45 90.19
+LinGraph 36.36 59.47 83.40 90.93
+FullGraph 39.86 62.35* 83.51 91.02*
+</table>
+<tableCaption confidence="0.968699">
+Table 1: Frame identification results in percentage accu-
+racy on 4,458 test targets. Bold scores indicate significant
+improvements relative to SEMAFOR and (*) denotes sig-
+nificant improvements over LinGraph (p &lt; 0.05).
+</tableCaption>
+<sectionHeader confidence="0.97128" genericHeader="evaluation">
+6 Experiments and Results
+</sectionHeader>
+<bodyText confidence="0.999987333333333">
+Before presenting our experiments and results, we
+will describe the datasets used in our experiments,
+and the various baseline models considered.
+</bodyText>
+<subsectionHeader confidence="0.994744">
+6.1 Data
+</subsectionHeader>
+<bodyText confidence="0.990550148148148">
+We make use of the FrameNet 1.5 lexicon released
+in 2010. This lexicon is a superset of previous ver-
+sions of FrameNet. It contains 154,607 exemplar
+sentences with one marked target and frame-role an-
+notations. 78 documents with full-text annotations
+with multiple frames per sentence were also released
+(a superset of the SemEval’07 dataset). We ran-
+domly selected 55 of these documents for training
+and treated the 23 remaining ones as our test set.
+After scanning the exemplar sentences and the train-
+ing data, we arrived at a set of 877 frames, 1,068
+roles,10 and 9,263 targets. Our training split of
+the full-text annotations contained 3,256 sentences
+with 19,582 frame annotatations with correspond-
+ing roles, while the test set contained 2,420 sen-
+tences with 4,458 annotations (the test set contained
+fewer annotated targets per sentence). We also di-
+vide the 55 training documents into 5 parts for cross-
+validation (see §6.3). The raw sentences in all the
+training and test documents were preprocessed us-
+ing MXPOST (Ratnaparkhi, 1996) and the MST de-
+pendency parser (McDonald et al., 2005) following
+Das et al. (2010a). In this work we assume the
+frame-evoking targets have been correctly identified
+in training and test data.
+10Note that the number of listed roles in the lexicon is nearly
+9,000, but their number in actual annotations is a lot fewer.
+</bodyText>
+<subsectionHeader confidence="0.99973">
+6.2 Baselines
+</subsectionHeader>
+<bodyText confidence="0.999970028571428">
+We compare our model with three baselines. The
+first baseline is the purely supervised model of Das
+et al. (2010a) trained on the training split of 55
+documents. Note that this is the strongest baseline
+available for this task;11 we refer to this model as
+“SEMAFOR.”
+The second baseline is a semi-supervised self-
+trained system, where we used SEMAFOR to label
+70,000 sentences from the Gigaword corpus with
+frame-semantic parses. For finding targets in a raw
+sentence, we used a relaxed target identification
+scheme, where we marked every target seen in the
+lexicon and all other words which were not prepo-
+sitions, particles, proper nouns, foreign words and
+Wh-words as potential frame evoking units. This
+was done so as to find unseen targets and get frame
+annotations with SEMAFOR on them. We appended
+these automatic annotations to the training data, re-
+sulting in 711,401 frame annotations, more than 36
+times the supervised data. These data were next used
+to train a frame identification model (§5.1).12 This
+setup is very similar to Bejan (2009) who used self-
+training to improve frame identification. We refer to
+this model as “Self-training.”
+The third baseline uses a graph constructed only
+with Lin’s thesaurus, without using supervised data.
+In other words, we followed the same scheme as in
+§4.1 but with the hyperparameter α = 0. Next, la-
+bel propagation was run on this graph (and hyper-
+parameters tuned using cross validation). The poste-
+rior distribution of frames over targets was next used
+for frame identification (Eq. 6-7), with SEMAFOR
+as the trained model. This model, which is very sim-
+ilar to our full model, is referred to as “LinGraph.”
+“FullGraph” refers to our full system.
+</bodyText>
+<subsectionHeader confidence="0.998931">
+6.3 Experimental Setup
+</subsectionHeader>
+<bodyText confidence="0.988844727272727">
+We used five-fold cross-validation to tune the hy-
+perparameters α, K, p, and M in our model. The
+11We do not compare our model with other systems, e.g. the
+ones submitted to SemEval’07 shared task, because SE-
+MAFOR outperforms them significantly (Das et al., 2010a)
+on the previous version of the data. Moreover, we trained our
+models on the new FrameNet 1.5 data, and training code for
+the SemEval’07 systems was not readily available.
+12Note that we only self-train the frame identification model and
+not the argument identification model, which is fixed through-
+out.
+</bodyText>
+<table confidence="0.9392915">
+1441
+UNKNOWN TARGETS ALL TARGETS
+Model Exact Match Partial Match Exact Match Partial Match
+P R Fl P R Fl P R Fl P R Fl
+SEMAFOR 19.59 16.48 17.90 33.03 27.80 30.19 66.15 61.64 63.82 70.68 65.86 68.18
+Self-training 15.44 13.00 14.11 29.08 24.47 26.58 65.78 61.30 63.46 70.39 65.59 67.90
+LinGraph 29.74 24.88 27.09 44.08 36.88 40.16 66.43 61.89 64.08 70.97 66.13 68.46
+FullGraph 35.27* 28.84* 31.74* 48.81* 39.91* 43.92* 66.59* 62.01* 64.22* 71.11* 66.22* 68.58*
+</table>
+<tableCaption confidence="0.9849105">
+Table 2: Full frame-semantic parsing precision, recall and Fl score on 2,420 test sentences. Bold scores indicate
+significant improvements relative to SEMAFOR and (*) denotes significant improvements over LinGraph (p &lt; 0.05).
+</tableCaption>
+<bodyText confidence="0.999634642857143">
+uniform regularization hyperparameter v for graph
+construction was set to 10−6 and not tuned. For
+each cross-validation split, four folds were used to
+train a frame identification model, construct a graph,
+run label propagation and then the model was tested
+on the fifth fold. This was done for all hyperpa-
+rameter settings, which were α E 10.2, 0.5, 0.8},
+K E 15,10,15, 20}, p E 10.01, 0.1, 0.3, 0.5, 1.0}
+and M E 12, 3, 5,10}. The joint setting which per-
+formed the best across five-folds was α = 0.2, K =
+10, p = 1.0, M = 2. Similar tuning was also done
+for the baseline LinGraph, where α was set to 0,
+and rest of the hyperparameters were tuned (the se-
+lected hyperparameters were K = 10, p = 0.1 and
+M = 2). With the chosen set of hyperparameters,
+the test set was used to measure final performance.
+The standard evaluation script from the Se-
+mEval’07 task calculates precision, recall, and F1-
+score for frames and arguments; it also provides a
+score that gives partial credit for hypothesizing a
+frame related to the correct one in the FrameNet lex-
+icon. We present precision, recall, and F1-measure
+microaveraged across the test documents, report
+labels-only matching scores (spans must match ex-
+actly), and do not use named entity labels. This eval-
+uation scheme follows Das et al. (2010a). Statistical
+significance is measured using a reimplementation
+of Dan Bikel’s parsing evaluation comparator.13
+</bodyText>
+<subsectionHeader confidence="0.759131">
+6.4 Results
+</subsectionHeader>
+<bodyText confidence="0.995848760869565">
+Tables 1 and 2 present results for frame identifica-
+tion and full frame-semantic parsing respectively.
+They also separately tabulate the results achieved
+for unknown targets. Our full model, denoted by
+“FullGraph,” outperforms all the baselines for both
+tasks. Note that the Self-training model even falls
+13http://www.cis.upenn.edu/˜dbikel/
+software.html#comparator
+short of the supervised baseline SEMAFOR, unlike
+what was observed by Bejan (2009) for the frame
+identification task. The model using a graph con-
+structed solely from the thesaurus (LinGraph) out-
+performs both the supervised and the self-training
+baselines for all tasks, but falls short of the graph
+constructed using the similarity metric that is a lin-
+ear combination of distributional similarity and su-
+pervised frame similarity. This indicates that a graph
+constructed with some knowledge of the supervised
+data is more powerful.
+For unknown targets, the gains of our approach
+are impressive: 15.7% absolute accuracy improve-
+ment over SEMAFOR for frame identification, and
+13.7% absolute F1 improvement over SEMAFOR
+for full frame-semantic parsing (both significant).
+When all the test targets are considered, the gains
+are still significant, resulting in 5.4% relative error
+reduction over SEMAFOR for frame identification,
+and 1.3% relative error reduction over SEMAFOR
+for full-frame semantic parsing.
+Although these improvements may seem modest,
+this is because only 3.2% of the test set targets are
+unseen in training. We expect that further gains
+would be realized in different text domains, where
+FrameNet coverage is presumably weaker than in
+news data. A semi-supervised strategy like ours is
+attractive in such a setting, and future work might
+explore such an application.
+Our approach also makes decoding much faster.
+For the unknown component of the test set, SE-
+MAFOR takes a total 111 seconds to find the best
+set of frames, while the FullGraph model takes only
+19 seconds to do so, thus bringing disambiguation
+time down by a factor of nearly 6. This is be-
+cause our model now disambiguates between only
+M = 2 frames instead of the full set of 877 frames
+in FrameNet. For the full test set too, the speedup
+</bodyText>
+<equation confidence="0.8467985">
+1442
+t = discrepancy.N t = contribution.N t = print.V t = mislead.V
+</equation>
+<table confidence="0.998439833333333">
+f qt(f) f qt(f) f qt(f) f qt(f)
+*SIMILARITY 0.076 *GIVING 0.167 *TEXT CREATION 0.081 EXPERIENCER OBJ 0.152
+NATURAL FEATURES 0.066 MONEY 0.046 SENDING 0.054 *PREVARICATION 0.130
+PREVARICATION 0.012 COMMITMENT 0.046 DISPERSAL 0.054 MANIPULATE INTO DOING 0.046
+QUARRELING 0.007 ASSISTANCE 0.040 READING 0.042 COMPLIANCE 0.041
+DUPLICATION 0.007 EARNINGS AND LOSSES 0.024 STATEMENT 0.028 EVIDENCE 0.038
+</table>
+<tableCaption confidence="0.8571055">
+Table 3: Top 5 frames according to the graph posterior distribution qt (f) for four targets: discrepancy.N, contri-
+bution.N, print.V and mislead.V. None of these targets were present in the supervised FrameNet data. * marks the
+correct frame, according to the test data. EXPERIENCER OBJ is described in FrameNet as “Some phenomenon (the
+Stimulus) provokes a particular emotion in an Experiencer.”
+</tableCaption>
+<bodyText confidence="0.985824333333333">
+is noticeable, as SEMAFOR takes 131 seconds for
+frame identification, while the FullGraph model only
+takes 39 seconds.
+</bodyText>
+<subsectionHeader confidence="0.857385">
+6.5 Discussion
+</subsectionHeader>
+<bodyText confidence="0.999402">
+The following is an example from our test set show-
+ing SEMAFOR’s output (for one target):
+</bodyText>
+<note confidence="0.378444333333333">
+REASON
+Discrepancies between North Korean de-
+discrepancy.N
+</note>
+<bodyText confidence="0.998873853658537">
+clarations and IAEA inspection findingsAction
+indicate that North Korea might have re-
+processed enough plutonium for one or
+two nuclear weapons.
+Note that the model identifies an incorrect frame
+REASON for the target discrepancy.N, in turn identi-
+fying the wrong semantic role Action for the under-
+lined argument. On the other hand, the FullGraph
+model exactly identifies the right semantic frame,
+SIMILARITY, as well as the correct role, Entities. This
+improvement can be easily explained. The excerpt
+from our constructed graph in Figure 2 shows the
+same target discrepancy.N in black, conveying that
+it did not belong to the supervised data. However,
+it is connected to the target difference.N drawn from
+annotated data, which evokes the frame SIMILARITY.
+Thus, after label propagation, we expect the frame
+SIMILARITY to receive high probability for the target
+discrepancy.N.
+Table 3 shows the top 5 frames that are assigned
+the highest posterior probabilities in the distribu-
+tion qt for four hand-selected test targets absent in
+supervised data, including discrepancy.N. For all
+of them, the FullGraph model identifies the correct
+frames for all four words in the test data by rank-
+ing these frames in the top M = 2. LinGraph
+also gets all four correct, Self-training only gets
+print.V/TEXT CREATION, and SEMAFOR gets none.
+Across unknown targets, on average the M = 2
+most common frames in the posterior distribution
+qt found by FullGraph have q(�) (f) = 7
+877, or
+seven times the average across all frames. This sug-
+gests that the graph propagation method is confi-
+dent only in predicting the top few frames out of
+the whole possible set. Moreover, the automatically
+selected number of frames to extract per unknown
+target, M = 2, suggests that only a few meaningful
+frames were assigned to unknown predicates. This
+matches the nature of FrameNet data, where the av-
+erage frame ambiguity for a target type is 1.20.
+</bodyText>
+<sectionHeader confidence="0.996435" genericHeader="conclusions">
+7 Conclusion
+</sectionHeader>
+<bodyText confidence="0.9999817">
+We have presented a semi-supervised strategy to
+improve the coverage of a frame-semantic pars-
+ing model. We showed that graph-based label
+propagation and resulting smoothed frame distri-
+butions over unseen targets significantly improved
+the coverage of a state-of-the-art semantic frame
+disambiguation model to previously unseen pred-
+icates, also improving the quality of full frame-
+semantic parses. The improved parser is available at
+http://www.ark.cs.cmu.edu/SEMAFOR.
+</bodyText>
+<sectionHeader confidence="0.997137" genericHeader="acknowledgments">
+Acknowledgments
+</sectionHeader>
+<bodyText confidence="0.999338857142857">
+We are grateful to Amarnag Subramanya for helpful dis-
+cussions. We also thank Slav Petrov, Nathan Schneider,
+and the three anonymous reviewers for valuable com-
+ments. This research was supported by NSF grants IIS-
+0844507, IIS-0915187 and TeraGrid resources provided
+by the Pittsburgh Supercomputing Center under NSF
+grant number TG-DBS110003.
+</bodyText>
+<page confidence="0.49033">
+1443
+</page>
+<sectionHeader confidence="0.990999" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.99996302970297">
+C. Baker, M. Ellsworth, and K. Erk. 2007. SemEval-
+2007 Task 19: frame semantic structure extraction. In
+Proc. of SemEval.
+C. A. Bejan. 2009. Learning Event Structures From Text.
+Ph.D. thesis, The University of Texas at Dallas.
+Y. Bengio, O. Delalleau, and N. Le Roux. 2006. La-
+bel propagation and quadratic criterion. In Semi-
+Supervised Learning. MIT Press.
+H. C. Boas. 2002. Bilingual FrameNet dictionaries for
+machine translation. In Proc. of LREC.
+D. Das and S. Petrov. 2011. Unsupervised part-of-
+speech tagging with bilingual graph-based projections.
+In Proc. of ACL-HLT.
+D. Das, N. Schneider, D. Chen, and N. A. Smith. 2010a.
+Probabilistic frame-semantic parsing. In Proc. of
+NAACL-HLT.
+D. Das, N. Schneider, D. Chen, and N. A. Smith.
+2010b. SEMAFOR 1.0: A probabilistic frame-
+semantic parser. Technical Report CMU-LTI-10-001,
+Carnegie Mellon University.
+K. Erk and S. Pad´o. 2006. Shalmaneser - a toolchain for
+shallow semantic parsing. In Proc. of LREC.
+C. Fellbaum, editor. 1998. WordNet: an electronic lexi-
+cal database. MIT Press, Cambridge, MA.
+C. J. Fillmore, C. R. Johnson, and M. R.L. Petruck. 2003.
+Background to FrameNet. International Journal of
+Lexicography, 16(3).
+C. J. Fillmore. 1982. Frame semantics. In Linguistics in
+the Morning Calm, pages 111–137. Hanshin Publish-
+ing Co., Seoul, South Korea.
+M. Fleischman, N. Kwon, and E. Hovy. 2003. Maximum
+entropy models for FrameNet classification. In Proc.
+of EMNLP.
+P. Fung and B. Chen. 2004. BiFrameNet: bilin-
+gual frame semantics resource construction by cross-
+lingual induction. In Proc. of COLING.
+H. F¨urstenau and M. Lapata. 2009. Semi-supervised se-
+mantic role labeling. In Proc. of EACL.
+D. Gildea and D. Jurafsky. 2002. Automatic labeling of
+semantic roles. Computational Linguistics, 28(3).
+A.-M. Giuglea and A. Moschitti. 2006. Shallow se-
+mantic parsing based on FrameNet, VerbNet and Prop-
+Bank. In Proc. of ECAI 2006.
+D. Graff. 2003. English Gigaword. Linguistic Data Con-
+sortium.
+R. Johansson and P. Nugues. 2007. LTH: semantic struc-
+ture extraction using nonprojective dependency trees.
+In Proc. of SemEval.
+D. Lin. 1993. Principle-based parsing without overgen-
+eration. In Proc. of ACL.
+D. Lin. 1994. Principar–an efficient, broadcoverage,
+principle-based parser. In Proc. of COLING.
+D. Lin. 1998. Automatic retrieval and clustering of sim-
+ilar words. In Proc. of COLING-ACL.
+D. C. Liu and J. Nocedal. 1989. On the limited mem-
+ory bfgs method for large scale optimization. Math.
+Programming, 45(3).
+Y. Matsubayashi, N. Okazaki, and J. Tsujii. 2009. A
+comparative study on generalization of semantic roles
+in FrameNet. In Proc. of ACL-IJCNLP.
+R. McDonald, K. Crammer, and F. Pereira. 2005. Online
+large-margin training of dependency parsers. In Proc.
+of ACL.
+Z.-Y. Niu, D.-H. Ji, and C. L. Tan. 2005. Word sense
+disambiguation using label propagation based semi-
+supervised learning. In Proc. of ACL.
+S. Pad´o and M. Lapata. 2005. Cross-linguistic projec-
+tion of role-semantic information. In Proc. of HLT-
+EMNLP.
+M. Pennacchiotti, D. De Cao, R. Basili, D. Croce, and
+M. Roth. 2008. Automatic induction of FrameNet
+lexical units. In Proc. of EMNLP.
+S. P. Ponzetto and M. Strube. 2007. Deriving a large
+scale taxonomy from wikipedia. In Proc. of AAAI.
+A. Ratnaparkhi. 1996. A maximum entropy model for
+part-of-speech tagging. In Proc. of EMNLP.
+L. Shi and R. Mihalcea. 2004. An algorithm for open
+text semantic parsing. In Proc. of Workshop on Robust
+Methods in Analysis of Natural Language Data.
+L. Shi and R. Mihalcea. 2005. Putting pieces together:
+combining FrameNet, VerbNet and WordNet for ro-
+bust semantic parsing. In Computational Linguis-
+tics and Intelligent Text Processing: Proc. of CICLing
+2005. Springer-Verlag.
+R. Snow, D. Jurafsky, and A. Y. Ng. 2006. Semantic
+taxonomy induction from heterogenous evidence. In
+Proc. of COLING-ACL.
+A. Subramanya and J. A. Bilmes. 2009. Entropic graph
+regularization in non-parametric semi-supervised clas-
+sification. In Proc. of NIPS.
+A. Subramanya, S. Petrov, and F. Pereira. 2010. Efficient
+Graph-based Semi-Supervised Learning of Structured
+Tagging Models. In Proc. of EMNLP.
+C. A. Thompson, R. Levy, and C. D. Manning. 2003. A
+generative model for semantic role labeling. In Proc.
+of ECML.
+S. Tonelli and C. Giuliano. 2009. Wikipedia as frame
+information repository. In Proc. of EMNLP.
+X. Zhu, Z. Ghahramani, and J. D. Lafferty. 2003. Semi-
+supervised learning using gaussian fields and har-
+monic functions. In Proc. of ICML.
+</reference>
+<page confidence="0.841933">
+1444
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.550755">
+<title confidence="0.997848">Semi-Supervised Frame-Semantic Parsing for Unknown Predicates</title>
+<author confidence="0.75691">A Das</author>
+<affiliation confidence="0.809853">Language Technologies Carnegie Mellon</affiliation>
+<address confidence="0.99237">Pittsburgh, PA 15213,</address>
+<abstract confidence="0.995234333333333">We describe a new approach to disambiguating semantic frames evoked by lexical predicates previously unseen in a lexicon or annotated data. Our approach makes use of large amounts of unlabeled data in a graph-based semi-supervised learning framework. We construct a large graph where vertices correspond to potential predicates and use label propagation to learn possible semantic frames for new ones. The label-propagated graph is used within a frame-semantic parser and, for unknown predicates, results in over 15% absolute improvement in frame identification accuracy and over 13% absolute improvement full frame-semantic parsing on a blind test set, over a state-of-the-art supervised baseline.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>C Baker</author>
+<author>M Ellsworth</author>
+<author>K Erk</author>
+</authors>
+<title>SemEval2007 Task 19: frame semantic structure extraction.</title>
+<date>2007</date>
+<booktitle>In Proc. of SemEval.</booktitle>
+<contexts>
+<context position="5731" citStr="Baker et al., 2007" startWordPosition="864" endWordPosition="867"> applied to natural language tasks. 2.1 Frame-semantic Parsing Gildea and Jurafsky (2002) pioneered SRL, and since then there has been much applied research on predicate-argument semantics. Early work on frame-semantic role labeling made use of the exemplar sentences in the FrameNet corpus, each of which is annotated for a single frame and its arguments (Thompson et al., 2003; Fleischman et al., 2003; Shi and Mihalcea, 2004; Erk and Pad´o, 2006, inter alia). Most of this work was done on an older, smaller version of FrameNet. Recently, since the release of full-text annotations in SemEval’07 (Baker et al., 2007), there has been work on identifying multiple frames and their corresponding sets of arguments in a sentence. The LTH system of Johansson and Nugues (2007) performed the best in the SemEval’07 shared task on frame-semantic parsing. Our probabilistic frame-semantic parser outperforms LTH on that task and dataset (Das et al., 2010a). The current paper builds on those probabilistic models to improve coverage on unseen predicates.2 Expert resources have limited coverage, and FrameNet is no exception. Automatic induction of semantic resources has been a major effort in recent years (Snow et al., 20</context>
+</contexts>
+<marker>Baker, Ellsworth, Erk, 2007</marker>
+<rawString>C. Baker, M. Ellsworth, and K. Erk. 2007. SemEval2007 Task 19: frame semantic structure extraction. In Proc. of SemEval.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>C A Bejan</author>
+</authors>
+<title>Learning Event Structures From Text.</title>
+<date>2009</date>
+<tech>Ph.D. thesis,</tech>
+<institution>The University of Texas at Dallas.</institution>
+<contexts>
+<context position="7032" citStr="Bejan (2009)" startWordPosition="1074" endWordPosition="1075">rk has sought to extend the coverage of FrameNet by exploiting resources like VerbNet, WordNet, or Wikipedia (Shi and Mihalcea, 2005; Giuglea and Moschitti, 2006; Pennacchiotti et al., 2008; Tonelli and Giuliano, 2009), and projecting entries and annotations within and across languages (Boas, 2002; Fung and Chen, 2004; Pad´o and Lapata, 2005). Although these approaches have increased coverage to various degrees, they rely on other lexicons and resources created by experts. F¨urstenau and Lapata (2009) proposed the use of unlabeled data to improve coverage, but their work was limited to verbs. Bejan (2009) used self-training to improve frame identification and reported improvements, but did not explicitly model unknown targets. In contrast, we use statistics gathered from large volumes of unlabeled data to improve the coverage of a frame-semantic parser on several syntactic categories, in a novel framework that makes use of graph-based semi-supervised learning. 2SEMAFOR, the system presented by Das et al. (2010a) is publicly available at http://www.ark.cs.cmu.edu/ SEMAFOR and has been extended in this work. 1436 2.2 Graph-based Semi-Supervised Learning In graph-based semi-supervised learning, o</context>
+<context position="26671" citStr="Bejan (2009)" startWordPosition="4424" endWordPosition="4425">ing targets in a raw sentence, we used a relaxed target identification scheme, where we marked every target seen in the lexicon and all other words which were not prepositions, particles, proper nouns, foreign words and Wh-words as potential frame evoking units. This was done so as to find unseen targets and get frame annotations with SEMAFOR on them. We appended these automatic annotations to the training data, resulting in 711,401 frame annotations, more than 36 times the supervised data. These data were next used to train a frame identification model (§5.1).12 This setup is very similar to Bejan (2009) who used selftraining to improve frame identification. We refer to this model as “Self-training.” The third baseline uses a graph constructed only with Lin’s thesaurus, without using supervised data. In other words, we followed the same scheme as in §4.1 but with the hyperparameter α = 0. Next, label propagation was run on this graph (and hyperparameters tuned using cross validation). The posterior distribution of frames over targets was next used for frame identification (Eq. 6-7), with SEMAFOR as the trained model. This model, which is very similar to our full model, is referred to as “LinG</context>
+<context position="30456" citStr="Bejan (2009)" startWordPosition="5043" endWordPosition="5044">uation scheme follows Das et al. (2010a). Statistical significance is measured using a reimplementation of Dan Bikel’s parsing evaluation comparator.13 6.4 Results Tables 1 and 2 present results for frame identification and full frame-semantic parsing respectively. They also separately tabulate the results achieved for unknown targets. Our full model, denoted by “FullGraph,” outperforms all the baselines for both tasks. Note that the Self-training model even falls 13http://www.cis.upenn.edu/˜dbikel/ software.html#comparator short of the supervised baseline SEMAFOR, unlike what was observed by Bejan (2009) for the frame identification task. The model using a graph constructed solely from the thesaurus (LinGraph) outperforms both the supervised and the self-training baselines for all tasks, but falls short of the graph constructed using the similarity metric that is a linear combination of distributional similarity and supervised frame similarity. This indicates that a graph constructed with some knowledge of the supervised data is more powerful. For unknown targets, the gains of our approach are impressive: 15.7% absolute accuracy improvement over SEMAFOR for frame identification, and 13.7% abs</context>
+</contexts>
+<marker>Bejan, 2009</marker>
+<rawString>C. A. Bejan. 2009. Learning Event Structures From Text. Ph.D. thesis, The University of Texas at Dallas.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Y Bengio</author>
+<author>O Delalleau</author>
+<author>N Le Roux</author>
+</authors>
+<title>Label propagation and quadratic criterion. In SemiSupervised Learning.</title>
+<date>2006</date>
+<publisher>MIT Press.</publisher>
+<marker>Bengio, Delalleau, Le Roux, 2006</marker>
+<rawString>Y. Bengio, O. Delalleau, and N. Le Roux. 2006. Label propagation and quadratic criterion. In SemiSupervised Learning. MIT Press.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>H C Boas</author>
+</authors>
+<title>Bilingual FrameNet dictionaries for machine translation.</title>
+<date>2002</date>
+<booktitle>In Proc. of LREC.</booktitle>
+<contexts>
+<context position="6718" citStr="Boas, 2002" startWordPosition="1022" endWordPosition="1023">stic models to improve coverage on unseen predicates.2 Expert resources have limited coverage, and FrameNet is no exception. Automatic induction of semantic resources has been a major effort in recent years (Snow et al., 2006; Ponzetto and Strube, 2007, inter alia). In the domain of frame semantics, previous work has sought to extend the coverage of FrameNet by exploiting resources like VerbNet, WordNet, or Wikipedia (Shi and Mihalcea, 2005; Giuglea and Moschitti, 2006; Pennacchiotti et al., 2008; Tonelli and Giuliano, 2009), and projecting entries and annotations within and across languages (Boas, 2002; Fung and Chen, 2004; Pad´o and Lapata, 2005). Although these approaches have increased coverage to various degrees, they rely on other lexicons and resources created by experts. F¨urstenau and Lapata (2009) proposed the use of unlabeled data to improve coverage, but their work was limited to verbs. Bejan (2009) used self-training to improve frame identification and reported improvements, but did not explicitly model unknown targets. In contrast, we use statistics gathered from large volumes of unlabeled data to improve the coverage of a frame-semantic parser on several syntactic categories, </context>
+</contexts>
+<marker>Boas, 2002</marker>
+<rawString>H. C. Boas. 2002. Bilingual FrameNet dictionaries for machine translation. In Proc. of LREC.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D Das</author>
+<author>S Petrov</author>
+</authors>
+<title>Unsupervised part-ofspeech tagging with bilingual graph-based projections.</title>
+<date>2011</date>
+<booktitle>In Proc. of ACL-HLT.</booktitle>
+<contexts>
+<context position="8698" citStr="Das and Petrov (2011)" startWordPosition="1335" endWordPosition="1338">k an approach to word-sense disambiguation due to Niu et al. (2005). Their formulation was transductive, so that the test data was part of the constructed graph, and they did not consider predicate-argument analysis. In contrast, we make use of the smoothed graph during inference in a probabilistic setting, in turn using it for the full frame-semantic parsing task. Recently, Subramanya et al. (2010) proposed the use of a graph over substructures of an underlying sequence model, and used a smoothed graph for domain adaptation of part-of-speech taggers. Subramanya et al.’s model was extended by Das and Petrov (2011) to induce part-of-speech dictionaries for unsupervised learning of taggers. Our semi-supervised learning setting is similar to these two lines of work and, like them, we use the graph to arrive at better final structures, in an inductive setting (i.e., where a parametric model is learned and then separately applied to test data, following most NLP research). 3 Approach Overview Our overall approach to handling unobserved targets consists of four distinct stages. Before going into the details of each stage individually, we provide their overview here: Graph Construction: A graph consisting of </context>
+<context position="16400" citStr="Das and Petrov (2011)" startWordPosition="2559" endWordPosition="2562"> on them. Figure 2 shows an excerpt from a constructed graph. For simplicity, only the most probable frames under the empirical distribution for the observed targets are shown; we actually label each vertex with the full empirical distribution over frames for the corresponding observed target in the data. The dotted lines demarcate parts of the graph that associate with different frames. Label propagation helps propagate the initial soft labels throughout the graph. To this end, we use a variant of the quadratic cost criterion of Bengio et al. (2006), also used by Subramanya et al. (2010) and Das and Petrov (2011).7 Let V denote the set of all vertices in the graph, Vl ⊂ V be the set of known targets and F denote the set of all frames. Let N(t) denote the set of neighbors of vertex t ∈ V . Let q = {q1, q2, ... , q|V |} be the set of frame distributions, one per vertex. For each known target t ∈ Vl, we have an initial frame distribution rt. For every edge in the graph, weights are defined as in Eq. 1. We find q by solving: arg minq &amp;∈ v `I rt − qt k2 + µ &amp;EV,u∈N(t) wtu k qt − qu k2 + ν &amp;∈V kqt − 1 |F|k2 s.t. ∀t ∈ V, P f∈F qt(f) = 1 ∀t ∈ V,f ∈ F, qt(f) ≥ 0 (2) We use a squared loss to penalize various pa</context>
+</contexts>
+<marker>Das, Petrov, 2011</marker>
+<rawString>D. Das and S. Petrov. 2011. Unsupervised part-ofspeech tagging with bilingual graph-based projections. In Proc. of ACL-HLT.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D Das</author>
+<author>N Schneider</author>
+<author>D Chen</author>
+<author>N A Smith</author>
+</authors>
+<title>Probabilistic frame-semantic parsing.</title>
+<date>2010</date>
+<booktitle>In Proc. of NAACL-HLT.</booktitle>
+<contexts>
+<context position="2304" citStr="Das et al., 2010" startWordPosition="340" endWordPosition="343">taining instantiations of semantic frames, and full-text annotations provide supervision for learning frame-semantic parsers. Yet these annotations lack coverage, including only 9,300 annotated target types. Recent papers have tried to address the coverage problem. Johansson and Nugues (2007) used WordNet (Fellbaum, 1998) to expand the list of targets that can evoke frames and trained classifiers to identify the best-suited frame for the newly created targets. In past work, we described an approach where latent variables were used in a probabilistic model to predict frames for unseen targets (Das et al., 2010a).1 Relatedly, for the argument identification subtask, Matsubayashi et al. (2009) proposed a technique for generalization of semantic roles to overcome data sparseness. Unseen targets continue to present a major obstacle to domain-general semantic analysis. In this paper, we address the problem of idenfifying the semantic frames for targets unseen either in FrameNet (including the exemplar sentences) or the collection of full-text annotations released along with the lexicon. Using a standard model for the argument identification stage (Das et al., 2010a), our proposed method improves overall</context>
+<context position="6061" citStr="Das et al., 2010" startWordPosition="919" endWordPosition="922">rame and its arguments (Thompson et al., 2003; Fleischman et al., 2003; Shi and Mihalcea, 2004; Erk and Pad´o, 2006, inter alia). Most of this work was done on an older, smaller version of FrameNet. Recently, since the release of full-text annotations in SemEval’07 (Baker et al., 2007), there has been work on identifying multiple frames and their corresponding sets of arguments in a sentence. The LTH system of Johansson and Nugues (2007) performed the best in the SemEval’07 shared task on frame-semantic parsing. Our probabilistic frame-semantic parser outperforms LTH on that task and dataset (Das et al., 2010a). The current paper builds on those probabilistic models to improve coverage on unseen predicates.2 Expert resources have limited coverage, and FrameNet is no exception. Automatic induction of semantic resources has been a major effort in recent years (Snow et al., 2006; Ponzetto and Strube, 2007, inter alia). In the domain of frame semantics, previous work has sought to extend the coverage of FrameNet by exploiting resources like VerbNet, WordNet, or Wikipedia (Shi and Mihalcea, 2005; Giuglea and Moschitti, 2006; Pennacchiotti et al., 2008; Tonelli and Giuliano, 2009), and projecting entrie</context>
+<context position="7445" citStr="Das et al. (2010" startWordPosition="1135" endWordPosition="1138">grees, they rely on other lexicons and resources created by experts. F¨urstenau and Lapata (2009) proposed the use of unlabeled data to improve coverage, but their work was limited to verbs. Bejan (2009) used self-training to improve frame identification and reported improvements, but did not explicitly model unknown targets. In contrast, we use statistics gathered from large volumes of unlabeled data to improve the coverage of a frame-semantic parser on several syntactic categories, in a novel framework that makes use of graph-based semi-supervised learning. 2SEMAFOR, the system presented by Das et al. (2010a) is publicly available at http://www.ark.cs.cmu.edu/ SEMAFOR and has been extended in this work. 1436 2.2 Graph-based Semi-Supervised Learning In graph-based semi-supervised learning, one constructs a graph whose vertices are labeled and unlabeled examples. Weighted edges in the graph, connecting pairs of examples/vertices, encode the degree to which they are expected to have the same label (Zhu et al., 2003). Variants of label propagation are used to transfer labels from the labeled to the unlabeled examples. There are several instances of the use of graph-based methods for natural language</context>
+<context position="9907" citStr="Das et al. (2010" startWordPosition="1520" endWordPosition="1523">ing of vertices corresponding to targets is constructed using a combination of frame similarity (for observed targets) and distributional similarity as edge weights. This stage also determines a fixed set of nearest neighbors for each vertex in the graph. Label Propagation: The observed targets (a small subset of the vertices) are initialized with empirical frame distributions extracted from FrameNet annotations. Label propagation results in a distribution of frames for each vertex in the graph. Supervised Learning: Frame identification and argument identification models are trained following Das et al. (2010a). The graph is used to define the set of candidate frames for unseen targets. Parsing: The frame identification model of Das et al. disambiguated among only those frames associated with a seen target in the annotated data. For an unseen target, all frames in the FrameNet lexicon were considered (a large number). The current work replaces that strategy, considering only the top M frames in the distribution produced by label propagation. This strategy results in large improvements in frame identification for the unseen targets and makes inference much faster. Argument identification is done ex</context>
+<context position="18670" citStr="Das et al. (2010" startWordPosition="3002" endWordPosition="3005">iterative method with updates defined as: γt(f) ← rt(f)1{t ∈ Vl} (3) + µ u∈N(t) X wtuq(m−1) u (f) + ν |F| κt ← 1{t ∈ Vl} + ν + µ X wtu (4) u∈N(t) qt (f) ← γt(f)/κt (m) (5) Here, 1{·} is an indicator function. The iterative procedure starts with a uniform distribution for each qt . For all our experiments, we run 10 iterations (0) of the updates. The final distribution of frames for a target t is denoted by q∗t. 5 Learning and Inference for Frame-Semantic Parsing In this section, we briefly review learning and inference techniques used in the frame-semantic parser, which are largely similar to Das et al. (2010a), except the handling of unknown targets. Note that in all our experiments, we assume that the targets are marked in a given sentence of which we want to extract a frame-semantic analysis. Therefore, unlike the systems presented in SemEval’07, we do not define a target identification module. 5.1 Frame Identification For a given sentence x with frame-evoking targets t, let ti denote the ith target (a word sequence). We seek a list f = hf1, ... , fmi of frames, one per target. Let L be the set of targets found in the FrameNet annotations. Let Lf ⊆ L be the subset of these targets annotated as </context>
+<context position="20768" citStr="Das et al., 2010" startWordPosition="3403" endWordPosition="3406">ation, but since ` is unobserved, it is summed out both during inference and training. A conditional log-linear model is used to model this probability: for f E Fi and ` E Lf, pθ(f, ` |ti, x) = exp θ&gt;g(f,`, ti, x) (8) Ef&apos;∈Fi E`&apos;∈Lf&apos; exp θ&gt;g(f0, `0, ti, x) where θ are the model weights, and g is a vectorvalued feature function. This discriminative formulation is very flexible, allowing for a variety of (possibly overlapping) features; e.g., a feature might relate a frame f to a prototype `, represent a lexicalsemantic relationship between ` and ti, or encode part of the syntax of the sentence (Das et al., 2010b). Given some training data, which is of the form ((x(j), t(j), f(j), A(j)))N(where N is the number of sentences in the data 1 and A is the set of argument in a sentence), we discriminatively train the frame identification model by maximizing the following log-likelihood:8 f = (f1, ... , fm) corresponding to each target, argument identification or SRL is the task of choosing which of each fi’s roles are filled, and by which parts of x. We directly adopt the model of Das et al. (2010a) for the argument identification stage and briefly describe it here. Let Rfi = {r1, ... , r|Rfi|} denote frame</context>
+<context position="25371" citStr="Das et al. (2010" startWordPosition="4207" endWordPosition="4210">ing data, we arrived at a set of 877 frames, 1,068 roles,10 and 9,263 targets. Our training split of the full-text annotations contained 3,256 sentences with 19,582 frame annotatations with corresponding roles, while the test set contained 2,420 sentences with 4,458 annotations (the test set contained fewer annotated targets per sentence). We also divide the 55 training documents into 5 parts for crossvalidation (see §6.3). The raw sentences in all the training and test documents were preprocessed using MXPOST (Ratnaparkhi, 1996) and the MST dependency parser (McDonald et al., 2005) following Das et al. (2010a). In this work we assume the frame-evoking targets have been correctly identified in training and test data. 10Note that the number of listed roles in the lexicon is nearly 9,000, but their number in actual annotations is a lot fewer. 6.2 Baselines We compare our model with three baselines. The first baseline is the purely supervised model of Das et al. (2010a) trained on the training split of 55 documents. Note that this is the strongest baseline available for this task;11 we refer to this model as “SEMAFOR.” The second baseline is a semi-supervised selftrained system, where we used SEMAFOR</context>
+<context position="27601" citStr="Das et al., 2010" startWordPosition="4578" endWordPosition="4581"> was run on this graph (and hyperparameters tuned using cross validation). The posterior distribution of frames over targets was next used for frame identification (Eq. 6-7), with SEMAFOR as the trained model. This model, which is very similar to our full model, is referred to as “LinGraph.” “FullGraph” refers to our full system. 6.3 Experimental Setup We used five-fold cross-validation to tune the hyperparameters α, K, p, and M in our model. The 11We do not compare our model with other systems, e.g. the ones submitted to SemEval’07 shared task, because SEMAFOR outperforms them significantly (Das et al., 2010a) on the previous version of the data. Moreover, we trained our models on the new FrameNet 1.5 data, and training code for the SemEval’07 systems was not readily available. 12Note that we only self-train the frame identification model and not the argument identification model, which is fixed throughout. 1441 UNKNOWN TARGETS ALL TARGETS Model Exact Match Partial Match Exact Match Partial Match P R Fl P R Fl P R Fl P R Fl SEMAFOR 19.59 16.48 17.90 33.03 27.80 30.19 66.15 61.64 63.82 70.68 65.86 68.18 Self-training 15.44 13.00 14.11 29.08 24.47 26.58 65.78 61.30 63.46 70.39 65.59 67.90 LinGraph </context>
+<context position="29882" citStr="Das et al. (2010" startWordPosition="4966" endWordPosition="4969">ers were K = 10, p = 0.1 and M = 2). With the chosen set of hyperparameters, the test set was used to measure final performance. The standard evaluation script from the SemEval’07 task calculates precision, recall, and F1- score for frames and arguments; it also provides a score that gives partial credit for hypothesizing a frame related to the correct one in the FrameNet lexicon. We present precision, recall, and F1-measure microaveraged across the test documents, report labels-only matching scores (spans must match exactly), and do not use named entity labels. This evaluation scheme follows Das et al. (2010a). Statistical significance is measured using a reimplementation of Dan Bikel’s parsing evaluation comparator.13 6.4 Results Tables 1 and 2 present results for frame identification and full frame-semantic parsing respectively. They also separately tabulate the results achieved for unknown targets. Our full model, denoted by “FullGraph,” outperforms all the baselines for both tasks. Note that the Self-training model even falls 13http://www.cis.upenn.edu/˜dbikel/ software.html#comparator short of the supervised baseline SEMAFOR, unlike what was observed by Bejan (2009) for the frame identificat</context>
+</contexts>
+<marker>Das, Schneider, Chen, Smith, 2010</marker>
+<rawString>D. Das, N. Schneider, D. Chen, and N. A. Smith. 2010a. Probabilistic frame-semantic parsing. In Proc. of NAACL-HLT.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D Das</author>
+<author>N Schneider</author>
+<author>D Chen</author>
+<author>N A Smith</author>
+</authors>
+<title>SEMAFOR 1.0: A probabilistic framesemantic parser.</title>
+<date>2010</date>
+<tech>Technical Report CMU-LTI-10-001,</tech>
+<institution>Carnegie Mellon University.</institution>
+<contexts>
+<context position="2304" citStr="Das et al., 2010" startWordPosition="340" endWordPosition="343">taining instantiations of semantic frames, and full-text annotations provide supervision for learning frame-semantic parsers. Yet these annotations lack coverage, including only 9,300 annotated target types. Recent papers have tried to address the coverage problem. Johansson and Nugues (2007) used WordNet (Fellbaum, 1998) to expand the list of targets that can evoke frames and trained classifiers to identify the best-suited frame for the newly created targets. In past work, we described an approach where latent variables were used in a probabilistic model to predict frames for unseen targets (Das et al., 2010a).1 Relatedly, for the argument identification subtask, Matsubayashi et al. (2009) proposed a technique for generalization of semantic roles to overcome data sparseness. Unseen targets continue to present a major obstacle to domain-general semantic analysis. In this paper, we address the problem of idenfifying the semantic frames for targets unseen either in FrameNet (including the exemplar sentences) or the collection of full-text annotations released along with the lexicon. Using a standard model for the argument identification stage (Das et al., 2010a), our proposed method improves overall</context>
+<context position="6061" citStr="Das et al., 2010" startWordPosition="919" endWordPosition="922">rame and its arguments (Thompson et al., 2003; Fleischman et al., 2003; Shi and Mihalcea, 2004; Erk and Pad´o, 2006, inter alia). Most of this work was done on an older, smaller version of FrameNet. Recently, since the release of full-text annotations in SemEval’07 (Baker et al., 2007), there has been work on identifying multiple frames and their corresponding sets of arguments in a sentence. The LTH system of Johansson and Nugues (2007) performed the best in the SemEval’07 shared task on frame-semantic parsing. Our probabilistic frame-semantic parser outperforms LTH on that task and dataset (Das et al., 2010a). The current paper builds on those probabilistic models to improve coverage on unseen predicates.2 Expert resources have limited coverage, and FrameNet is no exception. Automatic induction of semantic resources has been a major effort in recent years (Snow et al., 2006; Ponzetto and Strube, 2007, inter alia). In the domain of frame semantics, previous work has sought to extend the coverage of FrameNet by exploiting resources like VerbNet, WordNet, or Wikipedia (Shi and Mihalcea, 2005; Giuglea and Moschitti, 2006; Pennacchiotti et al., 2008; Tonelli and Giuliano, 2009), and projecting entrie</context>
+<context position="7445" citStr="Das et al. (2010" startWordPosition="1135" endWordPosition="1138">grees, they rely on other lexicons and resources created by experts. F¨urstenau and Lapata (2009) proposed the use of unlabeled data to improve coverage, but their work was limited to verbs. Bejan (2009) used self-training to improve frame identification and reported improvements, but did not explicitly model unknown targets. In contrast, we use statistics gathered from large volumes of unlabeled data to improve the coverage of a frame-semantic parser on several syntactic categories, in a novel framework that makes use of graph-based semi-supervised learning. 2SEMAFOR, the system presented by Das et al. (2010a) is publicly available at http://www.ark.cs.cmu.edu/ SEMAFOR and has been extended in this work. 1436 2.2 Graph-based Semi-Supervised Learning In graph-based semi-supervised learning, one constructs a graph whose vertices are labeled and unlabeled examples. Weighted edges in the graph, connecting pairs of examples/vertices, encode the degree to which they are expected to have the same label (Zhu et al., 2003). Variants of label propagation are used to transfer labels from the labeled to the unlabeled examples. There are several instances of the use of graph-based methods for natural language</context>
+<context position="9907" citStr="Das et al. (2010" startWordPosition="1520" endWordPosition="1523">ing of vertices corresponding to targets is constructed using a combination of frame similarity (for observed targets) and distributional similarity as edge weights. This stage also determines a fixed set of nearest neighbors for each vertex in the graph. Label Propagation: The observed targets (a small subset of the vertices) are initialized with empirical frame distributions extracted from FrameNet annotations. Label propagation results in a distribution of frames for each vertex in the graph. Supervised Learning: Frame identification and argument identification models are trained following Das et al. (2010a). The graph is used to define the set of candidate frames for unseen targets. Parsing: The frame identification model of Das et al. disambiguated among only those frames associated with a seen target in the annotated data. For an unseen target, all frames in the FrameNet lexicon were considered (a large number). The current work replaces that strategy, considering only the top M frames in the distribution produced by label propagation. This strategy results in large improvements in frame identification for the unseen targets and makes inference much faster. Argument identification is done ex</context>
+<context position="18670" citStr="Das et al. (2010" startWordPosition="3002" endWordPosition="3005">iterative method with updates defined as: γt(f) ← rt(f)1{t ∈ Vl} (3) + µ u∈N(t) X wtuq(m−1) u (f) + ν |F| κt ← 1{t ∈ Vl} + ν + µ X wtu (4) u∈N(t) qt (f) ← γt(f)/κt (m) (5) Here, 1{·} is an indicator function. The iterative procedure starts with a uniform distribution for each qt . For all our experiments, we run 10 iterations (0) of the updates. The final distribution of frames for a target t is denoted by q∗t. 5 Learning and Inference for Frame-Semantic Parsing In this section, we briefly review learning and inference techniques used in the frame-semantic parser, which are largely similar to Das et al. (2010a), except the handling of unknown targets. Note that in all our experiments, we assume that the targets are marked in a given sentence of which we want to extract a frame-semantic analysis. Therefore, unlike the systems presented in SemEval’07, we do not define a target identification module. 5.1 Frame Identification For a given sentence x with frame-evoking targets t, let ti denote the ith target (a word sequence). We seek a list f = hf1, ... , fmi of frames, one per target. Let L be the set of targets found in the FrameNet annotations. Let Lf ⊆ L be the subset of these targets annotated as </context>
+<context position="20768" citStr="Das et al., 2010" startWordPosition="3403" endWordPosition="3406">ation, but since ` is unobserved, it is summed out both during inference and training. A conditional log-linear model is used to model this probability: for f E Fi and ` E Lf, pθ(f, ` |ti, x) = exp θ&gt;g(f,`, ti, x) (8) Ef&apos;∈Fi E`&apos;∈Lf&apos; exp θ&gt;g(f0, `0, ti, x) where θ are the model weights, and g is a vectorvalued feature function. This discriminative formulation is very flexible, allowing for a variety of (possibly overlapping) features; e.g., a feature might relate a frame f to a prototype `, represent a lexicalsemantic relationship between ` and ti, or encode part of the syntax of the sentence (Das et al., 2010b). Given some training data, which is of the form ((x(j), t(j), f(j), A(j)))N(where N is the number of sentences in the data 1 and A is the set of argument in a sentence), we discriminatively train the frame identification model by maximizing the following log-likelihood:8 f = (f1, ... , fm) corresponding to each target, argument identification or SRL is the task of choosing which of each fi’s roles are filled, and by which parts of x. We directly adopt the model of Das et al. (2010a) for the argument identification stage and briefly describe it here. Let Rfi = {r1, ... , r|Rfi|} denote frame</context>
+<context position="25371" citStr="Das et al. (2010" startWordPosition="4207" endWordPosition="4210">ing data, we arrived at a set of 877 frames, 1,068 roles,10 and 9,263 targets. Our training split of the full-text annotations contained 3,256 sentences with 19,582 frame annotatations with corresponding roles, while the test set contained 2,420 sentences with 4,458 annotations (the test set contained fewer annotated targets per sentence). We also divide the 55 training documents into 5 parts for crossvalidation (see §6.3). The raw sentences in all the training and test documents were preprocessed using MXPOST (Ratnaparkhi, 1996) and the MST dependency parser (McDonald et al., 2005) following Das et al. (2010a). In this work we assume the frame-evoking targets have been correctly identified in training and test data. 10Note that the number of listed roles in the lexicon is nearly 9,000, but their number in actual annotations is a lot fewer. 6.2 Baselines We compare our model with three baselines. The first baseline is the purely supervised model of Das et al. (2010a) trained on the training split of 55 documents. Note that this is the strongest baseline available for this task;11 we refer to this model as “SEMAFOR.” The second baseline is a semi-supervised selftrained system, where we used SEMAFOR</context>
+<context position="27601" citStr="Das et al., 2010" startWordPosition="4578" endWordPosition="4581"> was run on this graph (and hyperparameters tuned using cross validation). The posterior distribution of frames over targets was next used for frame identification (Eq. 6-7), with SEMAFOR as the trained model. This model, which is very similar to our full model, is referred to as “LinGraph.” “FullGraph” refers to our full system. 6.3 Experimental Setup We used five-fold cross-validation to tune the hyperparameters α, K, p, and M in our model. The 11We do not compare our model with other systems, e.g. the ones submitted to SemEval’07 shared task, because SEMAFOR outperforms them significantly (Das et al., 2010a) on the previous version of the data. Moreover, we trained our models on the new FrameNet 1.5 data, and training code for the SemEval’07 systems was not readily available. 12Note that we only self-train the frame identification model and not the argument identification model, which is fixed throughout. 1441 UNKNOWN TARGETS ALL TARGETS Model Exact Match Partial Match Exact Match Partial Match P R Fl P R Fl P R Fl P R Fl SEMAFOR 19.59 16.48 17.90 33.03 27.80 30.19 66.15 61.64 63.82 70.68 65.86 68.18 Self-training 15.44 13.00 14.11 29.08 24.47 26.58 65.78 61.30 63.46 70.39 65.59 67.90 LinGraph </context>
+<context position="29882" citStr="Das et al. (2010" startWordPosition="4966" endWordPosition="4969">ers were K = 10, p = 0.1 and M = 2). With the chosen set of hyperparameters, the test set was used to measure final performance. The standard evaluation script from the SemEval’07 task calculates precision, recall, and F1- score for frames and arguments; it also provides a score that gives partial credit for hypothesizing a frame related to the correct one in the FrameNet lexicon. We present precision, recall, and F1-measure microaveraged across the test documents, report labels-only matching scores (spans must match exactly), and do not use named entity labels. This evaluation scheme follows Das et al. (2010a). Statistical significance is measured using a reimplementation of Dan Bikel’s parsing evaluation comparator.13 6.4 Results Tables 1 and 2 present results for frame identification and full frame-semantic parsing respectively. They also separately tabulate the results achieved for unknown targets. Our full model, denoted by “FullGraph,” outperforms all the baselines for both tasks. Note that the Self-training model even falls 13http://www.cis.upenn.edu/˜dbikel/ software.html#comparator short of the supervised baseline SEMAFOR, unlike what was observed by Bejan (2009) for the frame identificat</context>
+</contexts>
+<marker>Das, Schneider, Chen, Smith, 2010</marker>
+<rawString>D. Das, N. Schneider, D. Chen, and N. A. Smith. 2010b. SEMAFOR 1.0: A probabilistic framesemantic parser. Technical Report CMU-LTI-10-001, Carnegie Mellon University.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>K Erk</author>
+<author>S Pad´o</author>
+</authors>
+<title>Shalmaneser - a toolchain for shallow semantic parsing.</title>
+<date>2006</date>
+<booktitle>In Proc. of LREC.</booktitle>
+<marker>Erk, Pad´o, 2006</marker>
+<rawString>K. Erk and S. Pad´o. 2006. Shalmaneser - a toolchain for shallow semantic parsing. In Proc. of LREC.</rawString>
+</citation>
+<citation valid="true">
+<title>WordNet: an electronic lexical database.</title>
+<date>1998</date>
+<editor>C. Fellbaum, editor.</editor>
+<publisher>MIT Press,</publisher>
+<location>Cambridge, MA.</location>
+<marker>1998</marker>
+<rawString>C. Fellbaum, editor. 1998. WordNet: an electronic lexical database. MIT Press, Cambridge, MA.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>C J Fillmore</author>
+<author>C R Johnson</author>
+<author>M R L Petruck</author>
+</authors>
+<title>Background to FrameNet.</title>
+<date>2003</date>
+<journal>International Journal of Lexicography,</journal>
+<volume>16</volume>
+<issue>3</issue>
+<contexts>
+<context position="1088" citStr="Fillmore et al., 2003" startWordPosition="158" endWordPosition="161">. We construct a large graph where vertices correspond to potential predicates and use label propagation to learn possible semantic frames for new ones. The label-propagated graph is used within a frame-semantic parser and, for unknown predicates, results in over 15% absolute improvement in frame identification accuracy and over 13% absolute improvement in full frame-semantic parsing Fl score on a blind test set, over a state-of-the-art supervised baseline. 1 Introduction Frame-semantic parsing aims to extract a shallow semantic structure from text, as shown in Figure 1. The FrameNet lexicon (Fillmore et al., 2003) is a rich linguistic resource containing expert knowledge about lexical and predicate-argument semantics. The lexicon suggests an analysis based on the theory of frame semantics (Fillmore, 1982). Recent approaches to frame-semantic parsing have broadly focused on the use of two statistical classifiers corresponding to the aforementioned subtasks: the first one to identify the most suitable semantic frame for a marked lexical predicate (target, henceforth) in a sentence, and the second for performing semantic role labeling (SRL) given the frame. The FrameNet lexicon, its exemplar sentences con</context>
+</contexts>
+<marker>Fillmore, Johnson, Petruck, 2003</marker>
+<rawString>C. J. Fillmore, C. R. Johnson, and M. R.L. Petruck. 2003. Background to FrameNet. International Journal of Lexicography, 16(3).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>C J Fillmore</author>
+</authors>
+<title>Frame semantics.</title>
+<date>1982</date>
+<booktitle>In Linguistics in the Morning Calm,</booktitle>
+<pages>111--137</pages>
+<publisher>Hanshin Publishing Co.,</publisher>
+<location>Seoul, South</location>
+<contexts>
+<context position="1283" citStr="Fillmore, 1982" startWordPosition="189" endWordPosition="190">-semantic parser and, for unknown predicates, results in over 15% absolute improvement in frame identification accuracy and over 13% absolute improvement in full frame-semantic parsing Fl score on a blind test set, over a state-of-the-art supervised baseline. 1 Introduction Frame-semantic parsing aims to extract a shallow semantic structure from text, as shown in Figure 1. The FrameNet lexicon (Fillmore et al., 2003) is a rich linguistic resource containing expert knowledge about lexical and predicate-argument semantics. The lexicon suggests an analysis based on the theory of frame semantics (Fillmore, 1982). Recent approaches to frame-semantic parsing have broadly focused on the use of two statistical classifiers corresponding to the aforementioned subtasks: the first one to identify the most suitable semantic frame for a marked lexical predicate (target, henceforth) in a sentence, and the second for performing semantic role labeling (SRL) given the frame. The FrameNet lexicon, its exemplar sentences containing instantiations of semantic frames, and full-text annotations provide supervision for learning frame-semantic parsers. Yet these annotations lack coverage, including only 9,300 annotated t</context>
+</contexts>
+<marker>Fillmore, 1982</marker>
+<rawString>C. J. Fillmore. 1982. Frame semantics. In Linguistics in the Morning Calm, pages 111–137. Hanshin Publishing Co., Seoul, South Korea.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>M Fleischman</author>
+<author>N Kwon</author>
+<author>E Hovy</author>
+</authors>
+<title>Maximum entropy models for FrameNet classification.</title>
+<date>2003</date>
+<booktitle>In Proc. of EMNLP.</booktitle>
+<contexts>
+<context position="5515" citStr="Fleischman et al., 2003" startWordPosition="827" endWordPosition="830"> coverage for hitherto unobserved predicates (§6). 2 Background Before going into the details of our model, we provide some background on two topics relevant to this paper: frame-semantic parsing and graph-based learning applied to natural language tasks. 2.1 Frame-semantic Parsing Gildea and Jurafsky (2002) pioneered SRL, and since then there has been much applied research on predicate-argument semantics. Early work on frame-semantic role labeling made use of the exemplar sentences in the FrameNet corpus, each of which is annotated for a single frame and its arguments (Thompson et al., 2003; Fleischman et al., 2003; Shi and Mihalcea, 2004; Erk and Pad´o, 2006, inter alia). Most of this work was done on an older, smaller version of FrameNet. Recently, since the release of full-text annotations in SemEval’07 (Baker et al., 2007), there has been work on identifying multiple frames and their corresponding sets of arguments in a sentence. The LTH system of Johansson and Nugues (2007) performed the best in the SemEval’07 shared task on frame-semantic parsing. Our probabilistic frame-semantic parser outperforms LTH on that task and dataset (Das et al., 2010a). The current paper builds on those probabilistic mo</context>
+</contexts>
+<marker>Fleischman, Kwon, Hovy, 2003</marker>
+<rawString>M. Fleischman, N. Kwon, and E. Hovy. 2003. Maximum entropy models for FrameNet classification. In Proc. of EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>P Fung</author>
+<author>B Chen</author>
+</authors>
+<title>BiFrameNet: bilingual frame semantics resource construction by crosslingual induction.</title>
+<date>2004</date>
+<booktitle>In Proc. of COLING.</booktitle>
+<contexts>
+<context position="6739" citStr="Fung and Chen, 2004" startWordPosition="1024" endWordPosition="1027">to improve coverage on unseen predicates.2 Expert resources have limited coverage, and FrameNet is no exception. Automatic induction of semantic resources has been a major effort in recent years (Snow et al., 2006; Ponzetto and Strube, 2007, inter alia). In the domain of frame semantics, previous work has sought to extend the coverage of FrameNet by exploiting resources like VerbNet, WordNet, or Wikipedia (Shi and Mihalcea, 2005; Giuglea and Moschitti, 2006; Pennacchiotti et al., 2008; Tonelli and Giuliano, 2009), and projecting entries and annotations within and across languages (Boas, 2002; Fung and Chen, 2004; Pad´o and Lapata, 2005). Although these approaches have increased coverage to various degrees, they rely on other lexicons and resources created by experts. F¨urstenau and Lapata (2009) proposed the use of unlabeled data to improve coverage, but their work was limited to verbs. Bejan (2009) used self-training to improve frame identification and reported improvements, but did not explicitly model unknown targets. In contrast, we use statistics gathered from large volumes of unlabeled data to improve the coverage of a frame-semantic parser on several syntactic categories, in a novel framework </context>
+</contexts>
+<marker>Fung, Chen, 2004</marker>
+<rawString>P. Fung and B. Chen. 2004. BiFrameNet: bilingual frame semantics resource construction by crosslingual induction. In Proc. of COLING.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>H F¨urstenau</author>
+<author>M Lapata</author>
+</authors>
+<title>Semi-supervised semantic role labeling.</title>
+<date>2009</date>
+<booktitle>In Proc. of EACL.</booktitle>
+<marker>F¨urstenau, Lapata, 2009</marker>
+<rawString>H. F¨urstenau and M. Lapata. 2009. Semi-supervised semantic role labeling. In Proc. of EACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D Gildea</author>
+<author>D Jurafsky</author>
+</authors>
+<title>Automatic labeling of semantic roles.</title>
+<date>2002</date>
+<journal>Computational Linguistics,</journal>
+<volume>28</volume>
+<issue>3</issue>
+<contexts>
+<context position="5201" citStr="Gildea and Jurafsky (2002)" startWordPosition="775" endWordPosition="778">luated within a frame-semantic parser (§5). Considering unseen targets in test data (although few because the test data is also drawn from the training domain), significant absolute improvements of 15.7% and 13.7% are observed for frame identification and full framesemantic parsing, respectively, indicating improved coverage for hitherto unobserved predicates (§6). 2 Background Before going into the details of our model, we provide some background on two topics relevant to this paper: frame-semantic parsing and graph-based learning applied to natural language tasks. 2.1 Frame-semantic Parsing Gildea and Jurafsky (2002) pioneered SRL, and since then there has been much applied research on predicate-argument semantics. Early work on frame-semantic role labeling made use of the exemplar sentences in the FrameNet corpus, each of which is annotated for a single frame and its arguments (Thompson et al., 2003; Fleischman et al., 2003; Shi and Mihalcea, 2004; Erk and Pad´o, 2006, inter alia). Most of this work was done on an older, smaller version of FrameNet. Recently, since the release of full-text annotations in SemEval’07 (Baker et al., 2007), there has been work on identifying multiple frames and their corresp</context>
+</contexts>
+<marker>Gildea, Jurafsky, 2002</marker>
+<rawString>D. Gildea and D. Jurafsky. 2002. Automatic labeling of semantic roles. Computational Linguistics, 28(3).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>A-M Giuglea</author>
+<author>A Moschitti</author>
+</authors>
+<title>Shallow semantic parsing based on FrameNet, VerbNet and PropBank.</title>
+<date>2006</date>
+<booktitle>In Proc. of ECAI</booktitle>
+<contexts>
+<context position="6581" citStr="Giuglea and Moschitti, 2006" startWordPosition="1001" endWordPosition="1004">parsing. Our probabilistic frame-semantic parser outperforms LTH on that task and dataset (Das et al., 2010a). The current paper builds on those probabilistic models to improve coverage on unseen predicates.2 Expert resources have limited coverage, and FrameNet is no exception. Automatic induction of semantic resources has been a major effort in recent years (Snow et al., 2006; Ponzetto and Strube, 2007, inter alia). In the domain of frame semantics, previous work has sought to extend the coverage of FrameNet by exploiting resources like VerbNet, WordNet, or Wikipedia (Shi and Mihalcea, 2005; Giuglea and Moschitti, 2006; Pennacchiotti et al., 2008; Tonelli and Giuliano, 2009), and projecting entries and annotations within and across languages (Boas, 2002; Fung and Chen, 2004; Pad´o and Lapata, 2005). Although these approaches have increased coverage to various degrees, they rely on other lexicons and resources created by experts. F¨urstenau and Lapata (2009) proposed the use of unlabeled data to improve coverage, but their work was limited to verbs. Bejan (2009) used self-training to improve frame identification and reported improvements, but did not explicitly model unknown targets. In contrast, we use stat</context>
+</contexts>
+<marker>Giuglea, Moschitti, 2006</marker>
+<rawString>A.-M. Giuglea and A. Moschitti. 2006. Shallow semantic parsing based on FrameNet, VerbNet and PropBank. In Proc. of ECAI 2006.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D Graff</author>
+</authors>
+<title>English Gigaword. Linguistic Data Consortium.</title>
+<date>2003</date>
+<contexts>
+<context position="12950" citStr="Graff, 2003" startWordPosition="1967" endWordPosition="1968">stribution over most likely frames that they could evoke. or phrase. Lin separately treated nouns, verbs and adjectives/adverbs and the thesaurus contains three parts for each of these categories. For each item in the thesaurus, 200 nearest neighbors are listed with a symmetric similarity score between 0 and 1. We processed this thesaurus in two ways: first, we lowercased and lemmatized each word/phrase and merged entries which shared the same lemma; second, we separated the adjectives and adverbs into two lists from Lin’s original list by scanning a POS-tagged version of the Gigaword corpus (Graff, 2003) and categorizing each item into an adjective or an adverb depending on which category the item associated with more often in the data. The second step was necessary because FrameNet treats adjectives and adverbs separately. At the end of this processing step, we were left with 61,702 units—approximately six times more than the targets found in FrameNet annotations—each labeled with one of 4 coarse tags. We considered only the top 20 most similar targets for each target, and noted Lin’s similarity between two targets t and u, which we call simDL(t, u). The second component of graph constructio</context>
+</contexts>
+<marker>Graff, 2003</marker>
+<rawString>D. Graff. 2003. English Gigaword. Linguistic Data Consortium.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>R Johansson</author>
+<author>P Nugues</author>
+</authors>
+<title>LTH: semantic structure extraction using nonprojective dependency trees.</title>
+<date>2007</date>
+<booktitle>In Proc. of SemEval.</booktitle>
+<contexts>
+<context position="1981" citStr="Johansson and Nugues (2007)" startWordPosition="286" endWordPosition="289">he use of two statistical classifiers corresponding to the aforementioned subtasks: the first one to identify the most suitable semantic frame for a marked lexical predicate (target, henceforth) in a sentence, and the second for performing semantic role labeling (SRL) given the frame. The FrameNet lexicon, its exemplar sentences containing instantiations of semantic frames, and full-text annotations provide supervision for learning frame-semantic parsers. Yet these annotations lack coverage, including only 9,300 annotated target types. Recent papers have tried to address the coverage problem. Johansson and Nugues (2007) used WordNet (Fellbaum, 1998) to expand the list of targets that can evoke frames and trained classifiers to identify the best-suited frame for the newly created targets. In past work, we described an approach where latent variables were used in a probabilistic model to predict frames for unseen targets (Das et al., 2010a).1 Relatedly, for the argument identification subtask, Matsubayashi et al. (2009) proposed a technique for generalization of semantic roles to overcome data sparseness. Unseen targets continue to present a major obstacle to domain-general semantic analysis. In this paper, we</context>
+<context position="5886" citStr="Johansson and Nugues (2007)" startWordPosition="890" endWordPosition="894"> research on predicate-argument semantics. Early work on frame-semantic role labeling made use of the exemplar sentences in the FrameNet corpus, each of which is annotated for a single frame and its arguments (Thompson et al., 2003; Fleischman et al., 2003; Shi and Mihalcea, 2004; Erk and Pad´o, 2006, inter alia). Most of this work was done on an older, smaller version of FrameNet. Recently, since the release of full-text annotations in SemEval’07 (Baker et al., 2007), there has been work on identifying multiple frames and their corresponding sets of arguments in a sentence. The LTH system of Johansson and Nugues (2007) performed the best in the SemEval’07 shared task on frame-semantic parsing. Our probabilistic frame-semantic parser outperforms LTH on that task and dataset (Das et al., 2010a). The current paper builds on those probabilistic models to improve coverage on unseen predicates.2 Expert resources have limited coverage, and FrameNet is no exception. Automatic induction of semantic resources has been a major effort in recent years (Snow et al., 2006; Ponzetto and Strube, 2007, inter alia). In the domain of frame semantics, previous work has sought to extend the coverage of FrameNet by exploiting res</context>
+</contexts>
+<marker>Johansson, Nugues, 2007</marker>
+<rawString>R. Johansson and P. Nugues. 2007. LTH: semantic structure extraction using nonprojective dependency trees. In Proc. of SemEval.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D Lin</author>
+</authors>
+<title>Principle-based parsing without overgeneration.</title>
+<date>1993</date>
+<booktitle>In Proc. of ACL.</booktitle>
+<contexts>
+<context position="11507" citStr="Lin, 1993" startWordPosition="1774" endWordPosition="1775"> appended with a coarse POS tag, and it resembles the lexical units in the FrameNet lexicon. For example, two targets corresponding to the same lemma would look like boast.N and boast.V. Here, the first target is a noun, while the second is a verb. An example multiword target is chemical weapon.N. We use two resources for graph construction. First, we take all the words and phrases present in the dependency-based thesaurus constructed using syntactic cooccurrence statistics (Lin, 1998).3 To construct this resource, a corpus containing 64 million words was parsed with a fast dependency parser (Lin, 1993; Lin, 1994), and syntactic contexts were used to find similar lexical items for a given word 3This resource is available at http://webdocs.cs. ualberta.ca/˜lindek/Downloads/sim.tgz 1437 powerlessness.N POVERTY POVERTY rich.A SIMILARITY variant.N SIMILARITY similarity.N wealthy.A SIMILARITY resemblance.N difference.N SIMILARITY divergence.N deprivation.N destitution.N unemployment rate.N joblessness.N unemployment.N employment.N UNEMPLOYMENT_RATE UNEMPLOYMENT_RATE poverty.N homelessness.N UNEMPLOYMENT_RATE POVERTY inequality.N discrepancy.N disparity.N resemble.V SIMILARITY Figure 2: Excerpt f</context>
+</contexts>
+<marker>Lin, 1993</marker>
+<rawString>D. Lin. 1993. Principle-based parsing without overgeneration. In Proc. of ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D Lin</author>
+</authors>
+<title>Principar–an efficient, broadcoverage, principle-based parser.</title>
+<date>1994</date>
+<booktitle>In Proc. of</booktitle>
+<contexts>
+<context position="11519" citStr="Lin, 1994" startWordPosition="1776" endWordPosition="1777">ith a coarse POS tag, and it resembles the lexical units in the FrameNet lexicon. For example, two targets corresponding to the same lemma would look like boast.N and boast.V. Here, the first target is a noun, while the second is a verb. An example multiword target is chemical weapon.N. We use two resources for graph construction. First, we take all the words and phrases present in the dependency-based thesaurus constructed using syntactic cooccurrence statistics (Lin, 1998).3 To construct this resource, a corpus containing 64 million words was parsed with a fast dependency parser (Lin, 1993; Lin, 1994), and syntactic contexts were used to find similar lexical items for a given word 3This resource is available at http://webdocs.cs. ualberta.ca/˜lindek/Downloads/sim.tgz 1437 powerlessness.N POVERTY POVERTY rich.A SIMILARITY variant.N SIMILARITY similarity.N wealthy.A SIMILARITY resemblance.N difference.N SIMILARITY divergence.N deprivation.N destitution.N unemployment rate.N joblessness.N unemployment.N employment.N UNEMPLOYMENT_RATE UNEMPLOYMENT_RATE poverty.N homelessness.N UNEMPLOYMENT_RATE POVERTY inequality.N discrepancy.N disparity.N resemble.V SIMILARITY Figure 2: Excerpt from a graph </context>
+</contexts>
+<marker>Lin, 1994</marker>
+<rawString>D. Lin. 1994. Principar–an efficient, broadcoverage, principle-based parser. In Proc. of COLING. D. Lin. 1998. Automatic retrieval and clustering of similar words. In Proc. of COLING-ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D C Liu</author>
+<author>J Nocedal</author>
+</authors>
+<title>On the limited memory bfgs method for large scale optimization.</title>
+<date>1989</date>
+<journal>Math. Programming,</journal>
+<volume>45</volume>
+<issue>3</issue>
+<contexts>
+<context position="22619" citStr="Liu and Nocedal, 1989" startWordPosition="3761" endWordPosition="3764">spans in S. The model makes a prediction for each Ai(rk) (for all roles rk E Rfi): Ai(rk) +— arg maxs∈S p(s |rk, fi, ti, x) (10) A conditional log-linear model over spans for each role of each evoked frame is defined as: pψ(Ai(rk) = s |fi, ti, x) = (11) exp ψ&gt;h(s, rk, fi, ti, x) Es&apos;∈S exp ψ&gt;h(s0, rk, fi, ti, x) This model is trained by optimizing: max �N �mj � pθ(f(j) i, ` |t(j) max N �mj |R |fu) log pψ(A(j) θ j=1 i=1 log i , x(j)) (9) ψ j=1 i=1 � i i (rk) |f(j) `∈Lf�j) k=1 i ,t(j) i i , x(j)) This non-convex objective function is locally optimized using a distributed implementation of LBFGS (Liu and Nocedal, 1989).9 5.2 Argument Identification Given a sentence x = (x1,... , xn), the set of targets t = (t1, ... , tm), and a list of evoked frames 8We found no benefit from using an L2 regularizer. 9While training, in the partition function of the log-linear model, all frames F in FrameNet are summed up for a target ti instead of only Fi (as in Eq. 8), to learn interactions between the latent variables and different sentential contexts. This objective function is convex, and we globally optimize it using the distributed implementation of L-BFGS. We regularize by including −110Iψ�22 in the objective (the st</context>
+</contexts>
+<marker>Liu, Nocedal, 1989</marker>
+<rawString>D. C. Liu and J. Nocedal. 1989. On the limited memory bfgs method for large scale optimization. Math. Programming, 45(3).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Y Matsubayashi</author>
+<author>N Okazaki</author>
+<author>J Tsujii</author>
+</authors>
+<title>A comparative study on generalization of semantic roles in FrameNet.</title>
+<date>2009</date>
+<booktitle>In Proc. of ACL-IJCNLP.</booktitle>
+<contexts>
+<context position="2387" citStr="Matsubayashi et al. (2009)" startWordPosition="351" endWordPosition="354">ide supervision for learning frame-semantic parsers. Yet these annotations lack coverage, including only 9,300 annotated target types. Recent papers have tried to address the coverage problem. Johansson and Nugues (2007) used WordNet (Fellbaum, 1998) to expand the list of targets that can evoke frames and trained classifiers to identify the best-suited frame for the newly created targets. In past work, we described an approach where latent variables were used in a probabilistic model to predict frames for unseen targets (Das et al., 2010a).1 Relatedly, for the argument identification subtask, Matsubayashi et al. (2009) proposed a technique for generalization of semantic roles to overcome data sparseness. Unseen targets continue to present a major obstacle to domain-general semantic analysis. In this paper, we address the problem of idenfifying the semantic frames for targets unseen either in FrameNet (including the exemplar sentences) or the collection of full-text annotations released along with the lexicon. Using a standard model for the argument identification stage (Das et al., 2010a), our proposed method improves overall frame-semantic parsing, especially for unseen targets. To better handle these unse</context>
+</contexts>
+<marker>Matsubayashi, Okazaki, Tsujii, 2009</marker>
+<rawString>Y. Matsubayashi, N. Okazaki, and J. Tsujii. 2009. A comparative study on generalization of semantic roles in FrameNet. In Proc. of ACL-IJCNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>R McDonald</author>
+<author>K Crammer</author>
+<author>F Pereira</author>
+</authors>
+<title>Online large-margin training of dependency parsers.</title>
+<date>2005</date>
+<booktitle>In Proc. of ACL.</booktitle>
+<contexts>
+<context position="25344" citStr="McDonald et al., 2005" startWordPosition="4202" endWordPosition="4205"> exemplar sentences and the training data, we arrived at a set of 877 frames, 1,068 roles,10 and 9,263 targets. Our training split of the full-text annotations contained 3,256 sentences with 19,582 frame annotatations with corresponding roles, while the test set contained 2,420 sentences with 4,458 annotations (the test set contained fewer annotated targets per sentence). We also divide the 55 training documents into 5 parts for crossvalidation (see §6.3). The raw sentences in all the training and test documents were preprocessed using MXPOST (Ratnaparkhi, 1996) and the MST dependency parser (McDonald et al., 2005) following Das et al. (2010a). In this work we assume the frame-evoking targets have been correctly identified in training and test data. 10Note that the number of listed roles in the lexicon is nearly 9,000, but their number in actual annotations is a lot fewer. 6.2 Baselines We compare our model with three baselines. The first baseline is the purely supervised model of Das et al. (2010a) trained on the training split of 55 documents. Note that this is the strongest baseline available for this task;11 we refer to this model as “SEMAFOR.” The second baseline is a semi-supervised selftrained sy</context>
+</contexts>
+<marker>McDonald, Crammer, Pereira, 2005</marker>
+<rawString>R. McDonald, K. Crammer, and F. Pereira. 2005. Online large-margin training of dependency parsers. In Proc. of ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Z-Y Niu</author>
+<author>D-H Ji</author>
+<author>C L Tan</author>
+</authors>
+<title>Word sense disambiguation using label propagation based semisupervised learning.</title>
+<date>2005</date>
+<booktitle>In Proc. of ACL.</booktitle>
+<contexts>
+<context position="8144" citStr="Niu et al. (2005)" startWordPosition="1245" endWordPosition="1248">ed in this work. 1436 2.2 Graph-based Semi-Supervised Learning In graph-based semi-supervised learning, one constructs a graph whose vertices are labeled and unlabeled examples. Weighted edges in the graph, connecting pairs of examples/vertices, encode the degree to which they are expected to have the same label (Zhu et al., 2003). Variants of label propagation are used to transfer labels from the labeled to the unlabeled examples. There are several instances of the use of graph-based methods for natural language tasks. Most relevant to our work an approach to word-sense disambiguation due to Niu et al. (2005). Their formulation was transductive, so that the test data was part of the constructed graph, and they did not consider predicate-argument analysis. In contrast, we make use of the smoothed graph during inference in a probabilistic setting, in turn using it for the full frame-semantic parsing task. Recently, Subramanya et al. (2010) proposed the use of a graph over substructures of an underlying sequence model, and used a smoothed graph for domain adaptation of part-of-speech taggers. Subramanya et al.’s model was extended by Das and Petrov (2011) to induce part-of-speech dictionaries for uns</context>
+</contexts>
+<marker>Niu, Ji, Tan, 2005</marker>
+<rawString>Z.-Y. Niu, D.-H. Ji, and C. L. Tan. 2005. Word sense disambiguation using label propagation based semisupervised learning. In Proc. of ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>S Pad´o</author>
+<author>M Lapata</author>
+</authors>
+<title>Cross-linguistic projection of role-semantic information.</title>
+<date>2005</date>
+<booktitle>In Proc. of HLTEMNLP.</booktitle>
+<marker>Pad´o, Lapata, 2005</marker>
+<rawString>S. Pad´o and M. Lapata. 2005. Cross-linguistic projection of role-semantic information. In Proc. of HLTEMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>M Pennacchiotti</author>
+<author>D De Cao</author>
+<author>R Basili</author>
+<author>D Croce</author>
+<author>M Roth</author>
+</authors>
+<title>Automatic induction of FrameNet lexical units.</title>
+<date>2008</date>
+<booktitle>In Proc. of EMNLP.</booktitle>
+<marker>Pennacchiotti, De Cao, Basili, Croce, Roth, 2008</marker>
+<rawString>M. Pennacchiotti, D. De Cao, R. Basili, D. Croce, and M. Roth. 2008. Automatic induction of FrameNet lexical units. In Proc. of EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>S P Ponzetto</author>
+<author>M Strube</author>
+</authors>
+<title>Deriving a large scale taxonomy from wikipedia.</title>
+<date>2007</date>
+<booktitle>In Proc. of AAAI.</booktitle>
+<contexts>
+<context position="6360" citStr="Ponzetto and Strube, 2007" startWordPosition="967" endWordPosition="970">ere has been work on identifying multiple frames and their corresponding sets of arguments in a sentence. The LTH system of Johansson and Nugues (2007) performed the best in the SemEval’07 shared task on frame-semantic parsing. Our probabilistic frame-semantic parser outperforms LTH on that task and dataset (Das et al., 2010a). The current paper builds on those probabilistic models to improve coverage on unseen predicates.2 Expert resources have limited coverage, and FrameNet is no exception. Automatic induction of semantic resources has been a major effort in recent years (Snow et al., 2006; Ponzetto and Strube, 2007, inter alia). In the domain of frame semantics, previous work has sought to extend the coverage of FrameNet by exploiting resources like VerbNet, WordNet, or Wikipedia (Shi and Mihalcea, 2005; Giuglea and Moschitti, 2006; Pennacchiotti et al., 2008; Tonelli and Giuliano, 2009), and projecting entries and annotations within and across languages (Boas, 2002; Fung and Chen, 2004; Pad´o and Lapata, 2005). Although these approaches have increased coverage to various degrees, they rely on other lexicons and resources created by experts. F¨urstenau and Lapata (2009) proposed the use of unlabeled dat</context>
+</contexts>
+<marker>Ponzetto, Strube, 2007</marker>
+<rawString>S. P. Ponzetto and M. Strube. 2007. Deriving a large scale taxonomy from wikipedia. In Proc. of AAAI.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>A Ratnaparkhi</author>
+</authors>
+<title>A maximum entropy model for part-of-speech tagging.</title>
+<date>1996</date>
+<booktitle>In Proc. of EMNLP.</booktitle>
+<contexts>
+<context position="25290" citStr="Ratnaparkhi, 1996" startWordPosition="4194" endWordPosition="4195">remaining ones as our test set. After scanning the exemplar sentences and the training data, we arrived at a set of 877 frames, 1,068 roles,10 and 9,263 targets. Our training split of the full-text annotations contained 3,256 sentences with 19,582 frame annotatations with corresponding roles, while the test set contained 2,420 sentences with 4,458 annotations (the test set contained fewer annotated targets per sentence). We also divide the 55 training documents into 5 parts for crossvalidation (see §6.3). The raw sentences in all the training and test documents were preprocessed using MXPOST (Ratnaparkhi, 1996) and the MST dependency parser (McDonald et al., 2005) following Das et al. (2010a). In this work we assume the frame-evoking targets have been correctly identified in training and test data. 10Note that the number of listed roles in the lexicon is nearly 9,000, but their number in actual annotations is a lot fewer. 6.2 Baselines We compare our model with three baselines. The first baseline is the purely supervised model of Das et al. (2010a) trained on the training split of 55 documents. Note that this is the strongest baseline available for this task;11 we refer to this model as “SEMAFOR.” T</context>
+</contexts>
+<marker>Ratnaparkhi, 1996</marker>
+<rawString>A. Ratnaparkhi. 1996. A maximum entropy model for part-of-speech tagging. In Proc. of EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>L Shi</author>
+<author>R Mihalcea</author>
+</authors>
+<title>An algorithm for open text semantic parsing.</title>
+<date>2004</date>
+<booktitle>In Proc. of Workshop on Robust Methods in Analysis of Natural Language Data.</booktitle>
+<contexts>
+<context position="5539" citStr="Shi and Mihalcea, 2004" startWordPosition="831" endWordPosition="834">observed predicates (§6). 2 Background Before going into the details of our model, we provide some background on two topics relevant to this paper: frame-semantic parsing and graph-based learning applied to natural language tasks. 2.1 Frame-semantic Parsing Gildea and Jurafsky (2002) pioneered SRL, and since then there has been much applied research on predicate-argument semantics. Early work on frame-semantic role labeling made use of the exemplar sentences in the FrameNet corpus, each of which is annotated for a single frame and its arguments (Thompson et al., 2003; Fleischman et al., 2003; Shi and Mihalcea, 2004; Erk and Pad´o, 2006, inter alia). Most of this work was done on an older, smaller version of FrameNet. Recently, since the release of full-text annotations in SemEval’07 (Baker et al., 2007), there has been work on identifying multiple frames and their corresponding sets of arguments in a sentence. The LTH system of Johansson and Nugues (2007) performed the best in the SemEval’07 shared task on frame-semantic parsing. Our probabilistic frame-semantic parser outperforms LTH on that task and dataset (Das et al., 2010a). The current paper builds on those probabilistic models to improve coverage</context>
+</contexts>
+<marker>Shi, Mihalcea, 2004</marker>
+<rawString>L. Shi and R. Mihalcea. 2004. An algorithm for open text semantic parsing. In Proc. of Workshop on Robust Methods in Analysis of Natural Language Data.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>L Shi</author>
+<author>R Mihalcea</author>
+</authors>
+<title>Putting pieces together: combining FrameNet, VerbNet and WordNet for robust semantic parsing.</title>
+<date>2005</date>
+<booktitle>In Computational Linguistics and Intelligent Text Processing: Proc. of CICLing</booktitle>
+<publisher>Springer-Verlag.</publisher>
+<contexts>
+<context position="6552" citStr="Shi and Mihalcea, 2005" startWordPosition="997" endWordPosition="1000"> task on frame-semantic parsing. Our probabilistic frame-semantic parser outperforms LTH on that task and dataset (Das et al., 2010a). The current paper builds on those probabilistic models to improve coverage on unseen predicates.2 Expert resources have limited coverage, and FrameNet is no exception. Automatic induction of semantic resources has been a major effort in recent years (Snow et al., 2006; Ponzetto and Strube, 2007, inter alia). In the domain of frame semantics, previous work has sought to extend the coverage of FrameNet by exploiting resources like VerbNet, WordNet, or Wikipedia (Shi and Mihalcea, 2005; Giuglea and Moschitti, 2006; Pennacchiotti et al., 2008; Tonelli and Giuliano, 2009), and projecting entries and annotations within and across languages (Boas, 2002; Fung and Chen, 2004; Pad´o and Lapata, 2005). Although these approaches have increased coverage to various degrees, they rely on other lexicons and resources created by experts. F¨urstenau and Lapata (2009) proposed the use of unlabeled data to improve coverage, but their work was limited to verbs. Bejan (2009) used self-training to improve frame identification and reported improvements, but did not explicitly model unknown targ</context>
+</contexts>
+<marker>Shi, Mihalcea, 2005</marker>
+<rawString>L. Shi and R. Mihalcea. 2005. Putting pieces together: combining FrameNet, VerbNet and WordNet for robust semantic parsing. In Computational Linguistics and Intelligent Text Processing: Proc. of CICLing 2005. Springer-Verlag.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>R Snow</author>
+<author>D Jurafsky</author>
+<author>A Y Ng</author>
+</authors>
+<title>Semantic taxonomy induction from heterogenous evidence.</title>
+<date>2006</date>
+<booktitle>In Proc. of COLING-ACL.</booktitle>
+<contexts>
+<context position="6333" citStr="Snow et al., 2006" startWordPosition="963" endWordPosition="966">r et al., 2007), there has been work on identifying multiple frames and their corresponding sets of arguments in a sentence. The LTH system of Johansson and Nugues (2007) performed the best in the SemEval’07 shared task on frame-semantic parsing. Our probabilistic frame-semantic parser outperforms LTH on that task and dataset (Das et al., 2010a). The current paper builds on those probabilistic models to improve coverage on unseen predicates.2 Expert resources have limited coverage, and FrameNet is no exception. Automatic induction of semantic resources has been a major effort in recent years (Snow et al., 2006; Ponzetto and Strube, 2007, inter alia). In the domain of frame semantics, previous work has sought to extend the coverage of FrameNet by exploiting resources like VerbNet, WordNet, or Wikipedia (Shi and Mihalcea, 2005; Giuglea and Moschitti, 2006; Pennacchiotti et al., 2008; Tonelli and Giuliano, 2009), and projecting entries and annotations within and across languages (Boas, 2002; Fung and Chen, 2004; Pad´o and Lapata, 2005). Although these approaches have increased coverage to various degrees, they rely on other lexicons and resources created by experts. F¨urstenau and Lapata (2009) propos</context>
+</contexts>
+<marker>Snow, Jurafsky, Ng, 2006</marker>
+<rawString>R. Snow, D. Jurafsky, and A. Y. Ng. 2006. Semantic taxonomy induction from heterogenous evidence. In Proc. of COLING-ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>A Subramanya</author>
+<author>J A Bilmes</author>
+</authors>
+<title>Entropic graph regularization in non-parametric semi-supervised classification.</title>
+<date>2009</date>
+<booktitle>In Proc. of NIPS.</booktitle>
+<contexts>
+<context position="17882" citStr="Subramanya and Bilmes (2009)" startWordPosition="2854" endWordPosition="2858">ons of similar nodes (large wtu) to be similar. The final term is a regularizer encouraging all distributions to be uniform to the extent allowed by the first two terms. (If an unlabeled vertex does not have a path to any labeled vertex, this term ensures that its converged marginal will be uniform over all frames.) µ and ν are hyperparameters whose choice we discuss in §6.3. Note that Eq. 2 is convex in q. While it is possible to derive a closed form solution for this objective 7Instead of a quadratic cost, an entropic distance measure could have been used, e.g., KL-divergence, considered by Subramanya and Bilmes (2009). We do not explore that direction in the current paper. function, it would require the inversion of a |V |×|V | matrix. Hence, like Subramanya et al. (2010), we employ an iterative method with updates defined as: γt(f) ← rt(f)1{t ∈ Vl} (3) + µ u∈N(t) X wtuq(m−1) u (f) + ν |F| κt ← 1{t ∈ Vl} + ν + µ X wtu (4) u∈N(t) qt (f) ← γt(f)/κt (m) (5) Here, 1{·} is an indicator function. The iterative procedure starts with a uniform distribution for each qt . For all our experiments, we run 10 iterations (0) of the updates. The final distribution of frames for a target t is denoted by q∗t. 5 Learning an</context>
+</contexts>
+<marker>Subramanya, Bilmes, 2009</marker>
+<rawString>A. Subramanya and J. A. Bilmes. 2009. Entropic graph regularization in non-parametric semi-supervised classification. In Proc. of NIPS.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>A Subramanya</author>
+<author>S Petrov</author>
+<author>F Pereira</author>
+</authors>
+<title>Efficient Graph-based Semi-Supervised Learning of Structured Tagging Models.</title>
+<date>2010</date>
+<booktitle>In Proc. of EMNLP.</booktitle>
+<contexts>
+<context position="8479" citStr="Subramanya et al. (2010)" startWordPosition="1299" endWordPosition="1303">003). Variants of label propagation are used to transfer labels from the labeled to the unlabeled examples. There are several instances of the use of graph-based methods for natural language tasks. Most relevant to our work an approach to word-sense disambiguation due to Niu et al. (2005). Their formulation was transductive, so that the test data was part of the constructed graph, and they did not consider predicate-argument analysis. In contrast, we make use of the smoothed graph during inference in a probabilistic setting, in turn using it for the full frame-semantic parsing task. Recently, Subramanya et al. (2010) proposed the use of a graph over substructures of an underlying sequence model, and used a smoothed graph for domain adaptation of part-of-speech taggers. Subramanya et al.’s model was extended by Das and Petrov (2011) to induce part-of-speech dictionaries for unsupervised learning of taggers. Our semi-supervised learning setting is similar to these two lines of work and, like them, we use the graph to arrive at better final structures, in an inductive setting (i.e., where a parametric model is learned and then separately applied to test data, following most NLP research). 3 Approach Overview</context>
+<context position="16374" citStr="Subramanya et al. (2010)" startWordPosition="2554" endWordPosition="2557">. 1438 have soft frame labels on them. Figure 2 shows an excerpt from a constructed graph. For simplicity, only the most probable frames under the empirical distribution for the observed targets are shown; we actually label each vertex with the full empirical distribution over frames for the corresponding observed target in the data. The dotted lines demarcate parts of the graph that associate with different frames. Label propagation helps propagate the initial soft labels throughout the graph. To this end, we use a variant of the quadratic cost criterion of Bengio et al. (2006), also used by Subramanya et al. (2010) and Das and Petrov (2011).7 Let V denote the set of all vertices in the graph, Vl ⊂ V be the set of known targets and F denote the set of all frames. Let N(t) denote the set of neighbors of vertex t ∈ V . Let q = {q1, q2, ... , q|V |} be the set of frame distributions, one per vertex. For each known target t ∈ Vl, we have an initial frame distribution rt. For every edge in the graph, weights are defined as in Eq. 1. We find q by solving: arg minq &amp;∈ v `I rt − qt k2 + µ &amp;EV,u∈N(t) wtu k qt − qu k2 + ν &amp;∈V kqt − 1 |F|k2 s.t. ∀t ∈ V, P f∈F qt(f) = 1 ∀t ∈ V,f ∈ F, qt(f) ≥ 0 (2) We use a squared l</context>
+<context position="18039" citStr="Subramanya et al. (2010)" startWordPosition="2883" endWordPosition="2886">o terms. (If an unlabeled vertex does not have a path to any labeled vertex, this term ensures that its converged marginal will be uniform over all frames.) µ and ν are hyperparameters whose choice we discuss in §6.3. Note that Eq. 2 is convex in q. While it is possible to derive a closed form solution for this objective 7Instead of a quadratic cost, an entropic distance measure could have been used, e.g., KL-divergence, considered by Subramanya and Bilmes (2009). We do not explore that direction in the current paper. function, it would require the inversion of a |V |×|V | matrix. Hence, like Subramanya et al. (2010), we employ an iterative method with updates defined as: γt(f) ← rt(f)1{t ∈ Vl} (3) + µ u∈N(t) X wtuq(m−1) u (f) + ν |F| κt ← 1{t ∈ Vl} + ν + µ X wtu (4) u∈N(t) qt (f) ← γt(f)/κt (m) (5) Here, 1{·} is an indicator function. The iterative procedure starts with a uniform distribution for each qt . For all our experiments, we run 10 iterations (0) of the updates. The final distribution of frames for a target t is denoted by q∗t. 5 Learning and Inference for Frame-Semantic Parsing In this section, we briefly review learning and inference techniques used in the frame-semantic parser, which are larg</context>
+</contexts>
+<marker>Subramanya, Petrov, Pereira, 2010</marker>
+<rawString>A. Subramanya, S. Petrov, and F. Pereira. 2010. Efficient Graph-based Semi-Supervised Learning of Structured Tagging Models. In Proc. of EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>C A Thompson</author>
+<author>R Levy</author>
+<author>C D Manning</author>
+</authors>
+<title>A generative model for semantic role labeling.</title>
+<date>2003</date>
+<booktitle>In Proc. of ECML.</booktitle>
+<contexts>
+<context position="5490" citStr="Thompson et al., 2003" startWordPosition="823" endWordPosition="826">ly, indicating improved coverage for hitherto unobserved predicates (§6). 2 Background Before going into the details of our model, we provide some background on two topics relevant to this paper: frame-semantic parsing and graph-based learning applied to natural language tasks. 2.1 Frame-semantic Parsing Gildea and Jurafsky (2002) pioneered SRL, and since then there has been much applied research on predicate-argument semantics. Early work on frame-semantic role labeling made use of the exemplar sentences in the FrameNet corpus, each of which is annotated for a single frame and its arguments (Thompson et al., 2003; Fleischman et al., 2003; Shi and Mihalcea, 2004; Erk and Pad´o, 2006, inter alia). Most of this work was done on an older, smaller version of FrameNet. Recently, since the release of full-text annotations in SemEval’07 (Baker et al., 2007), there has been work on identifying multiple frames and their corresponding sets of arguments in a sentence. The LTH system of Johansson and Nugues (2007) performed the best in the SemEval’07 shared task on frame-semantic parsing. Our probabilistic frame-semantic parser outperforms LTH on that task and dataset (Das et al., 2010a). The current paper builds </context>
+</contexts>
+<marker>Thompson, Levy, Manning, 2003</marker>
+<rawString>C. A. Thompson, R. Levy, and C. D. Manning. 2003. A generative model for semantic role labeling. In Proc. of ECML.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>S Tonelli</author>
+<author>C Giuliano</author>
+</authors>
+<title>Wikipedia as frame information repository.</title>
+<date>2009</date>
+<booktitle>In Proc. of EMNLP.</booktitle>
+<contexts>
+<context position="6638" citStr="Tonelli and Giuliano, 2009" startWordPosition="1009" endWordPosition="1012">rms LTH on that task and dataset (Das et al., 2010a). The current paper builds on those probabilistic models to improve coverage on unseen predicates.2 Expert resources have limited coverage, and FrameNet is no exception. Automatic induction of semantic resources has been a major effort in recent years (Snow et al., 2006; Ponzetto and Strube, 2007, inter alia). In the domain of frame semantics, previous work has sought to extend the coverage of FrameNet by exploiting resources like VerbNet, WordNet, or Wikipedia (Shi and Mihalcea, 2005; Giuglea and Moschitti, 2006; Pennacchiotti et al., 2008; Tonelli and Giuliano, 2009), and projecting entries and annotations within and across languages (Boas, 2002; Fung and Chen, 2004; Pad´o and Lapata, 2005). Although these approaches have increased coverage to various degrees, they rely on other lexicons and resources created by experts. F¨urstenau and Lapata (2009) proposed the use of unlabeled data to improve coverage, but their work was limited to verbs. Bejan (2009) used self-training to improve frame identification and reported improvements, but did not explicitly model unknown targets. In contrast, we use statistics gathered from large volumes of unlabeled data to i</context>
+</contexts>
+<marker>Tonelli, Giuliano, 2009</marker>
+<rawString>S. Tonelli and C. Giuliano. 2009. Wikipedia as frame information repository. In Proc. of EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>X Zhu</author>
+<author>Z Ghahramani</author>
+<author>J D Lafferty</author>
+</authors>
+<title>Semisupervised learning using gaussian fields and harmonic functions.</title>
+<date>2003</date>
+<booktitle>In Proc. of ICML.</booktitle>
+<contexts>
+<context position="7859" citStr="Zhu et al., 2003" startWordPosition="1198" endWordPosition="1201">ve the coverage of a frame-semantic parser on several syntactic categories, in a novel framework that makes use of graph-based semi-supervised learning. 2SEMAFOR, the system presented by Das et al. (2010a) is publicly available at http://www.ark.cs.cmu.edu/ SEMAFOR and has been extended in this work. 1436 2.2 Graph-based Semi-Supervised Learning In graph-based semi-supervised learning, one constructs a graph whose vertices are labeled and unlabeled examples. Weighted edges in the graph, connecting pairs of examples/vertices, encode the degree to which they are expected to have the same label (Zhu et al., 2003). Variants of label propagation are used to transfer labels from the labeled to the unlabeled examples. There are several instances of the use of graph-based methods for natural language tasks. Most relevant to our work an approach to word-sense disambiguation due to Niu et al. (2005). Their formulation was transductive, so that the test data was part of the constructed graph, and they did not consider predicate-argument analysis. In contrast, we make use of the smoothed graph during inference in a probabilistic setting, in turn using it for the full frame-semantic parsing task. Recently, Subr</context>
+</contexts>
+<marker>Zhu, Ghahramani, Lafferty, 2003</marker>
+<rawString>X. Zhu, Z. Ghahramani, and J. D. Lafferty. 2003. Semisupervised learning using gaussian fields and harmonic functions. In Proc. of ICML.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

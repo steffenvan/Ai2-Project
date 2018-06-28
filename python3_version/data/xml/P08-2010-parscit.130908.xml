@@ -1,0 +1,656 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.000220">
+<title confidence="0.9978075">
+Beyond Log-Linear Models:
+Boosted Minimum Error Rate Training for N-best Re-ranking
+</title>
+<author confidence="0.997944">
+Kevin Duh*
+</author>
+<affiliation confidence="0.9967045">
+Dept. of Electrical Engineering
+University of Washington
+</affiliation>
+<address confidence="0.920006">
+Seattle, WA 98195
+</address>
+<email confidence="0.999188">
+kevinduh@u.washington.edu
+</email>
+<author confidence="0.995792">
+Katrin Kirchhoff
+</author>
+<affiliation confidence="0.9977525">
+Dept. of Electrical Engineering
+University of Washington
+</affiliation>
+<address confidence="0.919954">
+Seattle, WA 98195
+</address>
+<email confidence="0.999252">
+katrin@ee.washington.edu
+</email>
+<sectionHeader confidence="0.995666" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.989758285714286">
+Current re-ranking algorithms for machine
+translation rely on log-linear models, which
+have the potential problem of underfitting the
+training data. We present BoostedMERT, a
+novel boosting algorithm that uses Minimum
+Error Rate Training (MERT) as a weak learner
+and builds a re-ranker far more expressive than
+log-linear models. BoostedMERT is easy to
+implement, inherits the efficient optimization
+properties of MERT, and can quickly boost the
+BLEU score on N-best re-ranking tasks. In
+this paper, we describe the general algorithm
+and present preliminary results on the IWSLT
+2007 Arabic-English task.
+</bodyText>
+<sectionHeader confidence="0.998976" genericHeader="keywords">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.98942675">
+N-best list re-ranking is an important component in
+many complex natural language processing applica-
+tions (e.g. machine translation, speech recognition,
+parsing). Re-ranking the N-best lists generated from
+a 1st-pass decoder can be an effective approach be-
+cause (a) additional knowledge (features) can be in-
+corporated, and (b) the search space is smaller (i.e.
+choose 1 out of N hypotheses).
+Despite these theoretical advantages, we have of-
+ten observed little gains in re-ranking machine trans-
+lation (MT) N-best lists in practice. It has often
+been observed that N-best list rescoring only yields
+a moderate improvement over the first-pass output
+although the potential improvement as measured by
+the oracle-best hypothesis for each sentence is much
+&apos;work supported by an NSF Graduate Research Fellowship.
+</bodyText>
+<page confidence="0.99707">
+37
+</page>
+<bodyText confidence="0.988580357142857">
+higher. This shows that hypothesis features are ei-
+ther not discriminative enough, or that the reranking
+model is too weak
+This performance gap can be mainly attributed to
+two problems: optimization error and modeling er-
+ror (see Figure 1).1 Much work has focused on de-
+veloping better algorithms to tackle the optimization
+problem (e.g. MERT (Och, 2003)), since MT eval-
+uation metrics such as BLEU and PER are riddled
+with local minima and are difficult to differentiate
+with respect to re-ranker parameters. These opti-
+mization algorithms are based on the popular log-
+linear model, which chooses the English translation
+e of a foreign sentence f by the rule:
+</bodyText>
+<equation confidence="0.790109">
+�K
+arg max, p(e�f) � arg max, k�1 AkOk(e, f)
+</equation>
+<bodyText confidence="0.999850230769231">
+where Ok(e, f) and Ak are the K features and
+weights, respectively, and the argmax is over all hy-
+potheses in the N-best list.
+We believe that standard algorithms such as
+MERT already achieve low optimization error (this
+is based on experience where many random re-starts
+of MERT give little gains); instead the score gap is
+mainly due to modeling errors. Standard MT sys-
+tems use a small set of features (i.e. K Pz� 10) based
+on language/translation models.2 Log-linear mod-
+els on such few features are simply not expressive
+enough to achieve the oracle score, regardless of
+how well the weights IAkI are optimized.
+</bodyText>
+<footnote confidence="0.994809">
+1Note that we are focusing on closing the gap to the oracle
+score on the training set (or the development set); if we were
+focusing on the test set, there would be an additional term, the
+generalization error.
+2In this work, we do not consider systems which utilize a
+large smorgasbord of features, e.g. (Och and others, 2004).
+</footnote>
+<note confidence="0.546804">
+Proceedings of ACL-08: HLT, Short Papers (Companion Volume), pages 37–40,
+</note>
+<page confidence="0.548999">
+Columbus, Ohio, USA, June 2008. c�2008 Association for Computational Linguistics
+</page>
+<figure confidence="0.951488125">
+BLEU=.56, achieved by
+selecting oracle hypotheses
+Modeling problem:
+Log-linear model insufficient?
+Optimization problem:
+Stuck in local optimum?
+BLEU=.40, achieved by
+re-ranking with MERT
+</figure>
+<figureCaption confidence="0.812842">
+Figure 1: Both modeling and optimization problems in-
+crease the (training set) BLEU score gap between MERT
+</figureCaption>
+<bodyText confidence="0.975917647058824">
+re-ranking and oracle hypotheses. We believe that the
+modeling problem is more serious for log-linear models
+of around 10 features and focus on it in this work.
+To truly achieve the benefits of re-ranking in MT,
+one must go beyond the log-linear model. The re-
+ranker should not be a mere dot product operation,
+but a more dynamic and complex decision maker
+that exploits the structure of the N-best re-ranking
+problem.
+We present BoostedMERT, a general framework
+for learning such complex re-rankers using standard
+MERT as a building block. BoostedMERT is easy to
+implement, inherits MERT’s efficient optimization
+procedure, and more effectively boosts the training
+score. We describe the algorithm in Section 2, report
+experiment results in Section 3, and end with related
+work and future directions (Sections 4, 5).
+</bodyText>
+<sectionHeader confidence="0.978035" genericHeader="introduction">
+2 BoostedMERT
+</sectionHeader>
+<bodyText confidence="0.999878733333333">
+The idea for BoostedMERT follows the boosting
+philosophy of combining several weak classifiers
+to create a strong overall classifier (Schapire and
+Singer, 1999). In the classification case, boosting
+maintains a distribution over each training sample:
+the distribution is increased for samples that are in-
+correctly classified and decreased otherwise. In each
+boosting iteration, a weak learner is trained to opti-
+mize on the weighted sample distribution, attempt-1
+ing to correct the mistakes made in the previous iter-
+ation. The final classifier is a weighted combination
+of weak learners. This simple procedure is very ef-
+fective in reducing training and generalization error.
+In BoostedMERT, we maintain a sample distribu-
+tion di, i = 1... M over the M N-best lists.3 In
+</bodyText>
+<footnote confidence="0.6611305">
+3As such, it differs from RankBoost, a boosting-based rank-
+ing algorithm in information retrieval (Freund et al., 2003). If
+</footnote>
+<bodyText confidence="0.967898791666667">
+each boosting iteration t, MERT is called as as sub-
+procedure to find the best feature weights At on di.4
+The sample weight for an N-best list is increased if
+the currently selected hypothesis is far from the ora-
+cle score, and decreased otherwise. Here, the oracle
+hypothesis for each N-best list is defined as the hy-
+pothesis with the best sentence-level BLEU. The fi-
+nal ranker is a combination of (weak) MERT ranker
+outputs.
+Algorithm 1 presents more detailed pseudocode.
+We use the following notation: Let {xi} represent
+the set of M training N-best lists, i = 1... M. Each
+N-best list xi contains N feature vectors (for N hy-
+potheses). Each feature vector is of dimension K,
+which is the same dimension as the number of fea-
+ture weights A obtained by MERT. Let {bi} be the
+set of BLEU statistics for each hypothesis in {xi},
+which is used to train MERT or to compute BLEU
+scores for each hypothesis or oracle.
+Algorithm 1 BoostedMERT
+Input: N-best lists {xi}, BLEU scores {bi}
+Input: Initialize sample distribution di uniformly
+Input: Initialize y0 = [0], a constant zero vector
+Output: Overall Ranker: fT
+</bodyText>
+<listItem confidence="0.993482583333333">
+1: for t = 1 to T do
+2: Weak ranker: At = MERT({xi},{bi},di)
+4: if (t ≥ 2): {yt−1} = PRED(ft−1, {xi})
+5: {yt} = PRED(At, {xi})
+6: αt = MERT ([yt−1; yt],{bi})
+7: Overall ranker: ft = yt−1 + αtyt
+9: fori=1toMdo
+10: ai = [BLEU of hypothesis selected by ft]
+divided by [BLEU of oracle hypothesis]
+11: di = exp(−ai)/normalizer
+12: end for
+3: end for
+</listItem>
+<bodyText confidence="0.655646666666667">
+applied on MT, RankBoost would maintain a weight for each
+pair of hypotheses and would optimize a pairwise ranking met-
+ric, which is quite dissimilar to BLEU.
+</bodyText>
+<footnote confidence="0.8326775">
+4This is done by scaling each BLEU statistic, e.g. n-gram
+precision, reference length, by the appropriate sample weights
+before computing corpus-level BLEU. Alternatively, one could
+sample (with replacement) the N-best lists using the distribu-
+tion and use the resulting stochastic sample as input to an un-
+modified MERT procedure.
+</footnote>
+<page confidence="0.997845">
+38
+</page>
+<bodyText confidence="0.975738">
+The pseudocode can be divided into 3 sections:
+</bodyText>
+<listItem confidence="0.642179714285714">
+1. Line 2 finds the best log-linear feature weights
+on distribution di. MERT is invoked as a weak
+learner, so this step is computationally efficient
+for optimizing MT-specific metrics.
+2. Lines 4-7 create an overall ranker by combin-
+ing the outputs of the previous overall ranker
+ft−1 and current weak ranker At. PRED is a
+general function that takes a ranker and a M
+N-best lists and generates a set of M N-dim
+output vector y representing the predicted re-
+ciprocal rank. Specifically, suppose a 3-best list
+and a ranker predicts ranks (1,3,2) for the 1st,
+2nd, and 3rd hypotheses, respectively. Then
+y = (1/1,1/3,1/2) = (1,0.3,0.5).5
+</listItem>
+<bodyText confidence="0.999810666666667">
+Finally, using a 1-dimensional MERT, the
+scalar parameter at is optimized by maximiz-
+ing the BLEU of the hypothesis chosen by
+yt−1+atyt. This is analogous to the line search
+step in boosting for classification (Mason et al.,
+2000).
+</bodyText>
+<listItem confidence="0.498654">
+3. Lines 9-11 update the sample distribution di
+such that N-best lists with low accuracies ai
+are given higher emphasis in the next iteration.
+The per-list accuracy ai is defined as the ratio of
+selected vs. oracle BLEU, but other measures
+are possible: e.g. ratio of ranks, difference of
+BLEU.
+</listItem>
+<bodyText confidence="0.909734740740741">
+The final classifier fT can be seen as a voting pro-
+cedure among multiple log-linear models generated
+by MERT. The weighted vote for hypotheses in an
+N-best list xi is represented by the N-dimensional
+vector: y� = ETt=1 atyt = ETt=1 at PRED(At, xi).
+We choose the hypothesis with the maximum value
+in y�
+Finally, we stress that the above algorithm
+is an novel extension of boosting to re-ranking
+problems. There are many open questions and
+one can not always find a direct analog between
+boosting for classification and boosting for rank-
+ing. For instance, the distribution update scheme
+5There are other ways to define a ranking output that are
+worth exploring. For example, a hard argmax definition would
+be (1,0,0); a probabilistic definition derived from the dot prod-
+uct values can also be used. It is the definition of PRED that
+introduces non-linearities in BoostedMERT.
+of Lines 9-11 is recursive in the classification
+case (i.e. di = di * exp(LossOfWeakLearner)),
+but due to the non-decompositional properties of
+arg max in re-ranking, we have a non-recursive
+equation based on the overall learner (di =
+exp(LossOfOverallLearner)). This has deep impli-
+cations on the dynamics of boosting, e.g. the distri-
+bution may stay constant in the non-recursive equa-
+tion, if the new weak ranker gets a small a.
+</bodyText>
+<sectionHeader confidence="0.99879" genericHeader="background">
+3 Experiments
+</sectionHeader>
+<bodyText confidence="0.999947382352941">
+The experiments are done on the IWSLT 2007
+Arabic-to-English task (clean text condition). We
+used a standard phrase-based statistical MT system
+(Kirchhoff and Yang, 2007) to generated N-best lists
+(N=2000) on Development4, Development5,
+and Evaluation sub-sets. Development4 is
+used as the Train set; N-best lists that have the same
+sentence-level BLEU statistics for all hypotheses are
+filtered since they are not important in impacting
+training. Development5 is used as Dev set (in
+particular, for selecting the number of iterations in
+boosting), and Evaluation (Eval) is the blind
+dataset for final ranker comparison. Nine features
+are used in re-ranking.
+We compare MERT vs. BoostedMERT. MERT is
+randomly re-started 30 times, and BoostedMERT is
+run for 30 iterations, which makes for a relatively
+fair comparison. MERT usually does not improve
+its Train BLEU score, even with many random re-
+starts (again, this suggests that optimization error
+is low). Table 1 shows the results, with Boosted-
+MERT outperforming MERT 42.0 vs. 41.2 BLEU
+on Eval. BoostedMERT has the potential to achieve
+43.7 BLEU, if a better method for selecting optimal
+iterations can be devised.
+It should be noted that the Train scores achieved
+by both MERT and BoostedMERT is still far from
+the oracle (around 56). We found empirically that
+BoostedMERT is somewhat sensitive to the size (M)
+of the Train set. For small Train sets, BoostedMERT
+can improve the training score quite drastically; for
+the current Train set as well as other larger ones, the
+improvement per iteration is much slower. We plan
+to investigate this in future work.
+</bodyText>
+<page confidence="0.997475">
+39
+</page>
+<table confidence="0.9994546">
+MERT BOOST A
+Train, Best BLEU 40.3 41.0 0.7
+Dev, Best BLEU 24.0 25.0 1.0
+Eval, Best BLEU 41.2 43.7 2.5
+Eval, Selected BLEU 41.2 42.0 0.8
+</table>
+<tableCaption confidence="0.750785714285714">
+Table 1: The first three rows show the BLEU score for
+Train, Dev, and Eval from 30 iterations of BoostedMERT
+or 30 random re-restarts of MERT. The last row shows
+the actual BLEU on Eval when selecting the number
+of boosting iterations based on Dev. Last column in-
+dicates absolute improvements. BoostedMERT outper-
+forms MERT by 0.8 points on Eval.
+</tableCaption>
+<sectionHeader confidence="0.99991" genericHeader="related work">
+4 Related Work
+</sectionHeader>
+<bodyText confidence="0.9998471">
+Various methods are used to optimize log-linear
+models in re-ranking (Shen et al., 2004; Venugopal
+et al., 2005; Smith and Eisner, 2006). Although
+this line of work is worthwhile, we believe more
+gain is possible if we go beyond log-linear models.
+For example, Shen’s method (2004) produces large-
+margins but observed little gains in performance.
+Our BoostedMERT should not be confused with
+other boosting algorithms such as (Collins and Koo,
+2005; Kudo et al., 2005). These algorithms are
+called boosting because they iteratively choose fea-
+tures (weak learners) and optimize the weights for
+the boost/exponential loss. They do not, however,
+maintain a distribution over N-best lists.
+The idea of maintaining a distribution over N-
+best lists is novel. To the best of our knowledge,
+the most similar algorithm is AdaRank (Xu and Li,
+2007), developed for document ranking in informa-
+tion retrieval. Our main difference lies in Lines 4-7
+in Algorithm 1: AdaRank proposes a simple closed
+form solution for α and combines only weak fea-
+tures, not full learners (as in MERT). We have also
+implemented AdaRank but it gave inferior results.
+It should be noted that the theoretical training
+bounds derived in the AdaRank paper is relevant
+to BoostedMERT. Similar to standard boosting, this
+bound shows that the training score can be improved
+exponentially in the number of iterations. However,
+we found that the conditions for which this bound is
+applicable is rarely satisfied in our experiments.6
+</bodyText>
+<footnote confidence="0.930439">
+6The explanation for this is beyond the scope of this paper;
+the basic reason is that our weak rankers (MERT) are not weak
+in practice, so that successive iterations get diminishing returns.
+</footnote>
+<sectionHeader confidence="0.997624" genericHeader="conclusions">
+5 Conclusions
+</sectionHeader>
+<bodyText confidence="0.999947411764706">
+We argue that log-linear models often underfit the
+training data in MT re-ranking, and that this is the
+reason we observe a large gap between re-ranker and
+oracle scores. Our solution, BoostedMERT, creates
+a highly-expressive ranker by voting among multiple
+MERT rankers.
+Although BoostedMERT improves over MERT,
+more work at both the theoretical and algorithmic
+levels is needed to demonstrate even larger gains.
+For example, while standard boosting for classifica-
+tion can exponentially reduce training error in the
+number of iterations under mild assumptions, these
+assumptions are frequently not satisfied in the algo-
+rithm we described. We intend to further explore
+the idea of boosting on N-best lists, drawing inspi-
+rations from the large body of work on boosting for
+classification whenever possible.
+</bodyText>
+<sectionHeader confidence="0.999115" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.999499724137931">
+M. Collins and T. Koo. 2005. Discriminative reranking
+for natural langauge parsing. Computational Linguis-
+tics, 31(1).
+Y. Freund, R. Iyer, R.E. Schapire, and Y. Singer. 2003.
+An efficient boosting algorithm for combining prefer-
+ences. Journal ofMachine Learning Research, 4.
+K. Kirchhoff and M. Yang. 2007. The UW machine
+translation system for IWSLT 2007. In IWSLT.
+T. Kudo, J. Suzuki, and H. Isozaki. 2005. Boosting-
+based parse reranking with subtree features. In ACL.
+L. Mason, J. Baxter, P. Bartless, and M. Frean. 2000.
+Boosting as gradient descent. In NIPS.
+F.J. Och et al. 2004. A smorgasbord of features for sta-
+tistical machine translation. In HLT/NAACL.
+F.J. Och. 2003. Minimum error rate training in statistical
+machine translation. In ACL.
+R. E. Schapire and Y. Singer. 1999. Improved boosting
+algorithms using confidence-rated predictions. Ma-
+chine Learning, 37(3).
+L. Shen, A. Sarkar, and F.J. Och. 2004. Discriminative
+reranking for machine translation. In HLT-NAACL.
+D. Smith and J. Eisner. 2006. Minimum risk anneal-
+ing for training log-linear models. In Proc. of COL-
+ING/ACL Companion Volume.
+A. Venugopal, A. Zollmann, and A. Waibel. 2005. Train-
+ing and evaluating error minimization rules for SMT.
+In ACL Workshop on Building/Using Parallel Texts.
+J. Xu and H. Li. 2007. AdaRank: A boosting algorithm
+for information retrieval. In SIGIR.
+</reference>
+<page confidence="0.998633">
+40
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.279464">
+<title confidence="0.751562">Beyond Log-Linear Models: Boosted Minimum Error Rate Training for N-best Re-ranking</title>
+<affiliation confidence="0.9993775">Dept. of Electrical Engineering University of Washington</affiliation>
+<address confidence="0.999972">Seattle, WA 98195</address>
+<email confidence="0.999657">kevinduh@u.washington.edu</email>
+<author confidence="0.996367">Katrin Kirchhoff</author>
+<affiliation confidence="0.9998685">Dept. of Electrical Engineering University of Washington</affiliation>
+<address confidence="0.999971">Seattle, WA 98195</address>
+<email confidence="0.999773">katrin@ee.washington.edu</email>
+<abstract confidence="0.968797266666667">Current re-ranking algorithms for machine translation rely on log-linear models, which have the potential problem of underfitting the data. We present a novel boosting algorithm that uses Minimum Error Rate Training (MERT) as a weak learner and builds a re-ranker far more expressive than log-linear models. BoostedMERT is easy to implement, inherits the efficient optimization properties of MERT, and can quickly boost the BLEU score on N-best re-ranking tasks. In this paper, we describe the general algorithm and present preliminary results on the IWSLT 2007 Arabic-English task.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>M Collins</author>
+<author>T Koo</author>
+</authors>
+<title>Discriminative reranking for natural langauge parsing.</title>
+<date>2005</date>
+<journal>Computational Linguistics,</journal>
+<volume>31</volume>
+<issue>1</issue>
+<contexts>
+<context position="12591" citStr="Collins and Koo, 2005" startWordPosition="2038" endWordPosition="2041">when selecting the number of boosting iterations based on Dev. Last column indicates absolute improvements. BoostedMERT outperforms MERT by 0.8 points on Eval. 4 Related Work Various methods are used to optimize log-linear models in re-ranking (Shen et al., 2004; Venugopal et al., 2005; Smith and Eisner, 2006). Although this line of work is worthwhile, we believe more gain is possible if we go beyond log-linear models. For example, Shen’s method (2004) produces largemargins but observed little gains in performance. Our BoostedMERT should not be confused with other boosting algorithms such as (Collins and Koo, 2005; Kudo et al., 2005). These algorithms are called boosting because they iteratively choose features (weak learners) and optimize the weights for the boost/exponential loss. They do not, however, maintain a distribution over N-best lists. The idea of maintaining a distribution over Nbest lists is novel. To the best of our knowledge, the most similar algorithm is AdaRank (Xu and Li, 2007), developed for document ranking in information retrieval. Our main difference lies in Lines 4-7 in Algorithm 1: AdaRank proposes a simple closed form solution for α and combines only weak features, not full lea</context>
+</contexts>
+<marker>Collins, Koo, 2005</marker>
+<rawString>M. Collins and T. Koo. 2005. Discriminative reranking for natural langauge parsing. Computational Linguistics, 31(1).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Y Freund</author>
+<author>R Iyer</author>
+<author>R E Schapire</author>
+<author>Y Singer</author>
+</authors>
+<title>An efficient boosting algorithm for combining preferences.</title>
+<date>2003</date>
+<journal>Journal ofMachine Learning Research,</journal>
+<volume>4</volume>
+<contexts>
+<context position="5560" citStr="Freund et al., 2003" startWordPosition="858" endWordPosition="861"> is increased for samples that are incorrectly classified and decreased otherwise. In each boosting iteration, a weak learner is trained to optimize on the weighted sample distribution, attempt-1 ing to correct the mistakes made in the previous iteration. The final classifier is a weighted combination of weak learners. This simple procedure is very effective in reducing training and generalization error. In BoostedMERT, we maintain a sample distribution di, i = 1... M over the M N-best lists.3 In 3As such, it differs from RankBoost, a boosting-based ranking algorithm in information retrieval (Freund et al., 2003). If each boosting iteration t, MERT is called as as subprocedure to find the best feature weights At on di.4 The sample weight for an N-best list is increased if the currently selected hypothesis is far from the oracle score, and decreased otherwise. Here, the oracle hypothesis for each N-best list is defined as the hypothesis with the best sentence-level BLEU. The final ranker is a combination of (weak) MERT ranker outputs. Algorithm 1 presents more detailed pseudocode. We use the following notation: Let {xi} represent the set of M training N-best lists, i = 1... M. Each N-best list xi conta</context>
+</contexts>
+<marker>Freund, Iyer, Schapire, Singer, 2003</marker>
+<rawString>Y. Freund, R. Iyer, R.E. Schapire, and Y. Singer. 2003. An efficient boosting algorithm for combining preferences. Journal ofMachine Learning Research, 4.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>K Kirchhoff</author>
+<author>M Yang</author>
+</authors>
+<title>The UW machine translation system for IWSLT</title>
+<date>2007</date>
+<booktitle>In IWSLT.</booktitle>
+<contexts>
+<context position="10202" citStr="Kirchhoff and Yang, 2007" startWordPosition="1644" endWordPosition="1647">oostedMERT. of Lines 9-11 is recursive in the classification case (i.e. di = di * exp(LossOfWeakLearner)), but due to the non-decompositional properties of arg max in re-ranking, we have a non-recursive equation based on the overall learner (di = exp(LossOfOverallLearner)). This has deep implications on the dynamics of boosting, e.g. the distribution may stay constant in the non-recursive equation, if the new weak ranker gets a small a. 3 Experiments The experiments are done on the IWSLT 2007 Arabic-to-English task (clean text condition). We used a standard phrase-based statistical MT system (Kirchhoff and Yang, 2007) to generated N-best lists (N=2000) on Development4, Development5, and Evaluation sub-sets. Development4 is used as the Train set; N-best lists that have the same sentence-level BLEU statistics for all hypotheses are filtered since they are not important in impacting training. Development5 is used as Dev set (in particular, for selecting the number of iterations in boosting), and Evaluation (Eval) is the blind dataset for final ranker comparison. Nine features are used in re-ranking. We compare MERT vs. BoostedMERT. MERT is randomly re-started 30 times, and BoostedMERT is run for 30 iterations</context>
+</contexts>
+<marker>Kirchhoff, Yang, 2007</marker>
+<rawString>K. Kirchhoff and M. Yang. 2007. The UW machine translation system for IWSLT 2007. In IWSLT.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>T Kudo</author>
+<author>J Suzuki</author>
+<author>H Isozaki</author>
+</authors>
+<title>Boostingbased parse reranking with subtree features.</title>
+<date>2005</date>
+<booktitle>In ACL.</booktitle>
+<contexts>
+<context position="12611" citStr="Kudo et al., 2005" startWordPosition="2042" endWordPosition="2045">er of boosting iterations based on Dev. Last column indicates absolute improvements. BoostedMERT outperforms MERT by 0.8 points on Eval. 4 Related Work Various methods are used to optimize log-linear models in re-ranking (Shen et al., 2004; Venugopal et al., 2005; Smith and Eisner, 2006). Although this line of work is worthwhile, we believe more gain is possible if we go beyond log-linear models. For example, Shen’s method (2004) produces largemargins but observed little gains in performance. Our BoostedMERT should not be confused with other boosting algorithms such as (Collins and Koo, 2005; Kudo et al., 2005). These algorithms are called boosting because they iteratively choose features (weak learners) and optimize the weights for the boost/exponential loss. They do not, however, maintain a distribution over N-best lists. The idea of maintaining a distribution over Nbest lists is novel. To the best of our knowledge, the most similar algorithm is AdaRank (Xu and Li, 2007), developed for document ranking in information retrieval. Our main difference lies in Lines 4-7 in Algorithm 1: AdaRank proposes a simple closed form solution for α and combines only weak features, not full learners (as in MERT). </context>
+</contexts>
+<marker>Kudo, Suzuki, Isozaki, 2005</marker>
+<rawString>T. Kudo, J. Suzuki, and H. Isozaki. 2005. Boostingbased parse reranking with subtree features. In ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>L Mason</author>
+<author>J Baxter</author>
+<author>P Bartless</author>
+<author>M Frean</author>
+</authors>
+<title>Boosting as gradient descent.</title>
+<date>2000</date>
+<booktitle>In NIPS.</booktitle>
+<contexts>
+<context position="8417" citStr="Mason et al., 2000" startWordPosition="1351" endWordPosition="1354">uts of the previous overall ranker ft−1 and current weak ranker At. PRED is a general function that takes a ranker and a M N-best lists and generates a set of M N-dim output vector y representing the predicted reciprocal rank. Specifically, suppose a 3-best list and a ranker predicts ranks (1,3,2) for the 1st, 2nd, and 3rd hypotheses, respectively. Then y = (1/1,1/3,1/2) = (1,0.3,0.5).5 Finally, using a 1-dimensional MERT, the scalar parameter at is optimized by maximizing the BLEU of the hypothesis chosen by yt−1+atyt. This is analogous to the line search step in boosting for classification (Mason et al., 2000). 3. Lines 9-11 update the sample distribution di such that N-best lists with low accuracies ai are given higher emphasis in the next iteration. The per-list accuracy ai is defined as the ratio of selected vs. oracle BLEU, but other measures are possible: e.g. ratio of ranks, difference of BLEU. The final classifier fT can be seen as a voting procedure among multiple log-linear models generated by MERT. The weighted vote for hypotheses in an N-best list xi is represented by the N-dimensional vector: y� = ETt=1 atyt = ETt=1 at PRED(At, xi). We choose the hypothesis with the maximum value in y� </context>
+</contexts>
+<marker>Mason, Baxter, Bartless, Frean, 2000</marker>
+<rawString>L. Mason, J. Baxter, P. Bartless, and M. Frean. 2000. Boosting as gradient descent. In NIPS.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>F J Och</author>
+</authors>
+<title>A smorgasbord of features for statistical machine translation.</title>
+<date>2004</date>
+<booktitle>In HLT/NAACL.</booktitle>
+<marker>Och, 2004</marker>
+<rawString>F.J. Och et al. 2004. A smorgasbord of features for statistical machine translation. In HLT/NAACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>F J Och</author>
+</authors>
+<title>Minimum error rate training in statistical machine translation.</title>
+<date>2003</date>
+<booktitle>In ACL.</booktitle>
+<contexts>
+<context position="2102" citStr="Och, 2003" startWordPosition="306" endWordPosition="307">bserved that N-best list rescoring only yields a moderate improvement over the first-pass output although the potential improvement as measured by the oracle-best hypothesis for each sentence is much &apos;work supported by an NSF Graduate Research Fellowship. 37 higher. This shows that hypothesis features are either not discriminative enough, or that the reranking model is too weak This performance gap can be mainly attributed to two problems: optimization error and modeling error (see Figure 1).1 Much work has focused on developing better algorithms to tackle the optimization problem (e.g. MERT (Och, 2003)), since MT evaluation metrics such as BLEU and PER are riddled with local minima and are difficult to differentiate with respect to re-ranker parameters. These optimization algorithms are based on the popular loglinear model, which chooses the English translation e of a foreign sentence f by the rule: �K arg max, p(e�f) � arg max, k�1 AkOk(e, f) where Ok(e, f) and Ak are the K features and weights, respectively, and the argmax is over all hypotheses in the N-best list. We believe that standard algorithms such as MERT already achieve low optimization error (this is based on experience where ma</context>
+</contexts>
+<marker>Och, 2003</marker>
+<rawString>F.J. Och. 2003. Minimum error rate training in statistical machine translation. In ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>R E Schapire</author>
+<author>Y Singer</author>
+</authors>
+<title>Improved boosting algorithms using confidence-rated predictions.</title>
+<date>1999</date>
+<booktitle>Machine Learning,</booktitle>
+<volume>37</volume>
+<issue>3</issue>
+<contexts>
+<context position="4833" citStr="Schapire and Singer, 1999" startWordPosition="743" endWordPosition="746">oits the structure of the N-best re-ranking problem. We present BoostedMERT, a general framework for learning such complex re-rankers using standard MERT as a building block. BoostedMERT is easy to implement, inherits MERT’s efficient optimization procedure, and more effectively boosts the training score. We describe the algorithm in Section 2, report experiment results in Section 3, and end with related work and future directions (Sections 4, 5). 2 BoostedMERT The idea for BoostedMERT follows the boosting philosophy of combining several weak classifiers to create a strong overall classifier (Schapire and Singer, 1999). In the classification case, boosting maintains a distribution over each training sample: the distribution is increased for samples that are incorrectly classified and decreased otherwise. In each boosting iteration, a weak learner is trained to optimize on the weighted sample distribution, attempt-1 ing to correct the mistakes made in the previous iteration. The final classifier is a weighted combination of weak learners. This simple procedure is very effective in reducing training and generalization error. In BoostedMERT, we maintain a sample distribution di, i = 1... M over the M N-best li</context>
+</contexts>
+<marker>Schapire, Singer, 1999</marker>
+<rawString>R. E. Schapire and Y. Singer. 1999. Improved boosting algorithms using confidence-rated predictions. Machine Learning, 37(3).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>L Shen</author>
+<author>A Sarkar</author>
+<author>F J Och</author>
+</authors>
+<title>Discriminative reranking for machine translation.</title>
+<date>2004</date>
+<booktitle>In HLT-NAACL.</booktitle>
+<contexts>
+<context position="12232" citStr="Shen et al., 2004" startWordPosition="1981" endWordPosition="1984">stigate this in future work. 39 MERT BOOST A Train, Best BLEU 40.3 41.0 0.7 Dev, Best BLEU 24.0 25.0 1.0 Eval, Best BLEU 41.2 43.7 2.5 Eval, Selected BLEU 41.2 42.0 0.8 Table 1: The first three rows show the BLEU score for Train, Dev, and Eval from 30 iterations of BoostedMERT or 30 random re-restarts of MERT. The last row shows the actual BLEU on Eval when selecting the number of boosting iterations based on Dev. Last column indicates absolute improvements. BoostedMERT outperforms MERT by 0.8 points on Eval. 4 Related Work Various methods are used to optimize log-linear models in re-ranking (Shen et al., 2004; Venugopal et al., 2005; Smith and Eisner, 2006). Although this line of work is worthwhile, we believe more gain is possible if we go beyond log-linear models. For example, Shen’s method (2004) produces largemargins but observed little gains in performance. Our BoostedMERT should not be confused with other boosting algorithms such as (Collins and Koo, 2005; Kudo et al., 2005). These algorithms are called boosting because they iteratively choose features (weak learners) and optimize the weights for the boost/exponential loss. They do not, however, maintain a distribution over N-best lists. The</context>
+</contexts>
+<marker>Shen, Sarkar, Och, 2004</marker>
+<rawString>L. Shen, A. Sarkar, and F.J. Och. 2004. Discriminative reranking for machine translation. In HLT-NAACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D Smith</author>
+<author>J Eisner</author>
+</authors>
+<title>Minimum risk annealing for training log-linear models.</title>
+<date>2006</date>
+<booktitle>In Proc. of COLING/ACL Companion Volume.</booktitle>
+<contexts>
+<context position="12281" citStr="Smith and Eisner, 2006" startWordPosition="1989" endWordPosition="1992">A Train, Best BLEU 40.3 41.0 0.7 Dev, Best BLEU 24.0 25.0 1.0 Eval, Best BLEU 41.2 43.7 2.5 Eval, Selected BLEU 41.2 42.0 0.8 Table 1: The first three rows show the BLEU score for Train, Dev, and Eval from 30 iterations of BoostedMERT or 30 random re-restarts of MERT. The last row shows the actual BLEU on Eval when selecting the number of boosting iterations based on Dev. Last column indicates absolute improvements. BoostedMERT outperforms MERT by 0.8 points on Eval. 4 Related Work Various methods are used to optimize log-linear models in re-ranking (Shen et al., 2004; Venugopal et al., 2005; Smith and Eisner, 2006). Although this line of work is worthwhile, we believe more gain is possible if we go beyond log-linear models. For example, Shen’s method (2004) produces largemargins but observed little gains in performance. Our BoostedMERT should not be confused with other boosting algorithms such as (Collins and Koo, 2005; Kudo et al., 2005). These algorithms are called boosting because they iteratively choose features (weak learners) and optimize the weights for the boost/exponential loss. They do not, however, maintain a distribution over N-best lists. The idea of maintaining a distribution over Nbest li</context>
+</contexts>
+<marker>Smith, Eisner, 2006</marker>
+<rawString>D. Smith and J. Eisner. 2006. Minimum risk annealing for training log-linear models. In Proc. of COLING/ACL Companion Volume.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>A Venugopal</author>
+<author>A Zollmann</author>
+<author>A Waibel</author>
+</authors>
+<title>Training and evaluating error minimization rules for SMT.</title>
+<date>2005</date>
+<booktitle>In ACL Workshop on Building/Using Parallel Texts.</booktitle>
+<contexts>
+<context position="12256" citStr="Venugopal et al., 2005" startWordPosition="1985" endWordPosition="1988">ure work. 39 MERT BOOST A Train, Best BLEU 40.3 41.0 0.7 Dev, Best BLEU 24.0 25.0 1.0 Eval, Best BLEU 41.2 43.7 2.5 Eval, Selected BLEU 41.2 42.0 0.8 Table 1: The first three rows show the BLEU score for Train, Dev, and Eval from 30 iterations of BoostedMERT or 30 random re-restarts of MERT. The last row shows the actual BLEU on Eval when selecting the number of boosting iterations based on Dev. Last column indicates absolute improvements. BoostedMERT outperforms MERT by 0.8 points on Eval. 4 Related Work Various methods are used to optimize log-linear models in re-ranking (Shen et al., 2004; Venugopal et al., 2005; Smith and Eisner, 2006). Although this line of work is worthwhile, we believe more gain is possible if we go beyond log-linear models. For example, Shen’s method (2004) produces largemargins but observed little gains in performance. Our BoostedMERT should not be confused with other boosting algorithms such as (Collins and Koo, 2005; Kudo et al., 2005). These algorithms are called boosting because they iteratively choose features (weak learners) and optimize the weights for the boost/exponential loss. They do not, however, maintain a distribution over N-best lists. The idea of maintaining a d</context>
+</contexts>
+<marker>Venugopal, Zollmann, Waibel, 2005</marker>
+<rawString>A. Venugopal, A. Zollmann, and A. Waibel. 2005. Training and evaluating error minimization rules for SMT. In ACL Workshop on Building/Using Parallel Texts.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J Xu</author>
+<author>H Li</author>
+</authors>
+<title>AdaRank: A boosting algorithm for information retrieval.</title>
+<date>2007</date>
+<booktitle>In SIGIR.</booktitle>
+<contexts>
+<context position="12980" citStr="Xu and Li, 2007" startWordPosition="2101" endWordPosition="2104">go beyond log-linear models. For example, Shen’s method (2004) produces largemargins but observed little gains in performance. Our BoostedMERT should not be confused with other boosting algorithms such as (Collins and Koo, 2005; Kudo et al., 2005). These algorithms are called boosting because they iteratively choose features (weak learners) and optimize the weights for the boost/exponential loss. They do not, however, maintain a distribution over N-best lists. The idea of maintaining a distribution over Nbest lists is novel. To the best of our knowledge, the most similar algorithm is AdaRank (Xu and Li, 2007), developed for document ranking in information retrieval. Our main difference lies in Lines 4-7 in Algorithm 1: AdaRank proposes a simple closed form solution for α and combines only weak features, not full learners (as in MERT). We have also implemented AdaRank but it gave inferior results. It should be noted that the theoretical training bounds derived in the AdaRank paper is relevant to BoostedMERT. Similar to standard boosting, this bound shows that the training score can be improved exponentially in the number of iterations. However, we found that the conditions for which this bound is a</context>
+</contexts>
+<marker>Xu, Li, 2007</marker>
+<rawString>J. Xu and H. Li. 2007. AdaRank: A boosting algorithm for information retrieval. In SIGIR.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

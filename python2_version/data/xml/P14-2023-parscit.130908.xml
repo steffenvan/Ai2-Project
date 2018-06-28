@@ -1,0 +1,1266 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.001820">
+<title confidence="0.995384">
+Decoder Integration and Expected BLEU Training
+for Recurrent Neural Network Language Models
+</title>
+<author confidence="0.977576">
+Michael Auli
+</author>
+<affiliation confidence="0.949545">
+Microsoft Research
+</affiliation>
+<address confidence="0.960593">
+Redmond, WA, USA
+</address>
+<email confidence="0.999275">
+michael.auli@microsoft.com
+</email>
+<sectionHeader confidence="0.993904" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.999955166666667">
+Neural network language models are often
+trained by optimizing likelihood, but we
+would prefer to optimize for a task specific
+metric, such as BLEU in machine trans-
+lation. We show how a recurrent neural
+network language model can be optimized
+towards an expected BLEU loss instead
+of the usual cross-entropy criterion. Fur-
+thermore, we tackle the issue of directly
+integrating a recurrent network into first-
+pass decoding under an efficient approxi-
+mation. Our best results improve a phrase-
+based statistical machine translation sys-
+tem trained on WMT 2012 French-English
+data by up to 2.0 BLEU, and the expected
+BLEU objective improves over a cross-
+entropy trained model by up to 0.6 BLEU
+in a single reference setup.
+</bodyText>
+<sectionHeader confidence="0.998992" genericHeader="introduction">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.999779631578947">
+Neural network-based language and translation
+models have achieved impressive accuracy im-
+provements on statistical machine translation tasks
+(Allauzen et al., 2011; Le et al., 2012b; Schwenk
+et al., 2012; Vaswani et al., 2013; Gao et al., 2014).
+In this paper we focus on recurrent neural network
+architectures which have recently advanced the
+state of the art in language modeling (Mikolov et
+al., 2010; Mikolov et al., 2011; Sundermeyer et al.,
+2013) with several subsequent applications in ma-
+chine translation (Auli et al., 2013; Kalchbrenner
+and Blunsom, 2013; Hu et al., 2014). Recurrent
+models have the potential to capture long-span de-
+pendencies since their predictions are based on an
+unbounded history of previous words (§2).
+In practice, neural network models for machine
+translation are usually trained by maximizing the
+likelihood of the training data, either via a cross-
+entropy objective (Mikolov et al., 2010; Schwenk
+</bodyText>
+<note confidence="0.413733666666667">
+Jianfeng Gao
+Microsoft Research
+Redmond, WA, USA
+</note>
+<email confidence="0.964836">
+jfgao@microsoft.com
+</email>
+<bodyText confidence="0.999966292682927">
+et al., 2012) or more recently, noise-contrastive es-
+timation (Vaswani et al., 2013). However, it is
+widely appreciated that directly optimizing for a
+task-specific metric often leads to better perfor-
+mance (Goodman, 1996; Och, 2003; Auli and
+Lopez, 2011). The expected BLEU objective pro-
+vides an efficient way of achieving this for ma-
+chine translation (Rosti et al., 2010; Rosti et al.,
+2011; He and Deng, 2012; Gao and He, 2013;
+Gao et al., 2014) instead of solely relying on tra-
+ditional optimizers such as Minimum Error Rate
+Training (MERT) that only adjust the weighting
+of entire component models within the log-linear
+framework of machine translation (§3).
+Most previous work on neural networks for ma-
+chine translation is based on a rescoring setup
+(Arisoy et al., 2012; Mikolov, 2012; Le et al.,
+2012a; Auli et al., 2013), thereby side stepping
+the algorithmic and engineering challenges of di-
+rect decoder-integration. One recent exception is
+Vaswani et al. (2013) who demonstrated that feed-
+forward network-based language models are more
+accurate in first-pass decoding than in rescoring.
+Decoder integration has the advantage for the neu-
+ral network to directly influence search, unlike
+rescoring which is restricted to an n-best list or lat-
+tice. Decoding with feed-forward architectures is
+straightforward, since predictions are based on a
+fixed size input, similar to n-gram language mod-
+els. However, for recurrent networks we have to
+deal with the unbounded history, which breaks the
+usual dynamic programming assumptions for effi-
+cient search. We show how a simple but effective
+approximation can side step this issue and we em-
+pirically demonstrate its effectiveness (§4).
+We test the expected BLEU objective by train-
+ing a recurrent neural network language model
+and obtain substantial improvements. We also find
+that our efficient approximation for decoder inte-
+gration is very accurate, clearly outperforming a
+rescoring setup (§5).
+</bodyText>
+<page confidence="0.983344">
+136
+</page>
+<note confidence="0.603468">
+Proceedings of the 52nd Annual Meeting of the Association for Computational Linguistics (Short Papers), pages 136–142,
+Baltimore, Maryland, USA, June 23-25 2014. c�2014 Association for Computational Linguistics
+</note>
+<figureCaption confidence="0.9943615">
+Figure 1: Structure of the recurrent neural network
+language model.
+</figureCaption>
+<sectionHeader confidence="0.947114" genericHeader="method">
+2 Recurrent Neural Network LMs
+</sectionHeader>
+<bodyText confidence="0.999534409090909">
+Our model has a similar structure to the recurrent
+neural network language model of Mikolov et al.
+(2010) which is factored into an input layer, a hid-
+den layer with recurrent connections, and an out-
+put layer (Figure 1). The input layer encodes the
+word at position t as a 1-of-N vector wt. The out-
+put layer yt represents scores over possible next
+words; both the input and output layers are of size
+|V |, the size of the vocabulary. The hidden layer
+state ht encodes the history of all words observed
+in the sequence up to time step t. The state of
+the hidden layer is determined by the input layer
+and the hidden layer configuration of the previous
+time step ht−1. The weights of the connections
+between the layers are summarized in a number
+of matrices: U represents weights from the in-
+put layer to the hidden layer, and W represents
+connections from the previous hidden layer to the
+current hidden layer. Matrix V contains weights
+between the current hidden layer and the output
+layer. The activations of the hidden and output
+layers are computed by:
+</bodyText>
+<equation confidence="0.9992225">
+ht = tanh(Uwt + Wht−1)
+yt = tanh(Vht)
+</equation>
+<bodyText confidence="0.999327588235294">
+Different to previous work (Mikolov et al., 2010),
+we do not use the softmax activation function to
+output a probability over the next word, but in-
+stead just compute a single unnormalized score.
+This is computationally more efficient than sum-
+ming over all possible outputs such as required
+for the cross-entropy error function (Bengio et al.,
+2003; Mikolov et al., 2010; Schwenk et al., 2012).
+Training is based on the back propagation through
+time algorithm, which unrolls the network and
+then computes error gradients over multiple time
+steps (Rumelhart et al., 1986); we use the expected
+BLEU loss (§3) to obtain the error with respect to
+the output activations. After training, the output
+layer represents scores s(wt+1|w1 ... wt, ht) for
+the next word given the previous t input words and
+the current hidden layer configuration ht.
+</bodyText>
+<sectionHeader confidence="0.998975" genericHeader="method">
+3 Expected BLEU Training
+</sectionHeader>
+<bodyText confidence="0.9990973">
+We integrate the recurrent neural network lan-
+guage model as an additional feature into the stan-
+dard log-linear framework of translation (Och,
+2003). Formally, our phrase-based model is pa-
+rameterized by M parameters A where each λm E
+A, m = 1... M is the weight of an associated
+feature hm(f, e). Function h(f, e) maps foreign
+sentences f and English sentences e to the vector
+h1(f, e) ... (f, e), and the model chooses transla-
+tions according to the following decision rule:
+</bodyText>
+<equation confidence="0.9987835">
+eˆ = arg max ATh(f, e)
+eE£(f)
+</equation>
+<bodyText confidence="0.9572288">
+We summarize the weights of the recurrent neural
+network language model as θ = {U, W, V} and
+add the model as an additional feature to the log-
+linear translation model using the simplified nota-
+tion sO(wt) = s(wt|w1 ... wt−1, ht−1):
+</bodyText>
+<equation confidence="0.981477">
+|e|
+hM+1(e) = sO(e) = L log sO(wt) (1)
+t=1
+</equation>
+<bodyText confidence="0.755352588235294">
+which computes a sentence-level language model
+score as the sum of individual word scores. The
+translation model is parameterized by A and θ
+which are learned as follows (Gao et al., 2014):
+1. We generate an n-best list for each foreign
+sentence in the training data with the baseline
+translation system given A where λM+1 = 0
+using the settings described in §5. The n-best
+lists serve as an approximation to E(f) used
+in the next step for expected BLEU training
+of the recurrent neural network model (§3.1).
+2. Next, we fix A, set λM+1 = 1 and opti-
+mize θ with respect to the loss function on
+the training data using stochastic gradient de-
+scent (SGD).1
+1We tuned λM+1 on the development set but found that
+λM+1 = 1 resulted in faster training and equal accuracy.
+</bodyText>
+<figure confidence="0.996391769230769">
+wt
+0
+0
+1
+0
+0
+0
+yt
+ht
+U
+V
+ht-
+W
+</figure>
+<page confidence="0.926551">
+137
+</page>
+<bodyText confidence="0.97006125">
+3. We fix θ and re-optimize Λ in the presence
+of the recurrent neural network model using
+Minimum Error Rate Training (Och, 2003)
+on the development set (§5).
+</bodyText>
+<subsectionHeader confidence="0.986179">
+3.2 Derivation of the Error Term δwt
+</subsectionHeader>
+<bodyText confidence="0.999894">
+We rewrite the loss function (2) using (3) and sep-
+arate it into two terms G(θ) and Z(θ) as follows:
+</bodyText>
+<subsectionHeader confidence="0.98759">
+3.1 Expected BLEU Objective
+</subsectionHeader>
+<bodyText confidence="0.999677">
+Formally, we define our loss function l(θ) as
+the negative expected BLEU score, denoted as
+xBLEU(θ) for a given foreign sentence f:
+</bodyText>
+<equation confidence="0.998992">
+l(θ) = − xBLEU(θ)
+X pA,θ(e|f)sBLEU(e, e(i)) (2)
+eE£(f)
+</equation>
+<bodyText confidence="0.999865857142857">
+where sBLEU(e, e(i)) is a smoothed sentence-
+level BLEU score with respect to the reference
+translation e(i), and E(f) is the generation set
+given by an n-best list.2 We use a sentence-level
+BLEU approximation similar to He and Deng
+(2012).3 The normalized probability pA,θ(e|f) of
+a particular translation e given f is defined as:
+</bodyText>
+<equation confidence="0.994426">
+exp{γΛTh(f, e)}
+pA,θ(e|f) = (3)
+Pe,E£(f) exp{γΛTh(f, e&apos;)}
+</equation>
+<bodyText confidence="0.999977428571428">
+where ΛTh(f, e) includes the recurrent neural net-
+work hM+1(e), and γ ∈ [0, inf) is a scaling factor
+that flattens the distribution for γ &lt; 1 and sharp-
+ens it for γ &gt; 1 (Tromble et al., 2008).4
+Next, we define the gradient of the expected
+BLEU loss function l(θ) using the observation that
+the loss does not explicitly depend on θ:
+</bodyText>
+<equation confidence="0.991329947368421">
+∂l(θ) X
+∂θ =
+e
+G(θ)
+l(θ) = −xBLEU(θ) = −(4)
+Z(θ)
+PeE£(f) exp{γΛT h(f, e)} sBLEU(e, e(i))
+PeE£(f) exp{γΛTh(f, e)}
+Next, we apply the quotient rule of differentiation:
+δwt =∂sθ(wt) ∂sθ(wt)
+� ∂G(θ) �
+1 ∂sθ(wt) − ∂Z(θ)
+∂sθ(wt)xBLEU(θ)
+Z(θ)
+Using the observation that θ is only relevant to the
+recurrent neural network hM+1(e) (1) we have
+∂γΛTh(f, e)
+∂sθ(wt) = γλM+1 ∂sθ(wt) = sθ(wt)
+∂hM+1(e) γλM+1
+</equation>
+<bodyText confidence="0.6535985">
+which together with the chain rule, (3) and (4) al-
+lows us to rewrite δwt as follows:
+</bodyText>
+<equation confidence="0.97565344">
+C∂ exp{γΛTh(f,e)}U(θ,e) I
+∂sθ (wt)
+CpA,θ(e|f)U(θ,e)λM+1 γ
+( /
+sθ (Wt)
+where U(θ, e) = sBLEU(e, ei) − xBLEU(θ).
+∂l(θ)
+∂sθ(wt)
+∂sθ(wt)
+∂θ
+X |e|
+t=1
+=
+∂xBLEU(θ) =∂(G(θ)/Z(θ))
+1 X
+δwt = Z(θ)
+eE£(f),
+s.t.wtEe
+X=
+eE£(f),
+s.t.wtEe
+X |e |∂sθ(wt) 4 Decoder Integration
+X δwt ∂θ
+=
+e t=1
+</equation>
+<bodyText confidence="0.99983">
+where δwt is the error term for English word wt.5
+The error term indicates how the loss changes with
+the translation probability which we derive next.6
+</bodyText>
+<footnote confidence="0.981477857142857">
+2Our definitions do not take into account multiple derivations
+for the same translation because our n-best lists contain only
+unique entries which we obtain by choosing the highest scor-
+ing translation among string identical candidates.
+3In early experiments we found that the BLEU+1 approxi-
+mation used by Liang et al. (2006) and Nakov et. al (2012)
+worked equally well in our setting.
+4The γ parameter is only used during expected BLEU training
+but not for subsequent MERT tuning.
+5A sentence may contain the same word multiple times and
+we compute the error term for each occurrence separately
+since the error depends on the individual history.
+6We omit the gradient of the recurrent neural network score
+asθ since it follows the standard form (Mikolov, 2012).
+</footnote>
+<page confidence="0.450183">
+aθw
+</page>
+<bodyText confidence="0.999937533333333">
+Directly integrating our recurrent neural network
+language model into first-pass decoding enables us
+to search a much larger space than would be pos-
+sible in rescoring.
+Typically, phrase-based decoders maintain a set
+of states representing partial and complete transla-
+tion hypothesis that are scored by a set of features.
+Most features are local, meaning that all required
+information for them to assign a score is available
+within the state. One exception is the n-gram lan-
+guage model which requires the preceding n − 1
+words as well. In order to accommodate this fea-
+ture, each state usually keeps these words as con-
+text. Unfortunately, a recurrent neural network
+makes even weaker independence assumptions so
+</bodyText>
+<page confidence="0.993637">
+138
+</page>
+<bodyText confidence="0.999963045454545">
+that it depends on the entire left prefix of a sen-
+tence. Furthermore, the weaker independence as-
+sumptions also dramatically reduce the effective-
+ness of dynamic programming by allowing much
+fewer states to be recombined.7
+To solve this problem, we follow previous work
+on lattice rescoring with recurrent networks that
+maintained the usual n-gram context but kept a
+beam of hidden layer configurations at each state
+(Auli et al., 2013). In fact, to make decoding as
+efficient as possible, we only keep the single best
+scoring hidden layer configuration. This approx-
+imation has been effective for lattice rescoring,
+since the translations represented by each state are
+in fact very similar: They share both the same
+source words as well as the same n-gram context
+which is likely to result in similar recurrent his-
+tories that can be safely pruned. As future cost
+estimate we score each phrase in isolation, reset-
+ting the hidden layer at the beginning of a phrase.
+While simple, we found our estimate to be more
+accurate than no future cost at all.
+</bodyText>
+<sectionHeader confidence="0.999357" genericHeader="method">
+5 Experiments
+</sectionHeader>
+<bodyText confidence="0.995581736842105">
+Baseline. We use a phrase-based system simi-
+lar to Moses (Koehn et al., 2007) based on a set
+of common features including maximum likeli-
+hood estimates pML(e|f) and pML(f|e), lexically
+weighted estimates pLW(e|f) and pLW(f|e),
+word and phrase-penalties, a hierarchical reorder-
+ing model (Galley and Manning, 2008), a linear
+distortion feature, and a modified Kneser-Ney lan-
+guage model trained on the target-side of the paral-
+lel data. Log-linear weights are tuned with MERT.
+Evaluation. We use training and test data from
+the WMT 2012 campaign and report results on
+French-English and German-English. Transla-
+tion models are estimated on 102M words of par-
+allel data for French-English, and 99M words
+for German-English; about 6.5M words for each
+language pair are newswire, the remainder are
+parliamentary proceedings. We evaluate on six
+newswire domain test sets from 2008 to 2013 con-
+taining between 2034 to 3003 sentences. Log-
+linear weights are estimated on the 2009 data set
+comprising 2525 sentences. We evaluate accuracy
+in terms of BLEU with a single reference.
+Rescoring Setup. For rescoring we use ei-
+7Recombination only retains the highest scoring state if there
+are multiple identical states, that is, they cover the same
+source span, the same translation phrase and contexts.
+ther lattices or the unique 100-best output of
+the phrase-based decoder and re-estimate the log-
+linear weights by running a further iteration of
+MERT on the n-best list of the development set,
+augmented by scores corresponding to the neural
+network models. At test time we rescore n-best
+lists with the new weights.
+Neural Network Training. All neural network
+models are trained on the news portion of the
+parallel data, corresponding to 136K sentences,
+which we found to be most useful in initial exper-
+iments. As training data we use unique 100-best
+lists generated by the baseline system. We use the
+same data both for training the phrase-based sys-
+tem as well as the language model but find that
+the resulting bias did not hurt end-to-end accu-
+racy (Yu et al., 2013). The vocabulary consists of
+words that occur in at least two different sentences,
+which is 31K words for both language pairs. We
+tuned the learning rate p of our mini-batch SGD
+trainer as well as the probability scaling parameter
+-y (3) on a held-out set and found simple settings of
+p = 0.1 and -y = 1 to be good choices. To prevent
+over-fitting, we experimented with L2 regulariza-
+tion, but found no accuracy improvements, prob-
+ably because SGD regularizes enough. We evalu-
+ate performance on a held-out set during training
+and stop whenever the objective changes less than
+0.0003. The hidden layer uses 100 neurons unless
+otherwise stated.
+</bodyText>
+<subsectionHeader confidence="0.956113">
+5.1 Decoder Integration
+</subsectionHeader>
+<bodyText confidence="0.998779235294118">
+We compare the effect of direct decoder integra-
+tion to rescoring with both lattices and n-best lists
+when the model is trained with a cross-entropy ob-
+jective (Mikolov et al., 2010). The results (Ta-
+ble 1 and Table 2) show that direct integration im-
+proves accuracy across all six test sets on both lan-
+guage pairs. For French-English we improve over
+n-best rescoring by up to 1.1 BLEU and by up to
+0.5 BLEU for German-English. We improve over
+lattice rescoring by up to 0.4 BLEU on French-
+English and by up to 0.3 BLEU on German-
+English. Compared to the baseline, we achieve
+improvements of up to 2.0 BLEU for French-
+English and up to 1.3 BLEU for German-English.
+The average improvement across all test sets is
+1.5 BLEU for French-English and 1.0 BLEU for
+German-English compared to the baseline.
+</bodyText>
+<page confidence="0.995655">
+139
+</page>
+<table confidence="0.993683">
+dev 2008 2010 syscomb2010 2011 2012 2013 AllTest
+Baseline 24.11 20.73 24.68 24.59 25.62 24.85 25.54 24.53
+RNN n-best rescore 24.83 21.41 25.17 25.06 26.53 25.74 26.31 25.25
+RNN lattice rescore 24.91 21.73 25.56 25.43 27.04 26.43 26.75 25.72
+RNN decode 25.14 22.03 25.86 25.74 27.32 26.86 27.15 26.06
+</table>
+<tableCaption confidence="0.985985333333333">
+Table 1: French-English accuracy of decoder integration of a recurrent neural network language model
+(RNN decode) compared to n-best and lattice rescoring as well as the output of a phrase-based system
+using an n-gram model (Baseline); Alltest is the corpus-weighted average BLEU across all test sets.
+</tableCaption>
+<table confidence="0.9997944">
+dev 2008 2010 syscomb2010 2011 2012 2013 AllTest
+Baseline 19.35 19.96 20.87 20.66 19.60 19.80 22.48 20.58
+RNN n-best rescore 20.17 20.29 21.35 21.27 20.51 20.54 23.03 21.21
+RNN lattice rescore 20.24 20.38 21.55 21.43 20.77 20.63 23.23 21.38
+RNN decode 20.13 20.51 21.79 21.71 20.91 20.93 23.53 21.61
+</table>
+<tableCaption confidence="0.916187">
+Table 2: German-English results of direct decoder integration (cf. Table 1).
+</tableCaption>
+<table confidence="0.999608">
+dev 2008 2010 syscomb2010 2011 2012 2013 AllTest
+Baseline 24.11 20.73 24.68 24.59 25.62 24.85 25.54 24.53
+CE RNN 24.80 21.15 25.14 25.06 26.45 25.83 26.69 25.29
++ xBLEU RNN 25.11 21.74 25.52 25.42 27.06 26.42 26.72 25.71
+</table>
+<tableCaption confidence="0.800365">
+Table 3: French-English accuracy of a decoder integrated cross-entropy recurrent neural network model
+(CE RNN) and a combination with an expected BLEU trained model (xBLEU RNN). Results are not
+comparable to Table 1 since a smaller hidden layer was used to keep training times manageable (§5.2).
+</tableCaption>
+<subsectionHeader confidence="0.985907">
+5.2 Expected BLEU Training
+</subsectionHeader>
+<bodyText confidence="0.999942764705883">
+Training with the expected BLEU loss is compu-
+tationally more expensive than with cross-entropy
+since each training example is an n-best list in-
+stead of a single sentence. This increases the num-
+ber of words to be processed from 3.5M to 340M.
+To keep training times manageable, we reduce the
+hidden layer size to 30 neurons, thereby greatly
+increasing speed. Despite slower training, the ac-
+tual scoring at test time of expected BLEU mod-
+els is about 5 times faster than for cross-entropy
+models since we do not need to normalize the out-
+put layer anymore. The results (Table 3) show
+improvements of up to 0.6 BLEU when combin-
+ing a cross-entropy model with an expected BLEU
+variant. Average gains across all test sets are 0.4
+BLEU, demonstrating that the gains from the ex-
+pected BLEU loss are additive.
+</bodyText>
+<sectionHeader confidence="0.988041" genericHeader="conclusions">
+6 Conclusion and Future Work
+</sectionHeader>
+<bodyText confidence="0.999995454545455">
+We introduce an empirically effective approxima-
+tion to integrate a recurrent neural network model
+into first pass decoding, thereby extending pre-
+vious work on decoding with feed-forward neu-
+ral networks (Vaswani et al., 2013). Our best re-
+sult improves the output of a phrase-based decoder
+by up to 2.0 BLEU on French-English translation,
+outperforming n-best rescoring by up to 1.1 BLEU
+and lattice rescoring by up to 0.4 BLEU. Directly
+optimizing a recurrent neural network language
+model towards an expected BLEU loss proves ef-
+fective, improving a cross-entropy trained variant
+by up 0.6 BLEU. Despite higher training complex-
+ity, our expected BLEU trained model has five
+times faster runtime than a cross-entropy model
+since it does not require normalization.
+In future work, we would like to scale up to
+larger data sets and more complex models through
+parallelization. We would also like to experiment
+with more elaborate future cost estimates, such as
+the average score assigned to all occurrences of a
+phrase in a large corpus.
+</bodyText>
+<sectionHeader confidence="0.999115" genericHeader="acknowledgments">
+7 Acknowledgments
+</sectionHeader>
+<bodyText confidence="0.99335375">
+We thank Michel Galley, Arul Menezes, Chris
+Quirk and Geoffrey Zweig for helpful discussions
+related to this work as well as the four anonymous
+reviewers for their comments.
+</bodyText>
+<page confidence="0.995914">
+140
+</page>
+<sectionHeader confidence="0.989854" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.999882027522935">
+Alexandre Allauzen, H´el`ene Bonneau-Maynard, Hai-
+Son Le, Aur´elien Max, Guillaume Wisniewski,
+Franc¸ois Yvon, Gilles Adda, Josep Maria Crego,
+Adrien Lardilleux, Thomas Lavergne, and Artem
+Sokolov. 2011. LIMSI @ WMT11. In Proc. of
+WMT, pages 309–315, Edinburgh, Scotland, July.
+Association for Computational Linguistics.
+Ebru Arisoy, Tara N. Sainath, Brian Kingsbury, and
+Bhuvana Ramabhadran. 2012. Deep Neural Net-
+work Language Models. In NAACL-HLT Work-
+shop on the Future of Language Modeling for HLT,
+pages 20–28, Stroudsburg, PA, USA. Association
+for Computational Linguistics.
+Michael Auli and Adam Lopez. 2011. Training a
+Log-Linear Parser with Loss Functions via Softmax-
+Margin. In Proc. of EMNLP, pages 333–343. Asso-
+ciation for Computational Linguistics, July.
+Michael Auli, Michel Galley, Chris Quirk, and Geof-
+frey Zweig. 2013. Joint Language and Translation
+Modeling with Recurrent Neural Networks. In Proc.
+of EMNLP, October.
+Yoshua Bengio, R´ejean Ducharme, Pascal Vincent, and
+Christian Jauvin. 2003. A Neural Probabilistic Lan-
+guage Model. Journal of Machine Learning Re-
+search, 3:1137–1155.
+Michel Galley and Christopher D. Manning. 2008. A
+Simple and Effective Hierarchical Phrase Reorder-
+ing Model. In Proc. of EMNLP, pages 848–856.
+Jianfeng Gao and Xiaodong He. 2013. Training MRF-
+Based Phrase Translation Models using Gradient
+Ascent. In Proc. of NAACL-HLT, pages 450–459.
+Association for Computational Linguistics, June.
+Jianfeng Gao, Xiaodong He, Scott Wen tau Yih, and
+Li Deng. 2014. Learning Continuous Phrase Rep-
+resentations for Translation Modeling. In Proc.
+of ACL. Association for Computational Linguistics,
+June.
+Joshua Goodman. 1996. Parsing Algorithms and Met-
+rics. In Proc. of ACL, pages 177–183, Santa Cruz,
+CA, USA, June.
+Xiaodong He and Li Deng. 2012. Maximum Expected
+BLEU Training of Phrase and Lexicon Translation
+Models. In Proc. of ACL, pages 8–14. Association
+for Computational Linguistics, July.
+Yuening Hu, Michael Auli, Qin Gao, and Jianfeng Gao.
+2014. Minimum Translation Modeling with Recur-
+rent Neural Networks. In Proc. of EACL. Associa-
+tion for Computational Linguistics, April.
+Nal Kalchbrenner and Phil Blunsom. 2013. Re-
+current Continuous Translation Models. In Proc.
+of EMNLP, pages 1700–1709, Seattle, Washington,
+USA, October. Association for Computational Lin-
+guistics.
+Philipp Koehn, Hieu Hoang, Alexandra Birch, Chris
+Callison-Burch, Marcello Federico, Nicola Bertoldi,
+Brooke Cowan, Wade Shen, Christine Moran,
+Richard Zens, Chris Dyer, Ondrej Bojar, Alexandra
+Constantin, and Evan Herbst. 2007. Moses: Open
+Source Toolkit for Statistical Machine Translation.
+In Proc. of ACL Demo and Poster Sessions, pages
+177–180, Prague, Czech Republic, Jun.
+Hai-Son Le, Alexandre Allauzen, and Franc¸ois Yvon.
+2012a. Continuous Space Translation Models with
+Neural Networks. In Proc. of HLT-NAACL, pages
+39–48, Montr´eal, Canada. Association for Compu-
+tational Linguistics.
+Hai-Son Le, Thomas Lavergne, Alexandre Al-
+lauzen, Marianna Apidianaki, Li Gong, Aur´elien
+Max, Artem Sokolov, Guillaume Wisniewski, and
+Franc¸ois Yvon. 2012b. LIMSI @ WMT12. In Proc.
+of WMT, pages 330–337, Montr´eal, Canada, June.
+Association for Computational Linguistics.
+Percy Liang, Alexandre Bouchard-Cˆot´e, Ben Taskar,
+and Dan Klein. 2006. An end-to-end discriminative
+approach to machine translation. In Proc. of ACL-
+COLING, pages 761–768, Jul.
+Tom´a&amp;quot;s Mikolov, Karafi´at Martin, Luk´a&amp;quot;s Burget, Jan
+Cernock´y, and Sanjeev Khudanpur. 2010. Recur-
+rent Neural Network based Language Model. In
+Proc. of INTERSPEECH, pages 1045–1048.
+Tom´a&amp;quot;s Mikolov, Anoop Deoras, Daniel Povey, Luk´a&amp;quot;s
+Burget, and Jan &amp;quot;Cernock´y. 2011. Strategies for
+Training Large Scale Neural Network Language
+Models. In Proc. of ASRU, pages 196–201.
+Tom´a&amp;quot;s Mikolov. 2012. Statistical Language Models
+based on Neural Networks. Ph.D. thesis, Brno Uni-
+versity of Technology.
+Preslav Nakov, Francisco Guzman, and Stephan Vo-
+gel. 2012. Optimizing for Sentence-Level BLEU+1
+Yields Short Translations. In Proc. of COLING. As-
+sociation for Computational Linguistics.
+Franz Josef Och. 2003. Minimum Error Rate Training
+in Statistical Machine Translation. In Proc. of ACL,
+pages 160–167, Sapporo, Japan, July.
+Antti-Veikko I Rosti, Bing Zhang, Spyros Matsoukas,
+and Richard Schwartz. 2010. BBN System De-
+scription for WMT10 System Combination Task.
+In Proc. of WMT, pages 321–326. Association for
+Computational Linguistics, July.
+Antti-Veikko I Rosti, Bing Zhang, Spyros Matsoukas,
+and Richard Schwartz. 2011. Expected BLEU
+Training for Graphs: BBN System Description for
+WMT11 System Combination Task. In Proc. of
+WMT, pages 159–165. Association for Computa-
+tional Linguistics, July.
+David E. Rumelhart, Geoffrey E. Hinton, and Ronald J.
+Williams. 1986. Learning Internal Representations
+by Error Propagation. In Symposium on Parallel and
+Distributed Processing.
+</reference>
+<page confidence="0.979345">
+141
+</page>
+<reference confidence="0.999423592592593">
+Holger Schwenk, Anthony Rousseau, and Mohammed
+Attik. 2012. Large, Pruned or Continuous Space
+Language Models on a GPU for Statistical Machine
+Translation. In NAACL-HLT Workshop on the Fu-
+ture of Language Modeling for HLT, pages 11–19.
+Association for Computational Linguistics.
+Martin Sundermeyer, Ilya Oparin, Jean-Luc Gauvain,
+Ben Freiberg, Ralf Schl¨uter, and Hermann Ney.
+2013. Comparison of Feedforward and Recurrent
+Neural Network Language Models. In IEEE Inter-
+national Conference on Acoustics, Speech, and Sig-
+nal Processing, pages 8430–8434, May.
+Roy W. Tromble, Shankar Kumar, Franz Och, and
+Wolfgang Macherey. 2008. Lattice Minimum
+Bayes-Risk Decoding for Statistical Machine Trans-
+lation. In Proc. of EMNLP, pages 620–629. Associ-
+ation for Computational Linguistics, October.
+Ashish Vaswani, Yinggong Zhao, Victoria Fossum, and
+David Chiang. 2013. Decoding with Large-scale
+Neural Language Models improves Translation. In
+Proc. of EMNLP. Association for Computational
+Linguistics, October.
+Heng Yu, Liang Huang, Haitao Mi, and Kai Zhao.
+2013. Max-Violation Perceptron and Forced Decod-
+ing for Scalable MT Training. In Proc. of EMNLP,
+pages 1112–1123. Association for Computational
+Linguistics, October.
+</reference>
+<page confidence="0.997715">
+142
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.718510">
+<title confidence="0.999313">Decoder Integration and Expected BLEU for Recurrent Neural Network Language Models</title>
+<author confidence="0.993534">Michael</author>
+<affiliation confidence="0.968212">Microsoft</affiliation>
+<address confidence="0.754315">Redmond, WA,</address>
+<email confidence="0.999906">michael.auli@microsoft.com</email>
+<abstract confidence="0.998921631578947">Neural network language models are often trained by optimizing likelihood, but we would prefer to optimize for a task specific metric, such as BLEU in machine translation. We show how a recurrent neural network language model can be optimized towards an expected BLEU loss instead of the usual cross-entropy criterion. Furthermore, we tackle the issue of directly integrating a recurrent network into firstpass decoding under an efficient approximation. Our best results improve a phrasebased statistical machine translation system trained on WMT 2012 French-English data by up to 2.0 BLEU, and the expected BLEU objective improves over a crossentropy trained model by up to 0.6 BLEU in a single reference setup.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>Alexandre Allauzen</author>
+<author>H´el`ene Bonneau-Maynard</author>
+<author>HaiSon Le</author>
+<author>Aur´elien Max</author>
+<author>Guillaume Wisniewski</author>
+<author>Franc¸ois Yvon</author>
+<author>Gilles Adda</author>
+<author>Josep Maria Crego</author>
+<author>Adrien Lardilleux</author>
+<author>Thomas Lavergne</author>
+<author>Artem Sokolov</author>
+</authors>
+<date>2011</date>
+<booktitle>LIMSI @ WMT11. In Proc. of WMT,</booktitle>
+<pages>309--315</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<location>Edinburgh, Scotland,</location>
+<contexts>
+<context position="1068" citStr="Allauzen et al., 2011" startWordPosition="157" endWordPosition="160">ss instead of the usual cross-entropy criterion. Furthermore, we tackle the issue of directly integrating a recurrent network into firstpass decoding under an efficient approximation. Our best results improve a phrasebased statistical machine translation system trained on WMT 2012 French-English data by up to 2.0 BLEU, and the expected BLEU objective improves over a crossentropy trained model by up to 0.6 BLEU in a single reference setup. 1 Introduction Neural network-based language and translation models have achieved impressive accuracy improvements on statistical machine translation tasks (Allauzen et al., 2011; Le et al., 2012b; Schwenk et al., 2012; Vaswani et al., 2013; Gao et al., 2014). In this paper we focus on recurrent neural network architectures which have recently advanced the state of the art in language modeling (Mikolov et al., 2010; Mikolov et al., 2011; Sundermeyer et al., 2013) with several subsequent applications in machine translation (Auli et al., 2013; Kalchbrenner and Blunsom, 2013; Hu et al., 2014). Recurrent models have the potential to capture long-span dependencies since their predictions are based on an unbounded history of previous words (§2). In practice, neural network </context>
+</contexts>
+<marker>Allauzen, Bonneau-Maynard, Le, Max, Wisniewski, Yvon, Adda, Crego, Lardilleux, Lavergne, Sokolov, 2011</marker>
+<rawString>Alexandre Allauzen, H´el`ene Bonneau-Maynard, HaiSon Le, Aur´elien Max, Guillaume Wisniewski, Franc¸ois Yvon, Gilles Adda, Josep Maria Crego, Adrien Lardilleux, Thomas Lavergne, and Artem Sokolov. 2011. LIMSI @ WMT11. In Proc. of WMT, pages 309–315, Edinburgh, Scotland, July. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ebru Arisoy</author>
+<author>Tara N Sainath</author>
+<author>Brian Kingsbury</author>
+<author>Bhuvana Ramabhadran</author>
+</authors>
+<title>Deep Neural Network Language Models.</title>
+<date>2012</date>
+<booktitle>In NAACL-HLT Workshop on the Future of Language Modeling for HLT,</booktitle>
+<pages>20--28</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<location>Stroudsburg, PA, USA.</location>
+<contexts>
+<context position="2679" citStr="Arisoy et al., 2012" startWordPosition="415" endWordPosition="418">-specific metric often leads to better performance (Goodman, 1996; Och, 2003; Auli and Lopez, 2011). The expected BLEU objective provides an efficient way of achieving this for machine translation (Rosti et al., 2010; Rosti et al., 2011; He and Deng, 2012; Gao and He, 2013; Gao et al., 2014) instead of solely relying on traditional optimizers such as Minimum Error Rate Training (MERT) that only adjust the weighting of entire component models within the log-linear framework of machine translation (§3). Most previous work on neural networks for machine translation is based on a rescoring setup (Arisoy et al., 2012; Mikolov, 2012; Le et al., 2012a; Auli et al., 2013), thereby side stepping the algorithmic and engineering challenges of direct decoder-integration. One recent exception is Vaswani et al. (2013) who demonstrated that feedforward network-based language models are more accurate in first-pass decoding than in rescoring. Decoder integration has the advantage for the neural network to directly influence search, unlike rescoring which is restricted to an n-best list or lattice. Decoding with feed-forward architectures is straightforward, since predictions are based on a fixed size input, similar t</context>
+</contexts>
+<marker>Arisoy, Sainath, Kingsbury, Ramabhadran, 2012</marker>
+<rawString>Ebru Arisoy, Tara N. Sainath, Brian Kingsbury, and Bhuvana Ramabhadran. 2012. Deep Neural Network Language Models. In NAACL-HLT Workshop on the Future of Language Modeling for HLT, pages 20–28, Stroudsburg, PA, USA. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Michael Auli</author>
+<author>Adam Lopez</author>
+</authors>
+<title>Training a Log-Linear Parser with Loss Functions via SoftmaxMargin. In</title>
+<date>2011</date>
+<booktitle>Proc. of EMNLP,</booktitle>
+<pages>333--343</pages>
+<contexts>
+<context position="2159" citStr="Auli and Lopez, 2011" startWordPosition="327" endWordPosition="330">g-span dependencies since their predictions are based on an unbounded history of previous words (§2). In practice, neural network models for machine translation are usually trained by maximizing the likelihood of the training data, either via a crossentropy objective (Mikolov et al., 2010; Schwenk Jianfeng Gao Microsoft Research Redmond, WA, USA jfgao@microsoft.com et al., 2012) or more recently, noise-contrastive estimation (Vaswani et al., 2013). However, it is widely appreciated that directly optimizing for a task-specific metric often leads to better performance (Goodman, 1996; Och, 2003; Auli and Lopez, 2011). The expected BLEU objective provides an efficient way of achieving this for machine translation (Rosti et al., 2010; Rosti et al., 2011; He and Deng, 2012; Gao and He, 2013; Gao et al., 2014) instead of solely relying on traditional optimizers such as Minimum Error Rate Training (MERT) that only adjust the weighting of entire component models within the log-linear framework of machine translation (§3). Most previous work on neural networks for machine translation is based on a rescoring setup (Arisoy et al., 2012; Mikolov, 2012; Le et al., 2012a; Auli et al., 2013), thereby side stepping the</context>
+</contexts>
+<marker>Auli, Lopez, 2011</marker>
+<rawString>Michael Auli and Adam Lopez. 2011. Training a Log-Linear Parser with Loss Functions via SoftmaxMargin. In Proc. of EMNLP, pages 333–343. Association for Computational Linguistics, July.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Michael Auli</author>
+<author>Michel Galley</author>
+<author>Chris Quirk</author>
+<author>Geoffrey Zweig</author>
+</authors>
+<title>Joint Language and Translation Modeling with Recurrent Neural Networks.</title>
+<date>2013</date>
+<booktitle>In Proc. of EMNLP,</booktitle>
+<contexts>
+<context position="1436" citStr="Auli et al., 2013" startWordPosition="219" endWordPosition="222">ssentropy trained model by up to 0.6 BLEU in a single reference setup. 1 Introduction Neural network-based language and translation models have achieved impressive accuracy improvements on statistical machine translation tasks (Allauzen et al., 2011; Le et al., 2012b; Schwenk et al., 2012; Vaswani et al., 2013; Gao et al., 2014). In this paper we focus on recurrent neural network architectures which have recently advanced the state of the art in language modeling (Mikolov et al., 2010; Mikolov et al., 2011; Sundermeyer et al., 2013) with several subsequent applications in machine translation (Auli et al., 2013; Kalchbrenner and Blunsom, 2013; Hu et al., 2014). Recurrent models have the potential to capture long-span dependencies since their predictions are based on an unbounded history of previous words (§2). In practice, neural network models for machine translation are usually trained by maximizing the likelihood of the training data, either via a crossentropy objective (Mikolov et al., 2010; Schwenk Jianfeng Gao Microsoft Research Redmond, WA, USA jfgao@microsoft.com et al., 2012) or more recently, noise-contrastive estimation (Vaswani et al., 2013). However, it is widely appreciated that direct</context>
+<context position="2732" citStr="Auli et al., 2013" startWordPosition="425" endWordPosition="428">odman, 1996; Och, 2003; Auli and Lopez, 2011). The expected BLEU objective provides an efficient way of achieving this for machine translation (Rosti et al., 2010; Rosti et al., 2011; He and Deng, 2012; Gao and He, 2013; Gao et al., 2014) instead of solely relying on traditional optimizers such as Minimum Error Rate Training (MERT) that only adjust the weighting of entire component models within the log-linear framework of machine translation (§3). Most previous work on neural networks for machine translation is based on a rescoring setup (Arisoy et al., 2012; Mikolov, 2012; Le et al., 2012a; Auli et al., 2013), thereby side stepping the algorithmic and engineering challenges of direct decoder-integration. One recent exception is Vaswani et al. (2013) who demonstrated that feedforward network-based language models are more accurate in first-pass decoding than in rescoring. Decoder integration has the advantage for the neural network to directly influence search, unlike rescoring which is restricted to an n-best list or lattice. Decoding with feed-forward architectures is straightforward, since predictions are based on a fixed size input, similar to n-gram language models. However, for recurrent netw</context>
+<context position="11741" citStr="Auli et al., 2013" startWordPosition="1952" endWordPosition="1955">ell. In order to accommodate this feature, each state usually keeps these words as context. Unfortunately, a recurrent neural network makes even weaker independence assumptions so 138 that it depends on the entire left prefix of a sentence. Furthermore, the weaker independence assumptions also dramatically reduce the effectiveness of dynamic programming by allowing much fewer states to be recombined.7 To solve this problem, we follow previous work on lattice rescoring with recurrent networks that maintained the usual n-gram context but kept a beam of hidden layer configurations at each state (Auli et al., 2013). In fact, to make decoding as efficient as possible, we only keep the single best scoring hidden layer configuration. This approximation has been effective for lattice rescoring, since the translations represented by each state are in fact very similar: They share both the same source words as well as the same n-gram context which is likely to result in similar recurrent histories that can be safely pruned. As future cost estimate we score each phrase in isolation, resetting the hidden layer at the beginning of a phrase. While simple, we found our estimate to be more accurate than no future c</context>
+</contexts>
+<marker>Auli, Galley, Quirk, Zweig, 2013</marker>
+<rawString>Michael Auli, Michel Galley, Chris Quirk, and Geoffrey Zweig. 2013. Joint Language and Translation Modeling with Recurrent Neural Networks. In Proc. of EMNLP, October.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yoshua Bengio</author>
+<author>R´ejean Ducharme</author>
+<author>Pascal Vincent</author>
+<author>Christian Jauvin</author>
+</authors>
+<title>A Neural Probabilistic Language Model.</title>
+<date>2003</date>
+<journal>Journal of Machine Learning Research,</journal>
+<pages>3--1137</pages>
+<contexts>
+<context position="5601" citStr="Bengio et al., 2003" startWordPosition="888" endWordPosition="891">nd W represents connections from the previous hidden layer to the current hidden layer. Matrix V contains weights between the current hidden layer and the output layer. The activations of the hidden and output layers are computed by: ht = tanh(Uwt + Wht−1) yt = tanh(Vht) Different to previous work (Mikolov et al., 2010), we do not use the softmax activation function to output a probability over the next word, but instead just compute a single unnormalized score. This is computationally more efficient than summing over all possible outputs such as required for the cross-entropy error function (Bengio et al., 2003; Mikolov et al., 2010; Schwenk et al., 2012). Training is based on the back propagation through time algorithm, which unrolls the network and then computes error gradients over multiple time steps (Rumelhart et al., 1986); we use the expected BLEU loss (§3) to obtain the error with respect to the output activations. After training, the output layer represents scores s(wt+1|w1 ... wt, ht) for the next word given the previous t input words and the current hidden layer configuration ht. 3 Expected BLEU Training We integrate the recurrent neural network language model as an additional feature int</context>
+</contexts>
+<marker>Bengio, Ducharme, Vincent, Jauvin, 2003</marker>
+<rawString>Yoshua Bengio, R´ejean Ducharme, Pascal Vincent, and Christian Jauvin. 2003. A Neural Probabilistic Language Model. Journal of Machine Learning Research, 3:1137–1155.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Michel Galley</author>
+<author>Christopher D Manning</author>
+</authors>
+<title>A Simple and Effective Hierarchical Phrase Reordering Model.</title>
+<date>2008</date>
+<booktitle>In Proc. of EMNLP,</booktitle>
+<pages>848--856</pages>
+<contexts>
+<context position="12677" citStr="Galley and Manning, 2008" startWordPosition="2107" endWordPosition="2110">e n-gram context which is likely to result in similar recurrent histories that can be safely pruned. As future cost estimate we score each phrase in isolation, resetting the hidden layer at the beginning of a phrase. While simple, we found our estimate to be more accurate than no future cost at all. 5 Experiments Baseline. We use a phrase-based system similar to Moses (Koehn et al., 2007) based on a set of common features including maximum likelihood estimates pML(e|f) and pML(f|e), lexically weighted estimates pLW(e|f) and pLW(f|e), word and phrase-penalties, a hierarchical reordering model (Galley and Manning, 2008), a linear distortion feature, and a modified Kneser-Ney language model trained on the target-side of the parallel data. Log-linear weights are tuned with MERT. Evaluation. We use training and test data from the WMT 2012 campaign and report results on French-English and German-English. Translation models are estimated on 102M words of parallel data for French-English, and 99M words for German-English; about 6.5M words for each language pair are newswire, the remainder are parliamentary proceedings. We evaluate on six newswire domain test sets from 2008 to 2013 containing between 2034 to 3003 s</context>
+</contexts>
+<marker>Galley, Manning, 2008</marker>
+<rawString>Michel Galley and Christopher D. Manning. 2008. A Simple and Effective Hierarchical Phrase Reordering Model. In Proc. of EMNLP, pages 848–856.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jianfeng Gao</author>
+<author>Xiaodong He</author>
+</authors>
+<title>Training MRFBased Phrase Translation Models using Gradient Ascent.</title>
+<date>2013</date>
+<booktitle>In Proc. of NAACL-HLT,</booktitle>
+<pages>450--459</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics,</institution>
+<contexts>
+<context position="2333" citStr="Gao and He, 2013" startWordPosition="359" endWordPosition="362">d by maximizing the likelihood of the training data, either via a crossentropy objective (Mikolov et al., 2010; Schwenk Jianfeng Gao Microsoft Research Redmond, WA, USA jfgao@microsoft.com et al., 2012) or more recently, noise-contrastive estimation (Vaswani et al., 2013). However, it is widely appreciated that directly optimizing for a task-specific metric often leads to better performance (Goodman, 1996; Och, 2003; Auli and Lopez, 2011). The expected BLEU objective provides an efficient way of achieving this for machine translation (Rosti et al., 2010; Rosti et al., 2011; He and Deng, 2012; Gao and He, 2013; Gao et al., 2014) instead of solely relying on traditional optimizers such as Minimum Error Rate Training (MERT) that only adjust the weighting of entire component models within the log-linear framework of machine translation (§3). Most previous work on neural networks for machine translation is based on a rescoring setup (Arisoy et al., 2012; Mikolov, 2012; Le et al., 2012a; Auli et al., 2013), thereby side stepping the algorithmic and engineering challenges of direct decoder-integration. One recent exception is Vaswani et al. (2013) who demonstrated that feedforward network-based language </context>
+</contexts>
+<marker>Gao, He, 2013</marker>
+<rawString>Jianfeng Gao and Xiaodong He. 2013. Training MRFBased Phrase Translation Models using Gradient Ascent. In Proc. of NAACL-HLT, pages 450–459. Association for Computational Linguistics, June.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jianfeng Gao</author>
+<author>Xiaodong He</author>
+<author>Scott Wen tau Yih</author>
+<author>Li Deng</author>
+</authors>
+<title>Learning Continuous Phrase Representations for Translation Modeling.</title>
+<date>2014</date>
+<booktitle>In Proc. of ACL. Association for Computational Linguistics,</booktitle>
+<contexts>
+<context position="1149" citStr="Gao et al., 2014" startWordPosition="173" endWordPosition="176">directly integrating a recurrent network into firstpass decoding under an efficient approximation. Our best results improve a phrasebased statistical machine translation system trained on WMT 2012 French-English data by up to 2.0 BLEU, and the expected BLEU objective improves over a crossentropy trained model by up to 0.6 BLEU in a single reference setup. 1 Introduction Neural network-based language and translation models have achieved impressive accuracy improvements on statistical machine translation tasks (Allauzen et al., 2011; Le et al., 2012b; Schwenk et al., 2012; Vaswani et al., 2013; Gao et al., 2014). In this paper we focus on recurrent neural network architectures which have recently advanced the state of the art in language modeling (Mikolov et al., 2010; Mikolov et al., 2011; Sundermeyer et al., 2013) with several subsequent applications in machine translation (Auli et al., 2013; Kalchbrenner and Blunsom, 2013; Hu et al., 2014). Recurrent models have the potential to capture long-span dependencies since their predictions are based on an unbounded history of previous words (§2). In practice, neural network models for machine translation are usually trained by maximizing the likelihood o</context>
+<context position="7082" citStr="Gao et al., 2014" startWordPosition="1146" endWordPosition="1149"> sentences e to the vector h1(f, e) ... (f, e), and the model chooses translations according to the following decision rule: eˆ = arg max ATh(f, e) eE£(f) We summarize the weights of the recurrent neural network language model as θ = {U, W, V} and add the model as an additional feature to the loglinear translation model using the simplified notation sO(wt) = s(wt|w1 ... wt−1, ht−1): |e| hM+1(e) = sO(e) = L log sO(wt) (1) t=1 which computes a sentence-level language model score as the sum of individual word scores. The translation model is parameterized by A and θ which are learned as follows (Gao et al., 2014): 1. We generate an n-best list for each foreign sentence in the training data with the baseline translation system given A where λM+1 = 0 using the settings described in §5. The n-best lists serve as an approximation to E(f) used in the next step for expected BLEU training of the recurrent neural network model (§3.1). 2. Next, we fix A, set λM+1 = 1 and optimize θ with respect to the loss function on the training data using stochastic gradient descent (SGD).1 1We tuned λM+1 on the development set but found that λM+1 = 1 resulted in faster training and equal accuracy. wt 0 0 1 0 0 0 yt ht U V </context>
+</contexts>
+<marker>Gao, He, Yih, Deng, 2014</marker>
+<rawString>Jianfeng Gao, Xiaodong He, Scott Wen tau Yih, and Li Deng. 2014. Learning Continuous Phrase Representations for Translation Modeling. In Proc. of ACL. Association for Computational Linguistics, June.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Joshua Goodman</author>
+</authors>
+<title>Parsing Algorithms and Metrics. In</title>
+<date>1996</date>
+<booktitle>Proc. of ACL,</booktitle>
+<pages>177--183</pages>
+<location>Santa Cruz, CA, USA,</location>
+<contexts>
+<context position="2125" citStr="Goodman, 1996" startWordPosition="323" endWordPosition="324">e potential to capture long-span dependencies since their predictions are based on an unbounded history of previous words (§2). In practice, neural network models for machine translation are usually trained by maximizing the likelihood of the training data, either via a crossentropy objective (Mikolov et al., 2010; Schwenk Jianfeng Gao Microsoft Research Redmond, WA, USA jfgao@microsoft.com et al., 2012) or more recently, noise-contrastive estimation (Vaswani et al., 2013). However, it is widely appreciated that directly optimizing for a task-specific metric often leads to better performance (Goodman, 1996; Och, 2003; Auli and Lopez, 2011). The expected BLEU objective provides an efficient way of achieving this for machine translation (Rosti et al., 2010; Rosti et al., 2011; He and Deng, 2012; Gao and He, 2013; Gao et al., 2014) instead of solely relying on traditional optimizers such as Minimum Error Rate Training (MERT) that only adjust the weighting of entire component models within the log-linear framework of machine translation (§3). Most previous work on neural networks for machine translation is based on a rescoring setup (Arisoy et al., 2012; Mikolov, 2012; Le et al., 2012a; Auli et al.</context>
+</contexts>
+<marker>Goodman, 1996</marker>
+<rawString>Joshua Goodman. 1996. Parsing Algorithms and Metrics. In Proc. of ACL, pages 177–183, Santa Cruz, CA, USA, June.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Xiaodong He</author>
+<author>Li Deng</author>
+</authors>
+<title>Maximum Expected BLEU Training of Phrase and Lexicon Translation Models.</title>
+<date>2012</date>
+<booktitle>In Proc. of ACL,</booktitle>
+<pages>8--14</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics,</institution>
+<contexts>
+<context position="2315" citStr="He and Deng, 2012" startWordPosition="355" endWordPosition="358"> are usually trained by maximizing the likelihood of the training data, either via a crossentropy objective (Mikolov et al., 2010; Schwenk Jianfeng Gao Microsoft Research Redmond, WA, USA jfgao@microsoft.com et al., 2012) or more recently, noise-contrastive estimation (Vaswani et al., 2013). However, it is widely appreciated that directly optimizing for a task-specific metric often leads to better performance (Goodman, 1996; Och, 2003; Auli and Lopez, 2011). The expected BLEU objective provides an efficient way of achieving this for machine translation (Rosti et al., 2010; Rosti et al., 2011; He and Deng, 2012; Gao and He, 2013; Gao et al., 2014) instead of solely relying on traditional optimizers such as Minimum Error Rate Training (MERT) that only adjust the weighting of entire component models within the log-linear framework of machine translation (§3). Most previous work on neural networks for machine translation is based on a rescoring setup (Arisoy et al., 2012; Mikolov, 2012; Le et al., 2012a; Auli et al., 2013), thereby side stepping the algorithmic and engineering challenges of direct decoder-integration. One recent exception is Vaswani et al. (2013) who demonstrated that feedforward netwo</context>
+<context position="8438" citStr="He and Deng (2012)" startWordPosition="1395" endWordPosition="1398">on the development set (§5). 3.2 Derivation of the Error Term δwt We rewrite the loss function (2) using (3) and separate it into two terms G(θ) and Z(θ) as follows: 3.1 Expected BLEU Objective Formally, we define our loss function l(θ) as the negative expected BLEU score, denoted as xBLEU(θ) for a given foreign sentence f: l(θ) = − xBLEU(θ) X pA,θ(e|f)sBLEU(e, e(i)) (2) eE£(f) where sBLEU(e, e(i)) is a smoothed sentencelevel BLEU score with respect to the reference translation e(i), and E(f) is the generation set given by an n-best list.2 We use a sentence-level BLEU approximation similar to He and Deng (2012).3 The normalized probability pA,θ(e|f) of a particular translation e given f is defined as: exp{γΛTh(f, e)} pA,θ(e|f) = (3) Pe,E£(f) exp{γΛTh(f, e&apos;)} where ΛTh(f, e) includes the recurrent neural network hM+1(e), and γ ∈ [0, inf) is a scaling factor that flattens the distribution for γ &lt; 1 and sharpens it for γ &gt; 1 (Tromble et al., 2008).4 Next, we define the gradient of the expected BLEU loss function l(θ) using the observation that the loss does not explicitly depend on θ: ∂l(θ) X ∂θ = e G(θ) l(θ) = −xBLEU(θ) = −(4) Z(θ) PeE£(f) exp{γΛT h(f, e)} sBLEU(e, e(i)) PeE£(f) exp{γΛTh(f, e)} Next, </context>
+</contexts>
+<marker>He, Deng, 2012</marker>
+<rawString>Xiaodong He and Li Deng. 2012. Maximum Expected BLEU Training of Phrase and Lexicon Translation Models. In Proc. of ACL, pages 8–14. Association for Computational Linguistics, July.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yuening Hu</author>
+<author>Michael Auli</author>
+<author>Qin Gao</author>
+<author>Jianfeng Gao</author>
+</authors>
+<title>Minimum Translation Modeling with Recurrent Neural Networks.</title>
+<date>2014</date>
+<booktitle>In Proc. of EACL. Association for Computational Linguistics,</booktitle>
+<contexts>
+<context position="1486" citStr="Hu et al., 2014" startWordPosition="227" endWordPosition="230">le reference setup. 1 Introduction Neural network-based language and translation models have achieved impressive accuracy improvements on statistical machine translation tasks (Allauzen et al., 2011; Le et al., 2012b; Schwenk et al., 2012; Vaswani et al., 2013; Gao et al., 2014). In this paper we focus on recurrent neural network architectures which have recently advanced the state of the art in language modeling (Mikolov et al., 2010; Mikolov et al., 2011; Sundermeyer et al., 2013) with several subsequent applications in machine translation (Auli et al., 2013; Kalchbrenner and Blunsom, 2013; Hu et al., 2014). Recurrent models have the potential to capture long-span dependencies since their predictions are based on an unbounded history of previous words (§2). In practice, neural network models for machine translation are usually trained by maximizing the likelihood of the training data, either via a crossentropy objective (Mikolov et al., 2010; Schwenk Jianfeng Gao Microsoft Research Redmond, WA, USA jfgao@microsoft.com et al., 2012) or more recently, noise-contrastive estimation (Vaswani et al., 2013). However, it is widely appreciated that directly optimizing for a task-specific metric often lea</context>
+</contexts>
+<marker>Hu, Auli, Gao, Gao, 2014</marker>
+<rawString>Yuening Hu, Michael Auli, Qin Gao, and Jianfeng Gao. 2014. Minimum Translation Modeling with Recurrent Neural Networks. In Proc. of EACL. Association for Computational Linguistics, April.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Nal Kalchbrenner</author>
+<author>Phil Blunsom</author>
+</authors>
+<title>Recurrent Continuous Translation Models.</title>
+<date>2013</date>
+<booktitle>In Proc. of EMNLP,</booktitle>
+<pages>1700--1709</pages>
+<location>Seattle, Washington, USA,</location>
+<contexts>
+<context position="1468" citStr="Kalchbrenner and Blunsom, 2013" startWordPosition="223" endWordPosition="226">odel by up to 0.6 BLEU in a single reference setup. 1 Introduction Neural network-based language and translation models have achieved impressive accuracy improvements on statistical machine translation tasks (Allauzen et al., 2011; Le et al., 2012b; Schwenk et al., 2012; Vaswani et al., 2013; Gao et al., 2014). In this paper we focus on recurrent neural network architectures which have recently advanced the state of the art in language modeling (Mikolov et al., 2010; Mikolov et al., 2011; Sundermeyer et al., 2013) with several subsequent applications in machine translation (Auli et al., 2013; Kalchbrenner and Blunsom, 2013; Hu et al., 2014). Recurrent models have the potential to capture long-span dependencies since their predictions are based on an unbounded history of previous words (§2). In practice, neural network models for machine translation are usually trained by maximizing the likelihood of the training data, either via a crossentropy objective (Mikolov et al., 2010; Schwenk Jianfeng Gao Microsoft Research Redmond, WA, USA jfgao@microsoft.com et al., 2012) or more recently, noise-contrastive estimation (Vaswani et al., 2013). However, it is widely appreciated that directly optimizing for a task-specifi</context>
+</contexts>
+<marker>Kalchbrenner, Blunsom, 2013</marker>
+<rawString>Nal Kalchbrenner and Phil Blunsom. 2013. Recurrent Continuous Translation Models. In Proc. of EMNLP, pages 1700–1709, Seattle, Washington, USA, October. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Philipp Koehn</author>
+<author>Hieu Hoang</author>
+<author>Alexandra Birch</author>
+<author>Chris Callison-Burch</author>
+<author>Marcello Federico</author>
+<author>Nicola Bertoldi</author>
+<author>Brooke Cowan</author>
+<author>Wade Shen</author>
+</authors>
+<title>Moses: Open Source Toolkit for Statistical Machine Translation.</title>
+<date>2007</date>
+<booktitle>In Proc. of ACL Demo and Poster Sessions,</booktitle>
+<pages>177--180</pages>
+<location>Christine Moran, Richard Zens, Chris Dyer, Ondrej Bojar, Alexandra</location>
+<contexts>
+<context position="12443" citStr="Koehn et al., 2007" startWordPosition="2074" endWordPosition="2077">scoring hidden layer configuration. This approximation has been effective for lattice rescoring, since the translations represented by each state are in fact very similar: They share both the same source words as well as the same n-gram context which is likely to result in similar recurrent histories that can be safely pruned. As future cost estimate we score each phrase in isolation, resetting the hidden layer at the beginning of a phrase. While simple, we found our estimate to be more accurate than no future cost at all. 5 Experiments Baseline. We use a phrase-based system similar to Moses (Koehn et al., 2007) based on a set of common features including maximum likelihood estimates pML(e|f) and pML(f|e), lexically weighted estimates pLW(e|f) and pLW(f|e), word and phrase-penalties, a hierarchical reordering model (Galley and Manning, 2008), a linear distortion feature, and a modified Kneser-Ney language model trained on the target-side of the parallel data. Log-linear weights are tuned with MERT. Evaluation. We use training and test data from the WMT 2012 campaign and report results on French-English and German-English. Translation models are estimated on 102M words of parallel data for French-Engl</context>
+</contexts>
+<marker>Koehn, Hoang, Birch, Callison-Burch, Federico, Bertoldi, Cowan, Shen, 2007</marker>
+<rawString>Philipp Koehn, Hieu Hoang, Alexandra Birch, Chris Callison-Burch, Marcello Federico, Nicola Bertoldi, Brooke Cowan, Wade Shen, Christine Moran, Richard Zens, Chris Dyer, Ondrej Bojar, Alexandra Constantin, and Evan Herbst. 2007. Moses: Open Source Toolkit for Statistical Machine Translation. In Proc. of ACL Demo and Poster Sessions, pages 177–180, Prague, Czech Republic, Jun.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Hai-Son Le</author>
+<author>Alexandre Allauzen</author>
+<author>Franc¸ois Yvon</author>
+</authors>
+<title>Continuous Space Translation Models with Neural Networks.</title>
+<date>2012</date>
+<booktitle>In Proc. of HLT-NAACL,</booktitle>
+<pages>39--48</pages>
+<publisher>Association for</publisher>
+<institution>Computational Linguistics.</institution>
+<location>Montr´eal, Canada.</location>
+<contexts>
+<context position="1085" citStr="Le et al., 2012" startWordPosition="161" endWordPosition="164"> cross-entropy criterion. Furthermore, we tackle the issue of directly integrating a recurrent network into firstpass decoding under an efficient approximation. Our best results improve a phrasebased statistical machine translation system trained on WMT 2012 French-English data by up to 2.0 BLEU, and the expected BLEU objective improves over a crossentropy trained model by up to 0.6 BLEU in a single reference setup. 1 Introduction Neural network-based language and translation models have achieved impressive accuracy improvements on statistical machine translation tasks (Allauzen et al., 2011; Le et al., 2012b; Schwenk et al., 2012; Vaswani et al., 2013; Gao et al., 2014). In this paper we focus on recurrent neural network architectures which have recently advanced the state of the art in language modeling (Mikolov et al., 2010; Mikolov et al., 2011; Sundermeyer et al., 2013) with several subsequent applications in machine translation (Auli et al., 2013; Kalchbrenner and Blunsom, 2013; Hu et al., 2014). Recurrent models have the potential to capture long-span dependencies since their predictions are based on an unbounded history of previous words (§2). In practice, neural network models for machin</context>
+<context position="2711" citStr="Le et al., 2012" startWordPosition="421" endWordPosition="424">er performance (Goodman, 1996; Och, 2003; Auli and Lopez, 2011). The expected BLEU objective provides an efficient way of achieving this for machine translation (Rosti et al., 2010; Rosti et al., 2011; He and Deng, 2012; Gao and He, 2013; Gao et al., 2014) instead of solely relying on traditional optimizers such as Minimum Error Rate Training (MERT) that only adjust the weighting of entire component models within the log-linear framework of machine translation (§3). Most previous work on neural networks for machine translation is based on a rescoring setup (Arisoy et al., 2012; Mikolov, 2012; Le et al., 2012a; Auli et al., 2013), thereby side stepping the algorithmic and engineering challenges of direct decoder-integration. One recent exception is Vaswani et al. (2013) who demonstrated that feedforward network-based language models are more accurate in first-pass decoding than in rescoring. Decoder integration has the advantage for the neural network to directly influence search, unlike rescoring which is restricted to an n-best list or lattice. Decoding with feed-forward architectures is straightforward, since predictions are based on a fixed size input, similar to n-gram language models. Howeve</context>
+</contexts>
+<marker>Le, Allauzen, Yvon, 2012</marker>
+<rawString>Hai-Son Le, Alexandre Allauzen, and Franc¸ois Yvon. 2012a. Continuous Space Translation Models with Neural Networks. In Proc. of HLT-NAACL, pages 39–48, Montr´eal, Canada. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Hai-Son Le</author>
+<author>Thomas Lavergne</author>
+<author>Alexandre Allauzen</author>
+<author>Marianna Apidianaki</author>
+<author>Li Gong</author>
+<author>Aur´elien Max</author>
+<author>Artem Sokolov</author>
+<author>Guillaume Wisniewski</author>
+<author>Franc¸ois Yvon</author>
+</authors>
+<date></date>
+<booktitle>2012b. LIMSI @ WMT12. In Proc. of WMT,</booktitle>
+<pages>330--337</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<location>Montr´eal, Canada,</location>
+<marker>Le, Lavergne, Allauzen, Apidianaki, Gong, Max, Sokolov, Wisniewski, Yvon, </marker>
+<rawString>Hai-Son Le, Thomas Lavergne, Alexandre Allauzen, Marianna Apidianaki, Li Gong, Aur´elien Max, Artem Sokolov, Guillaume Wisniewski, and Franc¸ois Yvon. 2012b. LIMSI @ WMT12. In Proc. of WMT, pages 330–337, Montr´eal, Canada, June. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Percy Liang</author>
+<author>Alexandre Bouchard-Cˆot´e</author>
+<author>Ben Taskar</author>
+<author>Dan Klein</author>
+</authors>
+<title>An end-to-end discriminative approach to machine translation.</title>
+<date>2006</date>
+<booktitle>In Proc. of ACLCOLING,</booktitle>
+<pages>761--768</pages>
+<marker>Liang, Bouchard-Cˆot´e, Taskar, Klein, 2006</marker>
+<rawString>Percy Liang, Alexandre Bouchard-Cˆot´e, Ben Taskar, and Dan Klein. 2006. An end-to-end discriminative approach to machine translation. In Proc. of ACLCOLING, pages 761–768, Jul.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Tom´as Mikolov</author>
+<author>Karafi´at Martin</author>
+<author>Luk´as Burget</author>
+<author>Jan Cernock´y</author>
+<author>Sanjeev Khudanpur</author>
+</authors>
+<title>Recurrent Neural Network based Language Model.</title>
+<date>2010</date>
+<booktitle>In Proc. of INTERSPEECH,</booktitle>
+<pages>1045--1048</pages>
+<marker>Mikolov, Martin, Burget, Cernock´y, Khudanpur, 2010</marker>
+<rawString>Tom´a&amp;quot;s Mikolov, Karafi´at Martin, Luk´a&amp;quot;s Burget, Jan Cernock´y, and Sanjeev Khudanpur. 2010. Recurrent Neural Network based Language Model. In Proc. of INTERSPEECH, pages 1045–1048.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Tom´as Mikolov</author>
+<author>Anoop Deoras</author>
+<author>Daniel Povey</author>
+<author>Luk´as Burget</author>
+<author>Jan Cernock´y</author>
+</authors>
+<title>Strategies for Training Large Scale Neural Network Language Models.</title>
+<date>2011</date>
+<booktitle>In Proc. of ASRU,</booktitle>
+<pages>196--201</pages>
+<marker>Mikolov, Deoras, Povey, Burget, Cernock´y, 2011</marker>
+<rawString>Tom´a&amp;quot;s Mikolov, Anoop Deoras, Daniel Povey, Luk´a&amp;quot;s Burget, and Jan &amp;quot;Cernock´y. 2011. Strategies for Training Large Scale Neural Network Language Models. In Proc. of ASRU, pages 196–201.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Tom´as Mikolov</author>
+</authors>
+<title>Statistical Language Models based on Neural Networks.</title>
+<date>2012</date>
+<tech>Ph.D. thesis,</tech>
+<institution>Brno University of Technology.</institution>
+<contexts>
+<context position="2694" citStr="Mikolov, 2012" startWordPosition="419" endWordPosition="420">n leads to better performance (Goodman, 1996; Och, 2003; Auli and Lopez, 2011). The expected BLEU objective provides an efficient way of achieving this for machine translation (Rosti et al., 2010; Rosti et al., 2011; He and Deng, 2012; Gao and He, 2013; Gao et al., 2014) instead of solely relying on traditional optimizers such as Minimum Error Rate Training (MERT) that only adjust the weighting of entire component models within the log-linear framework of machine translation (§3). Most previous work on neural networks for machine translation is based on a rescoring setup (Arisoy et al., 2012; Mikolov, 2012; Le et al., 2012a; Auli et al., 2013), thereby side stepping the algorithmic and engineering challenges of direct decoder-integration. One recent exception is Vaswani et al. (2013) who demonstrated that feedforward network-based language models are more accurate in first-pass decoding than in rescoring. Decoder integration has the advantage for the neural network to directly influence search, unlike rescoring which is restricted to an n-best list or lattice. Decoding with feed-forward architectures is straightforward, since predictions are based on a fixed size input, similar to n-gram langua</context>
+<context position="10587" citStr="Mikolov, 2012" startWordPosition="1768" endWordPosition="1769"> we obtain by choosing the highest scoring translation among string identical candidates. 3In early experiments we found that the BLEU+1 approximation used by Liang et al. (2006) and Nakov et. al (2012) worked equally well in our setting. 4The γ parameter is only used during expected BLEU training but not for subsequent MERT tuning. 5A sentence may contain the same word multiple times and we compute the error term for each occurrence separately since the error depends on the individual history. 6We omit the gradient of the recurrent neural network score asθ since it follows the standard form (Mikolov, 2012). aθw Directly integrating our recurrent neural network language model into first-pass decoding enables us to search a much larger space than would be possible in rescoring. Typically, phrase-based decoders maintain a set of states representing partial and complete translation hypothesis that are scored by a set of features. Most features are local, meaning that all required information for them to assign a score is available within the state. One exception is the n-gram language model which requires the preceding n − 1 words as well. In order to accommodate this feature, each state usually ke</context>
+</contexts>
+<marker>Mikolov, 2012</marker>
+<rawString>Tom´a&amp;quot;s Mikolov. 2012. Statistical Language Models based on Neural Networks. Ph.D. thesis, Brno University of Technology.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Preslav Nakov</author>
+<author>Francisco Guzman</author>
+<author>Stephan Vogel</author>
+</authors>
+<title>Optimizing for Sentence-Level BLEU+1 Yields Short Translations.</title>
+<date>2012</date>
+<booktitle>In Proc. of COLING. Association for Computational Linguistics.</booktitle>
+<marker>Nakov, Guzman, Vogel, 2012</marker>
+<rawString>Preslav Nakov, Francisco Guzman, and Stephan Vogel. 2012. Optimizing for Sentence-Level BLEU+1 Yields Short Translations. In Proc. of COLING. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Franz Josef Och</author>
+</authors>
+<title>Minimum Error Rate Training in Statistical Machine Translation.</title>
+<date>2003</date>
+<booktitle>In Proc. of ACL,</booktitle>
+<pages>160--167</pages>
+<location>Sapporo, Japan,</location>
+<contexts>
+<context position="2136" citStr="Och, 2003" startWordPosition="325" endWordPosition="326">capture long-span dependencies since their predictions are based on an unbounded history of previous words (§2). In practice, neural network models for machine translation are usually trained by maximizing the likelihood of the training data, either via a crossentropy objective (Mikolov et al., 2010; Schwenk Jianfeng Gao Microsoft Research Redmond, WA, USA jfgao@microsoft.com et al., 2012) or more recently, noise-contrastive estimation (Vaswani et al., 2013). However, it is widely appreciated that directly optimizing for a task-specific metric often leads to better performance (Goodman, 1996; Och, 2003; Auli and Lopez, 2011). The expected BLEU objective provides an efficient way of achieving this for machine translation (Rosti et al., 2010; Rosti et al., 2011; He and Deng, 2012; Gao and He, 2013; Gao et al., 2014) instead of solely relying on traditional optimizers such as Minimum Error Rate Training (MERT) that only adjust the weighting of entire component models within the log-linear framework of machine translation (§3). Most previous work on neural networks for machine translation is based on a rescoring setup (Arisoy et al., 2012; Mikolov, 2012; Le et al., 2012a; Auli et al., 2013), th</context>
+<context position="6263" citStr="Och, 2003" startWordPosition="997" endWordPosition="998">ing is based on the back propagation through time algorithm, which unrolls the network and then computes error gradients over multiple time steps (Rumelhart et al., 1986); we use the expected BLEU loss (§3) to obtain the error with respect to the output activations. After training, the output layer represents scores s(wt+1|w1 ... wt, ht) for the next word given the previous t input words and the current hidden layer configuration ht. 3 Expected BLEU Training We integrate the recurrent neural network language model as an additional feature into the standard log-linear framework of translation (Och, 2003). Formally, our phrase-based model is parameterized by M parameters A where each λm E A, m = 1... M is the weight of an associated feature hm(f, e). Function h(f, e) maps foreign sentences f and English sentences e to the vector h1(f, e) ... (f, e), and the model chooses translations according to the following decision rule: eˆ = arg max ATh(f, e) eE£(f) We summarize the weights of the recurrent neural network language model as θ = {U, W, V} and add the model as an additional feature to the loglinear translation model using the simplified notation sO(wt) = s(wt|w1 ... wt−1, ht−1): |e| hM+1(e) </context>
+<context position="7819" citStr="Och, 2003" startWordPosition="1290" endWordPosition="1291">re λM+1 = 0 using the settings described in §5. The n-best lists serve as an approximation to E(f) used in the next step for expected BLEU training of the recurrent neural network model (§3.1). 2. Next, we fix A, set λM+1 = 1 and optimize θ with respect to the loss function on the training data using stochastic gradient descent (SGD).1 1We tuned λM+1 on the development set but found that λM+1 = 1 resulted in faster training and equal accuracy. wt 0 0 1 0 0 0 yt ht U V htW 137 3. We fix θ and re-optimize Λ in the presence of the recurrent neural network model using Minimum Error Rate Training (Och, 2003) on the development set (§5). 3.2 Derivation of the Error Term δwt We rewrite the loss function (2) using (3) and separate it into two terms G(θ) and Z(θ) as follows: 3.1 Expected BLEU Objective Formally, we define our loss function l(θ) as the negative expected BLEU score, denoted as xBLEU(θ) for a given foreign sentence f: l(θ) = − xBLEU(θ) X pA,θ(e|f)sBLEU(e, e(i)) (2) eE£(f) where sBLEU(e, e(i)) is a smoothed sentencelevel BLEU score with respect to the reference translation e(i), and E(f) is the generation set given by an n-best list.2 We use a sentence-level BLEU approximation similar to</context>
+</contexts>
+<marker>Och, 2003</marker>
+<rawString>Franz Josef Och. 2003. Minimum Error Rate Training in Statistical Machine Translation. In Proc. of ACL, pages 160–167, Sapporo, Japan, July.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Antti-Veikko I Rosti</author>
+<author>Bing Zhang</author>
+<author>Spyros Matsoukas</author>
+<author>Richard Schwartz</author>
+</authors>
+<title>BBN System Description for WMT10 System Combination Task.</title>
+<date>2010</date>
+<booktitle>In Proc. of WMT,</booktitle>
+<pages>321--326</pages>
+<contexts>
+<context position="2276" citStr="Rosti et al., 2010" startWordPosition="347" endWordPosition="350">l network models for machine translation are usually trained by maximizing the likelihood of the training data, either via a crossentropy objective (Mikolov et al., 2010; Schwenk Jianfeng Gao Microsoft Research Redmond, WA, USA jfgao@microsoft.com et al., 2012) or more recently, noise-contrastive estimation (Vaswani et al., 2013). However, it is widely appreciated that directly optimizing for a task-specific metric often leads to better performance (Goodman, 1996; Och, 2003; Auli and Lopez, 2011). The expected BLEU objective provides an efficient way of achieving this for machine translation (Rosti et al., 2010; Rosti et al., 2011; He and Deng, 2012; Gao and He, 2013; Gao et al., 2014) instead of solely relying on traditional optimizers such as Minimum Error Rate Training (MERT) that only adjust the weighting of entire component models within the log-linear framework of machine translation (§3). Most previous work on neural networks for machine translation is based on a rescoring setup (Arisoy et al., 2012; Mikolov, 2012; Le et al., 2012a; Auli et al., 2013), thereby side stepping the algorithmic and engineering challenges of direct decoder-integration. One recent exception is Vaswani et al. (2013) </context>
+</contexts>
+<marker>Rosti, Zhang, Matsoukas, Schwartz, 2010</marker>
+<rawString>Antti-Veikko I Rosti, Bing Zhang, Spyros Matsoukas, and Richard Schwartz. 2010. BBN System Description for WMT10 System Combination Task. In Proc. of WMT, pages 321–326. Association for Computational Linguistics, July.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Antti-Veikko I Rosti</author>
+<author>Bing Zhang</author>
+<author>Spyros Matsoukas</author>
+<author>Richard Schwartz</author>
+</authors>
+<title>Expected BLEU Training for Graphs: BBN System Description for WMT11 System Combination Task.</title>
+<date>2011</date>
+<booktitle>In Proc. of WMT,</booktitle>
+<pages>159--165</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics,</institution>
+<contexts>
+<context position="2296" citStr="Rosti et al., 2011" startWordPosition="351" endWordPosition="354"> machine translation are usually trained by maximizing the likelihood of the training data, either via a crossentropy objective (Mikolov et al., 2010; Schwenk Jianfeng Gao Microsoft Research Redmond, WA, USA jfgao@microsoft.com et al., 2012) or more recently, noise-contrastive estimation (Vaswani et al., 2013). However, it is widely appreciated that directly optimizing for a task-specific metric often leads to better performance (Goodman, 1996; Och, 2003; Auli and Lopez, 2011). The expected BLEU objective provides an efficient way of achieving this for machine translation (Rosti et al., 2010; Rosti et al., 2011; He and Deng, 2012; Gao and He, 2013; Gao et al., 2014) instead of solely relying on traditional optimizers such as Minimum Error Rate Training (MERT) that only adjust the weighting of entire component models within the log-linear framework of machine translation (§3). Most previous work on neural networks for machine translation is based on a rescoring setup (Arisoy et al., 2012; Mikolov, 2012; Le et al., 2012a; Auli et al., 2013), thereby side stepping the algorithmic and engineering challenges of direct decoder-integration. One recent exception is Vaswani et al. (2013) who demonstrated tha</context>
+</contexts>
+<marker>Rosti, Zhang, Matsoukas, Schwartz, 2011</marker>
+<rawString>Antti-Veikko I Rosti, Bing Zhang, Spyros Matsoukas, and Richard Schwartz. 2011. Expected BLEU Training for Graphs: BBN System Description for WMT11 System Combination Task. In Proc. of WMT, pages 159–165. Association for Computational Linguistics, July.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>David E Rumelhart</author>
+<author>Geoffrey E Hinton</author>
+<author>Ronald J Williams</author>
+</authors>
+<title>Learning Internal Representations by Error Propagation. In</title>
+<date>1986</date>
+<booktitle>Symposium on Parallel and Distributed Processing.</booktitle>
+<contexts>
+<context position="5823" citStr="Rumelhart et al., 1986" startWordPosition="923" endWordPosition="926">re computed by: ht = tanh(Uwt + Wht−1) yt = tanh(Vht) Different to previous work (Mikolov et al., 2010), we do not use the softmax activation function to output a probability over the next word, but instead just compute a single unnormalized score. This is computationally more efficient than summing over all possible outputs such as required for the cross-entropy error function (Bengio et al., 2003; Mikolov et al., 2010; Schwenk et al., 2012). Training is based on the back propagation through time algorithm, which unrolls the network and then computes error gradients over multiple time steps (Rumelhart et al., 1986); we use the expected BLEU loss (§3) to obtain the error with respect to the output activations. After training, the output layer represents scores s(wt+1|w1 ... wt, ht) for the next word given the previous t input words and the current hidden layer configuration ht. 3 Expected BLEU Training We integrate the recurrent neural network language model as an additional feature into the standard log-linear framework of translation (Och, 2003). Formally, our phrase-based model is parameterized by M parameters A where each λm E A, m = 1... M is the weight of an associated feature hm(f, e). Function h(</context>
+</contexts>
+<marker>Rumelhart, Hinton, Williams, 1986</marker>
+<rawString>David E. Rumelhart, Geoffrey E. Hinton, and Ronald J. Williams. 1986. Learning Internal Representations by Error Propagation. In Symposium on Parallel and Distributed Processing.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Holger Schwenk</author>
+<author>Anthony Rousseau</author>
+<author>Mohammed Attik</author>
+</authors>
+<title>Large, Pruned or Continuous Space Language Models on a GPU for Statistical Machine Translation.</title>
+<date>2012</date>
+<booktitle>In NAACL-HLT Workshop on the Future of Language Modeling for HLT,</booktitle>
+<pages>11--19</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<contexts>
+<context position="1108" citStr="Schwenk et al., 2012" startWordPosition="165" endWordPosition="168">terion. Furthermore, we tackle the issue of directly integrating a recurrent network into firstpass decoding under an efficient approximation. Our best results improve a phrasebased statistical machine translation system trained on WMT 2012 French-English data by up to 2.0 BLEU, and the expected BLEU objective improves over a crossentropy trained model by up to 0.6 BLEU in a single reference setup. 1 Introduction Neural network-based language and translation models have achieved impressive accuracy improvements on statistical machine translation tasks (Allauzen et al., 2011; Le et al., 2012b; Schwenk et al., 2012; Vaswani et al., 2013; Gao et al., 2014). In this paper we focus on recurrent neural network architectures which have recently advanced the state of the art in language modeling (Mikolov et al., 2010; Mikolov et al., 2011; Sundermeyer et al., 2013) with several subsequent applications in machine translation (Auli et al., 2013; Kalchbrenner and Blunsom, 2013; Hu et al., 2014). Recurrent models have the potential to capture long-span dependencies since their predictions are based on an unbounded history of previous words (§2). In practice, neural network models for machine translation are usual</context>
+<context position="5646" citStr="Schwenk et al., 2012" startWordPosition="896" endWordPosition="899">us hidden layer to the current hidden layer. Matrix V contains weights between the current hidden layer and the output layer. The activations of the hidden and output layers are computed by: ht = tanh(Uwt + Wht−1) yt = tanh(Vht) Different to previous work (Mikolov et al., 2010), we do not use the softmax activation function to output a probability over the next word, but instead just compute a single unnormalized score. This is computationally more efficient than summing over all possible outputs such as required for the cross-entropy error function (Bengio et al., 2003; Mikolov et al., 2010; Schwenk et al., 2012). Training is based on the back propagation through time algorithm, which unrolls the network and then computes error gradients over multiple time steps (Rumelhart et al., 1986); we use the expected BLEU loss (§3) to obtain the error with respect to the output activations. After training, the output layer represents scores s(wt+1|w1 ... wt, ht) for the next word given the previous t input words and the current hidden layer configuration ht. 3 Expected BLEU Training We integrate the recurrent neural network language model as an additional feature into the standard log-linear framework of transl</context>
+</contexts>
+<marker>Schwenk, Rousseau, Attik, 2012</marker>
+<rawString>Holger Schwenk, Anthony Rousseau, and Mohammed Attik. 2012. Large, Pruned or Continuous Space Language Models on a GPU for Statistical Machine Translation. In NAACL-HLT Workshop on the Future of Language Modeling for HLT, pages 11–19. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Martin Sundermeyer</author>
+<author>Ilya Oparin</author>
+<author>Jean-Luc Gauvain</author>
+<author>Ben Freiberg</author>
+<author>Ralf Schl¨uter</author>
+<author>Hermann Ney</author>
+</authors>
+<title>Comparison of Feedforward and Recurrent Neural Network Language Models.</title>
+<date>2013</date>
+<booktitle>In IEEE International Conference on Acoustics, Speech, and Signal Processing,</booktitle>
+<pages>8430--8434</pages>
+<marker>Sundermeyer, Oparin, Gauvain, Freiberg, Schl¨uter, Ney, 2013</marker>
+<rawString>Martin Sundermeyer, Ilya Oparin, Jean-Luc Gauvain, Ben Freiberg, Ralf Schl¨uter, and Hermann Ney. 2013. Comparison of Feedforward and Recurrent Neural Network Language Models. In IEEE International Conference on Acoustics, Speech, and Signal Processing, pages 8430–8434, May.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Roy W Tromble</author>
+<author>Shankar Kumar</author>
+<author>Franz Och</author>
+<author>Wolfgang Macherey</author>
+</authors>
+<title>Lattice Minimum Bayes-Risk Decoding for Statistical Machine Translation.</title>
+<date>2008</date>
+<booktitle>In Proc. of EMNLP,</booktitle>
+<pages>620--629</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics,</institution>
+<contexts>
+<context position="8778" citStr="Tromble et al., 2008" startWordPosition="1456" endWordPosition="1459">LEU(θ) X pA,θ(e|f)sBLEU(e, e(i)) (2) eE£(f) where sBLEU(e, e(i)) is a smoothed sentencelevel BLEU score with respect to the reference translation e(i), and E(f) is the generation set given by an n-best list.2 We use a sentence-level BLEU approximation similar to He and Deng (2012).3 The normalized probability pA,θ(e|f) of a particular translation e given f is defined as: exp{γΛTh(f, e)} pA,θ(e|f) = (3) Pe,E£(f) exp{γΛTh(f, e&apos;)} where ΛTh(f, e) includes the recurrent neural network hM+1(e), and γ ∈ [0, inf) is a scaling factor that flattens the distribution for γ &lt; 1 and sharpens it for γ &gt; 1 (Tromble et al., 2008).4 Next, we define the gradient of the expected BLEU loss function l(θ) using the observation that the loss does not explicitly depend on θ: ∂l(θ) X ∂θ = e G(θ) l(θ) = −xBLEU(θ) = −(4) Z(θ) PeE£(f) exp{γΛT h(f, e)} sBLEU(e, e(i)) PeE£(f) exp{γΛTh(f, e)} Next, we apply the quotient rule of differentiation: δwt =∂sθ(wt) ∂sθ(wt) � ∂G(θ) � 1 ∂sθ(wt) − ∂Z(θ) ∂sθ(wt)xBLEU(θ) Z(θ) Using the observation that θ is only relevant to the recurrent neural network hM+1(e) (1) we have ∂γΛTh(f, e) ∂sθ(wt) = γλM+1 ∂sθ(wt) = sθ(wt) ∂hM+1(e) γλM+1 which together with the chain rule, (3) and (4) allows us to rewr</context>
+</contexts>
+<marker>Tromble, Kumar, Och, Macherey, 2008</marker>
+<rawString>Roy W. Tromble, Shankar Kumar, Franz Och, and Wolfgang Macherey. 2008. Lattice Minimum Bayes-Risk Decoding for Statistical Machine Translation. In Proc. of EMNLP, pages 620–629. Association for Computational Linguistics, October.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ashish Vaswani</author>
+<author>Yinggong Zhao</author>
+<author>Victoria Fossum</author>
+<author>David Chiang</author>
+</authors>
+<title>Decoding with Large-scale Neural Language Models improves Translation.</title>
+<date>2013</date>
+<booktitle>In Proc. of EMNLP. Association for Computational Linguistics,</booktitle>
+<contexts>
+<context position="1130" citStr="Vaswani et al., 2013" startWordPosition="169" endWordPosition="172">e tackle the issue of directly integrating a recurrent network into firstpass decoding under an efficient approximation. Our best results improve a phrasebased statistical machine translation system trained on WMT 2012 French-English data by up to 2.0 BLEU, and the expected BLEU objective improves over a crossentropy trained model by up to 0.6 BLEU in a single reference setup. 1 Introduction Neural network-based language and translation models have achieved impressive accuracy improvements on statistical machine translation tasks (Allauzen et al., 2011; Le et al., 2012b; Schwenk et al., 2012; Vaswani et al., 2013; Gao et al., 2014). In this paper we focus on recurrent neural network architectures which have recently advanced the state of the art in language modeling (Mikolov et al., 2010; Mikolov et al., 2011; Sundermeyer et al., 2013) with several subsequent applications in machine translation (Auli et al., 2013; Kalchbrenner and Blunsom, 2013; Hu et al., 2014). Recurrent models have the potential to capture long-span dependencies since their predictions are based on an unbounded history of previous words (§2). In practice, neural network models for machine translation are usually trained by maximizi</context>
+<context position="2875" citStr="Vaswani et al. (2013)" startWordPosition="445" endWordPosition="448">on (Rosti et al., 2010; Rosti et al., 2011; He and Deng, 2012; Gao and He, 2013; Gao et al., 2014) instead of solely relying on traditional optimizers such as Minimum Error Rate Training (MERT) that only adjust the weighting of entire component models within the log-linear framework of machine translation (§3). Most previous work on neural networks for machine translation is based on a rescoring setup (Arisoy et al., 2012; Mikolov, 2012; Le et al., 2012a; Auli et al., 2013), thereby side stepping the algorithmic and engineering challenges of direct decoder-integration. One recent exception is Vaswani et al. (2013) who demonstrated that feedforward network-based language models are more accurate in first-pass decoding than in rescoring. Decoder integration has the advantage for the neural network to directly influence search, unlike rescoring which is restricted to an n-best list or lattice. Decoding with feed-forward architectures is straightforward, since predictions are based on a fixed size input, similar to n-gram language models. However, for recurrent networks we have to deal with the unbounded history, which breaks the usual dynamic programming assumptions for efficient search. We show how a sim</context>
+<context position="18449" citStr="Vaswani et al., 2013" startWordPosition="3068" endWordPosition="3071"> models is about 5 times faster than for cross-entropy models since we do not need to normalize the output layer anymore. The results (Table 3) show improvements of up to 0.6 BLEU when combining a cross-entropy model with an expected BLEU variant. Average gains across all test sets are 0.4 BLEU, demonstrating that the gains from the expected BLEU loss are additive. 6 Conclusion and Future Work We introduce an empirically effective approximation to integrate a recurrent neural network model into first pass decoding, thereby extending previous work on decoding with feed-forward neural networks (Vaswani et al., 2013). Our best result improves the output of a phrase-based decoder by up to 2.0 BLEU on French-English translation, outperforming n-best rescoring by up to 1.1 BLEU and lattice rescoring by up to 0.4 BLEU. Directly optimizing a recurrent neural network language model towards an expected BLEU loss proves effective, improving a cross-entropy trained variant by up 0.6 BLEU. Despite higher training complexity, our expected BLEU trained model has five times faster runtime than a cross-entropy model since it does not require normalization. In future work, we would like to scale up to larger data sets a</context>
+</contexts>
+<marker>Vaswani, Zhao, Fossum, Chiang, 2013</marker>
+<rawString>Ashish Vaswani, Yinggong Zhao, Victoria Fossum, and David Chiang. 2013. Decoding with Large-scale Neural Language Models improves Translation. In Proc. of EMNLP. Association for Computational Linguistics, October.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Heng Yu</author>
+<author>Liang Huang</author>
+<author>Haitao Mi</author>
+<author>Kai Zhao</author>
+</authors>
+<title>Max-Violation Perceptron and Forced Decoding for Scalable MT Training.</title>
+<date>2013</date>
+<booktitle>In Proc. of EMNLP,</booktitle>
+<pages>1112--1123</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics,</institution>
+<contexts>
+<context position="14414" citStr="Yu et al., 2013" startWordPosition="2393" endWordPosition="2396">n the n-best list of the development set, augmented by scores corresponding to the neural network models. At test time we rescore n-best lists with the new weights. Neural Network Training. All neural network models are trained on the news portion of the parallel data, corresponding to 136K sentences, which we found to be most useful in initial experiments. As training data we use unique 100-best lists generated by the baseline system. We use the same data both for training the phrase-based system as well as the language model but find that the resulting bias did not hurt end-to-end accuracy (Yu et al., 2013). The vocabulary consists of words that occur in at least two different sentences, which is 31K words for both language pairs. We tuned the learning rate p of our mini-batch SGD trainer as well as the probability scaling parameter -y (3) on a held-out set and found simple settings of p = 0.1 and -y = 1 to be good choices. To prevent over-fitting, we experimented with L2 regularization, but found no accuracy improvements, probably because SGD regularizes enough. We evaluate performance on a held-out set during training and stop whenever the objective changes less than 0.0003. The hidden layer u</context>
+</contexts>
+<marker>Yu, Huang, Mi, Zhao, 2013</marker>
+<rawString>Heng Yu, Liang Huang, Haitao Mi, and Kai Zhao. 2013. Max-Violation Perceptron and Forced Decoding for Scalable MT Training. In Proc. of EMNLP, pages 1112–1123. Association for Computational Linguistics, October.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

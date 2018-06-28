@@ -1,0 +1,1415 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.000008">
+<title confidence="0.719682">
+Pipeline Iteration
+</title>
+<author confidence="0.941034">
+Kristy Hollingshead and Brian Roark
+</author>
+<affiliation confidence="0.837011">
+Center for Spoken Language Understanding, OGI School of Science &amp; Engineering
+Oregon Health &amp; Science University, Beaverton, Oregon, 97006 USA
+</affiliation>
+<email confidence="0.997888">
+{hollingk,roark}@cslu.ogi.edu
+</email>
+<sectionHeader confidence="0.996654" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.999728">
+This paper presents pipeline iteration, an ap-
+proach that uses output from later stages
+of a pipeline to constrain earlier stages of
+the same pipeline. We demonstrate sig-
+nificant improvements in a state-of-the-art
+PCFG parsing pipeline using base-phrase
+constraints, derived either from later stages
+of the parsing pipeline or from a finite-
+state shallow parser. The best performance
+is achieved by reranking the union of un-
+constrained parses and relatively heavily-
+constrained parses.
+</bodyText>
+<sectionHeader confidence="0.998428" genericHeader="keywords">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.999887872727273">
+A “pipeline” system consists of a sequence of pro-
+cessing stages such that the output from one stage
+provides the input to the next. Each stage in such a
+pipeline identifies a subset of the possible solutions,
+and later stages are constrained to find solutions
+within that subset. For example, a part-of-speech
+tagger could constrain a “base phrase” chunker (Rat-
+naparkhi, 1999), or the n-best output of a parser
+could constrain a reranker (Charniak and Johnson,
+2005). A pipeline is typically used to reduce search
+complexity for rich models used in later stages, usu-
+ally at the risk that the best solutions may be pruned
+in early stages.
+Pipeline systems are ubiquitous in natural lan-
+guage processing, used not only in parsing (Rat-
+naparkhi, 1999; Charniak, 2000), but also machine
+translation (Och and Ney, 2003) and speech recogni-
+tion (Fiscus, 1997; Goel et al., 2000), among others.
+Despite the widespread use of pipelines, they have
+been understudied, with very little work on gen-
+eral techniques for designing and improving pipeline
+systems (although cf. Finkel et al. (2006)). This pa-
+per presents one such general technique, here ap-
+plied to stochastic parsing, whereby output from
+later stages of a pipeline is used to constrain earlier
+stages of the same pipeline. To our knowledge, this
+is the first time such a pipeline architecture has been
+proposed.
+It may seem surprising that later stages of a
+pipeline, already constrained to be consistent with
+the output of earlier stages, can profitably inform
+the earlier stages in a second pass. However, the
+richer models used in later stages of a pipeline pro-
+vide a better distribution over the subset of possible
+solutions produced by the early stages, effectively
+resolving some of the ambiguities that account for
+much of the original variation. If an earlier stage is
+then constrained in a second pass not to vary with re-
+spect to these resolved ambiguities, it will be forced
+to find other variations, which may include better so-
+lutions than were originally provided.
+To give a rough illustration, consider the Venn di-
+agram in Fig. 1(i). Set A represents the original sub-
+set of possible solutions passed along by the earlier
+stage, and the dark shaded region represents high-
+probability solutions according to later stages. If
+some constraints are then extracted from these high-
+probability solutions, defining a subset of solutions
+(S) that rule out some of A, the early stage will be
+forced to produce a different set (B). Constraints
+derived from later stages of the pipeline focus the
+search in an area believed to contain high-quality
+candidates.
+Another scenario is to use a different model al-
+together to constrain the pipeline. In this scenario,
+</bodyText>
+<figure confidence="0.790109">
+(i) (ii)
+AD
+SD
+SD
+BD
+BD
+</figure>
+<figureCaption confidence="0.9936945">
+Figure 1: Two Venn diagrams, representing (i) constraints
+derived from later stages of an iterated pipelined system; and
+</figureCaption>
+<bodyText confidence="0.579434">
+(ii) constraints derived from a different model.
+</bodyText>
+<sectionHeader confidence="0.347159" genericHeader="introduction">
+AD
+</sectionHeader>
+<page confidence="0.948394">
+952
+</page>
+<note confidence="0.925601">
+Proceedings of the 45th Annual Meeting of the Association of Computational Linguistics, pages 952–959,
+Prague, Czech Republic, June 2007. c�2007 Association for Computational Linguistics
+</note>
+<bodyText confidence="0.999896852941177">
+represented in Fig. 1(ii), the other model constrains
+the early stage to be consistent with some subset of
+solutions (S), which may be largely or completely
+disjoint from the original set A. Again, a different set
+(B) results, which may include better results than A.
+Whereas when iterating we are guaranteed that the
+new subset S will overlap at least partially with the
+original subset A, that is not the case when making
+use of constraints from a separately trained model.
+In this paper, we investigate pipeline iteration
+within the context of the Charniak and Johnson
+(2005) parsing pipeline, by constraining parses to
+be consistent with a base-phrase tree. We derive
+these base-phrase constraints from three sources: the
+reranking stage of the parsing pipeline; a finite-state
+shallow parser (Hollingshead et al., 2005); and a
+combination of the output from these two sources.
+We compare the relative performance of these three
+sources and find the best performance improvements
+using constraints derived from a weighted combina-
+tion of shallow parser output and reranker output.
+The Charniak parsing pipeline has been exten-
+sively studied over the past decade, with a num-
+ber of papers focused on improving early stages of
+the pipeline (Charniak et al., 1998; Caraballo and
+Charniak, 1998; Blaheta and Charniak, 1999; Hall
+and Johnson, 2004; Charniak et al., 2006) as well
+as many focused on optimizing final parse accuracy
+(Charniak, 2000; Charniak and Johnson, 2005; Mc-
+Closky et al., 2006). This focus on optimization has
+made system improvements very difficult to achieve;
+yet our relatively simple architecture yields statisti-
+cally significant improvements, making pipeline it-
+eration a promising approach for other tasks.
+</bodyText>
+<sectionHeader confidence="0.97894" genericHeader="method">
+2 Approach
+</sectionHeader>
+<bodyText confidence="0.998451692307692">
+Our approach uses the Charniak state-of-the-art
+parsing pipeline. The well-known Charniak (2000)
+coarse-to-fine parser is a two-stage parsing pipeline,
+in which the first stage uses a vanilla PCFG to pop-
+ulate a chart of parse constituents. The second
+stage, constrained to only those items in the first-
+stage chart, uses a refined grammar to generate an
+n-best list of parse candidates. Charniak and John-
+son (2005) extended this pipeline with a discrimina-
+tive maximum entropy model to rerank the n-best
+parse candidates, deriving a significant benefit from
+the richer model employed by the reranker.
+For our experiments, we modified the parser1 to
+</bodyText>
+<page confidence="0.413591">
+1ftp://ftp.cs.brown.edu/pub/nlparser/
+</page>
+<table confidence="0.999148">
+Parser Base Shallow
+Phrases Phrases
+Charniak parser-best 91.9 94.4
+reranker-best 92.8 94.8
+Finite-state shallow parser 91.7 94.3
+</table>
+<tableCaption confidence="0.9840495">
+Table 1: F-scores on WSJ section 24 of output from two
+parsers on the similar tasks of base-phrase parsing and shallow-
+phrase parsing. For evaluation, base and shallow phrases are
+extracted from the Charniak/Johnson full-parse output.
+</tableCaption>
+<bodyText confidence="0.7689125">
+allow us to optionally provide base-phrase trees to
+constrain the first stage of parsing.
+</bodyText>
+<subsectionHeader confidence="0.999545">
+2.1 Base Phrases
+</subsectionHeader>
+<bodyText confidence="0.999947">
+Following Ratnaparkhi (1999), we define a base
+phrase as any parse node with only preterminal chil-
+dren. Unlike the shallow phrases defined for the
+CoNLL-2000 Shared Task (Tjong Kim Sang and
+Buchholz, 2000), base phrases correspond directly
+to constituents that appear in full parses, and hence
+can provide a straightforward constraint on edges
+within a chart parser. In contrast, shallow phrases
+collapse certain non-constituents—such as auxiliary
+chains—into a single phrase, and hence are not di-
+rectly applicable as constraints on a chart parser.
+We have two methods for deriving base-phrase
+annotations for a string. First, we trained a finite-
+state shallow parser on base phrases extracted from
+the Penn Wall St. Journal (WSJ) Treebank (Marcus
+et al., 1993). The treebank trees are pre-processed
+identically to the procedure for training the Charniak
+parser, e.g., empty nodes and function tags are re-
+moved. The shallow parser is trained using the per-
+ceptron algorithm, with a feature set nearly identical
+to that from Sha and Pereira (2003), and achieves
+comparable performance to that paper. See Holling-
+shead et al. (2005) for more details. Second, base
+phrases can be extracted from the full-parse output
+of the Charniak and Johnson (2005) reranker, via a
+simple script to extract nodes with only preterminal
+children.
+Table 1 shows these systems’ bracketing accu-
+racy on both the base-phrase and shallow parsing
+tasks for WSJ section 24; each system was trained
+on WSJ sections 02-21. From this table we can
+see that base phrases are substantially more difficult
+than shallow phrases to annotate. Output from the
+finite-state shallow parser is roughly as accurate as
+output extracted from the Charniak parser-best trees,
+though a fair amount below output extracted from
+the reranker-best trees.
+In addition to using base phrase constraints from
+these two sources independently, we also looked at
+</bodyText>
+<page confidence="0.998307">
+953
+</page>
+<bodyText confidence="0.987825">
+combining the predictions of both to obtain more re-
+liable constraints. We next present a method of com-
+bining output from multiple parsers based on com-
+bined precision and recall optimization.
+</bodyText>
+<subsectionHeader confidence="0.999912">
+2.2 Combining Parser n-best Lists
+</subsectionHeader>
+<bodyText confidence="0.9999632">
+In order to select high-likelihood constraints for the
+pipeline, we may want to extract annotations with
+high levels of agreement (“consensus hypotheses”)
+between candidates. In addition, we may want to
+favor precision over recall to avoid erroneous con-
+straints within the pipeline as much as possible.
+Here we discuss how a technique presented in Good-
+man’s thesis (1998) can be applied to do this.
+We will first present this within a general chart
+parsing approach, then move to how we use it for n-
+best lists. Let T be the set of trees for a particular
+input, and let a parse T E T be considered as a set
+of labeled spans. Then, for all labeled spans X E T,
+we can calculate the posterior probability -y(X) as
+follows:
+</bodyText>
+<equation confidence="0.998051">
+P(T)QX E T� (1)
+PT&apos;ET P(TI)
+</equation>
+<bodyText confidence="0.9932805">
+where QX E T� = r 1 if X E T
+l 0 otherwise.
+Goodman (1996; 1998) presents a method for us-
+ing the posterior probability of constituents to maxi-
+mize the expected labeled recall of binary branching
+trees, as follows:
+</bodyText>
+<equation confidence="0.982681333333333">
+X
+Tb = argmax -y(X) (2)
+TET XET
+</equation>
+<bodyText confidence="0.999930909090909">
+Essentially, find the tree with the maximum sum of
+the posterior probabilities of its constituents. This
+is done by computing the posterior probabilities
+of constituents in a chart, typically via the Inside-
+Outside algorithm (Baker, 1979; Lari and Young,
+1990), followed by a final CYK-like pass to find the
+tree maximizing the sum.
+For non-binary branching trees, where precision
+and recall may differ, Goodman (1998, Ch.3) pro-
+poses the following combined metric for balancing
+precision and recall:
+</bodyText>
+<equation confidence="0.97546">
+X
+Tb = argmax (-y(X) − A) (3)
+TET XET
+</equation>
+<bodyText confidence="0.997452391304348">
+where A ranges from 0 to 1. Setting A=0 is equiv-
+alent to Eq. 2 and thus optimizes recall, and setting
+A=1 optimizes precision; Appendix 5 at the end of
+this paper presents brief derivations of these met-
+rics.2 Thus, A functions as a mixing factor to balance
+recall and precision.
+This approach also gives us a straightforward way
+to combine n-best outputs of multiple systems. To
+do this, we construct a chart of the constituents in the
+trees from the n-best lists, and allow any combina-
+tion of constituents that results in a tree – even one
+with no internal structure. In such a way, we can
+produce trees that only include a small number of
+high-certainty constituents, and leave the remainder
+of the string unconstrained, even if such trees were
+not candidates in the original n-best lists.
+For simplicity, we will here discuss the combina-
+tion of two n-best lists, though it generalizes in the
+obvious way to an arbitrary number of lists. Let T
+be the union of the two n-best lists. For all trees
+T E T, let P1(T) be the probability of T in the first
+n-best list, and P2(T) the probability of T in the sec-
+ond n-best list. Then, we define P(T) as follows:
+</bodyText>
+<equation confidence="0.999672">
+P(T) = α P1 (T) + P2(T) (4)
+</equation>
+<bodyText confidence="0.972876833333334">
+PT&apos; ET P1(TI) PT&apos;ET P2 (TI)
+where the parameter α dictates the relative weight of
+P1 versus P2 in the combination.3
+For this paper, we combined two n-best lists of
+base-phrase trees. Although there is no hierarchi-
+cal structure in base-phrase annotations, they can be
+represented as flat trees, as shown in Fig. 2(a). We
+constructed a chart from the two lists being com-
+bined, using Eq. 4 to define P(T) in Eq. 1. We wish
+to consider every possible combination of the base
+phrases, so for the final CYK-like pass to find the
+argmax tree, we included rules for attaching each
+preterminal directly to the root of the tree, in addi-
+tion to rules permitting any combination of hypoth-
+esized base phrases.
+Consider the trees in Fig. 2. Figure 2(a) is a
+shallow parse with three NP base phrases; Figure
+2(b) is the same parse where the ROOT produc-
+tion has been binarized for the final CYK-like pass,
+which requires binary productions. If we include
+productions of the form ‘ROOT —* X ROOT’ and
+‘ROOT —* X Y’ for all non-terminals X and Y (in-
+cluding POS tags), then any tree-structured com-
+bination of base phrases hypothesized in either n-
+2Our notation differs slightly from that in Goodman (1998),
+though the approaches are formally equivalent.
+3Note that P1 and P2 are normalized in eq. 4, and thus are
+not required to be true probabilities. In turn, P is normalized
+when used in eq. 1, such that the posterior probability -y is a
+true probability. Hence P need not be normalized in eq. 4.
+</bodyText>
+<equation confidence="0.951294333333333">
+X
+-y(X) =
+TET
+</equation>
+<page confidence="0.944379">
+954
+</page>
+<figure confidence="0.96192">
+(b)
+(a) ROOT
+</figure>
+<equation confidence="0.986763214285714">
+������� � �� �
+� � �
+� � � �
+NPVBD NP NP
+NN
+yesterday
+ROOT
+��� � � �
+NPROOT
+�� � �
+VBD ROOT
+�� � �
+sold NP NP
+�� ��
+</equation>
+<figure confidence="0.915800807692308">
+DT NNS
+the stocks
+(c) S
+���� � � � �
+NP VP
+�� ��
+DT NN
+the broker
+�� ��
+DT NN
+the broker
+�� ��
+sold DT NNS
+the stocks
+�� ��
+DT NN
+the broker
+NN
+yesterday
+���� � � � �
+VBD NP NP
+�� ��
+sold DT NNS
+the stocks
+NN
+yesterday
+</figure>
+<figureCaption confidence="0.91499">
+Figure 2: Base-phrase trees (a) as produced for an n-best list and (b) after root-binarization for n-best list combination. Full-parse
+tree (c) consistent with constraining base-phrase tree (a).
+</figureCaption>
+<figure confidence="0.728114">
+precision
+</figure>
+<figureCaption confidence="0.9591356">
+Figure 3: The tradeoff between recall and precision using a
+range of a values (Eq. 3) to select high-probability annotations
+from an n-best list. Results are shown on 50-best lists of base-
+phrase parses from two parsers, and on the combination of the
+two lists.
+</figureCaption>
+<bodyText confidence="0.961581205882353">
+best list is allowed, including the one with no base
+phrases at all. Note that, for the purpose of finding
+the argmax tree in Eq. 3, we only sum the posterior
+probabilities of base-phrase constituents, and not the
+ROOT symbol or POS tags.
+Figure 3 shows the results of performing this com-
+bined precision/recall optimization on three separate
+n-best lists: the 50-best list of base-phrase trees ex-
+tracted from the full-parse output of the Charniak
+and Johnson (2005) reranker; the 50-best list output
+by the Hollingshead et al. (2005) finite-state shallow
+parser; and the weighted combination of the two lists
+at various values of A in Eq. 3. For the combination,
+we set α=2 in Eq. 4, with the Charniak and Johnson
+(2005) reranker providing P1, effectively giving the
+reranker twice the weight of the shallow parser in
+determining the posteriors. The shallow parser has
+perceptron scores as weights, and the distribution of
+these scores after a softmax normalization was too
+peaked to be of utility, so we used the normalized
+reciprocal rank of each candidate as P2 in Eq. 4.
+We point out several details in these results.
+First, using this method does not result in an F-
+measure improvement over the Viterbi-best base-
+phrase parses (shown as solid symbols in the graph)
+for either the reranker or shallow parser. Also, us-
+ing this model effects a greater improvement in pre-
+cision than in recall, which is unsurprising with
+these non-hierarchical annotations; unlike full pars-
+ing (where long sequences of unary productions can
+improve recall arbitrarily), in base-phrase parsing,
+any given span can have only one non-terminal. Fi-
+nally, we see that the combination of the two n-best
+lists improves over either list in isolation.
+</bodyText>
+<sectionHeader confidence="0.999235" genericHeader="method">
+3 Experimental Setup
+</sectionHeader>
+<bodyText confidence="0.999911083333334">
+For our experiments we constructed a simple parsing
+pipeline, shown in Fig. 4. At the core of the pipeline
+is the Charniak and Johnson (2005) coarse-to-fine
+parser and MaxEnt reranker, described in Sec. 2.
+The parser constitutes the first and second stages of
+our pipeline, and the reranker the final stage. Fol-
+lowing Charniak and Johnson (2005), we set the
+parser to output 50-best parses for all experiments
+described here. We constrain only the first stage of
+the parser: during chart construction, we disallow
+any constituents that conflict with the constraints, as
+described in detail in the next section.
+</bodyText>
+<subsectionHeader confidence="0.995967">
+3.1 Parser Constraints
+</subsectionHeader>
+<bodyText confidence="0.999991444444445">
+We use base phrases, as defined in Sec. 2.1, to con-
+strain the first stage of our parsing pipeline. Under
+these constraints, full parses must be consistent with
+the base-phrase tree provided as input to the parser,
+i.e., any valid parse must contain all of the base-
+phrase constituents in the constraining tree. The
+full-parse tree in Fig. 2(c), for example, is consis-
+tent with the base-phrase tree in Fig. 2(a).
+Implementing these constraints in a parser is
+straightforward, one of the advantages of using base
+phrases as constraints. Since the internal structure
+of base phrases is, by definition, limited to preter-
+minal children, we can constrain the entire parse by
+constraining the parents of the appropriate pretermi-
+nal nodes. For any preterminal that occurs within
+the span of a constraining base phrase, the only
+valid parent is a node matching both the span (start
+and end points) and the label of the provided base
+</bodyText>
+<figure confidence="0.9840413">
+Charniak − reranked (solid viterbi)
+Finite−state shallow parser (solid viterbi)
+Charniak reranked + Finite−state
+94
+93
+92
+91
+90
+89
+88
+87
+86
+87 88 89 90 91 92 93 94 95 96 97
+recall
+96
+95
+955
+D❑
+extracted❑
+base phrases[]
+</figure>
+<figureCaption confidence="0.761803">
+Figure 4: The iterated parsing pipeline. In the first iteration,
+the coarse parser may be either unconstrained, or constrained
+by base phrases from the shallow parser (A1). In the second
+iteration, base phrase constraints may be extracted either from
+reranker output (A2) or from a weighted combination of shal-
+low parser output and reranker output (A3). Multiple sets of
+n-best parses, as output by the coarse-to-fine parser under dif-
+ferent constraint conditions, may be joined in a set union (C).
+</figureCaption>
+<bodyText confidence="0.996256">
+phrase. All other proposed parent-nodes are re-
+jected. In such a way, for any parse to cover the
+entire string, it would have to be consistent with the
+constraining base-phrase tree.
+Words that fall outside of any base-phrase con-
+straint are unconstrained in how they attach within
+the parse; hence, a base-phrase tree with few words
+covered by base-phrase constraints will result in a
+larger search space than one with many words cov-
+ered by base phrases. We also put no restrictions on
+the preterminal labels, even within the base phrases.
+We normalized for punctuation. If the parser fails to
+find a valid parse with the constraints, then we lift
+the constraints and allow any parse constituent orig-
+inally proposed by the first-stage parser.
+</bodyText>
+<subsectionHeader confidence="0.991231">
+3.2 Experimental Conditions
+</subsectionHeader>
+<bodyText confidence="0.95449119047619">
+Our experiments will demonstrate the effects of con-
+straining the Charniak parser under several differ-
+ent conditions. The baseline system places no con-
+straints on the parser. The remaining experimen-
+tal conditions each consider one of three possible
+sources of the base phrase constraints: (1) the base
+phrases output by the finite-state shallow parser;
+(2) the base phrases extracted from output of the
+reranker; and (3) a combination of the output from
+the shallow parser and the reranker, which is pro-
+duced using the techniques outlined in Sec. 2.2.
+Constraints are enforced as described in Sec. 3.1.
+Unconstrained For our baseline system, we
+run the Charniak and Johnson (2005) parser and
+reranker with default parameters. The parser is pro-
+vided with treebank-tokenized text and, as men-
+tioned previously, outputs 50-best parse candidates
+to the reranker.
+FS-constrained The FS-constrained condition
+provides a comparison point of non-iterated con-
+straints. Under this condition, the one-best base-
+</bodyText>
+<table confidence="0.9992918">
+System LR LP F
+Finite-state shallow parser 91.3 92.0 91.7
+Charniak reranker-best 92.2 93.3 92.8
+Combination (A=0.5) 92.2 94.1 93.2
+Combination (A=0.9) 81.0 97.4 88.4
+</table>
+<tableCaption confidence="0.999606333333333">
+Table 2: Labeled recall (LR), precision (LP), and F-scores
+on WSJ section 24 of base-phrase trees produced by the three
+possible sources of constraints.
+</tableCaption>
+<bodyText confidence="0.998693790697674">
+phrase tree output by the finite-state shallow parser
+is input as a constraint to the Charniak parser. We
+run the parser and reranker as before, under con-
+straints from the shallow parser. The accuracy of
+the constraints used under this condition is shown in
+the first row of Table 2. Note that this condition is
+not an instance of pipeline iteration, but is included
+to show the performance levels that can be achieved
+without iteration.
+Reranker-constrained We will use the
+reranker-constrained condition to examine the ef-
+fects of pipeline iteration, with no input from other
+models outside the pipeline. We take the reranker-
+best full-parse output under the condition of uncon-
+strained search, and extract the corresponding base-
+phrase tree. We run the parser and reranker as be-
+fore, now with constraints from the reranker. The
+accuracy of the constraints used under this condition
+is shown in the second row of Table 2.
+Combo-constrained The combo-constrained
+conditions are designed to compare the effects of
+generating constraints with different combination
+parameterizations, i.e., different A parameters in Eq.
+3. For this experimental condition, we extract base-
+phrase trees from the n-best full-parse trees output
+by the reranker. We combine this list with the n-best
+list output by the finite-state shallow parser, exactly
+as described in Sec. 2.2, again with the reranker pro-
+viding Pi and α=2 in Eq. 4. We examined a range
+of operating points from A=0.4 to A=0.9, and re-
+port two points here (A=0.5 and A=0.9), which rep-
+resent the highest overall accuracy and the highest
+precision, respectively, as shown in Table 2.
+Constrained and Unconstrained Union When
+iterating this pipeline, the original n-best list of full
+parses output from the unconstrained parser is avail-
+able at no additional cost, and our final set of ex-
+perimental conditions investigate taking the union
+of constrained and unconstrained n-best lists. The
+imposed constraints can result in candidate sets that
+are largely (or completely) disjoint from the uncon-
+strained sets, and it may be that the unconstrained
+set is in many cases superior to the constrained set.
+</bodyText>
+<figure confidence="0.999014692307692">
+Shallow[]
+Parser0
+A1El
+CoarseC
+Parser0
+A3❑
++c
+B❑
+C❑
+Fine❑
+Parser0
+Reranker[]
+A2D
+</figure>
+<page confidence="0.99463">
+956
+</page>
+<table confidence="0.9997745">
+Constraints Parser-best Reranker-best Oracle-best # Candidates
+Baseline (Unconstrained, 50-best) 88.92 90.24 95.95 47.9
+FS-constrained 88.44 89.50 94.10 46.2
+Reranker-constrained 89.60 90.46 95.07 46.9
+Combo-constrained (A=0.5) 89.81 90.74 95.41 46.3
+Combo-constrained (A=0.9) 89.34 90.43 95.91 47.5
+</table>
+<tableCaption confidence="0.988164">
+Table 3: Full-parse F-scores on WSJ section 24. The unconstrained search (first row) provides a baseline comparison for the
+effects of constraining the search space. The last four rows demonstrate the effect of various constraint conditions.
+</tableCaption>
+<bodyText confidence="0.999792692307692">
+Even our high-precision constraints did not reach
+100% precision, attesting to the fact that there was
+some error in all constrained conditions. By con-
+structing the union of the two n-best lists, we can
+take advantage of the new constrained candidate set
+without running the risk that the constraints have re-
+sulted in a worse n-best list. Note that the parser
+probabilities are produced from the same model in
+both passes, and are hence directly comparable.
+The output of the second pass of the pipeline
+could be used to constrain a third pass, for multiple
+pipeline iterations. However, we found that further
+iterations provided no additional improvements.
+</bodyText>
+<subsectionHeader confidence="0.998994">
+3.3 Data
+</subsectionHeader>
+<bodyText confidence="0.999923111111111">
+Unless stated otherwise, all reported results will be
+F-scores on WSJ section 24 of the Penn WSJ Tree-
+bank, which was our development set. Training data
+was WSJ sections 02-21, with section 00 as held-
+out data. Crossfold validation (20-fold with 2,000
+sentences per fold) was used to train the reranker
+for every condition. Evaluation was performed us-
+ing evalb under standard parameterizations. WSJ
+section 23 was used only for final testing.
+</bodyText>
+<sectionHeader confidence="0.998789" genericHeader="method">
+4 Results &amp; Discussion
+</sectionHeader>
+<bodyText confidence="0.999949416666667">
+We evaluate the one-best parse candidates before
+and after reranking (parser-best and reranker-best,
+respectively). We additionally provide the best-
+possible F-score in the n-best list (oracle-best) and
+the number of unique candidates in the list.
+Table 3 presents trials showing the effect of con-
+straining the parser under various conditions. Con-
+straining the parser to the base phrases produced
+by the finite-state shallow parser (FS-constrained)
+hurts performance by half a point. Constraining the
+parser to the base phrases produced by the reranker,
+however, provides a 0.7 percent improvement in the
+parser-best accuracy, and a 0.2 percent improvement
+after reranking. Combining the two base-phrase n-
+best lists to derive the constraints provides further
+improvements when A=0.5, to a total improvement
+of 0.9 and 0.5 percent over parser-best and reranker-
+best accuracy, respectively. Performance degrades
+at A=0.9 relative to A=0.5, indicating that, even at
+a lower precision, more constraints are beneficial.
+The oracle rate decreases under all of the con-
+strained conditions as compared to the baseline,
+demonstrating that the parser was prevented from
+finding some of the best solutions that were orig-
+inally found. However, the improvement in F-
+score shows that the constraints assisted the parser
+in achieving high-quality solutions despite this de-
+graded oracle accuracy of the lists.
+Table 4 shows the results when taking the union
+of the constrained and unconstrained lists prior to
+reranking. Several interesting points can be noted
+in this table. First, despite the fact that the FS-
+constrained condition hurts performance in Table
+3, the union provides a 0.5 percent improvement
+over the baseline in the parser-best performance.
+This indicates that, in some cases, the Charniak
+parser is scoring parses in the constrained set higher
+than in the unconstrained set, which is evidence of
+search errors in the unconstrained condition. One
+can see from the number of candidates that the FS-
+constrained condition provides the set of candidates
+most disjoint from the original unconstrained parser,
+leading to the largest number of candidates in the
+union. Surprisingly, even though this set provided
+the highest parser-best F-score of all of the union
+sets, it did not lead to significant overall improve-
+ments after reranking.
+In all other conditions, taking the union de-
+creases the parser-best accuracy when compared to
+the corresponding constrained output, but improves
+the reranker-best accuracy in all but the combo-
+constrained A=0.9 condition. One explanation for
+the lower performance at A=0.9 versus A=0.5 is
+seen in the number of candidates, about 7.5 fewer
+than in the A=0.5 condition. There are fewer con-
+straints in the high-precision condition, so the re-
+sulting n-best lists do not diverge as much from the
+original lists, leading to less diversity in their union.
+The gains in performance should not be attributed
+to increasing the number of candidates nor to allow-
+</bodyText>
+<page confidence="0.991633">
+957
+</page>
+<table confidence="0.930005142857143">
+Constraints Parser-best Reranker-best Oracle-best # Candidates
+Baseline (Unconstrained, 50-best) 88.92 90.24 95.95 47.9
+Unconstrained U FS-constrained 89.39 90.27 96.61 74.9
+Unconstrained U Reranker-constrained 89.23 90.59 96.48 70.3
+Unconstrained U Combo (A=0.5) 89.28 90.78 96.53 69.7
+Unconstrained U Combo (A=0.9) 89.03 90.44 96.40 62.1
+Unconstrained (100-best) 88.82 90.13 96.38 95.2
+Unconstrained (50-best, beamx2) 89.01 90.45 96.13 48.1
+Table 4: Full-parse F-scores on WSJ section 24 after taking the set union of unconstrained and constrained parser output under
+the 4 different constraint conditions. Also, F-score for 100-best parses, and 50-best parses with an increased beam threshold, output
+by the Charniak parser under the unconstrained condition.
+Constraints F-score
+Baseline (Unconstrained, 50-best) 91.06
+Unconstrained U Combo (A=0.5) 91.48
+</table>
+<tableCaption confidence="0.956418333333333">
+Table 5: Full-parse F-scores on WSJ section 23 for our best-
+performing system on WSJ section 24. The 0.4 percent F-score
+improvement is significant at p &lt; 0.001.
+</tableCaption>
+<bodyText confidence="0.999916684210526">
+ing the parser more time to generate the parses. The
+penultimate row in Table 4 shows the results with
+100-best lists output in the unconstrained condition,
+which does not improve upon the 50-best perfor-
+mance, despite an improved oracle F-score. Since
+the second iteration through the parsing pipeline
+clearly increases the overall processing time by a
+factor of two, we also compare against output ob-
+tained by doubling the coarse-parser’s beam thresh-
+old. The last row in Table 4 shows that the increased
+threshold yields an insignificant improvement over
+the baseline, despite a very large processing burden.
+We applied our best-performing model (Uncon-
+strained U Combo, A=0.5) to the test set, WSJ sec-
+tion 23, for comparison against the baseline system.
+Table 5 shows a 0.4 percent F-score improvement
+over the baseline for that section, which is statisti-
+cally significant at p &lt; 0.001, using the stratified
+shuffling test (Yeh, 2000).
+</bodyText>
+<sectionHeader confidence="0.997236" genericHeader="method">
+5 Conclusion &amp; Future Work
+</sectionHeader>
+<bodyText confidence="0.9999754375">
+In summary, we have demonstrated that pipeline it-
+eration can be useful in improving system perfor-
+mance, by constraining early stages of the pipeline
+with output derived from later stages. While the
+current work made use of a particular kind of
+constraint—base phrases—many others could be ex-
+tracted as well. Preliminary results extending the
+work presented in this paper show parser accuracy
+improvements from pipeline iteration when using
+constraints based on an unlabeled partial bracketing
+of the string. Higher-level phrase segmentations or
+fully specified trees over portions of the string might
+also prove to be effective constraints. The tech-
+niques shown here are by no means limited to pars-
+ing pipelines, and could easily be applied to other
+tasks making use of pipeline architectures.
+</bodyText>
+<sectionHeader confidence="0.998464" genericHeader="method">
+Acknowledgments
+</sectionHeader>
+<bodyText confidence="0.999764625">
+Thanks to Martin Jansche for useful discussions on
+topics related to this paper. The first author of this
+paper was supported under an NSF Graduate Re-
+search Fellowship. In addition, this research was
+supported in part by NSF Grant #IIS-0447214. Any
+opinions, findings, conclusions or recommendations
+expressed in this publication are those of the authors
+and do not necessarily reflect the views of the NSF.
+</bodyText>
+<sectionHeader confidence="0.996996" genericHeader="method">
+References
+</sectionHeader>
+<reference confidence="0.997205029411765">
+J.K. Baker. 1979. Trainable grammars for speech recognition.
+In Speech Communication papers for the 97th Meeting of the
+Acoustical Society of America.
+D. Blaheta and E. Charniak. 1999. Automatic compensation
+for parser figure-of-merit flaws. In Proceedings of the 37th
+Annual Meeting of ACL, pages 513–518.
+S. Caraballo and E. Charniak. 1998. New figures of merit
+for best-first probabilistic chart parsing. Computational Lin-
+guistics, 24(2):275–298.
+E. Charniak and M. Johnson. 2005. Coarse-to-fine n-best pars-
+ing and MaxEnt discriminative reranking. In Proceedings of
+the 43rd Annual Meeting of ACL, pages 173–180.
+E. Charniak, S. Goldwater, and M. Johnson. 1998. Edge-based
+best-first chart parsing. In Proceedings of the 6th Workshop
+for Very Large Corpora, pages 127–133.
+E. Charniak, M. Johnson, M. Elsner, J.L. Austerweil, D. Ellis,
+S.R. Iyangar, J. Moore, M.T. Pozar, C. Hill, T.Q. Vu, and
+I. Haxton. 2006. Multi-level course-to-fine PCFG parsing.
+In Proceedings of the HLT-NAACL Annual Meeting, pages
+168–175.
+E. Charniak. 2000. A Maximum-Entropy-inspired parser. In
+Proceedings of the 1st Annual Meeting of NAACL and 6th
+Conference on ANLP, pages 132–139.
+J.R. Finkel, C.D. Manning, and A.Y. Ng. 2006. Solving the
+problem of cascading errors: Approximate Bayesian infer-
+ence for linguistic annotation pipelines. In Proceedings of
+EMNLP, pages 618–626.
+J. Fiscus. 1997. A post-processing system to yield reduced
+word error rates: Recognizer output voting error reduction
+(ROVER). In Proceedings of the IEEE Workshop on Auto-
+matic Speech Recognition and Understanding.
+V. Goel, S. Kumar, and W. Byrne. 2000. Segmental minimum
+Bayes-risk ASR voting strategies. In Proceedings of ICSLP,
+pages 139–142.
+</reference>
+<page confidence="0.991334">
+958
+</page>
+<reference confidence="0.984307303030303">
+J. Goodman. 1996. Parsing algorithms and metrics. In Pro-
+ceedings of the 34th Annual Meeting ofACL, pages 177–183.
+J. Goodman. 1998. Parsing inside-out. Ph.D. thesis, Harvard
+University.
+K. Hall and M. Johnson. 2004. Attention shifting for parsing
+speech. In Proceedings of the 42nd Annual Meeting of ACL,
+pages 40–46.
+K. Hollingshead, S. Fisher, and B. Roark. 2005. Comparing
+and combining finite-state and context-free parsers. In Pro-
+ceedings of HLT-EMNLP, pages 787–794.
+K. Lari and S.J. Young. 1990. The estimation of stochastic
+context-free grammars using the inside-outside algorithm.
+Computer Speech and Language, 4(1):35–56.
+M.P. Marcus, M.A. Marcinkiewicz, and B. Santorini. 1993.
+Building a large annotated corpus of English: The Penn tree-
+bank. Computational Linguistics, 19:314–330.
+D. McClosky, E. Charniak, and M. Johnson. 2006. Reranking
+and self-training for parser adaptation. In Proceedings of
+COLING-ACL, pages 337–344.
+F.J. Och and H. Ney. 2003. A systematic comparison of various
+statistical alignment models. Computational Linguistics, 29.
+A. Ratnaparkhi. 1999. Learning to parse natural language with
+maximum entropy models. Machine Learning, 34(1-3):151–
+175.
+F. Sha and F. Pereira. 2003. Shallow parsing with conditional
+random fields. In Proceedings of the HLT-NAACL Annual
+Meeting, pages 134–141.
+E.F. Tjong Kim Sang and S. Buchholz. 2000. Introduction to
+the CoNLL-2000 shared task: Chunking. In Proceedings of
+CoNLL, pages 127–132.
+A. Yeh. 2000. More accurate tests for the statistical signifi-
+cance of result differences. In Proceedings of the 18th Inter-
+national COLING, pages 947–953.
+</reference>
+<sectionHeader confidence="0.9826525" genericHeader="method">
+Appendix A Combined Precision/Recall
+Decoding
+</sectionHeader>
+<bodyText confidence="0.9549482">
+Recall that T is the set of trees for a particular input,
+and each T E T is considered as a set of labeled
+spans. For all labeled spans X E T, we can calcu-
+late the posterior probability -y(X) as follows:
+this metric, we want to find the tree T as follows:
+</bodyText>
+<equation confidence="0.986236333333333">
+[ n ]
+E |T τ|
+P(T&apos;) [|T n T&apos;|]
+�
+P T&apos;&apos;
+T00ET ( )
+P(T&apos;) EXETJX E T&apos;K
+�
+P T&apos;&apos;
+T00ET ( )
+� �P(T &apos;)JX � T&apos;K
+= argmax
+P(T&apos;&apos;)
+TET XETT0ET ET00
+TET XET
+</equation>
+<bodyText confidence="0.999962833333333">
+This exactly maximizes the expected LR in the
+case of binary branching trees, and is closely re-
+lated to LR for non-binary branching trees. Simi-
+lar to maximizing the expected number of match-
+ing nodes, we can minimize the expected number of
+non-matching nodes, for a metric related to LP:
+</bodyText>
+<equation confidence="0.983973055555555">
+[ n ]
+E |T |− |T τ|
+[ n ]
+E |T τ |− |T |
+P(T&apos;) [|T n T&apos; |− |T|]
+�
+P T&apos;&apos;
+T00ET ( )
+P(T&apos;) EXET(JX E T&apos;K − 1)
+�
+P T&apos;&apos;
+T00ET ( )
+� �P(T&apos;)(JX � T&apos;K − 1)
+= argmax �
+P( T&apos;&apos;)
+T00 ET
+�= argmax
+TET XET
+</equation>
+<bodyText confidence="0.932798">
+Finally, we can combine these two metrics in a
+linear combination. Let A be a mixing factor from 0
+to 1. Then we can optimize the weighted sum:
+</bodyText>
+<figure confidence="0.93695916">
+[ n n ]
+E (1 − λ)|T τ |+ λ(|T τ |− |T|)
+� P(T)QX E T�
+�(X) =
+TET
+ET&apos;ET P(T I)
+T = argmax
+TET
+�=argmax
+TET T0ET
+�=argmax
+TET T0ET
+ET
+�
+= argmax γ(X) (5)
+T = argmin
+TET
+= argmax
+TET
+�=argmax
+TET T0ET
+�=argmax
+TET T0ET
+TET
+XET T0ET
+</figure>
+<equation confidence="0.870441">
+(γ(X) − 1) (6)
+T = argmax
+TET
+</equation>
+<bodyText confidence="0.9988166">
+where QX E T� = (1 if X E T
+tl 0 otherwise.
+If T is the reference tree, the labeled precision
+(LP) and labeled recall (LR) of a T relative to T are
+defined as
+</bodyText>
+<equation confidence="0.9889786">
+[ n ] [ n ]
+(1 − λ)E |T τ |+ λE |T τ |− |T|
+[(1 − λ) 11 -Y(X) + [λ 1] (γ(X) − 1)]
+XET XET
+= argmax
+TET
+= argmax
+TET
+LP = |T n T |LR = |T n T|
+|T ||T|
+</equation>
+<bodyText confidence="0.999898">
+where |T |denotes the size of the set T.
+A metric very close to LR is |T n T|, the number
+of nodes in common between the tree and the ref-
+erence tree. To maximize the expected value (£) of
+</bodyText>
+<equation confidence="0.6000915">
+�=argmax (γ(X) − λ) (7)
+TET XET
+</equation>
+<bodyText confidence="0.9985176">
+The result is a combined metric for balancing preci-
+sion and recall. Note that, if A=0, Eq. 7 is the same
+as Eq. 5 and thus maximizes the LR metric; and if
+A=1, Eq. 7 is the same as Eq. 6 and thus maximizes
+the LP metric.
+</bodyText>
+<page confidence="0.997883">
+959
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.939516">
+<title confidence="0.999929">Pipeline Iteration</title>
+<author confidence="0.998982">Hollingshead Roark</author>
+<affiliation confidence="0.999701">Center for Spoken Language Understanding, OGI School of Science &amp; Engineering</affiliation>
+<address confidence="0.975203">Oregon Health &amp; Science University, Beaverton, Oregon, 97006 USA</address>
+<abstract confidence="0.997223769230769">This paper presents pipeline iteration, an approach that uses output from later stages of a pipeline to constrain earlier stages of the same pipeline. We demonstrate significant improvements in a state-of-the-art PCFG parsing pipeline using base-phrase constraints, derived either from later stages of the parsing pipeline or from a finitestate shallow parser. The best performance is achieved by reranking the union of unconstrained parses and relatively heavilyconstrained parses.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>J K Baker</author>
+</authors>
+<title>Trainable grammars for speech recognition.</title>
+<date>1979</date>
+<booktitle>In Speech Communication papers for the 97th Meeting of the Acoustical</booktitle>
+<publisher>Society of America.</publisher>
+<contexts>
+<context position="10086" citStr="Baker, 1979" startWordPosition="1611" endWordPosition="1612">ans. Then, for all labeled spans X E T, we can calculate the posterior probability -y(X) as follows: P(T)QX E T� (1) PT&apos;ET P(TI) where QX E T� = r 1 if X E T l 0 otherwise. Goodman (1996; 1998) presents a method for using the posterior probability of constituents to maximize the expected labeled recall of binary branching trees, as follows: X Tb = argmax -y(X) (2) TET XET Essentially, find the tree with the maximum sum of the posterior probabilities of its constituents. This is done by computing the posterior probabilities of constituents in a chart, typically via the InsideOutside algorithm (Baker, 1979; Lari and Young, 1990), followed by a final CYK-like pass to find the tree maximizing the sum. For non-binary branching trees, where precision and recall may differ, Goodman (1998, Ch.3) proposes the following combined metric for balancing precision and recall: X Tb = argmax (-y(X) − A) (3) TET XET where A ranges from 0 to 1. Setting A=0 is equivalent to Eq. 2 and thus optimizes recall, and setting A=1 optimizes precision; Appendix 5 at the end of this paper presents brief derivations of these metrics.2 Thus, A functions as a mixing factor to balance recall and precision. This approach also g</context>
+</contexts>
+<marker>Baker, 1979</marker>
+<rawString>J.K. Baker. 1979. Trainable grammars for speech recognition. In Speech Communication papers for the 97th Meeting of the Acoustical Society of America.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D Blaheta</author>
+<author>E Charniak</author>
+</authors>
+<title>Automatic compensation for parser figure-of-merit flaws.</title>
+<date>1999</date>
+<booktitle>In Proceedings of the 37th Annual Meeting of ACL,</booktitle>
+<pages>513--518</pages>
+<contexts>
+<context position="5149" citStr="Blaheta and Charniak, 1999" startWordPosition="817" endWordPosition="820">straints from three sources: the reranking stage of the parsing pipeline; a finite-state shallow parser (Hollingshead et al., 2005); and a combination of the output from these two sources. We compare the relative performance of these three sources and find the best performance improvements using constraints derived from a weighted combination of shallow parser output and reranker output. The Charniak parsing pipeline has been extensively studied over the past decade, with a number of papers focused on improving early stages of the pipeline (Charniak et al., 1998; Caraballo and Charniak, 1998; Blaheta and Charniak, 1999; Hall and Johnson, 2004; Charniak et al., 2006) as well as many focused on optimizing final parse accuracy (Charniak, 2000; Charniak and Johnson, 2005; McClosky et al., 2006). This focus on optimization has made system improvements very difficult to achieve; yet our relatively simple architecture yields statistically significant improvements, making pipeline iteration a promising approach for other tasks. 2 Approach Our approach uses the Charniak state-of-the-art parsing pipeline. The well-known Charniak (2000) coarse-to-fine parser is a two-stage parsing pipeline, in which the first stage us</context>
+</contexts>
+<marker>Blaheta, Charniak, 1999</marker>
+<rawString>D. Blaheta and E. Charniak. 1999. Automatic compensation for parser figure-of-merit flaws. In Proceedings of the 37th Annual Meeting of ACL, pages 513–518.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>S Caraballo</author>
+<author>E Charniak</author>
+</authors>
+<title>New figures of merit for best-first probabilistic chart parsing.</title>
+<date>1998</date>
+<journal>Computational Linguistics,</journal>
+<volume>24</volume>
+<issue>2</issue>
+<contexts>
+<context position="5121" citStr="Caraballo and Charniak, 1998" startWordPosition="813" endWordPosition="816">e derive these base-phrase constraints from three sources: the reranking stage of the parsing pipeline; a finite-state shallow parser (Hollingshead et al., 2005); and a combination of the output from these two sources. We compare the relative performance of these three sources and find the best performance improvements using constraints derived from a weighted combination of shallow parser output and reranker output. The Charniak parsing pipeline has been extensively studied over the past decade, with a number of papers focused on improving early stages of the pipeline (Charniak et al., 1998; Caraballo and Charniak, 1998; Blaheta and Charniak, 1999; Hall and Johnson, 2004; Charniak et al., 2006) as well as many focused on optimizing final parse accuracy (Charniak, 2000; Charniak and Johnson, 2005; McClosky et al., 2006). This focus on optimization has made system improvements very difficult to achieve; yet our relatively simple architecture yields statistically significant improvements, making pipeline iteration a promising approach for other tasks. 2 Approach Our approach uses the Charniak state-of-the-art parsing pipeline. The well-known Charniak (2000) coarse-to-fine parser is a two-stage parsing pipeline,</context>
+</contexts>
+<marker>Caraballo, Charniak, 1998</marker>
+<rawString>S. Caraballo and E. Charniak. 1998. New figures of merit for best-first probabilistic chart parsing. Computational Linguistics, 24(2):275–298.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>E Charniak</author>
+<author>M Johnson</author>
+</authors>
+<title>Coarse-to-fine n-best parsing and MaxEnt discriminative reranking.</title>
+<date>2005</date>
+<booktitle>In Proceedings of the 43rd Annual Meeting of ACL,</booktitle>
+<pages>173--180</pages>
+<contexts>
+<context position="1201" citStr="Charniak and Johnson, 2005" startWordPosition="177" endWordPosition="180">testate shallow parser. The best performance is achieved by reranking the union of unconstrained parses and relatively heavilyconstrained parses. 1 Introduction A “pipeline” system consists of a sequence of processing stages such that the output from one stage provides the input to the next. Each stage in such a pipeline identifies a subset of the possible solutions, and later stages are constrained to find solutions within that subset. For example, a part-of-speech tagger could constrain a “base phrase” chunker (Ratnaparkhi, 1999), or the n-best output of a parser could constrain a reranker (Charniak and Johnson, 2005). A pipeline is typically used to reduce search complexity for rich models used in later stages, usually at the risk that the best solutions may be pruned in early stages. Pipeline systems are ubiquitous in natural language processing, used not only in parsing (Ratnaparkhi, 1999; Charniak, 2000), but also machine translation (Och and Ney, 2003) and speech recognition (Fiscus, 1997; Goel et al., 2000), among others. Despite the widespread use of pipelines, they have been understudied, with very little work on general techniques for designing and improving pipeline systems (although cf. Finkel e</context>
+<context position="4408" citStr="Charniak and Johnson (2005)" startWordPosition="703" endWordPosition="706">c�2007 Association for Computational Linguistics represented in Fig. 1(ii), the other model constrains the early stage to be consistent with some subset of solutions (S), which may be largely or completely disjoint from the original set A. Again, a different set (B) results, which may include better results than A. Whereas when iterating we are guaranteed that the new subset S will overlap at least partially with the original subset A, that is not the case when making use of constraints from a separately trained model. In this paper, we investigate pipeline iteration within the context of the Charniak and Johnson (2005) parsing pipeline, by constraining parses to be consistent with a base-phrase tree. We derive these base-phrase constraints from three sources: the reranking stage of the parsing pipeline; a finite-state shallow parser (Hollingshead et al., 2005); and a combination of the output from these two sources. We compare the relative performance of these three sources and find the best performance improvements using constraints derived from a weighted combination of shallow parser output and reranker output. The Charniak parsing pipeline has been extensively studied over the past decade, with a number</context>
+<context position="5983" citStr="Charniak and Johnson (2005)" startWordPosition="945" endWordPosition="949"> made system improvements very difficult to achieve; yet our relatively simple architecture yields statistically significant improvements, making pipeline iteration a promising approach for other tasks. 2 Approach Our approach uses the Charniak state-of-the-art parsing pipeline. The well-known Charniak (2000) coarse-to-fine parser is a two-stage parsing pipeline, in which the first stage uses a vanilla PCFG to populate a chart of parse constituents. The second stage, constrained to only those items in the firststage chart, uses a refined grammar to generate an n-best list of parse candidates. Charniak and Johnson (2005) extended this pipeline with a discriminative maximum entropy model to rerank the n-best parse candidates, deriving a significant benefit from the richer model employed by the reranker. For our experiments, we modified the parser1 to 1ftp://ftp.cs.brown.edu/pub/nlparser/ Parser Base Shallow Phrases Phrases Charniak parser-best 91.9 94.4 reranker-best 92.8 94.8 Finite-state shallow parser 91.7 94.3 Table 1: F-scores on WSJ section 24 of output from two parsers on the similar tasks of base-phrase parsing and shallowphrase parsing. For evaluation, base and shallow phrases are extracted from the C</context>
+<context position="7970" citStr="Charniak and Johnson (2005)" startWordPosition="1249" endWordPosition="1252">. First, we trained a finitestate shallow parser on base phrases extracted from the Penn Wall St. Journal (WSJ) Treebank (Marcus et al., 1993). The treebank trees are pre-processed identically to the procedure for training the Charniak parser, e.g., empty nodes and function tags are removed. The shallow parser is trained using the perceptron algorithm, with a feature set nearly identical to that from Sha and Pereira (2003), and achieves comparable performance to that paper. See Hollingshead et al. (2005) for more details. Second, base phrases can be extracted from the full-parse output of the Charniak and Johnson (2005) reranker, via a simple script to extract nodes with only preterminal children. Table 1 shows these systems’ bracketing accuracy on both the base-phrase and shallow parsing tasks for WSJ section 24; each system was trained on WSJ sections 02-21. From this table we can see that base phrases are substantially more difficult than shallow phrases to annotate. Output from the finite-state shallow parser is roughly as accurate as output extracted from the Charniak parser-best trees, though a fair amount below output extracted from the reranker-best trees. In addition to using base phrase constraints</context>
+<context position="14348" citStr="Charniak and Johnson (2005)" startWordPosition="2395" endWordPosition="2398">h-probability annotations from an n-best list. Results are shown on 50-best lists of basephrase parses from two parsers, and on the combination of the two lists. best list is allowed, including the one with no base phrases at all. Note that, for the purpose of finding the argmax tree in Eq. 3, we only sum the posterior probabilities of base-phrase constituents, and not the ROOT symbol or POS tags. Figure 3 shows the results of performing this combined precision/recall optimization on three separate n-best lists: the 50-best list of base-phrase trees extracted from the full-parse output of the Charniak and Johnson (2005) reranker; the 50-best list output by the Hollingshead et al. (2005) finite-state shallow parser; and the weighted combination of the two lists at various values of A in Eq. 3. For the combination, we set α=2 in Eq. 4, with the Charniak and Johnson (2005) reranker providing P1, effectively giving the reranker twice the weight of the shallow parser in determining the posteriors. The shallow parser has perceptron scores as weights, and the distribution of these scores after a softmax normalization was too peaked to be of utility, so we used the normalized reciprocal rank of each candidate as P2 </context>
+<context position="15769" citStr="Charniak and Johnson (2005)" startWordPosition="2631" endWordPosition="2634">e graph) for either the reranker or shallow parser. Also, using this model effects a greater improvement in precision than in recall, which is unsurprising with these non-hierarchical annotations; unlike full parsing (where long sequences of unary productions can improve recall arbitrarily), in base-phrase parsing, any given span can have only one non-terminal. Finally, we see that the combination of the two n-best lists improves over either list in isolation. 3 Experimental Setup For our experiments we constructed a simple parsing pipeline, shown in Fig. 4. At the core of the pipeline is the Charniak and Johnson (2005) coarse-to-fine parser and MaxEnt reranker, described in Sec. 2. The parser constitutes the first and second stages of our pipeline, and the reranker the final stage. Following Charniak and Johnson (2005), we set the parser to output 50-best parses for all experiments described here. We constrain only the first stage of the parser: during chart construction, we disallow any constituents that conflict with the constraints, as described in detail in the next section. 3.1 Parser Constraints We use base phrases, as defined in Sec. 2.1, to constrain the first stage of our parsing pipeline. Under th</context>
+<context position="19351" citStr="Charniak and Johnson (2005)" startWordPosition="3221" endWordPosition="3224">training the Charniak parser under several different conditions. The baseline system places no constraints on the parser. The remaining experimental conditions each consider one of three possible sources of the base phrase constraints: (1) the base phrases output by the finite-state shallow parser; (2) the base phrases extracted from output of the reranker; and (3) a combination of the output from the shallow parser and the reranker, which is produced using the techniques outlined in Sec. 2.2. Constraints are enforced as described in Sec. 3.1. Unconstrained For our baseline system, we run the Charniak and Johnson (2005) parser and reranker with default parameters. The parser is provided with treebank-tokenized text and, as mentioned previously, outputs 50-best parse candidates to the reranker. FS-constrained The FS-constrained condition provides a comparison point of non-iterated constraints. Under this condition, the one-best baseSystem LR LP F Finite-state shallow parser 91.3 92.0 91.7 Charniak reranker-best 92.2 93.3 92.8 Combination (A=0.5) 92.2 94.1 93.2 Combination (A=0.9) 81.0 97.4 88.4 Table 2: Labeled recall (LR), precision (LP), and F-scores on WSJ section 24 of base-phrase trees produced by the th</context>
+</contexts>
+<marker>Charniak, Johnson, 2005</marker>
+<rawString>E. Charniak and M. Johnson. 2005. Coarse-to-fine n-best parsing and MaxEnt discriminative reranking. In Proceedings of the 43rd Annual Meeting of ACL, pages 173–180.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>E Charniak</author>
+<author>S Goldwater</author>
+<author>M Johnson</author>
+</authors>
+<title>Edge-based best-first chart parsing.</title>
+<date>1998</date>
+<booktitle>In Proceedings of the 6th Workshop for Very Large Corpora,</booktitle>
+<pages>127--133</pages>
+<contexts>
+<context position="5091" citStr="Charniak et al., 1998" startWordPosition="809" endWordPosition="812">h a base-phrase tree. We derive these base-phrase constraints from three sources: the reranking stage of the parsing pipeline; a finite-state shallow parser (Hollingshead et al., 2005); and a combination of the output from these two sources. We compare the relative performance of these three sources and find the best performance improvements using constraints derived from a weighted combination of shallow parser output and reranker output. The Charniak parsing pipeline has been extensively studied over the past decade, with a number of papers focused on improving early stages of the pipeline (Charniak et al., 1998; Caraballo and Charniak, 1998; Blaheta and Charniak, 1999; Hall and Johnson, 2004; Charniak et al., 2006) as well as many focused on optimizing final parse accuracy (Charniak, 2000; Charniak and Johnson, 2005; McClosky et al., 2006). This focus on optimization has made system improvements very difficult to achieve; yet our relatively simple architecture yields statistically significant improvements, making pipeline iteration a promising approach for other tasks. 2 Approach Our approach uses the Charniak state-of-the-art parsing pipeline. The well-known Charniak (2000) coarse-to-fine parser is</context>
+</contexts>
+<marker>Charniak, Goldwater, Johnson, 1998</marker>
+<rawString>E. Charniak, S. Goldwater, and M. Johnson. 1998. Edge-based best-first chart parsing. In Proceedings of the 6th Workshop for Very Large Corpora, pages 127–133.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>E Charniak</author>
+<author>M Johnson</author>
+<author>M Elsner</author>
+<author>J L Austerweil</author>
+<author>D Ellis</author>
+<author>S R Iyangar</author>
+<author>J Moore</author>
+<author>M T Pozar</author>
+<author>C Hill</author>
+<author>T Q Vu</author>
+<author>I Haxton</author>
+</authors>
+<title>Multi-level course-to-fine PCFG parsing.</title>
+<date>2006</date>
+<booktitle>In Proceedings of the HLT-NAACL Annual Meeting,</booktitle>
+<pages>168--175</pages>
+<contexts>
+<context position="5197" citStr="Charniak et al., 2006" startWordPosition="825" endWordPosition="828">the parsing pipeline; a finite-state shallow parser (Hollingshead et al., 2005); and a combination of the output from these two sources. We compare the relative performance of these three sources and find the best performance improvements using constraints derived from a weighted combination of shallow parser output and reranker output. The Charniak parsing pipeline has been extensively studied over the past decade, with a number of papers focused on improving early stages of the pipeline (Charniak et al., 1998; Caraballo and Charniak, 1998; Blaheta and Charniak, 1999; Hall and Johnson, 2004; Charniak et al., 2006) as well as many focused on optimizing final parse accuracy (Charniak, 2000; Charniak and Johnson, 2005; McClosky et al., 2006). This focus on optimization has made system improvements very difficult to achieve; yet our relatively simple architecture yields statistically significant improvements, making pipeline iteration a promising approach for other tasks. 2 Approach Our approach uses the Charniak state-of-the-art parsing pipeline. The well-known Charniak (2000) coarse-to-fine parser is a two-stage parsing pipeline, in which the first stage uses a vanilla PCFG to populate a chart of parse c</context>
+</contexts>
+<marker>Charniak, Johnson, Elsner, Austerweil, Ellis, Iyangar, Moore, Pozar, Hill, Vu, Haxton, 2006</marker>
+<rawString>E. Charniak, M. Johnson, M. Elsner, J.L. Austerweil, D. Ellis, S.R. Iyangar, J. Moore, M.T. Pozar, C. Hill, T.Q. Vu, and I. Haxton. 2006. Multi-level course-to-fine PCFG parsing. In Proceedings of the HLT-NAACL Annual Meeting, pages 168–175.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>E Charniak</author>
+</authors>
+<title>A Maximum-Entropy-inspired parser.</title>
+<date>2000</date>
+<booktitle>In Proceedings of the 1st Annual Meeting of NAACL and 6th Conference on ANLP,</booktitle>
+<pages>132--139</pages>
+<contexts>
+<context position="1497" citStr="Charniak, 2000" startWordPosition="229" endWordPosition="230">uch a pipeline identifies a subset of the possible solutions, and later stages are constrained to find solutions within that subset. For example, a part-of-speech tagger could constrain a “base phrase” chunker (Ratnaparkhi, 1999), or the n-best output of a parser could constrain a reranker (Charniak and Johnson, 2005). A pipeline is typically used to reduce search complexity for rich models used in later stages, usually at the risk that the best solutions may be pruned in early stages. Pipeline systems are ubiquitous in natural language processing, used not only in parsing (Ratnaparkhi, 1999; Charniak, 2000), but also machine translation (Och and Ney, 2003) and speech recognition (Fiscus, 1997; Goel et al., 2000), among others. Despite the widespread use of pipelines, they have been understudied, with very little work on general techniques for designing and improving pipeline systems (although cf. Finkel et al. (2006)). This paper presents one such general technique, here applied to stochastic parsing, whereby output from later stages of a pipeline is used to constrain earlier stages of the same pipeline. To our knowledge, this is the first time such a pipeline architecture has been proposed. It </context>
+<context position="5272" citStr="Charniak, 2000" startWordPosition="839" endWordPosition="840">d a combination of the output from these two sources. We compare the relative performance of these three sources and find the best performance improvements using constraints derived from a weighted combination of shallow parser output and reranker output. The Charniak parsing pipeline has been extensively studied over the past decade, with a number of papers focused on improving early stages of the pipeline (Charniak et al., 1998; Caraballo and Charniak, 1998; Blaheta and Charniak, 1999; Hall and Johnson, 2004; Charniak et al., 2006) as well as many focused on optimizing final parse accuracy (Charniak, 2000; Charniak and Johnson, 2005; McClosky et al., 2006). This focus on optimization has made system improvements very difficult to achieve; yet our relatively simple architecture yields statistically significant improvements, making pipeline iteration a promising approach for other tasks. 2 Approach Our approach uses the Charniak state-of-the-art parsing pipeline. The well-known Charniak (2000) coarse-to-fine parser is a two-stage parsing pipeline, in which the first stage uses a vanilla PCFG to populate a chart of parse constituents. The second stage, constrained to only those items in the first</context>
+</contexts>
+<marker>Charniak, 2000</marker>
+<rawString>E. Charniak. 2000. A Maximum-Entropy-inspired parser. In Proceedings of the 1st Annual Meeting of NAACL and 6th Conference on ANLP, pages 132–139.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J R Finkel</author>
+<author>C D Manning</author>
+<author>A Y Ng</author>
+</authors>
+<title>Solving the problem of cascading errors: Approximate Bayesian inference for linguistic annotation pipelines.</title>
+<date>2006</date>
+<booktitle>In Proceedings of EMNLP,</booktitle>
+<pages>618--626</pages>
+<contexts>
+<context position="1813" citStr="Finkel et al. (2006)" startWordPosition="277" endWordPosition="280">n, 2005). A pipeline is typically used to reduce search complexity for rich models used in later stages, usually at the risk that the best solutions may be pruned in early stages. Pipeline systems are ubiquitous in natural language processing, used not only in parsing (Ratnaparkhi, 1999; Charniak, 2000), but also machine translation (Och and Ney, 2003) and speech recognition (Fiscus, 1997; Goel et al., 2000), among others. Despite the widespread use of pipelines, they have been understudied, with very little work on general techniques for designing and improving pipeline systems (although cf. Finkel et al. (2006)). This paper presents one such general technique, here applied to stochastic parsing, whereby output from later stages of a pipeline is used to constrain earlier stages of the same pipeline. To our knowledge, this is the first time such a pipeline architecture has been proposed. It may seem surprising that later stages of a pipeline, already constrained to be consistent with the output of earlier stages, can profitably inform the earlier stages in a second pass. However, the richer models used in later stages of a pipeline provide a better distribution over the subset of possible solutions pr</context>
+</contexts>
+<marker>Finkel, Manning, Ng, 2006</marker>
+<rawString>J.R. Finkel, C.D. Manning, and A.Y. Ng. 2006. Solving the problem of cascading errors: Approximate Bayesian inference for linguistic annotation pipelines. In Proceedings of EMNLP, pages 618–626.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J Fiscus</author>
+</authors>
+<title>A post-processing system to yield reduced word error rates: Recognizer output voting error reduction (ROVER).</title>
+<date>1997</date>
+<booktitle>In Proceedings of the IEEE Workshop on Automatic Speech Recognition and Understanding.</booktitle>
+<contexts>
+<context position="1584" citStr="Fiscus, 1997" startWordPosition="243" endWordPosition="244">ined to find solutions within that subset. For example, a part-of-speech tagger could constrain a “base phrase” chunker (Ratnaparkhi, 1999), or the n-best output of a parser could constrain a reranker (Charniak and Johnson, 2005). A pipeline is typically used to reduce search complexity for rich models used in later stages, usually at the risk that the best solutions may be pruned in early stages. Pipeline systems are ubiquitous in natural language processing, used not only in parsing (Ratnaparkhi, 1999; Charniak, 2000), but also machine translation (Och and Ney, 2003) and speech recognition (Fiscus, 1997; Goel et al., 2000), among others. Despite the widespread use of pipelines, they have been understudied, with very little work on general techniques for designing and improving pipeline systems (although cf. Finkel et al. (2006)). This paper presents one such general technique, here applied to stochastic parsing, whereby output from later stages of a pipeline is used to constrain earlier stages of the same pipeline. To our knowledge, this is the first time such a pipeline architecture has been proposed. It may seem surprising that later stages of a pipeline, already constrained to be consiste</context>
+</contexts>
+<marker>Fiscus, 1997</marker>
+<rawString>J. Fiscus. 1997. A post-processing system to yield reduced word error rates: Recognizer output voting error reduction (ROVER). In Proceedings of the IEEE Workshop on Automatic Speech Recognition and Understanding.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>V Goel</author>
+<author>S Kumar</author>
+<author>W Byrne</author>
+</authors>
+<title>Segmental minimum Bayes-risk ASR voting strategies.</title>
+<date>2000</date>
+<booktitle>In Proceedings of ICSLP,</booktitle>
+<pages>139--142</pages>
+<contexts>
+<context position="1604" citStr="Goel et al., 2000" startWordPosition="245" endWordPosition="248">olutions within that subset. For example, a part-of-speech tagger could constrain a “base phrase” chunker (Ratnaparkhi, 1999), or the n-best output of a parser could constrain a reranker (Charniak and Johnson, 2005). A pipeline is typically used to reduce search complexity for rich models used in later stages, usually at the risk that the best solutions may be pruned in early stages. Pipeline systems are ubiquitous in natural language processing, used not only in parsing (Ratnaparkhi, 1999; Charniak, 2000), but also machine translation (Och and Ney, 2003) and speech recognition (Fiscus, 1997; Goel et al., 2000), among others. Despite the widespread use of pipelines, they have been understudied, with very little work on general techniques for designing and improving pipeline systems (although cf. Finkel et al. (2006)). This paper presents one such general technique, here applied to stochastic parsing, whereby output from later stages of a pipeline is used to constrain earlier stages of the same pipeline. To our knowledge, this is the first time such a pipeline architecture has been proposed. It may seem surprising that later stages of a pipeline, already constrained to be consistent with the output o</context>
+</contexts>
+<marker>Goel, Kumar, Byrne, 2000</marker>
+<rawString>V. Goel, S. Kumar, and W. Byrne. 2000. Segmental minimum Bayes-risk ASR voting strategies. In Proceedings of ICSLP, pages 139–142.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J Goodman</author>
+</authors>
+<title>Parsing algorithms and metrics.</title>
+<date>1996</date>
+<booktitle>In Proceedings of the 34th Annual Meeting ofACL,</booktitle>
+<pages>177--183</pages>
+<contexts>
+<context position="9661" citStr="Goodman (1996" startWordPosition="1542" endWordPosition="1543">ay want to favor precision over recall to avoid erroneous constraints within the pipeline as much as possible. Here we discuss how a technique presented in Goodman’s thesis (1998) can be applied to do this. We will first present this within a general chart parsing approach, then move to how we use it for nbest lists. Let T be the set of trees for a particular input, and let a parse T E T be considered as a set of labeled spans. Then, for all labeled spans X E T, we can calculate the posterior probability -y(X) as follows: P(T)QX E T� (1) PT&apos;ET P(TI) where QX E T� = r 1 if X E T l 0 otherwise. Goodman (1996; 1998) presents a method for using the posterior probability of constituents to maximize the expected labeled recall of binary branching trees, as follows: X Tb = argmax -y(X) (2) TET XET Essentially, find the tree with the maximum sum of the posterior probabilities of its constituents. This is done by computing the posterior probabilities of constituents in a chart, typically via the InsideOutside algorithm (Baker, 1979; Lari and Young, 1990), followed by a final CYK-like pass to find the tree maximizing the sum. For non-binary branching trees, where precision and recall may differ, Goodman </context>
+</contexts>
+<marker>Goodman, 1996</marker>
+<rawString>J. Goodman. 1996. Parsing algorithms and metrics. In Proceedings of the 34th Annual Meeting ofACL, pages 177–183.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J Goodman</author>
+</authors>
+<title>Parsing inside-out.</title>
+<date>1998</date>
+<tech>Ph.D. thesis,</tech>
+<institution>Harvard University.</institution>
+<contexts>
+<context position="10266" citStr="Goodman (1998" startWordPosition="1640" endWordPosition="1641">an (1996; 1998) presents a method for using the posterior probability of constituents to maximize the expected labeled recall of binary branching trees, as follows: X Tb = argmax -y(X) (2) TET XET Essentially, find the tree with the maximum sum of the posterior probabilities of its constituents. This is done by computing the posterior probabilities of constituents in a chart, typically via the InsideOutside algorithm (Baker, 1979; Lari and Young, 1990), followed by a final CYK-like pass to find the tree maximizing the sum. For non-binary branching trees, where precision and recall may differ, Goodman (1998, Ch.3) proposes the following combined metric for balancing precision and recall: X Tb = argmax (-y(X) − A) (3) TET XET where A ranges from 0 to 1. Setting A=0 is equivalent to Eq. 2 and thus optimizes recall, and setting A=1 optimizes precision; Appendix 5 at the end of this paper presents brief derivations of these metrics.2 Thus, A functions as a mixing factor to balance recall and precision. This approach also gives us a straightforward way to combine n-best outputs of multiple systems. To do this, we construct a chart of the constituents in the trees from the n-best lists, and allow any </context>
+<context position="12756" citStr="Goodman (1998)" startWordPosition="2091" endWordPosition="2092">h preterminal directly to the root of the tree, in addition to rules permitting any combination of hypothesized base phrases. Consider the trees in Fig. 2. Figure 2(a) is a shallow parse with three NP base phrases; Figure 2(b) is the same parse where the ROOT production has been binarized for the final CYK-like pass, which requires binary productions. If we include productions of the form ‘ROOT —* X ROOT’ and ‘ROOT —* X Y’ for all non-terminals X and Y (including POS tags), then any tree-structured combination of base phrases hypothesized in either n2Our notation differs slightly from that in Goodman (1998), though the approaches are formally equivalent. 3Note that P1 and P2 are normalized in eq. 4, and thus are not required to be true probabilities. In turn, P is normalized when used in eq. 1, such that the posterior probability -y is a true probability. Hence P need not be normalized in eq. 4. X -y(X) = TET 954 (b) (a) ROOT ������� � �� � � � � � � � � NPVBD NP NP NN yesterday ROOT ��� � � � NPROOT �� � � VBD ROOT �� � � sold NP NP �� �� DT NNS the stocks (c) S ���� � � � � NP VP �� �� DT NN the broker �� �� DT NN the broker �� �� sold DT NNS the stocks �� �� DT NN the broker NN yesterday ����</context>
+</contexts>
+<marker>Goodman, 1998</marker>
+<rawString>J. Goodman. 1998. Parsing inside-out. Ph.D. thesis, Harvard University.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>K Hall</author>
+<author>M Johnson</author>
+</authors>
+<title>Attention shifting for parsing speech.</title>
+<date>2004</date>
+<booktitle>In Proceedings of the 42nd Annual Meeting of ACL,</booktitle>
+<pages>40--46</pages>
+<contexts>
+<context position="5173" citStr="Hall and Johnson, 2004" startWordPosition="821" endWordPosition="824"> the reranking stage of the parsing pipeline; a finite-state shallow parser (Hollingshead et al., 2005); and a combination of the output from these two sources. We compare the relative performance of these three sources and find the best performance improvements using constraints derived from a weighted combination of shallow parser output and reranker output. The Charniak parsing pipeline has been extensively studied over the past decade, with a number of papers focused on improving early stages of the pipeline (Charniak et al., 1998; Caraballo and Charniak, 1998; Blaheta and Charniak, 1999; Hall and Johnson, 2004; Charniak et al., 2006) as well as many focused on optimizing final parse accuracy (Charniak, 2000; Charniak and Johnson, 2005; McClosky et al., 2006). This focus on optimization has made system improvements very difficult to achieve; yet our relatively simple architecture yields statistically significant improvements, making pipeline iteration a promising approach for other tasks. 2 Approach Our approach uses the Charniak state-of-the-art parsing pipeline. The well-known Charniak (2000) coarse-to-fine parser is a two-stage parsing pipeline, in which the first stage uses a vanilla PCFG to pop</context>
+</contexts>
+<marker>Hall, Johnson, 2004</marker>
+<rawString>K. Hall and M. Johnson. 2004. Attention shifting for parsing speech. In Proceedings of the 42nd Annual Meeting of ACL, pages 40–46.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>K Hollingshead</author>
+<author>S Fisher</author>
+<author>B Roark</author>
+</authors>
+<title>Comparing and combining finite-state and context-free parsers.</title>
+<date>2005</date>
+<booktitle>In Proceedings of HLT-EMNLP,</booktitle>
+<pages>787--794</pages>
+<contexts>
+<context position="4654" citStr="Hollingshead et al., 2005" startWordPosition="738" endWordPosition="741">a different set (B) results, which may include better results than A. Whereas when iterating we are guaranteed that the new subset S will overlap at least partially with the original subset A, that is not the case when making use of constraints from a separately trained model. In this paper, we investigate pipeline iteration within the context of the Charniak and Johnson (2005) parsing pipeline, by constraining parses to be consistent with a base-phrase tree. We derive these base-phrase constraints from three sources: the reranking stage of the parsing pipeline; a finite-state shallow parser (Hollingshead et al., 2005); and a combination of the output from these two sources. We compare the relative performance of these three sources and find the best performance improvements using constraints derived from a weighted combination of shallow parser output and reranker output. The Charniak parsing pipeline has been extensively studied over the past decade, with a number of papers focused on improving early stages of the pipeline (Charniak et al., 1998; Caraballo and Charniak, 1998; Blaheta and Charniak, 1999; Hall and Johnson, 2004; Charniak et al., 2006) as well as many focused on optimizing final parse accura</context>
+<context position="7852" citStr="Hollingshead et al. (2005)" startWordPosition="1229" endWordPosition="1233">ly applicable as constraints on a chart parser. We have two methods for deriving base-phrase annotations for a string. First, we trained a finitestate shallow parser on base phrases extracted from the Penn Wall St. Journal (WSJ) Treebank (Marcus et al., 1993). The treebank trees are pre-processed identically to the procedure for training the Charniak parser, e.g., empty nodes and function tags are removed. The shallow parser is trained using the perceptron algorithm, with a feature set nearly identical to that from Sha and Pereira (2003), and achieves comparable performance to that paper. See Hollingshead et al. (2005) for more details. Second, base phrases can be extracted from the full-parse output of the Charniak and Johnson (2005) reranker, via a simple script to extract nodes with only preterminal children. Table 1 shows these systems’ bracketing accuracy on both the base-phrase and shallow parsing tasks for WSJ section 24; each system was trained on WSJ sections 02-21. From this table we can see that base phrases are substantially more difficult than shallow phrases to annotate. Output from the finite-state shallow parser is roughly as accurate as output extracted from the Charniak parser-best trees, </context>
+<context position="14416" citStr="Hollingshead et al. (2005)" startWordPosition="2406" endWordPosition="2409">0-best lists of basephrase parses from two parsers, and on the combination of the two lists. best list is allowed, including the one with no base phrases at all. Note that, for the purpose of finding the argmax tree in Eq. 3, we only sum the posterior probabilities of base-phrase constituents, and not the ROOT symbol or POS tags. Figure 3 shows the results of performing this combined precision/recall optimization on three separate n-best lists: the 50-best list of base-phrase trees extracted from the full-parse output of the Charniak and Johnson (2005) reranker; the 50-best list output by the Hollingshead et al. (2005) finite-state shallow parser; and the weighted combination of the two lists at various values of A in Eq. 3. For the combination, we set α=2 in Eq. 4, with the Charniak and Johnson (2005) reranker providing P1, effectively giving the reranker twice the weight of the shallow parser in determining the posteriors. The shallow parser has perceptron scores as weights, and the distribution of these scores after a softmax normalization was too peaked to be of utility, so we used the normalized reciprocal rank of each candidate as P2 in Eq. 4. We point out several details in these results. First, usin</context>
+</contexts>
+<marker>Hollingshead, Fisher, Roark, 2005</marker>
+<rawString>K. Hollingshead, S. Fisher, and B. Roark. 2005. Comparing and combining finite-state and context-free parsers. In Proceedings of HLT-EMNLP, pages 787–794.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>K Lari</author>
+<author>S J Young</author>
+</authors>
+<title>The estimation of stochastic context-free grammars using the inside-outside algorithm.</title>
+<date>1990</date>
+<journal>Computer Speech and Language,</journal>
+<volume>4</volume>
+<issue>1</issue>
+<contexts>
+<context position="10109" citStr="Lari and Young, 1990" startWordPosition="1613" endWordPosition="1616">r all labeled spans X E T, we can calculate the posterior probability -y(X) as follows: P(T)QX E T� (1) PT&apos;ET P(TI) where QX E T� = r 1 if X E T l 0 otherwise. Goodman (1996; 1998) presents a method for using the posterior probability of constituents to maximize the expected labeled recall of binary branching trees, as follows: X Tb = argmax -y(X) (2) TET XET Essentially, find the tree with the maximum sum of the posterior probabilities of its constituents. This is done by computing the posterior probabilities of constituents in a chart, typically via the InsideOutside algorithm (Baker, 1979; Lari and Young, 1990), followed by a final CYK-like pass to find the tree maximizing the sum. For non-binary branching trees, where precision and recall may differ, Goodman (1998, Ch.3) proposes the following combined metric for balancing precision and recall: X Tb = argmax (-y(X) − A) (3) TET XET where A ranges from 0 to 1. Setting A=0 is equivalent to Eq. 2 and thus optimizes recall, and setting A=1 optimizes precision; Appendix 5 at the end of this paper presents brief derivations of these metrics.2 Thus, A functions as a mixing factor to balance recall and precision. This approach also gives us a straightforwa</context>
+</contexts>
+<marker>Lari, Young, 1990</marker>
+<rawString>K. Lari and S.J. Young. 1990. The estimation of stochastic context-free grammars using the inside-outside algorithm. Computer Speech and Language, 4(1):35–56.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>M P Marcus</author>
+<author>M A Marcinkiewicz</author>
+<author>B Santorini</author>
+</authors>
+<title>Building a large annotated corpus of English: The Penn treebank. Computational Linguistics,</title>
+<date>1993</date>
+<contexts>
+<context position="7485" citStr="Marcus et al., 1993" startWordPosition="1171" endWordPosition="1174">or the CoNLL-2000 Shared Task (Tjong Kim Sang and Buchholz, 2000), base phrases correspond directly to constituents that appear in full parses, and hence can provide a straightforward constraint on edges within a chart parser. In contrast, shallow phrases collapse certain non-constituents—such as auxiliary chains—into a single phrase, and hence are not directly applicable as constraints on a chart parser. We have two methods for deriving base-phrase annotations for a string. First, we trained a finitestate shallow parser on base phrases extracted from the Penn Wall St. Journal (WSJ) Treebank (Marcus et al., 1993). The treebank trees are pre-processed identically to the procedure for training the Charniak parser, e.g., empty nodes and function tags are removed. The shallow parser is trained using the perceptron algorithm, with a feature set nearly identical to that from Sha and Pereira (2003), and achieves comparable performance to that paper. See Hollingshead et al. (2005) for more details. Second, base phrases can be extracted from the full-parse output of the Charniak and Johnson (2005) reranker, via a simple script to extract nodes with only preterminal children. Table 1 shows these systems’ bracke</context>
+</contexts>
+<marker>Marcus, Marcinkiewicz, Santorini, 1993</marker>
+<rawString>M.P. Marcus, M.A. Marcinkiewicz, and B. Santorini. 1993. Building a large annotated corpus of English: The Penn treebank. Computational Linguistics, 19:314–330.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D McClosky</author>
+<author>E Charniak</author>
+<author>M Johnson</author>
+</authors>
+<title>Reranking and self-training for parser adaptation.</title>
+<date>2006</date>
+<booktitle>In Proceedings of COLING-ACL,</booktitle>
+<pages>337--344</pages>
+<contexts>
+<context position="5324" citStr="McClosky et al., 2006" startWordPosition="845" endWordPosition="849"> sources. We compare the relative performance of these three sources and find the best performance improvements using constraints derived from a weighted combination of shallow parser output and reranker output. The Charniak parsing pipeline has been extensively studied over the past decade, with a number of papers focused on improving early stages of the pipeline (Charniak et al., 1998; Caraballo and Charniak, 1998; Blaheta and Charniak, 1999; Hall and Johnson, 2004; Charniak et al., 2006) as well as many focused on optimizing final parse accuracy (Charniak, 2000; Charniak and Johnson, 2005; McClosky et al., 2006). This focus on optimization has made system improvements very difficult to achieve; yet our relatively simple architecture yields statistically significant improvements, making pipeline iteration a promising approach for other tasks. 2 Approach Our approach uses the Charniak state-of-the-art parsing pipeline. The well-known Charniak (2000) coarse-to-fine parser is a two-stage parsing pipeline, in which the first stage uses a vanilla PCFG to populate a chart of parse constituents. The second stage, constrained to only those items in the firststage chart, uses a refined grammar to generate an n</context>
+</contexts>
+<marker>McClosky, Charniak, Johnson, 2006</marker>
+<rawString>D. McClosky, E. Charniak, and M. Johnson. 2006. Reranking and self-training for parser adaptation. In Proceedings of COLING-ACL, pages 337–344.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>F J Och</author>
+<author>H Ney</author>
+</authors>
+<title>A systematic comparison of various statistical alignment models.</title>
+<date>2003</date>
+<journal>Computational Linguistics,</journal>
+<volume>29</volume>
+<contexts>
+<context position="1547" citStr="Och and Ney, 2003" startWordPosition="235" endWordPosition="238">ble solutions, and later stages are constrained to find solutions within that subset. For example, a part-of-speech tagger could constrain a “base phrase” chunker (Ratnaparkhi, 1999), or the n-best output of a parser could constrain a reranker (Charniak and Johnson, 2005). A pipeline is typically used to reduce search complexity for rich models used in later stages, usually at the risk that the best solutions may be pruned in early stages. Pipeline systems are ubiquitous in natural language processing, used not only in parsing (Ratnaparkhi, 1999; Charniak, 2000), but also machine translation (Och and Ney, 2003) and speech recognition (Fiscus, 1997; Goel et al., 2000), among others. Despite the widespread use of pipelines, they have been understudied, with very little work on general techniques for designing and improving pipeline systems (although cf. Finkel et al. (2006)). This paper presents one such general technique, here applied to stochastic parsing, whereby output from later stages of a pipeline is used to constrain earlier stages of the same pipeline. To our knowledge, this is the first time such a pipeline architecture has been proposed. It may seem surprising that later stages of a pipelin</context>
+</contexts>
+<marker>Och, Ney, 2003</marker>
+<rawString>F.J. Och and H. Ney. 2003. A systematic comparison of various statistical alignment models. Computational Linguistics, 29.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>A Ratnaparkhi</author>
+</authors>
+<title>Learning to parse natural language with maximum entropy models.</title>
+<date>1999</date>
+<booktitle>Machine Learning,</booktitle>
+<pages>34--1</pages>
+<contexts>
+<context position="1111" citStr="Ratnaparkhi, 1999" startWordPosition="163" endWordPosition="165">straints, derived either from later stages of the parsing pipeline or from a finitestate shallow parser. The best performance is achieved by reranking the union of unconstrained parses and relatively heavilyconstrained parses. 1 Introduction A “pipeline” system consists of a sequence of processing stages such that the output from one stage provides the input to the next. Each stage in such a pipeline identifies a subset of the possible solutions, and later stages are constrained to find solutions within that subset. For example, a part-of-speech tagger could constrain a “base phrase” chunker (Ratnaparkhi, 1999), or the n-best output of a parser could constrain a reranker (Charniak and Johnson, 2005). A pipeline is typically used to reduce search complexity for rich models used in later stages, usually at the risk that the best solutions may be pruned in early stages. Pipeline systems are ubiquitous in natural language processing, used not only in parsing (Ratnaparkhi, 1999; Charniak, 2000), but also machine translation (Och and Ney, 2003) and speech recognition (Fiscus, 1997; Goel et al., 2000), among others. Despite the widespread use of pipelines, they have been understudied, with very little work</context>
+<context position="6753" citStr="Ratnaparkhi (1999)" startWordPosition="1058" endWordPosition="1059">r model employed by the reranker. For our experiments, we modified the parser1 to 1ftp://ftp.cs.brown.edu/pub/nlparser/ Parser Base Shallow Phrases Phrases Charniak parser-best 91.9 94.4 reranker-best 92.8 94.8 Finite-state shallow parser 91.7 94.3 Table 1: F-scores on WSJ section 24 of output from two parsers on the similar tasks of base-phrase parsing and shallowphrase parsing. For evaluation, base and shallow phrases are extracted from the Charniak/Johnson full-parse output. allow us to optionally provide base-phrase trees to constrain the first stage of parsing. 2.1 Base Phrases Following Ratnaparkhi (1999), we define a base phrase as any parse node with only preterminal children. Unlike the shallow phrases defined for the CoNLL-2000 Shared Task (Tjong Kim Sang and Buchholz, 2000), base phrases correspond directly to constituents that appear in full parses, and hence can provide a straightforward constraint on edges within a chart parser. In contrast, shallow phrases collapse certain non-constituents—such as auxiliary chains—into a single phrase, and hence are not directly applicable as constraints on a chart parser. We have two methods for deriving base-phrase annotations for a string. First, w</context>
+</contexts>
+<marker>Ratnaparkhi, 1999</marker>
+<rawString>A. Ratnaparkhi. 1999. Learning to parse natural language with maximum entropy models. Machine Learning, 34(1-3):151– 175.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>F Sha</author>
+<author>F Pereira</author>
+</authors>
+<title>Shallow parsing with conditional random fields.</title>
+<date>2003</date>
+<booktitle>In Proceedings of the HLT-NAACL Annual Meeting,</booktitle>
+<pages>134--141</pages>
+<contexts>
+<context position="7769" citStr="Sha and Pereira (2003)" startWordPosition="1217" endWordPosition="1220">ituents—such as auxiliary chains—into a single phrase, and hence are not directly applicable as constraints on a chart parser. We have two methods for deriving base-phrase annotations for a string. First, we trained a finitestate shallow parser on base phrases extracted from the Penn Wall St. Journal (WSJ) Treebank (Marcus et al., 1993). The treebank trees are pre-processed identically to the procedure for training the Charniak parser, e.g., empty nodes and function tags are removed. The shallow parser is trained using the perceptron algorithm, with a feature set nearly identical to that from Sha and Pereira (2003), and achieves comparable performance to that paper. See Hollingshead et al. (2005) for more details. Second, base phrases can be extracted from the full-parse output of the Charniak and Johnson (2005) reranker, via a simple script to extract nodes with only preterminal children. Table 1 shows these systems’ bracketing accuracy on both the base-phrase and shallow parsing tasks for WSJ section 24; each system was trained on WSJ sections 02-21. From this table we can see that base phrases are substantially more difficult than shallow phrases to annotate. Output from the finite-state shallow pars</context>
+</contexts>
+<marker>Sha, Pereira, 2003</marker>
+<rawString>F. Sha and F. Pereira. 2003. Shallow parsing with conditional random fields. In Proceedings of the HLT-NAACL Annual Meeting, pages 134–141.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>E F Tjong Kim Sang</author>
+<author>S Buchholz</author>
+</authors>
+<title>Introduction to the CoNLL-2000 shared task: Chunking.</title>
+<date>2000</date>
+<booktitle>In Proceedings of CoNLL,</booktitle>
+<pages>127--132</pages>
+<contexts>
+<context position="6930" citStr="Sang and Buchholz, 2000" startWordPosition="1086" endWordPosition="1089">-best 91.9 94.4 reranker-best 92.8 94.8 Finite-state shallow parser 91.7 94.3 Table 1: F-scores on WSJ section 24 of output from two parsers on the similar tasks of base-phrase parsing and shallowphrase parsing. For evaluation, base and shallow phrases are extracted from the Charniak/Johnson full-parse output. allow us to optionally provide base-phrase trees to constrain the first stage of parsing. 2.1 Base Phrases Following Ratnaparkhi (1999), we define a base phrase as any parse node with only preterminal children. Unlike the shallow phrases defined for the CoNLL-2000 Shared Task (Tjong Kim Sang and Buchholz, 2000), base phrases correspond directly to constituents that appear in full parses, and hence can provide a straightforward constraint on edges within a chart parser. In contrast, shallow phrases collapse certain non-constituents—such as auxiliary chains—into a single phrase, and hence are not directly applicable as constraints on a chart parser. We have two methods for deriving base-phrase annotations for a string. First, we trained a finitestate shallow parser on base phrases extracted from the Penn Wall St. Journal (WSJ) Treebank (Marcus et al., 1993). The treebank trees are pre-processed identi</context>
+</contexts>
+<marker>Sang, Buchholz, 2000</marker>
+<rawString>E.F. Tjong Kim Sang and S. Buchholz. 2000. Introduction to the CoNLL-2000 shared task: Chunking. In Proceedings of CoNLL, pages 127–132.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>A Yeh</author>
+</authors>
+<title>More accurate tests for the statistical significance of result differences.</title>
+<date>2000</date>
+<booktitle>In Proceedings of the 18th International COLING,</booktitle>
+<pages>947--953</pages>
+<contexts>
+<context position="28821" citStr="Yeh, 2000" startWordPosition="4688" endWordPosition="4689">verall processing time by a factor of two, we also compare against output obtained by doubling the coarse-parser’s beam threshold. The last row in Table 4 shows that the increased threshold yields an insignificant improvement over the baseline, despite a very large processing burden. We applied our best-performing model (Unconstrained U Combo, A=0.5) to the test set, WSJ section 23, for comparison against the baseline system. Table 5 shows a 0.4 percent F-score improvement over the baseline for that section, which is statistically significant at p &lt; 0.001, using the stratified shuffling test (Yeh, 2000). 5 Conclusion &amp; Future Work In summary, we have demonstrated that pipeline iteration can be useful in improving system performance, by constraining early stages of the pipeline with output derived from later stages. While the current work made use of a particular kind of constraint—base phrases—many others could be extracted as well. Preliminary results extending the work presented in this paper show parser accuracy improvements from pipeline iteration when using constraints based on an unlabeled partial bracketing of the string. Higher-level phrase segmentations or fully specified trees over</context>
+</contexts>
+<marker>Yeh, 2000</marker>
+<rawString>A. Yeh. 2000. More accurate tests for the statistical significance of result differences. In Proceedings of the 18th International COLING, pages 947–953.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

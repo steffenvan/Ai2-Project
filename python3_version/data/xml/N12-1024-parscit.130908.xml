@@ -1,0 +1,1599 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.000169">
+<title confidence="0.741079">
+Implicitly Intersecting Weighted Automata using Dual Decomposition*
+</title>
+<author confidence="0.857497">
+Michael J. Paul and Jason Eisner
+</author>
+<affiliation confidence="0.99204">
+Department of Computer Science / Johns Hopkins University
+</affiliation>
+<address confidence="0.773663">
+Baltimore, MD 21218, USA
+</address>
+<email confidence="0.998822">
+{mpaul,jason}@cs.jhu.edu
+</email>
+<sectionHeader confidence="0.997387" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.999689909090909">
+We propose an algorithm to find the best path
+through an intersection of arbitrarily many
+weighted automata, without actually perform-
+ing the intersection. The algorithm is based on
+dual decomposition: the automata attempt to
+agree on a string by communicating about fea-
+tures of the string. We demonstrate the algo-
+rithm on the Steiner consensus string problem,
+both on synthetic data and on consensus de-
+coding for speech recognition. This involves
+implicitly intersecting up to 100 automata.
+</bodyText>
+<sectionHeader confidence="0.999392" genericHeader="keywords">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.994107275862069">
+Many tasks in natural language processing in-
+volve functions that assign scores—such as log-
+probabilities—to candidate strings or sequences.
+Often such a function can be represented compactly
+as a weighted finite state automaton (WFSA). Find-
+ing the best-scoring string according to a WFSA is
+straightforward using standard best-path algorithms.
+It is common to construct a scoring WFSA by
+combining two or more simpler WFSAs, taking ad-
+vantage of the closure properties of WFSAs. For ex-
+ample, consider noisy channel approaches to speech
+recognition (Pereira and Riley, 1997) or machine
+translation (Knight and Al-Onaizan, 1998). Given
+an input f, the score of a possible English tran-
+scription or translation e is the sum of its language
+model score logp(e) and its channel model score
+log p(f  |e). If each of these functions of e is repre-
+sented as a WFSA, then their sum is represented as
+the intersection of those two WFSAs.
+WFSA intersection corresponds to constraint con-
+junction, and hence is often a mathematically natu-
+ral way to specify a solution to a problem involving
+*The authors are grateful to Damianos Karakos for provid-
+ing tools and data for the ASR experiments. This work was
+supported in part by an NSF Graduate Research Fellowship.
+multiple soft constraints on a desired string. Unfor-
+tunately, the intersection may be computationally in-
+efficient in practice. The intersection of K WFSAs
+having n1, n2, ... , nK states may have n1·n2 · · · nK
+states in the worst case.1
+In this paper, we propose a more efficient method
+for finding the best path in an intersection without
+actually computing the full intersection. Our ap-
+proach is based on dual decomposition, a combina-
+torial optimization technique that was recently intro-
+duced to the vision (Komodakis et al., 2007) and lan-
+guage processing communities (Rush et al., 2010;
+Koo et al., 2010). Our idea is to interrogate the
+several WFSAs separately, repeatedly visiting each
+WFSA to seek a high-scoring path in each WFSA
+that agrees with the current paths found in the other
+WSFAs. This iterative negotiation is reminiscent of
+message-passing algorithms (Sontag et al., 2008),
+while the queries to the WFSAs are reminiscent of
+loss-augmented inference (Taskar et al., 2005).
+We remark that a general solution whose asymp-
+totic worst-case runtime beat that of naive intersec-
+tion would have important implications for com-
+plexity theory (Karakostas et al., 2003). Our ap-
+proach is not such a solution. We have no worst-case
+bounds on how long dual decomposition will take to
+converge in our setting, and indeed it can fail to con-
+verge altogether.2 However, when it does converge,
+we have a “certificate” that the solution is optimal.
+Dual decomposition is usually regarded as a
+method for finding an optimal vector in Rd, sub-
+ject to several constraints. However, it is not ob-
+vious how best to represent strings as vectors—they
+</bodyText>
+<footnote confidence="0.957163125">
+1Most regular expression operators combine WFSA sizes
+additively. It is primarily intersection and its close relative,
+composition, that do so multiplicatively, leading to inefficiency
+when two large WFSAs are combined, and to exponential
+blowup when many WFSAs are combined. Yet these operations
+are crucially important in practice.
+2An example that oscillates can be constructed along lines
+similar to the one given by Rush et al. (2010).
+</footnote>
+<page confidence="0.600959">
+232
+2012 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies, pages 232–242,
+Montr´eal, Canada, June 3-8, 2012. c�2012 Association for Computational Linguistics
+</page>
+<bodyText confidence="0.999936708333333">
+have unbounded length, and furthermore the abso-
+lute position of a symbol is not usually significant in
+evaluating its contribution to the score.3 One con-
+tribution of this work is that we propose a general,
+flexible scheme for converting strings to feature vec-
+tors on which the WFSAs must agree. In principle
+the number of features may be infinite, but the set
+of “active” features is expanded only as needed un-
+til the algorithm converges. Our experiments use a
+particular instantiation of our general scheme, based
+on n-gram features.
+We apply our method to a particular task: finding
+the Steiner consensus string (Gusfield, 1997) that
+has low total edit distance to a number of given, un-
+aligned strings. As an illustration, we are pleased to
+report that “alia” and “aian” are the consensus
+popular names for girls and boys born in the U.S. in
+2010. We use this technique for consensus decoding
+from speech recognition lattices, and to reconstruct
+the common source of up to 100 strings corrupted by
+random noise. Explicit intersection would be astro-
+nomically expensive in these cases. We demonstrate
+that our approach tends to converge rather quickly,
+and that it finds good solutions quickly in any case.
+</bodyText>
+<sectionHeader confidence="0.999134" genericHeader="introduction">
+2 Preliminaries
+</sectionHeader>
+<subsectionHeader confidence="0.994694">
+2.1 Weighted Finite State Automata
+</subsectionHeader>
+<bodyText confidence="0.999970076923077">
+A weighted finite state automaton (WFSA) over the
+finite alphabet E is an FSA that has a cost or weight
+associated with each arc. We consider the case of
+real-valued weights in the tropical semiring. This is
+a fancy way of saying that the weight of a path is the
+sum of its arc weights, and that the weight of a string
+is the minimum weight of all its accepting paths (or
+oc if there are none).
+When we intersect two WFSAs F and G, the ef-
+fect is to add string weights: (F n G)(x) = F(x) +
+G(x). Our problem is to find the x that minimizes
+this sum, but without constructing F n G to run a
+shortest-path algorithm on it.
+</bodyText>
+<subsectionHeader confidence="0.997931">
+2.2 Dual Decomposition
+</subsectionHeader>
+<bodyText confidence="0.9999295">
+The trick in dual decomposition is to decompose
+an intractable global problem into two or more
+</bodyText>
+<footnote confidence="0.856677">
+3Such difficulties are typical when trying to apply structured
+prediction or optimization techniques to predict linguistic ob-
+jects such as strings or trees, rather than vectors.
+</footnote>
+<bodyText confidence="0.992503">
+tractable subproblems that can be solved indepen-
+dently. If we can somehow combine the solutions
+from the subproblems into a “valid” solution to the
+global problem, then we can avoid optimizing the
+joint problem directly. A valid solution is one in
+which the individual solutions of each subproblem
+all agree on the variables which are shared in the
+joint problem. For example, if we are combining a
+parser with a part-of-speech tagger, the tag assign-
+ments from both models must agree in the final so-
+lution (Rush et al., 2010); if we are intersecting a
+translation model with a language model, then it is
+the words that must agree (Rush and Collins, 2011).
+More formally, suppose we want to find a global
+solution that is jointly optimized among K sub-
+problems: argminx Ek1 fk(x). Suppose that x
+ranges over vectors. Introducing an auxiliary vari-
+able xk for each subproblem fk allows us to equiv-
+alently formulate this as the following constrained
+optimization problem:
+</bodyText>
+<equation confidence="0.901557571428572">
+K
+argmin fk(xk) s.t. (bk) xk = x (1)
+{x,x1,...,xK} k=1
+For any set of vectors Ak that sum to 0, EKk=1 Ak =
+0, Komodakis et al. (2007) show that the following
+Lagrangian dual is a lower bound on (1):4
+fk(xk) + Ak · xk (2)
+</equation>
+<bodyText confidence="0.999749933333333">
+where the Lagrange multiplier vectors Ak can be
+used to penalize solutions that do not satisfy the
+agreement constraints (bk) xk = x. Our goal is to
+maximize this lower bound and hope that the result
+does satisfy the constraints. The graphs in Fig. 2
+illustrate how we increase the lower bound over
+time, using a subgradient algorithm to adjust the A’s.
+At each subgradient step, (2) can be computed by
+choosing each xk = argminxk fk(xk) + Ak · xk sep-
+arately. In effect, each subproblem makes an inde-
+pendent prediction xk influenced by Ak, and if these
+outputs do not yet satisfy the agreement constraints,
+then the Ak are adjusted to encourage the subprob-
+lems to agree on the next iteration. See Sontag et al.
+(2011) for a detailed tutorial on dual decomposition.
+</bodyText>
+<footnote confidence="0.942875666666667">
+4The objective in (2) can always be made as small as in (1)
+by choosing the vectors (x1, ... xK) that minimize (1) (because
+then Ek ak · xk = Ek ak · x = 0 · x = 0). Hence (2)&lt;(1).
+</footnote>
+<equation confidence="0.990321">
+K
+min
+{x1,...,xK} k=1
+</equation>
+<page confidence="0.997835">
+233
+</page>
+<sectionHeader confidence="0.992439" genericHeader="method">
+3 WFSAs and Dual Decomposition
+</sectionHeader>
+<bodyText confidence="0.99978425">
+Given K WFSAs, F1, ... , FK, we are interested in
+finding the string x which has the best score in the
+intersection F1 n ... n FK. The lowest-cost string in
+the intersection of all K machines is defined as:
+</bodyText>
+<equation confidence="0.809118">
+Fk(x) (3)
+</equation>
+<bodyText confidence="0.999657416666667">
+As explained above, the trick in dual decomposi-
+tion is to recast (3) as independent problems of the
+form argmin2k Fk(xk), subject to constraints that
+all xk are the same. However, it is not so clear how
+to define agreement constraints on strings. Perhaps
+a natural formulation is that Fk should be urged to
+favor strings xk that would be read by Fk0 along a
+similar path to that of xk0. But Fk cannot keep track
+of the state of Fk0 for all k� without solving the full
+intersection—precisely what we are trying to avoid.
+Instead of requiring the strings xk to be equal as
+in (1), we will require their features to be equal:
+</bodyText>
+<equation confidence="0.999187">
+(bk)γ(xk) = γ(x) (4)
+</equation>
+<bodyText confidence="0.994282612903226">
+Of course, we must define the features. We will use
+an infinite feature vector γ(x) that completely char-
+acterizes x, so that agreement of the feature vectors
+implies agreement of the strings. At each subgradi-
+ent step, however, we will only allow finitely many
+elements of λk to become nonzero, so only a finite
+portion of γ(xk) needs to be computed.5
+We will define these “active” features of a string
+x by constructing some unweighted deterministic
+FSA, G (described in §4). The active features of x
+are determined by the collection of arcs on the ac-
+cepting path of x in G. Thus, to satisfy the agree-
+ment constraint, xi and xj must be accepted using
+the same arcs of G (or more generally, arcs that have
+the same features).
+We relax the constraints by introducing a col-
+lection λ = λ1, ... , λK of Lagrange multipliers,
+5The simplest scheme would define a binary feature for each
+string in E∗. Then the nonzero elements of Ak would spec-
+ify punishments and rewards for outputting various strings that
+had been encountered at earlier iterations: “Try subproblem k
+again, and try harder not to output michael this time, as it still
+didn’t agree with other subproblems: try jason instead.” This
+scheme would converge glacially if at all. We instead focus on
+featurizations that let subproblems negotiate about substrings:
+“Try again, avoiding mi if possible and favoring ja instead.”
+and defining Gak(x) such that the features of G are
+weighted by the vector λk (all of whose nonzero el-
+ements must correspond to features in G). As in (2),
+we assume λ E A, where A = {λ : Pk λk = 0}.
+This gives the objective:
+</bodyText>
+<equation confidence="0.996010666666667">
+X
+h(λ) = min (Fk(xk) + Gak(xk)) (5)
+{21,...,2x} k
+</equation>
+<bodyText confidence="0.999832583333334">
+This minimization fully decomposes into K sub-
+problems that can be solved independently. The kth
+subproblem is to find argmin2k Fk(xk) + Gak(xk),
+which is straightforward to solve with finite-state
+methods. It is the string on the lowest-cost path
+through Hk = Fk n Gak, as found with standard
+path algorithms (Mohri, 2002).
+The dual problem we wish to solve is
+maxaEΛ h(λ), where h(λ) itself is a min over
+{x1, ... , xK}. We optimize λ via projected subgra-
+dient ascent (Komodakis et al., 2007). The update
+equation for λk at iteration t is then:
+</bodyText>
+<equation confidence="0.999689857142857">
+P !
+k0 γ(x(t)
+λ(t+1)
+k = λ(t) k0 )
+γ(x(t)
+k + ηt k ) − (6)
+K
+</equation>
+<bodyText confidence="0.99997355">
+where ηt &gt; 0 is the step size at iteration t. This up-
+date is intuitive. It moves away from the current so-
+lution and toward the average solution (where they
+differ), by increasing the cost of the former’s fea-
+tures and reducing the cost of the latter’s features.
+This update may be very dense, however, since
+γ(x) is an infinite vector. So we usually only up-
+date the elements of λk that correspond to the small
+finite set of active features (the other elements are
+still “frozen” at 0), denoted O. This is still a valid
+subgradient step. This strategy is incorrect only if
+the updates for all active features are 0—in other
+words, only if we have achieved equality of the cur-
+rently active features and yet still the {xk} do not
+agree. In that case, we must choose some inactive
+features that are still unequal and allow the subgra-
+dient step to update their λ coefficients to nonzero,
+making them active. At the next step of optimiza-
+tion, we must expand G to consider this enlarged set
+of active features.
+</bodyText>
+<sectionHeader confidence="0.989529" genericHeader="method">
+4 The Agreement Machine
+</sectionHeader>
+<bodyText confidence="0.9997825">
+The agreement machine (or constraint machine) G
+can be thought of as a way of encoding features of
+</bodyText>
+<equation confidence="0.665435">
+X
+k
+argmin
+2
+</equation>
+<page confidence="0.982976">
+234
+</page>
+<bodyText confidence="0.9999425">
+strings on which we enforce agreement. There are a
+number of different topologies for G that might be
+considered, with varying degrees of efficiency and
+utility. Constructing G essentially amounts to fea-
+ture engineering; as such, it is unlikely that there
+is a universally optimal topology of G. Neverthe-
+less, there are clearly bad ways to build G, as not
+all topologies are guaranteed to lead to an optimal
+solution. In this section, we lay out some abstract
+guidelines for appropriate G construction, before we
+describe specific topologies in the later subsections.
+Most importantly, we should design G so that it
+accepts all strings in F1 n...nFK. This is to ensure
+that it accepts the string that is the optimal solution
+to the joint problem. If G did not accept that string,
+then neither would Hk = Fk n G, and our algorithm
+would not be able to find it.
+Even if Hk can accept the optimal string, it is pos-
+sible that this string would never be the best path in
+this machine, regardless of A. For example, suppose
+G is a single-state machine with self-loops accept-
+ing each symbol in the alphabet (i.e. a unigram ma-
+chine). Suppose Hk outputs the string aaa in the
+current iteration, but we would like the machines to
+converge to aaaaa. We would lower the weight of
+Aa to encourage Hk to output more of the symbol a.
+However, if Hk has a cyclic topology, then it could
+happen that a negative value of Aa could create a
+negative-weight cycle, in which the lowest-cost path
+through Hk is infinitely long. It might be that adjust-
+ing Aa can change the best string to either aaa or
+aaaaaaaaa... (depending on whether a cycle af-
+ter the initial aaa has positive or negative weight),
+but never the optimal aaaaa. On the other hand,
+if G instead encoded 5-grams, this would not be a
+problem because a path through a 5-gram machine
+could accept aaaaa without traversing a cycle.
+Finally, agreeing on (active) features does not
+necessarily mean that all xk are the same string. For
+example, if we again use a unigram G (that is, O =
+E, the set of unigrams), then -ye(abc) = -ye(cba),
+where -ye returns a feature vector where all but the
+active features are zeroed out. In this instance, we
+satisfy the constraints imposed by G, even though
+we have not satisfied the constraint we truly care
+about: that the strings agree.
+To summarize, we will aim to choose O such that
+G has the following characteristics:
+</bodyText>
+<listItem confidence="0.9846036">
+1. The language L(Fk n G) = L(Fk); i.e. G does
+not restrict the set of strings accepted by Fk.
+2. When -ye(xi) = -ye(xj), typically xi = xj.
+3. ]A E A s.t. argminx Fk(x) + Gak(x) =
+�
+</listItem>
+<bodyText confidence="0.9992186875">
+argminx k&apos; Fk&apos;(x), i.e., the optimal string
+can be the best path in Fk n G.6 This may not
+be the case if G is cyclic.
+The first of these is required during every itera-
+tion of the algorithm in order to maintain optimality
+guarantees. However, even if we do not satisfy the
+latter two points, we may get lucky and the strings
+themselves will agree upon convergence, and no fur-
+ther work is required. Furthermore, the unigram ma-
+chine G used in the above examples, despite break-
+ing these requirements, has the advantage of being
+very efficient to intersect with F. This motivates
+our “active feature” strategy of using a simple G ini-
+tially, and incrementally altering it as needed, for ex-
+ample if we satisfy the constraints but the strings do
+not yet match. We discuss this in §4.2.
+</bodyText>
+<subsectionHeader confidence="0.993972">
+4.1 N-Gram Construction of G
+</subsectionHeader>
+<bodyText confidence="0.999988857142857">
+In principle, it is valid to use any G that satisfies the
+guidelines above, but in practice, some topologies
+will lead to faster convergence than others.
+Perhaps the most obvious form is a simple vector
+encoding of strings, e.g. “a at position 1”, “b at po-
+sition 2”, and so on. As a WFSA, this would simply
+have one state represent each position, with arcs for
+each symbol going from position i to i + 1. This is
+essentially a unigram machine where the loops have
+been “unrolled” to also keep track of position.
+However, early experiments showed that with
+this topology for G, our algorithm converged very
+slowly, if at all. What goes wrong? The problem
+stems from the fact that the strings are unaligned and
+of varying length, and it is difficult to get the strings
+to agree quickly at specific positions. For example,
+if two subproblems have b at positions 6 and 8 in the
+current iteration, they might agree at position 7—but
+our features don’t encourage this. The Lagrangian
+update would discourage accepting b at 6 and en-
+courage b at 8 (and vice versa), without giving credit
+</bodyText>
+<footnote confidence="0.960399333333333">
+6It is not always possible to construct a G to satisfy this
+property, as the Lagrangian dual may not be a tight bound to the
+original problem.
+</footnote>
+<page confidence="0.996219">
+235
+</page>
+<bodyText confidence="0.99994082">
+for meeting in the middle. Further, these features do
+not encourage the subproblems to preserve the rela-
+tive order of neighboring symbols, and strings which
+are almost the same but slightly misaligned will be
+penalized essentially everywhere. This is an ineffec-
+tive way for the subproblems to communicate.
+In this paper, we focus on the feature set we
+found to work the best in our experiments: the
+strings should agree on their n-gram features, such
+as “number of occurrences of the bigram ab.” Even
+if we don’t yet know precisely where ab should ap-
+pear in the string, we can still move toward conver-
+gence if we try to force the subproblems to agree on
+whether and how often ab appears at all.
+To encode n-gram features in a WFSA, each state
+represents the (n−1)-gram history, and all arcs leav-
+ing the state represent the final symbol in the n-
+gram, weighted by the score of that n-gram. The
+machine will also contain start and end states, with
+appropriate transitions to/from the n-gram states.
+For example, if the trigram abc has weight Aabc,
+then the trigram machine will encode this as an arc
+with the symbol c leaving the state representing ab,
+and this arc will have weight Aabc. If our feature
+set also contains 1- and 2-grams, then the arc in this
+example would incorporate the weights of all of the
+corresponding features: Aabc + Abc + Ac.
+A drawback is that these features give no infor-
+mation about where in the string the n-grams should
+occur. In a long string, we might want to encour-
+age or discourage an n-gram in a certain “region” of
+the string. Our features can only encourage or dis-
+courage it everywhere in the string, which may lead
+to slow convergence. Nevertheless, in our particular
+experimental settings, we find that this works better
+than other topologies we have considered.
+Sparse N-Gram Encoding A full n-gram lan-
+guage model requires Pz� |E|n arcs to encode as a
+WFSA. This could be quite expensive. Fortunately,
+large n-gram models can be compacted by using
+failure arcs (0-arcs) to encode backoff (Allauzen et
+al., 2003). These arcs act as E-transitions that can
+be taken only when no other transition is available.
+They allow us to encode the sparse subset of n-
+grams that have nonzero Lagrangians. We encode G
+such that all features whose A value is 0 will back off
+to the next largest n-gram having nonzero weight.
+This form of G still accepts E* and has the same
+weights as a dense representation, but could require
+substantially fewer states.
+</bodyText>
+<subsectionHeader confidence="0.93569">
+4.2 Incrementally Expanding G
+</subsectionHeader>
+<bodyText confidence="0.999916441860465">
+As mentioned above, we may need to alter G as we
+go along. Intuitively, we may want to start with fea-
+tures that are cheap to encode, to move the param-
+eters A to a good part of the solution space, then
+incrementally bring in more expensive features as
+needed. Shorter n-grams require a smaller G and
+will require a shorter runtime per iteration, but if
+they are too short to be informative, then they may
+require many more iterations to reach convergence.
+In an extreme case, we may reach a point where
+the subproblems all agree on n-grams currently in
+O, but the actual strings still do not match. Wait-
+ing until we hit such a point may be unnecessarily
+slow. We experimented with periodically increas-
+ing n (e.g. adding trigrams to the feature set if we
+haven’t converged with bigrams after a fixed num-
+ber of iterations), but this is expensive, and it is not
+clear how to define a schedule for increasing the or-
+der of n. We instead present a simple and effective
+heuristic for bringing in more features.
+The idea is that if the subproblem solutions cur-
+rently disagree on counts of the bigrams ab and
+bc, then an abc feature may be unnecessary, since
+the subproblems could still make progress with only
+these bigram constraints. However, once the sub-
+problems agree on these two bigrams, but disagree
+on trigram abc, we bring this into the feature set O.
+More generally, we add an (n + 1)-gram to the fea-
+ture set if the current strings disagree on its counts
+despite agreeing on its n-gram prefix and n-gram
+suffix (which need not necessarily be O). This se-
+lectively brings in larger n-grams to target portions
+of the strings that may require longer context, while
+keeping the agreement machine small.
+Algorithm 1 gives pseudocode for our complete
+algorithm when using n-gram features with this in-
+cremental strategy. To summarize, we solve for each
+xk using the current Ak, and if all the strings agree,
+we return them as the optimal solution. Otherwise,
+we update Ak and repeat. At each iteration, we check
+for n-gram agreement, and bring in select (n + 1)-
+grams to the feature set as appropriate.
+Finally, there is another instance where we might
+</bodyText>
+<page confidence="0.992739">
+236
+</page>
+<table confidence="0.9034494">
+Algorithm 1 The dual decomposition algorithm
+with n-gram features.
+Initialize O to some initial set of n-gram features.
+fort = 1 to T do
+fork = 1 to K do
+Solve xk = argmin.,(Fk n Gak)(x) with a
+shortest-path algorithm
+end for
+if (di, j)xi = xj then
+return {xl, ... , xK}
+else
+O = O U {z E E* : all xk agree on the features
+corresponding to the length-(|z |− 1) prefix and
+suffix of z, but not on z itself}
+fork=1toKdo
+</table>
+<tableCaption confidence="0.757973">
+Update Ak according to equation (6)
+Create Gak to encode the features O
+end for
+end if
+end for
+</tableCaption>
+<bodyText confidence="0.998798869565218">
+need to expand G, which we omit from the pseu-
+docode for conciseness. If both Fk and G are cyclic,
+then there is a chance that there will be a negative-
+weight cycle in FknGak. (If at least one of these ma-
+chines is acyclic, then this is not a problem, because
+their intersection yields a finite set.) In the case of
+a negative-weight cycle, the best path is infinitely
+long, and so the algorithm will either return an error
+or fail to terminate. If this happens, then we need to
+backtrack, and either decrease the subgradient step
+size to avoid moving into this territory, or alter G to
+expand the cycles. This can be done by unrolling
+loops to keep track of more information—when en-
+coding n-gram features with G, this amounts to ex-
+panding G to encode higher order n-grams. When
+using a sparse G with 0-arcs, it may also be neces-
+sary to increase the minimum n-gram history that
+is used for back-off. For example, instead of al-
+lowing bigrams to back off to unigrams, we might
+force G to encode the full set of bigrams (not just
+bigrams with nonzero A) in order to avoid cycles
+in the lower order states. Our strategy for avoiding
+negative-weight cycles is detailed in §5.1.
+</bodyText>
+<sectionHeader confidence="0.993713" genericHeader="method">
+5 Experiments with Consensus Decoding
+</sectionHeader>
+<bodyText confidence="0.999992">
+To best highlight the utility of our approach, we con-
+sider applications that must (implicitly) intersect a
+large number of WFSAs. We will demonstrate that,
+in many cases, our algorithm converges to an exact
+solution on problems involving 10, 25, and even 100
+machines, all of which would be hopeless to solve
+by taking the full intersection.
+We focus on the problem of solving for the Steiner
+consensus string: given a set of K strings, find the
+string in E* that has minimal total edit distance to
+all strings in the set. This is an NP-hard problem
+that can be solved as an intersection of K machines,
+as we will describe in §5.2. The consensus string
+also gives an implicit multiple sequence alignment,
+as we discuss in §6.
+We begin with the application of minimum Bayes
+risk decoding of speech lattices, which we show can
+reduce to the consensus string problem. We then ex-
+plore the consensus problem in depth by applying it
+to a variety of different inputs.
+</bodyText>
+<subsectionHeader confidence="0.926532">
+5.1 Experimental Details
+</subsectionHeader>
+<bodyText confidence="0.999848761904762">
+We initialize O to include both unigrams and bi-
+grams, as we find that unigrams alone are not pro-
+ductive features in these experiments. As we expand
+O, we allow it to include n-grams up to length five.
+We run our algorithm for a maximum of 1000 iter-
+ations, using a subgradient step size of α/(t + 500)
+at iteration t, which satisfies the general properties
+to guarantee asymptotic convergence (Spall, 2003).
+We initialize α to 1 and 10 in the two subsections, re-
+spectively. We halve α whenever we hit a negative-
+weight cycle and need to backtrack. If we still get
+negative-weight cycles after α &lt; 10−4 then we reset
+α and increase the minimum order of n which is en-
+coded in G. (If n is already at our maximum of five,
+then we simply end without converging.) In the case
+of non-convergence after 1000 iterations, we select
+the best string (according to the objective) from the
+set of strings that were solutions to any subproblem
+at any point during optimization.
+Our implementation uses OpenFST 1.2.8 (Al-
+lauzen et al., 2007).
+</bodyText>
+<subsectionHeader confidence="0.997645">
+5.2 Minimum Bayes Risk Decoding for ASR
+</subsectionHeader>
+<bodyText confidence="0.999979833333333">
+We first consider the task of automatic speech recog-
+nition (ASR). Suppose x* is the true transcription
+(a string) of an spoken utterance, and 7r(w) is an
+ASR system’s probability distribution over possi-
+ble transcriptions w. The Bayes risk of an out-
+put transcription x is defined as the expectation
+</bodyText>
+<page confidence="0.941697">
+237
+</page>
+<equation confidence="0.9726055">
+E
+w π(w) `(x, w) for some loss function ` (Bickel
+</equation>
+<bodyText confidence="0.9999763">
+and Doksum, 2006). Minimum Bayes risk decoding
+(Goel and Byrne, 2003) involves choosing the x that
+minimizes the Bayes risk, rather than simply choos-
+ing the x that maximizes π(x) as in MAP decoding.
+As a reasonable approximation, we will take the
+expectation over just the strings w1, ... , wK that are
+most probable under π. A common loss function
+is the Levenshtein distance because this is generally
+used to measure the word error rate of ASR output.
+Thus, we seek a consensus transcription
+</bodyText>
+<figure confidence="0.93876935">
+0 &lt;s&gt; I WANT TO BE TAKING A DEEP BREATH NOW &lt;/s&gt;
+&lt;s&gt; WE WANT TO BE TAKING A DEEP BREATH NOW &lt;/s&gt;
+&lt;s&gt; I DON’T WANT TO BE TAKING A DEEP BREATH NOW &lt;/s&gt;
+&lt;s&gt; WELL I WANT TO BE TAKING A DEEP BREATH NOW &lt;/s&gt;
+&lt;s&gt; THEY WANT TO BE TAKING A DEEP BREATH NOW &lt;/s&gt;
+300 &lt;s&gt; I WANT TO BE TAKING A DEEP BREATH NOW &lt;/s&gt;
+&lt;s&gt; WE WANT TO BE TAKING A DEEP BREATH NOW &lt;/s&gt;
+&lt;s&gt; I DON’T WANT TO BE TAKING A DEEP BREATH NOW &lt;/s&gt;
+&lt;s&gt; WELL I WANT TO BE TAKING A DEEP BREATH NOW &lt;/s&gt;
+&lt;s&gt; WELL WANT TO BE TAKING A DEEP BREATH NOW &lt;/s&gt;
+375 &lt;s&gt; I WANT TO BE TAKING A DEEP BREATH NOW &lt;/s&gt;
+&lt;s&gt; I WANT TO BE TAKING A DEEP BREATH NOW &lt;/s&gt;
+&lt;s&gt; I DON’T WANT TO BE TAKING A DEEP BREATH NOW &lt;/s&gt;
+&lt;s&gt; I WANT TO BE TAKING A DEEP BREATH NOW &lt;/s&gt;
+&lt;s&gt; I WANT TO BE TAKING A DEEP BREATH NOW &lt;/s&gt;
+472 &lt;s&gt; I WANT TO BE TAKING A DEEP BREATH NOW &lt;/s&gt;
+&lt;s&gt; I WANT TO BE TAKING A DEEP BREATH NOW &lt;/s&gt;
+&lt;s&gt; I WANT TO BE TAKING A DEEP BREATH NOW &lt;/s&gt;
+&lt;s&gt; I WANT TO BE TAKING A DEEP BREATH NOW &lt;/s&gt;
+&lt;s&gt; I WANT TO BE TAKING A DEEP BREATH NOW &lt;/s&gt;
+</figure>
+<equation confidence="0.656395333333333">
+K Figure 1: Example run of the consensus problem on
+argmin πk d(x, wk) (7) K = 25 strings on a Broadcast News utterance, showing
+x k=1 x1, ... , x5 at the 0th, 300th, 375th, and 472nd iterations.
+</equation>
+<bodyText confidence="0.999942206896552">
+that minimizes a weighted sum of edit distances to
+all of the top-K strings, where high edit distance
+to more probable strings is more strongly penal-
+ized. Here d(x, w) is the unweighted Levenshtein
+distance between two strings, and πk = π(wk). If
+each πk = 1/K, then argminx is known as the
+Steiner consensus string, which is NP-hard to find
+(Sim and Park, 2003). Equation (7) is a weighted
+generalization of the Steiner problem.
+Given an input string wk, it is straightforward
+to define our WFSA Fk such that Fk(x) computes
+πk d(x, wk). A direct construction of Fk is as fol-
+lows. First, create a “straight line” WFSA whose
+single path accepts (only) wk; each each state corre-
+sponds to a position in wk. These arcs all have cost
+0. Now add various arcs with cost πk that permit
+edit operations. For each arc labeled with a symbol
+a E E, add competing “substitution” arcs labeled
+with the other symbols in E, and a competing “dele-
+tion” arc labeled with c; these have the same source
+and target as the original arc. Also, at each state, add
+a self-loop labeled with each symbol in E; these are
+“insertion” arcs. Each arc that deviates from wk has
+a cost of πk, and thus the lowest-cost path through
+Fk accepting x has weight πk d(x, wk).
+The consensus objective in Equation (7) can be
+solved by finding the lowest-cost path in F1 n ... n
+FK, and we can solve this best-path problem using
+the dual decomposition algorithm described above.
+</bodyText>
+<subsectionHeader confidence="0.640273">
+5.2.1 Experiments
+</subsectionHeader>
+<bodyText confidence="0.999920941176471">
+We ran our algorithm on Broadcast News data, us-
+ing 226 lattices produced by the IBM Attila decoder
+(Chen et al., 2006; Soltau et al., 2010) on a subset
+of the NIST dev04f data, using models trained by
+Zweig et al. (2011). For each lattice, we found the
+consensus of the top K = 25 strings.
+85% of the problems converged within 1000 it-
+erations, with an average of 147.4 iterations. We
+found that the true consensus was often the most
+likely string under π, but not always—this was true
+70% of the time. In the Bayes risk objective we are
+optimizing in equation (7)—the expected loss—our
+approach averaged a score of 1.59, while always tak-
+ing the top string gives only a slightly worse average
+of 1.66. 8% of the problems encountered negative-
+weight cycles, which were all resolved either by de-
+creasing the step size or encoding larger n-grams.
+</bodyText>
+<subsectionHeader confidence="0.999853">
+5.3 Investigating Consensus Performance with
+Synthetic Data
+</subsectionHeader>
+<bodyText confidence="0.999967285714286">
+The above experiments demonstrate that we can ex-
+actly find the best path in the intersection of 25
+machines—an intersection that could not feasibly be
+constructed in practice. However, these experiments
+do not exhaustively explore how dual decomposition
+behaves on the Steiner string problem in general.
+Above, we experimented with only a fixed num-
+ber of input strings, which were generally similar to
+one another. There are a variety of other inputs to the
+consensus problem which might lead to different be-
+havior and convergence results, however. If we were
+to instead run this experiment on DNA sequences
+(for example, if we posit that the strings are all muta-
+tions of the same ancestor), the alphabet {A,T,C,G}
+</bodyText>
+<page confidence="0.996784">
+238
+</page>
+<figureCaption confidence="0.99221225">
+Figure 2: The algorithm’s behavior on three specific consensus problems. The curves show the current values of
+the primal bound (based on the best string at the current iteration) and dual bound h(A). The horizontal axis shows
+runtime. Red upper triangles are placed every 10 iterations, while blue lower triangles are placed for every 10%
+increase in the size of the feature set R
+</figureCaption>
+<figure confidence="0.995261975">
+K =5,� =50,|E|=5,µ =0.1
+40
+35
+30
+25
+20
+Score
+15
+10
+5
+Primal
+Dual
+80
+70
+60
+Score
+50
+40
+30
+20
+10
+K =50,� =10,|E|=10,µ =0.2
+90
+K =10,� =15,|E|=20,µ =0.4
+50
+40
+30
+Score
+20
+10
+Primal
+Dual
+Primal
+Dual
+00 5 10 15 20
+Runtime (s)
+00 10 20 30 40 50 60
+Runtime (s)
+00 5 10 15 20 25 30 35
+Runtime (s)
+</figure>
+<table confidence="0.96725747826087">
+K t |E |µ Conv. Iters. Red.
+5 100 5 0.1 68% 257 (±110) 24%
+5 100 5 0.2 0% – 8%
+5 50 5 0.1 80% 123 (± 65) 20%
+5 50 5 0.2 10% 436 (±195) 18%
+10 50 5 0.1 69% 228 (±164) 18%
+10 50 5 0.2 0% – 8%
+10 50 5 0.4 0% – 3%
+10 30 10 0.1 100% 50 (± 69) 13%
+10 30 10 0.2 93% 146 (±142) 20%
+10 30 10 0.4 0% – 16%
+10 15 20 0.1 100% 26 (± 6) 1%
+10 15 20 0.2 98% 43 (± 18) 10%
+10 15 20 0.4 63% 289 (±217) 18%
+10 15 20 0.8 0% – 11%
+25 15 20 0.1 98% 30 (± 5) 0%
+25 15 20 0.2 92% 69 (±112) 6%
+25 15 20 0.4 55% 257 (±149) 16%
+25 15 20 0.8 0% – 12%
+50 10 10 0.2 68% 84 (±141) 0%
+50 10 10 0.4 21% 173 (± 94) 9%
+100 10 10 0.2 44% 147 (±220) 0%
+100 10 10 0.4 13% 201 (±138) 6%
+</table>
+<tableCaption confidence="0.9842215">
+Table 1: A summary of results for various consensus
+problems, as described in §5.3.
+</tableCaption>
+<bodyText confidence="0.999710934782609">
+is so small that n-grams are likely to be repeated in
+many parts of the strings, and the lack of position in-
+formation in our features could make it hard to reach
+agreement. Another interesting case is when the in-
+put strings have little or nothing in common—can
+we still converge to an optimal consensus in a rea-
+sonable number of iterations?
+We can investigate many different cases by cre-
+ating synthetic data, where we tune the number of
+input strings K, the length of the strings, the size of
+the vocabulary |E|, as well as how similar the strings
+are. We do this by randomly generating a base string
+x* E V of length E. We then generate K random
+strings w1, ... , wK, each by passing x* through a
+noisy edit channel, where each position has inde-
+pendent probability µ of making an edit. For each
+position in x*, we uniformly sample once among
+the three types of edits (substitution, insertion, dele-
+tion), and in the case of the first two, we uniformly
+sample from the vocabulary (excluding the current
+symbol for substitution). The larger µ, the more mu-
+tated the strings will be. For small µ or large K, the
+optimal consensus of w1, ... , wK will usually be x*.
+Table 1 shows results under various settings. Each
+line presents the percentage of 100 examples that
+converge within the iteration limit, the average num-
+ber of iterations to convergence (f standard devi-
+ation) for those that converged, and the reduction
+in the objective value that is obtained over a sim-
+ple baseline of choosing the best string in the input
+set, to show how much progress the algorithm makes
+between the 0th and final iteration.
+As expected, a higher mutation probability slows
+convergence in all cases, as does having longer in-
+put strings. These results also confirm our hypothe-
+sis that a small alphabet would lead to slow conver-
+gence when using small n-gram features. For these
+types of strings, which might show up in biological
+data, one would likely need more informative con-
+straints than position-agnostic n-grams.
+Figure 2 shows example runs on problems gen-
+erated at three different parameter settings. We plot
+the objective value as a function of runtime, showing
+both the primal objective (3) that we hope to mini-
+mize, which we measure as the quality of the best
+solution among the {xk} that are output at the cur-
+</bodyText>
+<page confidence="0.993154">
+239
+</page>
+<bodyText confidence="0.999986837209302">
+rent iteration, and the dual objective (5) that our al-
+gorithm is maximizing. The dual problem (which is
+concave in A) lower bounds the primal. If the two
+functions ever touch, we know the solution to the
+dual problem is in the set of feasible solutions to the
+original primal problem we are attempting to solve,
+and indeed must be optimal. The figure shows that
+the dual function always has an initial value of 0,
+since we initialize each Ak = 0, and then Fk will
+simply return the input wk as its best solution (since
+wk has zero distance to itself). As the algorithm be-
+gins to enforce the agreement constraints, the value
+of the relaxed dual problem gradually worsens, until
+it fully satisfies the constraints.
+These plots indicate the number of iterations that
+have passed and the number of active features. We
+see that the time per iteration increases as the num-
+ber of features increases, as expected, because more
+(and longer) n-grams are being encoded by G.
+The three patterns shown are typical of almost all
+the trials we examined. When the solution is in the
+original input set (a likely occurrence for large K or
+small p · E), the primal value will be optimal from
+the start, and our algorithm only has to prove its op-
+timality. For more challenging problems, the primal
+solution may jump around in quality at each iteration
+before settling into a stable part of the space.
+To investigate how different n-gram sizes affect
+convergence rates, we experiment with using the en-
+tire set of n-grams (for a fixed n) for the duration
+of the optimization procedure. Figure 3 shows con-
+vergence rates (based on both iterations and run-
+time) of different values of n for one set of param-
+eters. While bigrams are very fast (average runtime
+of 14s among those that converged), this converged
+within 1000 iterations only 78% of the time, and
+the remaining 22% end up bringing down the av-
+erage speed (with an overall average runtime over a
+minute). All larger n-grams converged every time;
+trigrams had an average runtime of 32s. Our algo-
+rithm, which begins with bigrams but brings in more
+features (up to 5-grams) as needed, had an average
+runtime of 19s (with 98% convergence).
+</bodyText>
+<sectionHeader confidence="0.999534" genericHeader="conclusions">
+6 Discussion and Future Work
+</sectionHeader>
+<bodyText confidence="0.995883">
+An important (and motivating) property of La-
+grangian relaxation methods is the certificate of op-
+</bodyText>
+<equation confidence="0.9641552">
+K =10,t =15,|E|=20,g =0.2
+n =2
+n =3
+n =4
+n =5
+</equation>
+<figure confidence="0.9260438">
+300
+200
+100
+00 50 100 150 200
+Number of Iterations
+</figure>
+<figureCaption confidence="0.999928">
+Figure 3: Convergence rates for a fixed set of n-grams.
+</figureCaption>
+<bodyText confidence="0.999932888888889">
+timality. Even in instances where approximate algo-
+rithms perform well, it could be useful to have a true
+optimality guarantee. For example, our algorithm
+can be used to produce reference solutions, which
+are important to have for research purposes.
+Under a sum-of-pairs Levenshtein objective, the
+exact multi-sequence alignment can be directly ob-
+tained from the Steiner consensus string and vice
+versa (Gusfield, 1997). This implies that our ex-
+act algorithm could be also used to find exact multi-
+sequence alignments, an important problem in nat-
+ural language processing (Barzilay and Lee, 2003)
+and computational biology (Durbin et al., 2006) that
+is almost always solved with approximate methods.
+We have noted that some constraints are more
+useful than others. Position-specific information is
+hard to agree on and leads to slow convergence,
+while pure n-gram constraints do not work as well
+for long strings where the position may be impor-
+tant. One avenue we are investigating is the use
+of a non-deterministic G, which would allow us to
+encode latent variables (Dreyer et al., 2008), such
+as loosely defined “regions” within a string, and to
+allow for the encoding of alignments between the
+input strings. We would also like to extend these
+methods to other combinatorial optimization prob-
+lems involving strings, such as inference in graphi-
+cal models over strings (Dreyer and Eisner, 2009).
+To conclude, we have presented a general frame-
+work for applying dual decomposition to implicit
+WFSA intersection. This could be applied to a num-
+ber of NLP problems such as language model and
+lattice intersection. To demonstrate its utility on a
+large number of automata, we applied it to consen-
+sus decoding, determining the true optimum in a rea-
+sonable amount of time on a large majority of cases.
+</bodyText>
+<figure confidence="0.946009666666667">
+Runtime (s)
+500
+400
+</figure>
+<page confidence="0.98073">
+240
+</page>
+<sectionHeader confidence="0.997288" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.999922723809524">
+Cyril Allauzen, Mehryar Mohri, and Brian Roark. 2003.
+Generalized algorithms for constructing statistical lan-
+guage models. In Proceedings of the 41st Annual
+Meeting of the Association for Computational Linguis-
+tics, pages 40–47.
+Cyril Allauzen, Michael Riley, Johan Schalkwyk, Woj-
+ciech Skut, and Mehryar Mohri. 2007. OpenFst: A
+general and efficient weighted finite-state transducer
+library. In Proceedings of the 12th International Con-
+ference on Implementation and Application of Au-
+tomata, CIAA’07, pages 11–23.
+Regina Barzilay and Lillian Lee. 2003. Learning to
+paraphrase: An unsupervised approach using multiple-
+sequence alignment. In Proceedings of the 2003 Con-
+ference of the North American Chapter of the Associ-
+ation for Computational Linguistics on Human Lan-
+guage Technology - Volume 1, NAACL ’03, pages 16–
+23.
+Peter J. Bickel and Kjell A. Doksum. 2006. Mathemat-
+ical Statistics: Basic Ideas and Selected Topics, vol-
+ume 1. Pearson Prentice Hall.
+Stanley F. Chen, Brian Kingsbury, Lidia Mangu, Daniel
+Povey, George Saon, Hagen Soltau, and Geoffrey
+Zweig. 2006. Advances in speech transcription at
+IBM under the DARPA EARS program. IEEE Trans-
+actions on Audio, Speech &amp; Language Processing,
+14(5):1596–1608.
+Markus Dreyer and Jason Eisner. 2009. Graphical mod-
+els over multiple strings. In Proceedings of the 2009
+Conference on Empirical Methods in Natural Lan-
+guage Processing, EMNLP ’09, pages 101–110. As-
+sociation for Computational Linguistics.
+Markus Dreyer, Jason R. Smith, and Jason Eisner. 2008.
+Latent-variable modeling of string transductions with
+finite-state methods. In Proceedings of the Conference
+on Empirical Methods in Natural Language Process-
+ing (EMNLP), pages 1080–1089, Honolulu, October.
+R. Durbin, S. Eddy, A. Krogh, and G. Mitchison. 2006.
+Biological Sequence Analysis. Cambridge University
+Press.
+Vaibhava Goel and William J. Byrne. 2003. Mini-
+mum Bayes risk methods in automatic speech recog-
+nition. In Wu Chou and Biing-Hwang Juan, editors,
+Pattern Recognition in Speech and Language Process-
+ing. CRC Press.
+Dan Gusfield. 1997. Algorithms on Strings, Trees, and
+Sequences: Computer Science and Computational Bi-
+ology. Cambridge University Press.
+George Karakostas, Richard J Lipton, and Anastasios Vi-
+glas. 2003. On the complexity of intersecting finite
+state automata and NL versus NP. Theoretical Com-
+puter Science, pages 257–274.
+Kevin Knight and Yaser Al-Onaizan. 1998. Translation
+with finite-state devices. In AMTA’98, pages 421–437.
+N. Komodakis, N. Paragios, and G. Tziritas. 2007.
+MRF optimization via dual decomposition: Message-
+Passing revisited. In Computer Vision, 2007. ICCV
+2007. IEEE 11th International Conference on, pages
+1–8.
+Terry Koo, Alexander M. Rush, Michael Collins, Tommi
+Jaakkola, and David Sontag. 2010. Dual decompo-
+sition for parsing with non-projective head automata.
+In Proceedings of the 2010 Conference on Empirical
+Methods in Natural Language Processing, EMNLP
+’10, pages 1288–1298.
+Mehryar Mohri. 2002. Semiring frameworks and algo-
+rithms for shortest-distance problems. J. Autom. Lang.
+Comb., 7:321–350, January.
+Fernando C. N. Pereira and Michael Riley. 1997. Speech
+recognition by composition of weighted finite au-
+tomata. CoRR.
+Alexander M. Rush and Michael Collins. 2011. Exact
+decoding of syntactic translation models through La-
+grangian relaxation. In Proceedings of the 49th An-
+nual Meeting of the Association for Computational
+Linguistics: Human Language Technologies - Volume
+1, HLT ’11, pages 72–82.
+Alexander M. Rush, David Sontag, Michael Collins, and
+Tommi Jaakkola. 2010. On dual decomposition and
+linear programming relaxations for natural language
+processing. In Proceedings of the 2010 Conference on
+Empirical Methods in Natural Language Processing,
+EMNLP ’10, pages 1–11.
+Jeong Seop Sim and Kunsoo Park. 2003. The consen-
+sus string problem for a metric is NP-complete. J. of
+Discrete Algorithms, 1:111–117, February.
+H. Soltau, G. Saon, and B. Kingsbury. 2010. The IBM
+Attila speech recognition toolkit. In Proc. IEEE Work-
+shop on Spoken Language Technology, pages 97–102.
+David Sontag, Talya Meltzer, Amir Globerson, Yair
+Weiss, and Tommi Jaakkola. 2008. Tightening LP
+relaxations for MAP using message-passing. In 24th
+Conference in Uncertainty in Artificial Intelligence,
+pages 503–510. AUAI Press.
+David Sontag, Amir Globerson, and Tommi Jaakkola.
+2011. Introduction to dual decomposition for in-
+ference. In Suvrit Sra, Sebastian Nowozin, and
+Stephen J. Wright, editors, Optimization for Machine
+Learning. MIT Press.
+James C. Spall. 2003. Introduction to Stochastic Search
+and Optimization. John Wiley &amp; Sons, Inc., New
+York, NY, USA, 1 edition.
+Ben Taskar, Vassil Chatalbashev, Daphne Koller, and
+Carlos Guestrin. 2005. Learning structured prediction
+models: A large margin approach. In Proceedings of
+</reference>
+<page confidence="0.964997">
+241
+</page>
+<reference confidence="0.9986729">
+the 22nd international conference on Machine learn-
+ing, ICML ’05, pages 896–903.
+Geoffrey Zweig, Patrick Nguyen, Dirk Van Compernolle,
+Kris Demuynck, Les E. Atlas, Pascal Clark, Gregory
+Sell, Meihong Wang, Fei Sha, Hynek Hermansky,
+Damianos Karakos, Aren Jansen, Samuel Thomas,
+Sivaram G. S. V. S., Sam Bowman, and Justine T. Kao.
+2011. Speech recognition with segmental conditional
+random fields: A summary of the JHU CLSP 2010
+Summer Workshop. In ICASSP.
+</reference>
+<page confidence="0.99772">
+242
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.969991">
+<title confidence="0.999973">Intersecting Weighted Automata using Dual</title>
+<author confidence="0.999906">J Paul</author>
+<affiliation confidence="0.999816">Department of Computer Science / Johns Hopkins</affiliation>
+<address confidence="0.998332">Baltimore, MD 21218,</address>
+<abstract confidence="0.997277">We propose an algorithm to find the best path through an intersection of arbitrarily many weighted automata, without actually performing the intersection. The algorithm is based on dual decomposition: the automata attempt to agree on a string by communicating about features of the string. We demonstrate the algorithm on the Steiner consensus string problem, both on synthetic data and on consensus decoding for speech recognition. This involves implicitly intersecting up to 100 automata.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>Cyril Allauzen</author>
+<author>Mehryar Mohri</author>
+<author>Brian Roark</author>
+</authors>
+<title>Generalized algorithms for constructing statistical language models.</title>
+<date>2003</date>
+<booktitle>In Proceedings of the 41st Annual Meeting of the Association for Computational Linguistics,</booktitle>
+<pages>40--47</pages>
+<contexts>
+<context position="19571" citStr="Allauzen et al., 2003" startWordPosition="3421" endWordPosition="3424">g the n-grams should occur. In a long string, we might want to encourage or discourage an n-gram in a certain “region” of the string. Our features can only encourage or discourage it everywhere in the string, which may lead to slow convergence. Nevertheless, in our particular experimental settings, we find that this works better than other topologies we have considered. Sparse N-Gram Encoding A full n-gram language model requires Pz� |E|n arcs to encode as a WFSA. This could be quite expensive. Fortunately, large n-gram models can be compacted by using failure arcs (0-arcs) to encode backoff (Allauzen et al., 2003). These arcs act as E-transitions that can be taken only when no other transition is available. They allow us to encode the sparse subset of ngrams that have nonzero Lagrangians. We encode G such that all features whose A value is 0 will back off to the next largest n-gram having nonzero weight. This form of G still accepts E* and has the same weights as a dense representation, but could require substantially fewer states. 4.2 Incrementally Expanding G As mentioned above, we may need to alter G as we go along. Intuitively, we may want to start with features that are cheap to encode, to move th</context>
+</contexts>
+<marker>Allauzen, Mohri, Roark, 2003</marker>
+<rawString>Cyril Allauzen, Mehryar Mohri, and Brian Roark. 2003. Generalized algorithms for constructing statistical language models. In Proceedings of the 41st Annual Meeting of the Association for Computational Linguistics, pages 40–47.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Cyril Allauzen</author>
+<author>Michael Riley</author>
+<author>Johan Schalkwyk</author>
+<author>Wojciech Skut</author>
+<author>Mehryar Mohri</author>
+</authors>
+<title>OpenFst: A general and efficient weighted finite-state transducer library.</title>
+<date>2007</date>
+<booktitle>In Proceedings of the 12th International Conference on Implementation and Application of Automata, CIAA’07,</booktitle>
+<pages>11--23</pages>
+<contexts>
+<context position="25908" citStr="Allauzen et al., 2007" startWordPosition="4562" endWordPosition="4566">2003). We initialize α to 1 and 10 in the two subsections, respectively. We halve α whenever we hit a negativeweight cycle and need to backtrack. If we still get negative-weight cycles after α &lt; 10−4 then we reset α and increase the minimum order of n which is encoded in G. (If n is already at our maximum of five, then we simply end without converging.) In the case of non-convergence after 1000 iterations, we select the best string (according to the objective) from the set of strings that were solutions to any subproblem at any point during optimization. Our implementation uses OpenFST 1.2.8 (Allauzen et al., 2007). 5.2 Minimum Bayes Risk Decoding for ASR We first consider the task of automatic speech recognition (ASR). Suppose x* is the true transcription (a string) of an spoken utterance, and 7r(w) is an ASR system’s probability distribution over possible transcriptions w. The Bayes risk of an output transcription x is defined as the expectation 237 E w π(w) `(x, w) for some loss function ` (Bickel and Doksum, 2006). Minimum Bayes risk decoding (Goel and Byrne, 2003) involves choosing the x that minimizes the Bayes risk, rather than simply choosing the x that maximizes π(x) as in MAP decoding. As a re</context>
+</contexts>
+<marker>Allauzen, Riley, Schalkwyk, Skut, Mohri, 2007</marker>
+<rawString>Cyril Allauzen, Michael Riley, Johan Schalkwyk, Wojciech Skut, and Mehryar Mohri. 2007. OpenFst: A general and efficient weighted finite-state transducer library. In Proceedings of the 12th International Conference on Implementation and Application of Automata, CIAA’07, pages 11–23.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Regina Barzilay</author>
+<author>Lillian Lee</author>
+</authors>
+<title>Learning to paraphrase: An unsupervised approach using multiplesequence alignment.</title>
+<date>2003</date>
+<booktitle>In Proceedings of the 2003 Conference of the North American Chapter of the Association for Computational Linguistics on Human Language Technology - Volume 1, NAACL ’03,</booktitle>
+<pages>16--23</pages>
+<contexts>
+<context position="37807" citStr="Barzilay and Lee, 2003" startWordPosition="6789" endWordPosition="6792">s for a fixed set of n-grams. timality. Even in instances where approximate algorithms perform well, it could be useful to have a true optimality guarantee. For example, our algorithm can be used to produce reference solutions, which are important to have for research purposes. Under a sum-of-pairs Levenshtein objective, the exact multi-sequence alignment can be directly obtained from the Steiner consensus string and vice versa (Gusfield, 1997). This implies that our exact algorithm could be also used to find exact multisequence alignments, an important problem in natural language processing (Barzilay and Lee, 2003) and computational biology (Durbin et al., 2006) that is almost always solved with approximate methods. We have noted that some constraints are more useful than others. Position-specific information is hard to agree on and leads to slow convergence, while pure n-gram constraints do not work as well for long strings where the position may be important. One avenue we are investigating is the use of a non-deterministic G, which would allow us to encode latent variables (Dreyer et al., 2008), such as loosely defined “regions” within a string, and to allow for the encoding of alignments between the</context>
+</contexts>
+<marker>Barzilay, Lee, 2003</marker>
+<rawString>Regina Barzilay and Lillian Lee. 2003. Learning to paraphrase: An unsupervised approach using multiplesequence alignment. In Proceedings of the 2003 Conference of the North American Chapter of the Association for Computational Linguistics on Human Language Technology - Volume 1, NAACL ’03, pages 16– 23.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Peter J Bickel</author>
+<author>Kjell A Doksum</author>
+</authors>
+<date>2006</date>
+<booktitle>Mathematical Statistics: Basic Ideas and Selected Topics,</booktitle>
+<volume>1</volume>
+<publisher>Pearson Prentice Hall.</publisher>
+<contexts>
+<context position="26319" citStr="Bickel and Doksum, 2006" startWordPosition="4635" endWordPosition="4638"> we select the best string (according to the objective) from the set of strings that were solutions to any subproblem at any point during optimization. Our implementation uses OpenFST 1.2.8 (Allauzen et al., 2007). 5.2 Minimum Bayes Risk Decoding for ASR We first consider the task of automatic speech recognition (ASR). Suppose x* is the true transcription (a string) of an spoken utterance, and 7r(w) is an ASR system’s probability distribution over possible transcriptions w. The Bayes risk of an output transcription x is defined as the expectation 237 E w π(w) `(x, w) for some loss function ` (Bickel and Doksum, 2006). Minimum Bayes risk decoding (Goel and Byrne, 2003) involves choosing the x that minimizes the Bayes risk, rather than simply choosing the x that maximizes π(x) as in MAP decoding. As a reasonable approximation, we will take the expectation over just the strings w1, ... , wK that are most probable under π. A common loss function is the Levenshtein distance because this is generally used to measure the word error rate of ASR output. Thus, we seek a consensus transcription 0 &lt;s&gt; I WANT TO BE TAKING A DEEP BREATH NOW &lt;/s&gt; &lt;s&gt; WE WANT TO BE TAKING A DEEP BREATH NOW &lt;/s&gt; &lt;s&gt; I DON’T WANT TO BE TAK</context>
+</contexts>
+<marker>Bickel, Doksum, 2006</marker>
+<rawString>Peter J. Bickel and Kjell A. Doksum. 2006. Mathematical Statistics: Basic Ideas and Selected Topics, volume 1. Pearson Prentice Hall.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Stanley F Chen</author>
+<author>Brian Kingsbury</author>
+<author>Lidia Mangu</author>
+<author>Daniel Povey</author>
+<author>George Saon</author>
+<author>Hagen Soltau</author>
+<author>Geoffrey Zweig</author>
+</authors>
+<date>2006</date>
+<booktitle>Advances in speech transcription at IBM under the DARPA EARS program. IEEE Transactions on Audio, Speech &amp; Language Processing,</booktitle>
+<volume>14</volume>
+<issue>5</issue>
+<contexts>
+<context position="29553" citStr="Chen et al., 2006" startWordPosition="5269" endWordPosition="5272"> these have the same source and target as the original arc. Also, at each state, add a self-loop labeled with each symbol in E; these are “insertion” arcs. Each arc that deviates from wk has a cost of πk, and thus the lowest-cost path through Fk accepting x has weight πk d(x, wk). The consensus objective in Equation (7) can be solved by finding the lowest-cost path in F1 n ... n FK, and we can solve this best-path problem using the dual decomposition algorithm described above. 5.2.1 Experiments We ran our algorithm on Broadcast News data, using 226 lattices produced by the IBM Attila decoder (Chen et al., 2006; Soltau et al., 2010) on a subset of the NIST dev04f data, using models trained by Zweig et al. (2011). For each lattice, we found the consensus of the top K = 25 strings. 85% of the problems converged within 1000 iterations, with an average of 147.4 iterations. We found that the true consensus was often the most likely string under π, but not always—this was true 70% of the time. In the Bayes risk objective we are optimizing in equation (7)—the expected loss—our approach averaged a score of 1.59, while always taking the top string gives only a slightly worse average of 1.66. 8% of the proble</context>
+</contexts>
+<marker>Chen, Kingsbury, Mangu, Povey, Saon, Soltau, Zweig, 2006</marker>
+<rawString>Stanley F. Chen, Brian Kingsbury, Lidia Mangu, Daniel Povey, George Saon, Hagen Soltau, and Geoffrey Zweig. 2006. Advances in speech transcription at IBM under the DARPA EARS program. IEEE Transactions on Audio, Speech &amp; Language Processing, 14(5):1596–1608.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Markus Dreyer</author>
+<author>Jason Eisner</author>
+</authors>
+<title>Graphical models over multiple strings.</title>
+<date>2009</date>
+<booktitle>In Proceedings of the 2009 Conference on Empirical Methods in Natural Language Processing, EMNLP ’09,</booktitle>
+<pages>101--110</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<marker>Dreyer, Eisner, 2009</marker>
+<rawString>Markus Dreyer and Jason Eisner. 2009. Graphical models over multiple strings. In Proceedings of the 2009 Conference on Empirical Methods in Natural Language Processing, EMNLP ’09, pages 101–110. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Markus Dreyer</author>
+<author>Jason R Smith</author>
+<author>Jason Eisner</author>
+</authors>
+<title>Latent-variable modeling of string transductions with finite-state methods.</title>
+<date>2008</date>
+<booktitle>In Proceedings of the Conference on Empirical Methods in Natural Language Processing (EMNLP),</booktitle>
+<pages>1080--1089</pages>
+<location>Honolulu,</location>
+<contexts>
+<context position="38299" citStr="Dreyer et al., 2008" startWordPosition="6870" endWordPosition="6873">e also used to find exact multisequence alignments, an important problem in natural language processing (Barzilay and Lee, 2003) and computational biology (Durbin et al., 2006) that is almost always solved with approximate methods. We have noted that some constraints are more useful than others. Position-specific information is hard to agree on and leads to slow convergence, while pure n-gram constraints do not work as well for long strings where the position may be important. One avenue we are investigating is the use of a non-deterministic G, which would allow us to encode latent variables (Dreyer et al., 2008), such as loosely defined “regions” within a string, and to allow for the encoding of alignments between the input strings. We would also like to extend these methods to other combinatorial optimization problems involving strings, such as inference in graphical models over strings (Dreyer and Eisner, 2009). To conclude, we have presented a general framework for applying dual decomposition to implicit WFSA intersection. This could be applied to a number of NLP problems such as language model and lattice intersection. To demonstrate its utility on a large number of automata, we applied it to con</context>
+</contexts>
+<marker>Dreyer, Smith, Eisner, 2008</marker>
+<rawString>Markus Dreyer, Jason R. Smith, and Jason Eisner. 2008. Latent-variable modeling of string transductions with finite-state methods. In Proceedings of the Conference on Empirical Methods in Natural Language Processing (EMNLP), pages 1080–1089, Honolulu, October.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>R Durbin</author>
+<author>S Eddy</author>
+<author>A Krogh</author>
+<author>G Mitchison</author>
+</authors>
+<title>Biological Sequence Analysis.</title>
+<date>2006</date>
+<publisher>Cambridge University Press.</publisher>
+<contexts>
+<context position="37855" citStr="Durbin et al., 2006" startWordPosition="6796" endWordPosition="6799">tances where approximate algorithms perform well, it could be useful to have a true optimality guarantee. For example, our algorithm can be used to produce reference solutions, which are important to have for research purposes. Under a sum-of-pairs Levenshtein objective, the exact multi-sequence alignment can be directly obtained from the Steiner consensus string and vice versa (Gusfield, 1997). This implies that our exact algorithm could be also used to find exact multisequence alignments, an important problem in natural language processing (Barzilay and Lee, 2003) and computational biology (Durbin et al., 2006) that is almost always solved with approximate methods. We have noted that some constraints are more useful than others. Position-specific information is hard to agree on and leads to slow convergence, while pure n-gram constraints do not work as well for long strings where the position may be important. One avenue we are investigating is the use of a non-deterministic G, which would allow us to encode latent variables (Dreyer et al., 2008), such as loosely defined “regions” within a string, and to allow for the encoding of alignments between the input strings. We would also like to extend the</context>
+</contexts>
+<marker>Durbin, Eddy, Krogh, Mitchison, 2006</marker>
+<rawString>R. Durbin, S. Eddy, A. Krogh, and G. Mitchison. 2006. Biological Sequence Analysis. Cambridge University Press.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Vaibhava Goel</author>
+<author>William J Byrne</author>
+</authors>
+<title>Minimum Bayes risk methods in automatic speech recognition.</title>
+<date>2003</date>
+<booktitle>In Wu Chou and Biing-Hwang Juan, editors, Pattern Recognition in Speech and Language Processing.</booktitle>
+<publisher>CRC Press.</publisher>
+<contexts>
+<context position="26371" citStr="Goel and Byrne, 2003" startWordPosition="4643" endWordPosition="4646"> from the set of strings that were solutions to any subproblem at any point during optimization. Our implementation uses OpenFST 1.2.8 (Allauzen et al., 2007). 5.2 Minimum Bayes Risk Decoding for ASR We first consider the task of automatic speech recognition (ASR). Suppose x* is the true transcription (a string) of an spoken utterance, and 7r(w) is an ASR system’s probability distribution over possible transcriptions w. The Bayes risk of an output transcription x is defined as the expectation 237 E w π(w) `(x, w) for some loss function ` (Bickel and Doksum, 2006). Minimum Bayes risk decoding (Goel and Byrne, 2003) involves choosing the x that minimizes the Bayes risk, rather than simply choosing the x that maximizes π(x) as in MAP decoding. As a reasonable approximation, we will take the expectation over just the strings w1, ... , wK that are most probable under π. A common loss function is the Levenshtein distance because this is generally used to measure the word error rate of ASR output. Thus, we seek a consensus transcription 0 &lt;s&gt; I WANT TO BE TAKING A DEEP BREATH NOW &lt;/s&gt; &lt;s&gt; WE WANT TO BE TAKING A DEEP BREATH NOW &lt;/s&gt; &lt;s&gt; I DON’T WANT TO BE TAKING A DEEP BREATH NOW &lt;/s&gt; &lt;s&gt; WELL I WANT TO BE TAK</context>
+</contexts>
+<marker>Goel, Byrne, 2003</marker>
+<rawString>Vaibhava Goel and William J. Byrne. 2003. Minimum Bayes risk methods in automatic speech recognition. In Wu Chou and Biing-Hwang Juan, editors, Pattern Recognition in Speech and Language Processing. CRC Press.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Dan Gusfield</author>
+</authors>
+<title>Algorithms on Strings, Trees, and Sequences: Computer Science and Computational Biology.</title>
+<date>1997</date>
+<publisher>Cambridge University Press.</publisher>
+<contexts>
+<context position="4906" citStr="Gusfield, 1997" startWordPosition="779" endWordPosition="780">length, and furthermore the absolute position of a symbol is not usually significant in evaluating its contribution to the score.3 One contribution of this work is that we propose a general, flexible scheme for converting strings to feature vectors on which the WFSAs must agree. In principle the number of features may be infinite, but the set of “active” features is expanded only as needed until the algorithm converges. Our experiments use a particular instantiation of our general scheme, based on n-gram features. We apply our method to a particular task: finding the Steiner consensus string (Gusfield, 1997) that has low total edit distance to a number of given, unaligned strings. As an illustration, we are pleased to report that “alia” and “aian” are the consensus popular names for girls and boys born in the U.S. in 2010. We use this technique for consensus decoding from speech recognition lattices, and to reconstruct the common source of up to 100 strings corrupted by random noise. Explicit intersection would be astronomically expensive in these cases. We demonstrate that our approach tends to converge rather quickly, and that it finds good solutions quickly in any case. 2 Preliminaries 2.1 Wei</context>
+<context position="37632" citStr="Gusfield, 1997" startWordPosition="6762" endWordPosition="6763"> relaxation methods is the certificate of opK =10,t =15,|E|=20,g =0.2 n =2 n =3 n =4 n =5 300 200 100 00 50 100 150 200 Number of Iterations Figure 3: Convergence rates for a fixed set of n-grams. timality. Even in instances where approximate algorithms perform well, it could be useful to have a true optimality guarantee. For example, our algorithm can be used to produce reference solutions, which are important to have for research purposes. Under a sum-of-pairs Levenshtein objective, the exact multi-sequence alignment can be directly obtained from the Steiner consensus string and vice versa (Gusfield, 1997). This implies that our exact algorithm could be also used to find exact multisequence alignments, an important problem in natural language processing (Barzilay and Lee, 2003) and computational biology (Durbin et al., 2006) that is almost always solved with approximate methods. We have noted that some constraints are more useful than others. Position-specific information is hard to agree on and leads to slow convergence, while pure n-gram constraints do not work as well for long strings where the position may be important. One avenue we are investigating is the use of a non-deterministic G, wh</context>
+</contexts>
+<marker>Gusfield, 1997</marker>
+<rawString>Dan Gusfield. 1997. Algorithms on Strings, Trees, and Sequences: Computer Science and Computational Biology. Cambridge University Press.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>George Karakostas</author>
+<author>Richard J Lipton</author>
+<author>Anastasios Viglas</author>
+</authors>
+<title>On the complexity of intersecting finite state automata and NL versus NP. Theoretical Computer Science,</title>
+<date>2003</date>
+<pages>257--274</pages>
+<contexts>
+<context position="3143" citStr="Karakostas et al., 2003" startWordPosition="497" endWordPosition="500">cessing communities (Rush et al., 2010; Koo et al., 2010). Our idea is to interrogate the several WFSAs separately, repeatedly visiting each WFSA to seek a high-scoring path in each WFSA that agrees with the current paths found in the other WSFAs. This iterative negotiation is reminiscent of message-passing algorithms (Sontag et al., 2008), while the queries to the WFSAs are reminiscent of loss-augmented inference (Taskar et al., 2005). We remark that a general solution whose asymptotic worst-case runtime beat that of naive intersection would have important implications for complexity theory (Karakostas et al., 2003). Our approach is not such a solution. We have no worst-case bounds on how long dual decomposition will take to converge in our setting, and indeed it can fail to converge altogether.2 However, when it does converge, we have a “certificate” that the solution is optimal. Dual decomposition is usually regarded as a method for finding an optimal vector in Rd, subject to several constraints. However, it is not obvious how best to represent strings as vectors—they 1Most regular expression operators combine WFSA sizes additively. It is primarily intersection and its close relative, composition, that</context>
+</contexts>
+<marker>Karakostas, Lipton, Viglas, 2003</marker>
+<rawString>George Karakostas, Richard J Lipton, and Anastasios Viglas. 2003. On the complexity of intersecting finite state automata and NL versus NP. Theoretical Computer Science, pages 257–274.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Kevin Knight</author>
+<author>Yaser Al-Onaizan</author>
+</authors>
+<title>Translation with finite-state devices.</title>
+<date>1998</date>
+<booktitle>In AMTA’98,</booktitle>
+<pages>421--437</pages>
+<contexts>
+<context position="1348" citStr="Knight and Al-Onaizan, 1998" startWordPosition="196" endWordPosition="199">ion Many tasks in natural language processing involve functions that assign scores—such as logprobabilities—to candidate strings or sequences. Often such a function can be represented compactly as a weighted finite state automaton (WFSA). Finding the best-scoring string according to a WFSA is straightforward using standard best-path algorithms. It is common to construct a scoring WFSA by combining two or more simpler WFSAs, taking advantage of the closure properties of WFSAs. For example, consider noisy channel approaches to speech recognition (Pereira and Riley, 1997) or machine translation (Knight and Al-Onaizan, 1998). Given an input f, the score of a possible English transcription or translation e is the sum of its language model score logp(e) and its channel model score log p(f |e). If each of these functions of e is represented as a WFSA, then their sum is represented as the intersection of those two WFSAs. WFSA intersection corresponds to constraint conjunction, and hence is often a mathematically natural way to specify a solution to a problem involving *The authors are grateful to Damianos Karakos for providing tools and data for the ASR experiments. This work was supported in part by an NSF Graduate </context>
+</contexts>
+<marker>Knight, Al-Onaizan, 1998</marker>
+<rawString>Kevin Knight and Yaser Al-Onaizan. 1998. Translation with finite-state devices. In AMTA’98, pages 421–437.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>N Komodakis</author>
+<author>N Paragios</author>
+<author>G Tziritas</author>
+</authors>
+<title>MRF optimization via dual decomposition: MessagePassing revisited.</title>
+<date>2007</date>
+<booktitle>In Computer Vision,</booktitle>
+<pages>1--8</pages>
+<contexts>
+<context position="2502" citStr="Komodakis et al., 2007" startWordPosition="396" endWordPosition="399"> ASR experiments. This work was supported in part by an NSF Graduate Research Fellowship. multiple soft constraints on a desired string. Unfortunately, the intersection may be computationally inefficient in practice. The intersection of K WFSAs having n1, n2, ... , nK states may have n1·n2 · · · nK states in the worst case.1 In this paper, we propose a more efficient method for finding the best path in an intersection without actually computing the full intersection. Our approach is based on dual decomposition, a combinatorial optimization technique that was recently introduced to the vision (Komodakis et al., 2007) and language processing communities (Rush et al., 2010; Koo et al., 2010). Our idea is to interrogate the several WFSAs separately, repeatedly visiting each WFSA to seek a high-scoring path in each WFSA that agrees with the current paths found in the other WSFAs. This iterative negotiation is reminiscent of message-passing algorithms (Sontag et al., 2008), while the queries to the WFSAs are reminiscent of loss-augmented inference (Taskar et al., 2005). We remark that a general solution whose asymptotic worst-case runtime beat that of naive intersection would have important implications for co</context>
+<context position="7550" citStr="Komodakis et al. (2007)" startWordPosition="1242" endWordPosition="1245"> agree in the final solution (Rush et al., 2010); if we are intersecting a translation model with a language model, then it is the words that must agree (Rush and Collins, 2011). More formally, suppose we want to find a global solution that is jointly optimized among K subproblems: argminx Ek1 fk(x). Suppose that x ranges over vectors. Introducing an auxiliary variable xk for each subproblem fk allows us to equivalently formulate this as the following constrained optimization problem: K argmin fk(xk) s.t. (bk) xk = x (1) {x,x1,...,xK} k=1 For any set of vectors Ak that sum to 0, EKk=1 Ak = 0, Komodakis et al. (2007) show that the following Lagrangian dual is a lower bound on (1):4 fk(xk) + Ak · xk (2) where the Lagrange multiplier vectors Ak can be used to penalize solutions that do not satisfy the agreement constraints (bk) xk = x. Our goal is to maximize this lower bound and hope that the result does satisfy the constraints. The graphs in Fig. 2 illustrate how we increase the lower bound over time, using a subgradient algorithm to adjust the A’s. At each subgradient step, (2) can be computed by choosing each xk = argminxk fk(xk) + Ak · xk separately. In effect, each subproblem makes an independent pred</context>
+<context position="11650" citStr="Komodakis et al., 2007" startWordPosition="1990" endWordPosition="1993">s in (2), we assume λ E A, where A = {λ : Pk λk = 0}. This gives the objective: X h(λ) = min (Fk(xk) + Gak(xk)) (5) {21,...,2x} k This minimization fully decomposes into K subproblems that can be solved independently. The kth subproblem is to find argmin2k Fk(xk) + Gak(xk), which is straightforward to solve with finite-state methods. It is the string on the lowest-cost path through Hk = Fk n Gak, as found with standard path algorithms (Mohri, 2002). The dual problem we wish to solve is maxaEΛ h(λ), where h(λ) itself is a min over {x1, ... , xK}. We optimize λ via projected subgradient ascent (Komodakis et al., 2007). The update equation for λk at iteration t is then: P ! k0 γ(x(t) λ(t+1) k = λ(t) k0 ) γ(x(t) k + ηt k ) − (6) K where ηt &gt; 0 is the step size at iteration t. This update is intuitive. It moves away from the current solution and toward the average solution (where they differ), by increasing the cost of the former’s features and reducing the cost of the latter’s features. This update may be very dense, however, since γ(x) is an infinite vector. So we usually only update the elements of λk that correspond to the small finite set of active features (the other elements are still “frozen” at 0), d</context>
+</contexts>
+<marker>Komodakis, Paragios, Tziritas, 2007</marker>
+<rawString>N. Komodakis, N. Paragios, and G. Tziritas. 2007. MRF optimization via dual decomposition: MessagePassing revisited. In Computer Vision, 2007. ICCV 2007. IEEE 11th International Conference on, pages 1–8.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Terry Koo</author>
+<author>Alexander M Rush</author>
+<author>Michael Collins</author>
+<author>Tommi Jaakkola</author>
+<author>David Sontag</author>
+</authors>
+<title>Dual decomposition for parsing with non-projective head automata.</title>
+<date>2010</date>
+<booktitle>In Proceedings of the 2010 Conference on Empirical Methods in Natural Language Processing, EMNLP ’10,</booktitle>
+<pages>1288--1298</pages>
+<contexts>
+<context position="2576" citStr="Koo et al., 2010" startWordPosition="409" endWordPosition="412">llowship. multiple soft constraints on a desired string. Unfortunately, the intersection may be computationally inefficient in practice. The intersection of K WFSAs having n1, n2, ... , nK states may have n1·n2 · · · nK states in the worst case.1 In this paper, we propose a more efficient method for finding the best path in an intersection without actually computing the full intersection. Our approach is based on dual decomposition, a combinatorial optimization technique that was recently introduced to the vision (Komodakis et al., 2007) and language processing communities (Rush et al., 2010; Koo et al., 2010). Our idea is to interrogate the several WFSAs separately, repeatedly visiting each WFSA to seek a high-scoring path in each WFSA that agrees with the current paths found in the other WSFAs. This iterative negotiation is reminiscent of message-passing algorithms (Sontag et al., 2008), while the queries to the WFSAs are reminiscent of loss-augmented inference (Taskar et al., 2005). We remark that a general solution whose asymptotic worst-case runtime beat that of naive intersection would have important implications for complexity theory (Karakostas et al., 2003). Our approach is not such a solu</context>
+</contexts>
+<marker>Koo, Rush, Collins, Jaakkola, Sontag, 2010</marker>
+<rawString>Terry Koo, Alexander M. Rush, Michael Collins, Tommi Jaakkola, and David Sontag. 2010. Dual decomposition for parsing with non-projective head automata. In Proceedings of the 2010 Conference on Empirical Methods in Natural Language Processing, EMNLP ’10, pages 1288–1298.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Mehryar Mohri</author>
+</authors>
+<title>Semiring frameworks and algorithms for shortest-distance problems.</title>
+<date>2002</date>
+<journal>J. Autom. Lang. Comb.,</journal>
+<volume>7</volume>
+<contexts>
+<context position="11479" citStr="Mohri, 2002" startWordPosition="1959" endWordPosition="1960">g ja instead.” and defining Gak(x) such that the features of G are weighted by the vector λk (all of whose nonzero elements must correspond to features in G). As in (2), we assume λ E A, where A = {λ : Pk λk = 0}. This gives the objective: X h(λ) = min (Fk(xk) + Gak(xk)) (5) {21,...,2x} k This minimization fully decomposes into K subproblems that can be solved independently. The kth subproblem is to find argmin2k Fk(xk) + Gak(xk), which is straightforward to solve with finite-state methods. It is the string on the lowest-cost path through Hk = Fk n Gak, as found with standard path algorithms (Mohri, 2002). The dual problem we wish to solve is maxaEΛ h(λ), where h(λ) itself is a min over {x1, ... , xK}. We optimize λ via projected subgradient ascent (Komodakis et al., 2007). The update equation for λk at iteration t is then: P ! k0 γ(x(t) λ(t+1) k = λ(t) k0 ) γ(x(t) k + ηt k ) − (6) K where ηt &gt; 0 is the step size at iteration t. This update is intuitive. It moves away from the current solution and toward the average solution (where they differ), by increasing the cost of the former’s features and reducing the cost of the latter’s features. This update may be very dense, however, since γ(x) is </context>
+</contexts>
+<marker>Mohri, 2002</marker>
+<rawString>Mehryar Mohri. 2002. Semiring frameworks and algorithms for shortest-distance problems. J. Autom. Lang. Comb., 7:321–350, January.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Fernando C N Pereira</author>
+<author>Michael Riley</author>
+</authors>
+<title>Speech recognition by composition of weighted finite automata.</title>
+<date>1997</date>
+<publisher>CoRR.</publisher>
+<contexts>
+<context position="1295" citStr="Pereira and Riley, 1997" startWordPosition="189" endWordPosition="192">itly intersecting up to 100 automata. 1 Introduction Many tasks in natural language processing involve functions that assign scores—such as logprobabilities—to candidate strings or sequences. Often such a function can be represented compactly as a weighted finite state automaton (WFSA). Finding the best-scoring string according to a WFSA is straightforward using standard best-path algorithms. It is common to construct a scoring WFSA by combining two or more simpler WFSAs, taking advantage of the closure properties of WFSAs. For example, consider noisy channel approaches to speech recognition (Pereira and Riley, 1997) or machine translation (Knight and Al-Onaizan, 1998). Given an input f, the score of a possible English transcription or translation e is the sum of its language model score logp(e) and its channel model score log p(f |e). If each of these functions of e is represented as a WFSA, then their sum is represented as the intersection of those two WFSAs. WFSA intersection corresponds to constraint conjunction, and hence is often a mathematically natural way to specify a solution to a problem involving *The authors are grateful to Damianos Karakos for providing tools and data for the ASR experiments</context>
+</contexts>
+<marker>Pereira, Riley, 1997</marker>
+<rawString>Fernando C. N. Pereira and Michael Riley. 1997. Speech recognition by composition of weighted finite automata. CoRR.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Alexander M Rush</author>
+<author>Michael Collins</author>
+</authors>
+<title>Exact decoding of syntactic translation models through Lagrangian relaxation.</title>
+<date>2011</date>
+<booktitle>In Proceedings of the 49th Annual Meeting of the Association for Computational Linguistics: Human Language Technologies - Volume 1, HLT ’11,</booktitle>
+<pages>72--82</pages>
+<contexts>
+<context position="7104" citStr="Rush and Collins, 2011" startWordPosition="1163" endWordPosition="1166">be solved independently. If we can somehow combine the solutions from the subproblems into a “valid” solution to the global problem, then we can avoid optimizing the joint problem directly. A valid solution is one in which the individual solutions of each subproblem all agree on the variables which are shared in the joint problem. For example, if we are combining a parser with a part-of-speech tagger, the tag assignments from both models must agree in the final solution (Rush et al., 2010); if we are intersecting a translation model with a language model, then it is the words that must agree (Rush and Collins, 2011). More formally, suppose we want to find a global solution that is jointly optimized among K subproblems: argminx Ek1 fk(x). Suppose that x ranges over vectors. Introducing an auxiliary variable xk for each subproblem fk allows us to equivalently formulate this as the following constrained optimization problem: K argmin fk(xk) s.t. (bk) xk = x (1) {x,x1,...,xK} k=1 For any set of vectors Ak that sum to 0, EKk=1 Ak = 0, Komodakis et al. (2007) show that the following Lagrangian dual is a lower bound on (1):4 fk(xk) + Ak · xk (2) where the Lagrange multiplier vectors Ak can be used to penalize s</context>
+</contexts>
+<marker>Rush, Collins, 2011</marker>
+<rawString>Alexander M. Rush and Michael Collins. 2011. Exact decoding of syntactic translation models through Lagrangian relaxation. In Proceedings of the 49th Annual Meeting of the Association for Computational Linguistics: Human Language Technologies - Volume 1, HLT ’11, pages 72–82.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Alexander M Rush</author>
+<author>David Sontag</author>
+<author>Michael Collins</author>
+<author>Tommi Jaakkola</author>
+</authors>
+<title>On dual decomposition and linear programming relaxations for natural language processing.</title>
+<date>2010</date>
+<booktitle>In Proceedings of the 2010 Conference on Empirical Methods in Natural Language Processing, EMNLP ’10,</booktitle>
+<pages>1--11</pages>
+<contexts>
+<context position="2557" citStr="Rush et al., 2010" startWordPosition="405" endWordPosition="408">raduate Research Fellowship. multiple soft constraints on a desired string. Unfortunately, the intersection may be computationally inefficient in practice. The intersection of K WFSAs having n1, n2, ... , nK states may have n1·n2 · · · nK states in the worst case.1 In this paper, we propose a more efficient method for finding the best path in an intersection without actually computing the full intersection. Our approach is based on dual decomposition, a combinatorial optimization technique that was recently introduced to the vision (Komodakis et al., 2007) and language processing communities (Rush et al., 2010; Koo et al., 2010). Our idea is to interrogate the several WFSAs separately, repeatedly visiting each WFSA to seek a high-scoring path in each WFSA that agrees with the current paths found in the other WSFAs. This iterative negotiation is reminiscent of message-passing algorithms (Sontag et al., 2008), while the queries to the WFSAs are reminiscent of loss-augmented inference (Taskar et al., 2005). We remark that a general solution whose asymptotic worst-case runtime beat that of naive intersection would have important implications for complexity theory (Karakostas et al., 2003). Our approach</context>
+<context position="4046" citStr="Rush et al. (2010)" startWordPosition="644" endWordPosition="647">tion is usually regarded as a method for finding an optimal vector in Rd, subject to several constraints. However, it is not obvious how best to represent strings as vectors—they 1Most regular expression operators combine WFSA sizes additively. It is primarily intersection and its close relative, composition, that do so multiplicatively, leading to inefficiency when two large WFSAs are combined, and to exponential blowup when many WFSAs are combined. Yet these operations are crucially important in practice. 2An example that oscillates can be constructed along lines similar to the one given by Rush et al. (2010). 232 2012 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies, pages 232–242, Montr´eal, Canada, June 3-8, 2012. c�2012 Association for Computational Linguistics have unbounded length, and furthermore the absolute position of a symbol is not usually significant in evaluating its contribution to the score.3 One contribution of this work is that we propose a general, flexible scheme for converting strings to feature vectors on which the WFSAs must agree. In principle the number of features may be infinite, but the set of “active</context>
+<context position="6975" citStr="Rush et al., 2010" startWordPosition="1140" endWordPosition="1143">tion techniques to predict linguistic objects such as strings or trees, rather than vectors. tractable subproblems that can be solved independently. If we can somehow combine the solutions from the subproblems into a “valid” solution to the global problem, then we can avoid optimizing the joint problem directly. A valid solution is one in which the individual solutions of each subproblem all agree on the variables which are shared in the joint problem. For example, if we are combining a parser with a part-of-speech tagger, the tag assignments from both models must agree in the final solution (Rush et al., 2010); if we are intersecting a translation model with a language model, then it is the words that must agree (Rush and Collins, 2011). More formally, suppose we want to find a global solution that is jointly optimized among K subproblems: argminx Ek1 fk(x). Suppose that x ranges over vectors. Introducing an auxiliary variable xk for each subproblem fk allows us to equivalently formulate this as the following constrained optimization problem: K argmin fk(xk) s.t. (bk) xk = x (1) {x,x1,...,xK} k=1 For any set of vectors Ak that sum to 0, EKk=1 Ak = 0, Komodakis et al. (2007) show that the following </context>
+</contexts>
+<marker>Rush, Sontag, Collins, Jaakkola, 2010</marker>
+<rawString>Alexander M. Rush, David Sontag, Michael Collins, and Tommi Jaakkola. 2010. On dual decomposition and linear programming relaxations for natural language processing. In Proceedings of the 2010 Conference on Empirical Methods in Natural Language Processing, EMNLP ’10, pages 1–11.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jeong Seop Sim</author>
+<author>Kunsoo Park</author>
+</authors>
+<title>The consensus string problem for a metric is NP-complete.</title>
+<date>2003</date>
+<journal>J. of Discrete Algorithms,</journal>
+<pages>1--111</pages>
+<contexts>
+<context position="28344" citStr="Sim and Park, 2003" startWordPosition="5050" endWordPosition="5053">EATH NOW &lt;/s&gt; &lt;s&gt; I WANT TO BE TAKING A DEEP BREATH NOW &lt;/s&gt; K Figure 1: Example run of the consensus problem on argmin πk d(x, wk) (7) K = 25 strings on a Broadcast News utterance, showing x k=1 x1, ... , x5 at the 0th, 300th, 375th, and 472nd iterations. that minimizes a weighted sum of edit distances to all of the top-K strings, where high edit distance to more probable strings is more strongly penalized. Here d(x, w) is the unweighted Levenshtein distance between two strings, and πk = π(wk). If each πk = 1/K, then argminx is known as the Steiner consensus string, which is NP-hard to find (Sim and Park, 2003). Equation (7) is a weighted generalization of the Steiner problem. Given an input string wk, it is straightforward to define our WFSA Fk such that Fk(x) computes πk d(x, wk). A direct construction of Fk is as follows. First, create a “straight line” WFSA whose single path accepts (only) wk; each each state corresponds to a position in wk. These arcs all have cost 0. Now add various arcs with cost πk that permit edit operations. For each arc labeled with a symbol a E E, add competing “substitution” arcs labeled with the other symbols in E, and a competing “deletion” arc labeled with c; these h</context>
+</contexts>
+<marker>Sim, Park, 2003</marker>
+<rawString>Jeong Seop Sim and Kunsoo Park. 2003. The consensus string problem for a metric is NP-complete. J. of Discrete Algorithms, 1:111–117, February.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>H Soltau</author>
+<author>G Saon</author>
+<author>B Kingsbury</author>
+</authors>
+<title>The IBM Attila speech recognition toolkit.</title>
+<date>2010</date>
+<booktitle>In Proc. IEEE Workshop on Spoken Language Technology,</booktitle>
+<pages>97--102</pages>
+<contexts>
+<context position="29575" citStr="Soltau et al., 2010" startWordPosition="5273" endWordPosition="5276">e source and target as the original arc. Also, at each state, add a self-loop labeled with each symbol in E; these are “insertion” arcs. Each arc that deviates from wk has a cost of πk, and thus the lowest-cost path through Fk accepting x has weight πk d(x, wk). The consensus objective in Equation (7) can be solved by finding the lowest-cost path in F1 n ... n FK, and we can solve this best-path problem using the dual decomposition algorithm described above. 5.2.1 Experiments We ran our algorithm on Broadcast News data, using 226 lattices produced by the IBM Attila decoder (Chen et al., 2006; Soltau et al., 2010) on a subset of the NIST dev04f data, using models trained by Zweig et al. (2011). For each lattice, we found the consensus of the top K = 25 strings. 85% of the problems converged within 1000 iterations, with an average of 147.4 iterations. We found that the true consensus was often the most likely string under π, but not always—this was true 70% of the time. In the Bayes risk objective we are optimizing in equation (7)—the expected loss—our approach averaged a score of 1.59, while always taking the top string gives only a slightly worse average of 1.66. 8% of the problems encountered negativ</context>
+</contexts>
+<marker>Soltau, Saon, Kingsbury, 2010</marker>
+<rawString>H. Soltau, G. Saon, and B. Kingsbury. 2010. The IBM Attila speech recognition toolkit. In Proc. IEEE Workshop on Spoken Language Technology, pages 97–102.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>David Sontag</author>
+<author>Talya Meltzer</author>
+<author>Amir Globerson</author>
+<author>Yair Weiss</author>
+<author>Tommi Jaakkola</author>
+</authors>
+<title>Tightening LP relaxations for MAP using message-passing.</title>
+<date>2008</date>
+<booktitle>In 24th Conference in Uncertainty in Artificial Intelligence,</booktitle>
+<pages>503--510</pages>
+<publisher>AUAI Press.</publisher>
+<contexts>
+<context position="2860" citStr="Sontag et al., 2008" startWordPosition="453" endWordPosition="456">fficient method for finding the best path in an intersection without actually computing the full intersection. Our approach is based on dual decomposition, a combinatorial optimization technique that was recently introduced to the vision (Komodakis et al., 2007) and language processing communities (Rush et al., 2010; Koo et al., 2010). Our idea is to interrogate the several WFSAs separately, repeatedly visiting each WFSA to seek a high-scoring path in each WFSA that agrees with the current paths found in the other WSFAs. This iterative negotiation is reminiscent of message-passing algorithms (Sontag et al., 2008), while the queries to the WFSAs are reminiscent of loss-augmented inference (Taskar et al., 2005). We remark that a general solution whose asymptotic worst-case runtime beat that of naive intersection would have important implications for complexity theory (Karakostas et al., 2003). Our approach is not such a solution. We have no worst-case bounds on how long dual decomposition will take to converge in our setting, and indeed it can fail to converge altogether.2 However, when it does converge, we have a “certificate” that the solution is optimal. Dual decomposition is usually regarded as a me</context>
+</contexts>
+<marker>Sontag, Meltzer, Globerson, Weiss, Jaakkola, 2008</marker>
+<rawString>David Sontag, Talya Meltzer, Amir Globerson, Yair Weiss, and Tommi Jaakkola. 2008. Tightening LP relaxations for MAP using message-passing. In 24th Conference in Uncertainty in Artificial Intelligence, pages 503–510. AUAI Press.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>David Sontag</author>
+<author>Amir Globerson</author>
+<author>Tommi Jaakkola</author>
+</authors>
+<title>Introduction to dual decomposition for inference.</title>
+<date>2011</date>
+<booktitle>Optimization for Machine Learning.</booktitle>
+<editor>In Suvrit Sra, Sebastian Nowozin, and Stephen J. Wright, editors,</editor>
+<publisher>MIT Press.</publisher>
+<contexts>
+<context position="8355" citStr="Sontag et al. (2011)" startWordPosition="1388" endWordPosition="1391">e agreement constraints (bk) xk = x. Our goal is to maximize this lower bound and hope that the result does satisfy the constraints. The graphs in Fig. 2 illustrate how we increase the lower bound over time, using a subgradient algorithm to adjust the A’s. At each subgradient step, (2) can be computed by choosing each xk = argminxk fk(xk) + Ak · xk separately. In effect, each subproblem makes an independent prediction xk influenced by Ak, and if these outputs do not yet satisfy the agreement constraints, then the Ak are adjusted to encourage the subproblems to agree on the next iteration. See Sontag et al. (2011) for a detailed tutorial on dual decomposition. 4The objective in (2) can always be made as small as in (1) by choosing the vectors (x1, ... xK) that minimize (1) (because then Ek ak · xk = Ek ak · x = 0 · x = 0). Hence (2)&lt;(1). K min {x1,...,xK} k=1 233 3 WFSAs and Dual Decomposition Given K WFSAs, F1, ... , FK, we are interested in finding the string x which has the best score in the intersection F1 n ... n FK. The lowest-cost string in the intersection of all K machines is defined as: Fk(x) (3) As explained above, the trick in dual decomposition is to recast (3) as independent problems of t</context>
+</contexts>
+<marker>Sontag, Globerson, Jaakkola, 2011</marker>
+<rawString>David Sontag, Amir Globerson, and Tommi Jaakkola. 2011. Introduction to dual decomposition for inference. In Suvrit Sra, Sebastian Nowozin, and Stephen J. Wright, editors, Optimization for Machine Learning. MIT Press.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>James C Spall</author>
+</authors>
+<title>Introduction to Stochastic Search and Optimization.</title>
+<date>2003</date>
+<volume>1</volume>
+<pages>edition.</pages>
+<publisher>John Wiley &amp; Sons, Inc.,</publisher>
+<location>New York, NY, USA,</location>
+<contexts>
+<context position="25291" citStr="Spall, 2003" startWordPosition="4453" endWordPosition="4454">ecoding of speech lattices, which we show can reduce to the consensus string problem. We then explore the consensus problem in depth by applying it to a variety of different inputs. 5.1 Experimental Details We initialize O to include both unigrams and bigrams, as we find that unigrams alone are not productive features in these experiments. As we expand O, we allow it to include n-grams up to length five. We run our algorithm for a maximum of 1000 iterations, using a subgradient step size of α/(t + 500) at iteration t, which satisfies the general properties to guarantee asymptotic convergence (Spall, 2003). We initialize α to 1 and 10 in the two subsections, respectively. We halve α whenever we hit a negativeweight cycle and need to backtrack. If we still get negative-weight cycles after α &lt; 10−4 then we reset α and increase the minimum order of n which is encoded in G. (If n is already at our maximum of five, then we simply end without converging.) In the case of non-convergence after 1000 iterations, we select the best string (according to the objective) from the set of strings that were solutions to any subproblem at any point during optimization. Our implementation uses OpenFST 1.2.8 (Allau</context>
+</contexts>
+<marker>Spall, 2003</marker>
+<rawString>James C. Spall. 2003. Introduction to Stochastic Search and Optimization. John Wiley &amp; Sons, Inc., New York, NY, USA, 1 edition.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ben Taskar</author>
+<author>Vassil Chatalbashev</author>
+<author>Daphne Koller</author>
+<author>Carlos Guestrin</author>
+</authors>
+<title>Learning structured prediction models: A large margin approach.</title>
+<date>2005</date>
+<booktitle>In Proceedings of the 22nd international conference on Machine learning, ICML ’05,</booktitle>
+<pages>896--903</pages>
+<contexts>
+<context position="2958" citStr="Taskar et al., 2005" startWordPosition="468" endWordPosition="471">ntersection. Our approach is based on dual decomposition, a combinatorial optimization technique that was recently introduced to the vision (Komodakis et al., 2007) and language processing communities (Rush et al., 2010; Koo et al., 2010). Our idea is to interrogate the several WFSAs separately, repeatedly visiting each WFSA to seek a high-scoring path in each WFSA that agrees with the current paths found in the other WSFAs. This iterative negotiation is reminiscent of message-passing algorithms (Sontag et al., 2008), while the queries to the WFSAs are reminiscent of loss-augmented inference (Taskar et al., 2005). We remark that a general solution whose asymptotic worst-case runtime beat that of naive intersection would have important implications for complexity theory (Karakostas et al., 2003). Our approach is not such a solution. We have no worst-case bounds on how long dual decomposition will take to converge in our setting, and indeed it can fail to converge altogether.2 However, when it does converge, we have a “certificate” that the solution is optimal. Dual decomposition is usually regarded as a method for finding an optimal vector in Rd, subject to several constraints. However, it is not obvio</context>
+</contexts>
+<marker>Taskar, Chatalbashev, Koller, Guestrin, 2005</marker>
+<rawString>Ben Taskar, Vassil Chatalbashev, Daphne Koller, and Carlos Guestrin. 2005. Learning structured prediction models: A large margin approach. In Proceedings of the 22nd international conference on Machine learning, ICML ’05, pages 896–903.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Geoffrey Zweig</author>
+<author>Patrick Nguyen</author>
+<author>Dirk Van Compernolle</author>
+<author>Kris Demuynck</author>
+<author>Les E Atlas</author>
+<author>Pascal Clark</author>
+<author>Gregory Sell</author>
+<author>Meihong Wang</author>
+<author>Fei Sha</author>
+</authors>
+<title>Hynek Hermansky, Damianos Karakos, Aren Jansen, Samuel Thomas, Sivaram</title>
+<date>2011</date>
+<booktitle>In ICASSP.</booktitle>
+<marker>Zweig, Nguyen, Van Compernolle, Demuynck, Atlas, Clark, Sell, Wang, Sha, 2011</marker>
+<rawString>Geoffrey Zweig, Patrick Nguyen, Dirk Van Compernolle, Kris Demuynck, Les E. Atlas, Pascal Clark, Gregory Sell, Meihong Wang, Fei Sha, Hynek Hermansky, Damianos Karakos, Aren Jansen, Samuel Thomas, Sivaram G. S. V. S., Sam Bowman, and Justine T. Kao. 2011. Speech recognition with segmental conditional random fields: A summary of the JHU CLSP 2010 Summer Workshop. In ICASSP.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

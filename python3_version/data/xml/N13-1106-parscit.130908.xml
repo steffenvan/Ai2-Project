@@ -1,0 +1,1688 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.000013">
+<title confidence="0.971141">
+Answer Extraction as Sequence Tagging with Tree Edit Distance
+</title>
+<author confidence="0.868634">
+Xuchen Yao and Benjamin Van Durme
+</author>
+<affiliation confidence="0.816371">
+Johns Hopkins University
+</affiliation>
+<address confidence="0.484616">
+Baltimore, MD, USA
+</address>
+<author confidence="0.993805">
+Chris Callison-Burch* Peter Clark
+</author>
+<affiliation confidence="0.8487875">
+University of Pennsylvania Vulcan Inc.
+Philadelphia, PA, USA Seattle, WA, USA
+</affiliation>
+<sectionHeader confidence="0.982272" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.9999193">
+Our goal is to extract answers from pre-
+retrieved sentences for Question Answering
+(QA). We construct a linear-chain Conditional
+Random Field based on pairs of questions
+and their possible answer sentences, learning
+the association between questions and answer
+types. This casts answer extraction as an an-
+swer sequence tagging problem for the first
+time, where knowledge of shared structure be-
+tween question and source sentence is incor-
+porated through features based on Tree Edit
+Distance (TED). Our model is free of man-
+ually created question and answer templates,
+fast to run (processing 200 QA pairs per sec-
+ond excluding parsing time), and yields an F1
+of 63.3% on a new public dataset based on
+prior TREC QA evaluations. The developed
+system is open-source, and includes an imple-
+mentation of the TED model that is state of the
+art in the task of ranking QA pairs.
+</bodyText>
+<sectionHeader confidence="0.999132" genericHeader="introduction">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.99743511627907">
+The success of IBM’s Watson system for Question
+Answering (QA) (Ferrucci et al., 2010) has illus-
+trated a continued public interest in this topic. Wat-
+son is a sophisticated piece of software engineering
+consisting of many components tied together in a
+large parallel architecture. It took many researchers
+working full time for years to construct. Such re-
+sources are not available to individual academic re-
+searchers. If they are interested in evaluating new
+ideas on some aspect of QA, they must either con-
+struct a full system, or create a focused subtask
+*Performed while faculty at Johns Hopkins University.
+paired with a representative dataset. We follow the
+latter approach and focus on the task of answer ex-
+traction, i.e., producing the exact answer strings for
+a question.
+We propose the use of a linear-chain Conditional
+Random Field (CRF) (Lafferty et al., 2001) in or-
+der to cast the problem as one of sequence tagging
+by labeling each token in a candidate sentence as ei-
+ther Beginning, Inside or Outside (BIO) of an an-
+swer. This is to our knowledge the first time a
+CRF has been used to extract answers.1 We uti-
+lize not only traditional contextual features based on
+POS tagging, dependency parsing and Named Entity
+Recognition (NER), but most importantly, features
+extracted from a Tree Edit Distance (TED) model
+for aligning an answer sentence tree with the ques-
+tion tree. The linear-chain CRF, when trained to
+learn the associations between question and answer
+types, is a robust approach against error propaga-
+tion introduced in the NLP pipeline. For instance,
+given an NER tool that always (i.e., in both train-
+ing and test data) recognizes the pesticide DDT as
+an ORG, our model realizes, when a question is
+asked about the type of chemicals, the correct an-
+swer might be incorrectly but consistently recog-
+nized as ORG by NER. This helps reduce errors in-
+troduced by wrong answer types, which were esti-
+mated as the most significant contributer (36.4%)
+of errors in the then state-of-the-art QA system of
+Moldovan et al. (2003).
+The features based on TED allow us to draw the
+</bodyText>
+<footnote confidence="0.778736666666667">
+1CRFs have been used in judging answer-bearing sentences
+(Shima et al., 2008; Ding et al., 2008; Wang and Manning,
+2010), but not extracting exact answers from these sentences.
+</footnote>
+<page confidence="0.906255">
+858
+</page>
+<note confidence="0.479774">
+Proceedings of NAACL-HLT 2013, pages 858–867,
+Atlanta, Georgia, 9–14 June 2013. c�2013 Association for Computational Linguistics
+</note>
+<bodyText confidence="0.96830041025641">
+connection between the question and answer sen-
+tences before answer extraction, whereas tradition-
+ally the exercise of answer validation (Magnini et
+al., 2002; Penas et al., 2008; Rodrigo et al., 2009)
+has been performed after as a remedy to ensure the
+answer is really “about” the question.
+Motivated by a desire for a fast runtime,2 we
+base our TED implementation on the dynamic-
+programming approach of Zhang and Shasha
+(1989), which helps our final system process 200
+QA pairs per second on standard desktop hardware,
+when input is syntactically pre-parsed.
+In the following we first provide background on
+the TED model, going on to evaluate our implemen-
+tation against prior work in the context of question
+answer sentence ranking (QASR), achieving state of
+the art in that task. We then describe how we cou-
+ple TED features to a linear-chain CRF for answer
+extraction, providing the set of features used, and fi-
+nally experimental results on an extraction dataset
+we make public (together with the software) to the
+community.3 Related prior work is interspersed
+throughout the paper.
+Feature Description
+distance tree edit distance from answer
+sentence to question
+renNoun # edits changing POS from or to
+renVerb noun, verb, or other types
+renOther
+insN, insV, # edits inserting a noun, verb,
+insPunc, punctuation mark, determiner
+insDet, or other POS types
+insOtherPos
+delN, delV, ... deletion mirror of above
+ins{N,V,P}Mod # edits inserting a modifier for
+insSub, insObj {noun, verb, preposition}, sub-
+insOtherRel ject, object or other relations
+delNMod, ... deletion mirror of above
+renNMod, ... rename mirror of above
+</bodyText>
+<equation confidence="0.863833833333333">
+XEdits # basic edits plus sum of in-
+s/del/ren edits
+alignNodes, # aligned nodes, and those that
+alignNum, are numbers, nouns, verbs, or
+alignN, alignV, proper nouns
+alignProper
+</equation>
+<tableCaption confidence="0.878485">
+Table 1: Features for ranking QA pairs.
+</tableCaption>
+<sectionHeader confidence="0.951639" genericHeader="method">
+2 Tree Edit Distance Model
+</sectionHeader>
+<bodyText confidence="0.9998675625">
+Tree Edit Distance (§2.1) models have been shown
+effective in a variety of applications, including tex-
+tual entailment, paraphrase identification, answer
+ranking and information retrieval (Reis et al., 2004;
+Kouylekov and Magnini, 2005; Heilman and Smith,
+2010; Augsten et al., 2010). We chose the variant
+proposed by Heilman and Smith (2010), inspired by
+its simplicity, generality, and effectiveness. Our ap-
+proach differs from those authors in their reliance
+on a greedy search routine to make use of a complex
+tree kernel. With speed a consideration, we opted
+for the dynamic-programming solution of Zhang
+and Shasha (1989) (§2.1). We added new lexical-
+semantic features §(2.2) to the model and then eval-
+uated our implementation on the QASR task, show-
+ing strong results §(2.3).
+</bodyText>
+<subsectionHeader confidence="0.999124">
+2.1 Cost Design and Edit Search
+</subsectionHeader>
+<bodyText confidence="0.999313941176471">
+Following Bille (2005), we define an edit script be-
+tween trees T1, T2 as the edit sequence transforming
+T1 to T2 according to a cost function, with the total
+summed cost known as the tree edit distance. Basic
+edit operations include: insert, delete and rename.
+With T a dependency tree, we represent each node
+by three fields: lemma, POS and the type of depen-
+dency relation to the node’s parent (DEP). For in-
+stance, Mary/nnp/sub is the proper noun Mary in
+subject position.
+Basic edits are refined into 9 types, where the
+first six (INS LEAF, INS SUBTREE, INS, DEL LEAF,
+DEL SUBTREE, DEL) insert or delete a leaf node, a
+whole subtree, or a node that is neither a leaf nor
+part of a whole inserted subtree. The last three
+(REN POS, REN DEP, REN POS DEP) serve to re-
+name a POS tag, dependency relation, or both.
+</bodyText>
+<footnote confidence="0.99607875">
+2For instance, Watson was designed under the constraint of
+a 3 second response time, arising from its intended live use in
+the television gameshow, Jeopardy!.
+3http://code.google.com/p/jacana/
+</footnote>
+<page confidence="0.997732">
+859
+</page>
+<figureCaption confidence="0.9559545">
+Figure 1: Edits transforming a source sentence (left) to a question (right). Each node consists of: lemma, POS tag
+and dependency relation, with root nodes and punctuation not shown. Shown includes deletion (× and strikethrough
+on the left), alignment (arrows) and insertion (shaded area). Order of operations is not displayed. The standard TED
+model does not capture the alignment between tennis and sport (see Section 2.2).
+</figureCaption>
+<figure confidence="0.997083641025641">
+ins(play/vbz/vmod)
+ins(do/vbz/root)
+subj
+be
+vbz
+prd
+insSubTree:
+do
+vbz
+vmod vmod
+capriati
+nnp
+23
+cd
+what
+wp
+play
+vbz
+nmod
+nmod nmod
+TreeEdit
+Distance
+nmod
+tennis
+nn
+player
+nn
+jennifer
+nn
+sport
+nn
+capriati
+nnp
+WordNet
+Tennis player Jennifer Capriati is 23
+What sport does
+Jennifer Capriati play
+jennifer
+nnp
+</figure>
+<bodyText confidence="0.984872166666667">
+We begin by uniformly assigning basic edits a
+cost of 1.0,4 which brings the cost of a full node in-
+sertion or deletion to 3 (all the three fields inserted or
+deleted). We allow renaming of POS and/or relation
+type iff the lemmas of source and target nodes are
+identical.5 When two nodes are identical and thus
+do not appear in the edit script, or when two nodes
+are renamed due to the same lemma, we say they are
+aligned by the tree edit model (see Figure 1).
+We used Zhang and Shasha (1989)’s dynamic
+programming algorithm to produce an optimal edit
+script with the lowest tree edit distance. The ap-
+proach explores both trees in a bottom-up, post-
+order manner, running in time:
+O(|T1 ||T2 |min(D1, L1) min(D2, L2))
+where |Ti |is the number of nodes, Di is the depth,
+and Li is the number of leaves, with respect to tree
+Ti.
+Additionally, we fix the cost of stopword renam-
+ing to 2.5, even in the case of identity, regardless
+of whether two stopwords have the same POS tags
+or relations. Stopwords tend to have fixed POS tags
+and dependency relations, which often leads to less
+expensive alignments as compared to renaming con-
+</bodyText>
+<footnote confidence="0.91481025">
+4This applies separately to each element of the tripartite
+structure; e.g., deleting a POS entry, inserting a lemma, etc.
+5This is aimed at minimizing node variations introduced by
+morphology differences, tagging or parsing errors.
+</footnote>
+<bodyText confidence="0.999341">
+tent terms. In practice this gave stopwords “too
+much say” in guiding the overall edit sequence.
+The resultant system is fast in practice, processing
+10,000 pre-parsed tree pairs per second on a contem-
+porary machine.6
+</bodyText>
+<subsectionHeader confidence="0.975001">
+2.2 TED for Sentence Ranking
+</subsectionHeader>
+<bodyText confidence="0.999977166666667">
+The task of Question Answer Sentence Ranking
+(QASR) takes a question and a set of source sen-
+tences, returning a list sorted by the probability
+likelihood that each sentence contains an appropri-
+ate answer. Prior work in this includes that of:
+Punyakanok et al. (2004), based on mapping syn-
+tactic dependency trees; Wang et al. (2007) utiliz-
+ing Quasi-Synchronous Grammar (Smith and Eis-
+ner, 2006); Heilman and Smith (2010) using TED;
+and Shima et al. (2008), Ding et al. (2008) and Wang
+and Manning (2010), who each employed a CRF in
+various ways. Wang et al. (2007) made their dataset
+public, which we use here for system validation. To
+date, models based on TED have shown the best per-
+formance for this task.
+Our implementation follows Heilman and Smith
+(2010), with the addition of 15 new features beyond
+their original 33 (see Table 1). Based on results
+</bodyText>
+<footnote confidence="0.990889">
+6In later tasks, feature extraction and decoding will slow
+down the system, but the final system was still able to process
+200 pairs per second.
+</footnote>
+<page confidence="0.981761">
+860
+</page>
+<table confidence="0.999838">
+set source #ques. #pairs %pos. len.
+TRAIN-ALL TREC8-12 1229 53417 12.0 any
+TRAIN TREC8-12 94 4718 7.4 &lt; 40
+DEV TREC13 82 1148 19.3 &lt; 40
+TEST TREC13 89 1517 18.7 &lt; 40
+</table>
+<tableCaption confidence="0.9976335">
+Table 2: Distribution of data, with imbalance towards
+negative examples (sentences without an answer).
+</tableCaption>
+<table confidence="0.998590142857143">
+System MAP MRR
+Wang et al. (2007) 0.6029 0.6852
+Heilman and Smith (2010) 0.6091 0.6917
+Wang and Manning (2010) 0.5951 0.6951
+this paper (48 features) 0.6319 0.7270
++WNsearch 0.6371 0.7301
++WNfeature (11 more feat.) 0.6307 0.7477
+</table>
+<tableCaption confidence="0.999956">
+Table 3: Results on the QA Sentence Ranking task.
+</tableCaption>
+<bodyText confidence="0.999973416666667">
+in DEV, we extract edits in the direction from the
+source sentence to the question.
+In addition to syntactic features, we incorporated
+the following lexical-semantic relations from Word-
+Net: hypernym and synonym (nouns and verbs); en-
+tailment and causing (verbs); and membersOf, sub-
+stancesOf, partsOf, haveMember, haveSubstance,
+havePart (nouns). Such relations have been used
+in prior approaches to this task (Wang et al., 2007;
+Wang and Manning, 2010), but not in conjunction
+with the model of Heilman and Smith (2010).
+These were made into features in two ways:
+WNsearch loosens renaming and alignment within
+the TED model from requiring strict lemma equal-
+ity to allowing lemmas that shared any of the
+above relations, leading to renaming operations such
+as REN ...(country, china) and REN ...(sport,
+tennis); WNfeature counts how many words be-
+tween the sentence and answer sentence have each
+of the above relations, separately as 10 independent
+features, plus an aggregate count for a total of 11
+new features beyond the earlier 48.
+These features were then used to train a logistic
+regression model using Weka (Hall et al., 2009).
+</bodyText>
+<subsectionHeader confidence="0.997855">
+2.3 QA Sentence Ranking Experiment
+</subsectionHeader>
+<bodyText confidence="0.99997936">
+We trained and tested on the dataset from Wang et
+al. (2007), which spans QA pairs from TREC QA
+8-13 (see Table 2). Per question, sentences with
+non-stopword overlap were first retrieved from the
+task collection, which were then compared against
+the TREC answer pattern (in the form of Perl regu-
+lar expressions). If a sentence matched, then it was
+deemed a (noisy) positive example. Finally, TRAIN,
+DEV and TEST were manually corrected for errors.
+Those authors decided to limit candidate source sen-
+tences to be no longer than 40 words.7 Keeping
+with prior work, those questions with only positive
+or negative examples were removed, leaving 94 of
+the original 100 questions for evaluation.
+The data was processed by Wang et al. (2007)
+with the following tool chain: POS tags via MX-
+POST (Ratnaparkhi, 1996); parse trees via MST-
+Parser (McDonald et al., 2005) with 12 coarse-
+grained dependency relation labels; and named enti-
+ties via Identifinder (Bikel et al., 1999). Mean Av-
+erage Precision (MAP) and Mean Reciprocal Rank
+(MRR) are reported in Table 3. Our implementa-
+tion gives state of the art performance, and is fur-
+thered improved by our inclusion of semantic fea-
+tures drawn from WordNet.8
+</bodyText>
+<sectionHeader confidence="0.922617" genericHeader="method">
+3 CRF with TED for Answer Extraction
+</sectionHeader>
+<bodyText confidence="0.999967">
+In this section we move from ranking source sen-
+tences, to the next QA stage: answer extraction.
+Given our competitive TED-based alignment model,
+the most obvious solution to extraction would be to
+report those spans aligned from a source sentence
+to a question’s wh- terms. However, we show that
+this approach is better formulated as a (strongly in-
+dicative) feature of a larger set of answer extraction
+signals.
+</bodyText>
+<subsectionHeader confidence="0.985447">
+3.1 Sequence Model
+</subsectionHeader>
+<bodyText confidence="0.954466">
+Figure 2 illustrates the task of tagging each token in
+a candidate sentence with one of the following la-
+</bodyText>
+<footnote confidence="0.88818875">
+7TRAIN-ALL is not used in QASR, but later for answer ex-
+traction; TRAIN comes from the first 100 questions of TRAIN-
+ALL.
+8As the test set is of limited size (94 questions), then while
+our MAP/MRR scores are 2.8% — 5.6% higher than prior
+work, this is not statistically significant according to the Paired
+Randomization Test (Smucker et al., 2007), and thus should be
+considered on par with the current state of the art.
+</footnote>
+<page confidence="0.991232">
+861
+</page>
+<figureCaption confidence="0.9746515">
+Figure 2: An example of linear-chain CRF for an-
+swer sequence tagging.
+</figureCaption>
+<bodyText confidence="0.940615272727273">
+bels: B-ANSWER (beginning of answer), I-ANSWER
+(inside of answer), O (outside of answer).
+Besides local POS/NER/DEP features, at each to-
+ken we need to inspect the entire input to connect the
+answer sentence with the question sentence through
+tree edits, drawing features from the question and
+the edit script, motivating the use of a linear-chain
+CRF model (Lafferty et al., 2001) over HMMs. To
+the best of our knowledge this is the first time a
+CRF has been used to label answer fragments, de-
+spite success in other sequence tagging tasks.
+</bodyText>
+<subsectionHeader confidence="0.995192">
+3.2 Feature Design
+</subsectionHeader>
+<bodyText confidence="0.996842782608696">
+In this subsection we describe the local and global
+features used by the CRF.
+Chunking We use the POS/NER/DEP tags directly
+just as one would in a chunking task. Specifically,
+suppose t represents the current token position and
+pos[t] its POS tag, we extract unigram, bigram and
+trigram features over the local context, e.g., pos[t −
+2], pos[t − 2] : pos[t − 1], and pos[t − 2] : pos[t −
+1] : pos[t]. Similar features are extracted for named
+entity types (ner[t]), and dependency relation labels
+(dep[t]).
+Our intuition is these chunking features should al-
+low for learning which types of words tend to be
+answers. For instance, we expect adverbs to be as-
+signed lower feature weights as they are rarely a
+part of answer, while prepositions may have differ-
+ent feature weights depending on their context. For
+instance, of in kind of silly has an adjective on the
+right, and is unlikely to be the Beginning of an an-
+swer to a TREC-style question, as compared to in
+when paired with a question on time, such as seen in
+an answer in 90 days, where the preposition is fol-
+lowed by a number then a noun.
+</bodyText>
+<table confidence="0.999523619047619">
+Feature Description
+edit=X type of edit feature. X: DEL,
+DEL SUBTREE, DEL LEAF,
+REN POS, REN DEP, REN POS DEP
+or ALIGN.
+X pos=? Delete features. X is either DEL,
+X ner=? DEL SUBTREE or DEL LEAF. ?
+X dep=? represents the corresponding
+POS/NER/DEP of the current token.
+Xpos from=?f Rename features. X is either
+Xpos to=?t REN POS, REN DEP or
+Xpos f t=?f ?t REN POS DEP. Suppose word f in
+Xner from=?f answer is renamed to word t in
+Xner to=?t question, then ?f and ?t represent
+Xner f t=?f ?t corresponding POS/NER/DEP of f
+Xdep from=?f and t.
+Xdep to=?t
+Xdep f t=?f ?t
+align pos=? Align features. ? represents the
+align ner=? corresponding POS/NER/DEP of the
+align dep=? current token.
+</table>
+<tableCaption confidence="0.964766">
+Table 4: Features based on edit script for answer se-
+quence tagging.
+</tableCaption>
+<bodyText confidence="0.984173380952381">
+Question-type Chunking features do not capture
+the connection between question word and an-
+swer types. Thus they have to be combined
+with question types. For instance, how many
+questions are usually associated with numeric an-
+swer types. We encode each major question-
+type: who, whom, when, where, how many, how
+much, how long, and then for each token, we
+combine the question term with its chunking fea-
+tures described in (most tokens have different fea-
+tures because they have different POS/NER/DEP
+types). One feature example of the QA pair
+how much/100 dollars for the word 100 would be:
+qword=how much|pos[t]=CD|pos[t+1]=NNS. We ex-
+pect high weight for this feature since it is a good
+pattern for matching question type and answer type.
+Similar features also apply to what, which, why and
+how questions, even though they do not indicate an
+answer type as clearly as how much does.
+Some extra features are designed for what/which
+questions per required answer types. The question
+</bodyText>
+<table confidence="0.820835">
+B-ANS O O O O O
+Tennis player Jennifer Capriati is 23
+862
+dependency tree is analyzed and the Lexical Answer • What is the name of Durst ’s group?
+Type (LAT) is extracted. The following are some • Limp Bizkit lead singer Fred Durst did a lot ...
+examples of LAT for what questions:
+</table>
+<listItem confidence="0.9997905">
+• color: what is Crips’ gang color?
+• animal: what kind of animal is an agouti?
+</listItem>
+<bodyText confidence="0.999667915254238">
+The extra LAT=? feature is also used with chunking
+features for what/which questions.
+There is significant prior work in building spe-
+cialized templates or classifiers for labeling question
+types (Hermjakob, 2001; Li and Roth, 2002; Zhang
+and Lee, 2003; Hacioglu and Ward, 2003; Metzler
+and Croft, 2005; Blunsom et al., 2006; Moschitti
+et al., 2007). We designed our shallow question
+type features based on the intuitions of these prior
+work, with the goal of having a relatively compact
+approach that still extracts useful predictive signal.
+One possible drawback, however, is that if an LAT is
+not observed during training but shows up in testing,
+the sequence tagger would not know which answer
+type to associate with the question. In this case it
+falls back to the more general qword=? feature and
+will most likely pick the type of answers that are
+mostly associated with what questions in training.
+Edit script Our TED module produces an edit
+trace for each word in a candidate sentence: the
+word is either deleted, renamed (if there is a word
+of the same lemma in the question tree) or strictly
+aligned (if there is an identical node in the question
+tree). A word in the deleted edit sequence is a cue
+that it could be the answer. A word being aligned
+suggests it is less likely to be an answer. Thus for
+each word we extract features based on its edit type,
+shown in Table 4.
+These features are also appended with the token’s
+POS/NER/DEP information. For instance, a deleted
+noun usually carries higher edit feature weights than
+an aligned adjective.
+Alignment distance We observed that a candidate
+answer often appears close to an aligned word (i.e.,
+answer tokens tend to be located “nearby” portions
+of text that align across the pair), especially in com-
+pound noun constructions, restrictive clauses, prepo-
+sition phrases, etc. For instance, in the following
+pair, the answer Limp Bizkit comes from the leading
+compound noun:
+Past work has designed large numbers of specific
+templates aimed at these constructions (Soubbotin,
+2001; Ravichandran et al., 2003; Clark et al., 2003;
+Sneiders, 2002). Here we use a single general fea-
+ture that we expect to pick up much of this signal,
+without the significant feature engineering.
+Thus we incorporated a simple feature to roughly
+model this phenomenon. It is defined as the distance
+to the nearest aligned nonstop word in the original
+word order. In the above example, the only aligned
+nonstop word is Durst. Then this nearest alignment
+distance feature for the word Limp is:
+nearest dist to align(Limp):5
+This is the only integer-valued feature. All other
+features are binary-valued. Note this feature does
+not specify answer types: an adverb close to an
+aligned word can also be wrongly taken as a strong
+candidate. Thus we also include a version of the
+POS/NER/DEP based feature for each token:
+</bodyText>
+<listItem confidence="0.999547">
+• nearest dist pos(Limp)=NNP
+• nearest dist dep(Limp)=NMOD
+• nearest dist ner(Limp)=B-PERSON
+</listItem>
+<subsectionHeader confidence="0.992602">
+3.3 Overproduce-and-vote
+</subsectionHeader>
+<bodyText confidence="0.984006">
+We make an assumption that each sentence produces
+a candidate answer and then vote among all answer
+candidates to select the most-voted as the answer to
+the original question. Specifically, this overproduce-
+and-vote strategy applies voting in two places:
+1. If there are overlaps between two answer candi-
+dates, a partial vote is performed. For instance,
+for a when question, if one answer candidate is
+April , 1994 and the other is 1994, then besides
+the base vote of 1, both candidates have an ex-
+tra partial vote of #overlap/#total words = 1/4. We
+call this adjusted vote.
+2. If the CRF fails to find an answer, we still try to
+“force” an answer out of the tagged sequence,
+O’s). thus forced vote. Due to its lower credi-
+bility (the sequence tagger does not think it is
+an answer), we manually downweight the pre-
+diction score by a factor of 0.1 (divide by 10).
+</bodyText>
+<page confidence="0.996902">
+863
+</page>
+<figure confidence="0.6464293125">
+During what war did Nimitz serve ?
+O O:0.921060 Conant
+O O:0.991168 had
+O O:0.997307 been
+O O:0.998570 a
+O O:0.998608 photographer
+O O:0.999005 f o r
+O O:0.877619 Adm
+O O:0.988293 .
+O O:0.874101 Chester
+O O:0.924568 Nimitz
+O O:0.970045 during
+B−ANS O:0.464799 World
+I−ANS O:0.493715 War
+I−ANS O:0.449017 II
+O O:0.915448 .
+</figure>
+<figureCaption confidence="0.993083">
+Figure 3: A sample sequence tagging output that
+</figureCaption>
+<bodyText confidence="0.9815434">
+fails to predict an answer. From line 2 on, the first
+column is the reference output and the second col-
+umn is the model output with the marginal probabil-
+ity for predicated labels. Note that World War II has
+much lower probabilities as an O than others.
+The modified score for an answer candidate is thus:
+total vote = adjusted vote + 0.1 × forced vote. To
+compute forced vote, we make the following obser-
+vation. Sometimes the sequence tagger does not tag
+an answer in a candidate sentence at all, if there
+is not enough probability mass accumulated for B-
+ANS. However, a possible answer can still be caught
+if it has an “outlier” marginal probability. Figure 3
+shows an example. The answer candidate World War
+II has a much lower marginal probability as an “O”
+but still not low enough to be part of B-ANS/I-ANS.
+To catch such an outlier, we use Median Absolute
+Deviation (MAD), which is the median of the abso-
+lute deviation from the median of a data sequence.
+Given a data sequence x, MAD is defined as:
+</bodyText>
+<equation confidence="0.999293">
+MAD(x) = median( |x − median(x) |)
+</equation>
+<bodyText confidence="0.999116">
+Compared to mean value and standard deviation,
+MAD is more robust against the influence of out-
+liers since it does not directly depend on them. We
+select those words whose marginal probability is 50
+times of MAD away from the median of the whole
+sequence as answer candidates. They contribute to
+the forced vote. Downweight ratio (0.1) and MAD
+</bodyText>
+<table confidence="0.999830444444444">
+System Train Prec.% Rec.% F1%
+CRF TRAIN 55.7 43.8 49.1
+CRF TRAIN-ALL 67.2 50.6 57.7
++WNsearch TRAIN 58.6 46.1 51.6
+TRAIN-ALL 66.7 49.4 56.8
+CRF forced TRAIN 54.5 53.9 54.2
+CRF forced TRAIN-ALL 60.9 59.6 60.2
++WNsearch TRAIN 55.2 53.9 54.5
+TRAIN-ALL 63.6 62.9 63.3
+</table>
+<tableCaption confidence="0.7811962">
+Table 5: Performance on TEST. “CRF” only takes
+votes from candidates tagged by the sequence tag-
+ger. “CRF forced” (described in §3.3) further col-
+lects answer candidates from sentences that CRF
+does not tag an answer by detecting outliers.
+</tableCaption>
+<bodyText confidence="0.879915">
+ratio (50) were hand-tuned on DEV.9
+</bodyText>
+<sectionHeader confidence="0.998841" genericHeader="evaluation">
+4 Experiments
+</sectionHeader>
+<subsectionHeader confidence="0.992435">
+4.1 QA Results
+</subsectionHeader>
+<bodyText confidence="0.999778826086956">
+The dataset listed in Table 2 was not designed to
+include an answer for each positive answer sen-
+tence, but only a binary indicator on whether a sen-
+tence contains an answer. We used the answer pat-
+tern files (in Perl regular expressions) released along
+with TREC8-13 to pinpoint the exact answer frag-
+ments. Then we manually checked TRAIN, DEV, and
+TEST for errors. TRAIN-ALL already came as a noisy
+dataset so we did not manually clean it, also due to
+its large size.
+We trained on only the positive examples of
+TRAIN and TRAIN-ALL separately with CRFsuite
+(Okazaki, 2007). The reason for training solely with
+positive examples is that they only constitute 10% of
+all training data and if trained on all, the CRF tagger
+was very biased on negative examples and reluctant
+to give an answer for most of the questions. The
+CRF tagger attempted an answer for about 2/3 of all
+questions when training on just positive examples.
+DEV was used to help design features. A practi-
+cal benefit of our compact approach is that an entire
+round of feature extraction, training on TRAIN and
+testing on DEV took less than one minute. Table 5
+</bodyText>
+<footnote confidence="0.93644925">
+9One might further improve this by leveraging the probabil-
+ity of a sentence containing an answer from the QA pair ranker
+described in Section 2 or via the conditional probability of the
+sequence labels, p(y I x), under the CRF.
+</footnote>
+<page confidence="0.997249">
+864
+</page>
+<bodyText confidence="0.999788451612903">
+reports F1 scores on both the positive and negative
+examples of TEST.
+Our baseline model, which aligns the question
+word with some content word in the answer sen-
+tence,10 achieves 31.4% in F1. This model does not
+require any training. “CRF” only takes votes from
+those sentences with an identified answer. It has the
+best precision among all models. “CRF forced” also
+detects outliers from sentences not tagged with an
+answer. Large amount of training data, even noisy,
+is helpful. In general TRAIN-ALL is able to boost the
+F1 value by 7 — 8%. Also, the overgenerate-and-
+vote strategy, used by the “forced” approach, greatly
+increased recall and achieved the best F1 value.
+We also experimented with the two methods uti-
+lizing WordNet in Section 2.2 , i.e., WNsearch and
+WNfeature. In general, WNsearch helps F1 and
+yields the best score (63.3%) for this task. For
+WNfeature11 we observed that the CRF model con-
+verged to a larger objective likelihood with these
+features. However, it did not make a difference in
+F1 after overgenerate-and-vote.
+Finally, we found it difficult to do a head-to-head
+comparison with other QA systems on this task.12
+Thus we contribute this dataset to the community,
+hoping to solicit direct comparisons in the future.
+Also, we believe our chunking and question-type
+features capture many intuitions most current QA
+systems rely on, while our novel features are based
+on TED. We further conduct an ablation test to com-
+pare traditional and new QA features.
+</bodyText>
+<subsectionHeader confidence="0.998338">
+4.2 Ablation Test
+</subsectionHeader>
+<bodyText confidence="0.9993754">
+We did an ablation test for each of the four types of
+features. Note that the question type features are
+used in combination with chunking features (e.g.,
+qword=how much|pos[t]=CD|pos[t+1]=NN), while
+the chunking feature is defined over POS/NER/DEP
+</bodyText>
+<footnote confidence="0.512292909090909">
+10This only requires minimal modification to the original
+TED algorithm: the question word is aligned with a certain
+word in the answer tree instead of being inserted. Then the
+whole subtree headed by the aligned word counts as the answer.
+11These are binary features indicating whether an answer
+candidate has a WordNet relation ( c.f. §2.2) with the LAT.
+For instance, tennis is a hyponym of the LAT word sport in the
+what sport question in Figure 1.
+12Reasons include: most available QA systems either retrieve
+sentences from the web, have different preprocessing steps, or
+even include templates learned from our test set.
+</footnote>
+<table confidence="0.99946">
+CRF Forced CRF Forced
+All 49.1 54.2 -above 3 19.4 25.3
+-POS 44.7 48.9 -EDIT 44.3 47.5
+-NER 44.0 50.8 -ALIGN 47.4 51.1
+-DEP 49.4 54.5 -above 2 40.5 42.0
+</table>
+<tableCaption confidence="0.99915">
+Table 6: F1 based on feature ablation tests.
+</tableCaption>
+<figureCaption confidence="0.989062666666667">
+Figure 4: Impact of adding features based on chunk-
+ing and question-type (CHUNKING) and tree edits
+(TED), e.g., EDIT and ALIGN.
+</figureCaption>
+<bodyText confidence="0.7106885">
+separately. We tested the CRF model with deletion
+of one of the following features each time:
+</bodyText>
+<listItem confidence="0.989395125">
+• POS, NER or DEP. These features are all com-
+bined with question types.
+• The three of the above. Deletion of these fea-
+tures also deletes question type feature implic-
+itly.
+• EDIT. Features extracted from edit script.
+• ALIGN. Alignment distance features.
+• The two of the above, based on the TED model.
+</listItem>
+<bodyText confidence="0.999867833333333">
+Table 6 shows the F1 scores of ablation test when
+trained on TRAIN. NER and EDIT are the two single
+most significant features. NER is important because
+it closely relates question types with answer entity
+types (e.g., qword=who|ner[t]=PERSON). EDIT is
+also important because it captures the syntactic asso-
+ciation between question tree and answer tree. Tak-
+ing out all three POS/NER/DEP features means the
+chunking and question type features do not fire any-
+more. This has the biggest impact on F1. Note the
+feature redundancy here: the question type features
+are combined with all three POS/NER/DEP features
+</bodyText>
+<figure confidence="0.989819684210526">
+F1(%)
+60
+40
+50
+30
+20
+10
+0
+CRF
+CRF forced
+NONE CHUNKING CHUNKING+TED
+Features Used
+31.4
+Baseline
+F1 with Different Features
+40.5
+42.0
+49.1
+54.2
+</figure>
+<page confidence="0.995787">
+865
+</page>
+<bodyText confidence="0.9998245">
+thus taking out a single one does not decrease per-
+formance much. However, since TED related fea-
+tures do not combine question type features, taking
+out all three POS/NER/DEP features decreases F1 by
+30%. Without TED related features (both EDIT and
+ALIGN) F1 also drops more than 10%.
+Figure 4 is a bar chart showing how much im-
+provement each feature brings. While having a
+baseline model with 31.4% in F1, traditional fea-
+tures based on POS/DEP/NER and question types
+brings a 10% increase with a simple sequence tag-
+ging model (second bar labeled “CHUNKING” in
+the figure). Furthermore, adding TED based features
+to the model boosted F1 by another 10%.
+</bodyText>
+<sectionHeader confidence="0.9993" genericHeader="conclusions">
+5 Conclusion
+</sectionHeader>
+<bodyText confidence="0.99997076">
+Answer extraction is an essential task for any text-
+based question-answering system to perform. In this
+paper, we have cast answer extraction as a sequence
+tagging problem by deploying a fast and compact
+CRF model with simple features that capture many
+of the intuitions in prior “deep pipeline” approaches.
+We introduced novel features based on TED that
+boosted F1 score by 10% compared with the use of
+more standard features. Besides answer extraction,
+our modified design of the TED model is the state
+of the art in the task of ranking QA pairs. Finally,
+to improve the community’s ability to evaluate QA
+components without requiring increasingly imprac-
+tical end-to-end implementations, we have proposed
+answer extraction as a subtask worth evaluating in
+its own right, and contributed a dataset that could
+become a potential standard for this purpose. We
+believe all these developments will contribute to the
+continuing improvement of QA systems in the fu-
+ture.
+Acknowledgement We thank Vulcan Inc. for
+funding this work. We also thank Michael Heil-
+man and Mengqiu Wang for helpful discussion and
+dataset, and the three anonymous reviewers for in-
+sightful comments.
+</bodyText>
+<sectionHeader confidence="0.998975" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.998826909090909">
+Nikolaus Augsten, Denilson Barbosa, Michael B¨ohlen,
+and Themis Palpanas. 2010. TASM: Top-k Approx-
+imate Subtree Matching. In Proceedings of the Inter-
+national Conference on Data Engineering (ICDE-10),
+pages 353–364, Long Beach, California, USA, March.
+IEEE Computer Society.
+D.M. Bikel, R. Schwartz, and R.M. Weischedel. 1999.
+An algorithm that learns what’s in a name. Machine
+learning, 34(1):211–231.
+P. Bille. 2005. A survey on tree edit distance and
+related problems. Theoretical Computer Science,
+337(1):217–239.
+P. Blunsom, K. Kocik, and J.R. Curran. 2006. Question
+classification with log-linear models. In Proceedings
+of the 29th annual international ACM SIGIR confer-
+ence on Research and development in information re-
+trieval, pages 615–616. ACM.
+Peter Clark, Vinay Chaudhri, Sunil Mishra, J´erˆome
+Thom´er´e, Ken Barker, and Bruce Porter. 2003. En-
+abling domain experts to convey questions to a ma-
+chine: a modified, template-based approach. In
+Proceedings of the 2nd international conference on
+Knowledge Capture, pages 13–19, New York, NY,
+USA. ACM.
+Shilin Ding, Gao Cong, Chin yew Lin, and Xiaoyan Zhu.
+2008. Using conditional random fields to extract con-
+texts and answers of questions from online forums. In
+In Proceedings of ACL-08: HLT.
+D. Ferrucci, E. Brown, J. Chu-Carroll, J. Fan, D. Gondek,
+A.A. Kalyanpur, A. Lally, J.W. Murdock, E. Nyberg,
+J. Prager, et al. 2010. Building Watson: An overview
+of the DeepQA project. AI Magazine, 31(3):59–79.
+K. Hacioglu and W. Ward. 2003. Question classifica-
+tion with support vector machines and error correcting
+codes. In Proceedings of NAACL 2003, short papers,
+pages 28–30.
+M. Hall, E. Frank, G. Holmes, B. Pfahringer, P. Reute-
+mann, and I.H. Witten. 2009. The WEKA data min-
+ing software: an update. ACM SIGKDD Explorations
+Newsletter, 11(1):10–18.
+Michael Heilman and Noah A. Smith. 2010. Tree
+edit models for recognizing textual entailments, para-
+phrases, and answers to questions. In Proceedings of
+NAACL 2010, pages 1011–1019, Los Angeles, Cali-
+fornia.
+U. Hermjakob. 2001. Parsing and question classification
+for question answering. In Proceedings of the work-
+shop on Open-domain question answering-Volume 12,
+pages 1–6.
+Milen Kouylekov and Bernardo Magnini. 2005. Recog-
+nizing textual entailment with tree edit distance algo-
+rithms. In PASCAL Challenges on RTE, pages 17–20.
+John D. Lafferty, Andrew McCallum, and Fernando C. N.
+Pereira. 2001. Conditional random fields: Probabilis-
+tic models for segmenting and labeling sequence data.
+</reference>
+<page confidence="0.987366">
+866
+</page>
+<reference confidence="0.999560322580646">
+In Proceedings of the Eighteenth International Confer-
+ence on Machine Learning, pages 282–289, San Fran-
+cisco, CA, USA. Morgan Kaufmann Publishers Inc.
+X. Li and D. Roth. 2002. Learning question classifiers.
+In Proceedings of ACL 2002, pages 1–7.
+B. Magnini, M. Negri, R. Prevete, and H. Tanev. 2002.
+Is it the right answer?: exploiting web redundancy for
+answer validation. In Proceedings ofACL 2002, pages
+425–432.
+R. McDonald, K. Crammer, and F. Pereira. 2005. On-
+line large-margin training of dependency parsers. In
+Proceedings of ACL 2005, pages 91–98.
+D. Metzler and W.B. Croft. 2005. Analysis of statistical
+question classification for fact-based questions. Infor-
+mation Retrieval, 8(3):481–504.
+D. Moldovan, M. Pas¸ca, S. Harabagiu, and M. Surdeanu.
+2003. Performance issues and error analysis in an
+open-domain question answering system. ACM Trans-
+actions on Information Systems (TOIS), 21(2):133–
+154.
+A. Moschitti, S. Quarteroni, R. Basili, and S. Manandhar.
+2007. Exploiting syntactic and shallow semantic ker-
+nels for question answer classification. In Proceedings
+of ACL 2007, volume 45, page 776.
+Naoaki Okazaki. 2007. CRFsuite: a fast implementation
+of Conditional Random Fields (CRFs).
+A. Penas, A. Rodrigo, V. Sama, and F. Verdejo. 2008.
+Testing the reasoning for question answering valida-
+tion. Journal of Logic and Computation, 18(3):459–
+474.
+Vasin Punyakanok, Dan Roth, and Wen T. Yih. 2004.
+Mapping Dependencies Trees: An Application to
+Question Answering. In Proceedings of the 8th In-
+ternational Symposium on Artificial Intelligence and
+Mathematics, Fort Lauderdale, Florida.
+A. Ratnaparkhi. 1996. A maximum entropy model for
+part-of-speech tagging. In Proceedings of EMNLP
+1996, volume 1, pages 133–142.
+Deepak Ravichandran, Abraham Ittycheriah, and Salim
+Roukos. 2003. Automatic derivation of surface text
+patterns for a maximum entropy based question an-
+swering system. In Proceedings of NAACL 2003, short
+papers, pages 85–87, Stroudsburg, PA, USA.
+D. C. Reis, P. B. Golgher, A. S. Silva, and A. F. Laen-
+der. 2004. Automatic web news extraction using tree
+edit distance. In Proceedings of the 13th international
+conference on World Wide Web, pages 502–511, New
+York, NY, USA. ACM.
+´A. Rodrigo, A. Pe˜nas, and F. Verdejo. 2009. Overview of
+the answer validation exercise 2008. Evaluating Sys-
+tems for Multilingual and Multimodal Information Ac-
+cess, pages 296–313.
+H. Shima, N. Lao, E. Nyberg, and T. Mitamura. 2008.
+Complex cross-lingual question answering as sequen-
+tial classification and multi-document summarization
+task. In Proceedings of NTICIR-7 Workshop, Japan.
+David A. Smith and Jason Eisner. 2006. Quasi-
+synchronous grammars: Alignment by soft projection
+of syntactic dependencies. In Proceedings of the HLT-
+NAACL Workshop on Statistical Machine Translation,
+pages 23–30, New York, June.
+Mark D. Smucker, James Allan, and Ben Carterette.
+2007. A comparison of statistical significance tests
+for information retrieval evaluation. In CIKM ’07:
+Proceedings of the sixteenth ACM conference on Con-
+ference on information and knowledge management,
+pages 623–632, New York, NY, USA. ACM.
+E. Sneiders. 2002. Automated question answering:
+template-based approach. Ph.D. thesis, KTH.
+Martin M. Soubbotin. 2001. Patterns of potential answer
+expressions as clues to the right answers. In Proceed-
+ings of the Tenth Text REtrieval Conference (TREC
+2001).
+Mengqiu Wang and Christopher D. Manning. 2010.
+Probabilistic tree-edit models with structured latent
+variables for textual entailment and question answer-
+ing. In Proceedings of ACL 2010, pages 1164–1172,
+Stroudsburg, PA, USA.
+Mengqiu Wang, Noah A. Smith, and Teruko Mita-
+mura. 2007. What is the Jeopardy model? a quasi-
+synchronous grammar for QA. In Proceedings of the
+2007 Joint Conference on Empirical Methods in Natu-
+ral Language Processing and Computational Natural
+Language Learning (EMNLP-CoNLL), pages 22–32,
+Prague, Czech Republic, June.
+D. Zhang and W.S. Lee. 2003. Question classifica-
+tion using support vector machines. In Proceedings of
+the 26th annual international ACM SIGIR conference
+on Research and development in informaion retrieval,
+pages 26–32. ACM.
+K. Zhang and D. Shasha. 1989. Simple fast algorithms
+for the editing distance between trees and related prob-
+lems. SIAM J. Comput., 18(6):1245–1262, December.
+</reference>
+<page confidence="0.997925">
+867
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.589561">
+<title confidence="0.994441">Answer Extraction as Sequence Tagging with Tree Edit Distance</title>
+<author confidence="0.8647155">Yao Van_Johns Hopkins</author>
+<address confidence="0.917246">Baltimore, MD, USA Clark</address>
+<affiliation confidence="0.999951">University of Pennsylvania Vulcan Inc.</affiliation>
+<address confidence="0.999438">Philadelphia, PA, USA Seattle, WA, USA</address>
+<abstract confidence="0.998523428571429">Our goal is to extract answers from preretrieved sentences for Question Answering (QA). We construct a linear-chain Conditional Random Field based on pairs of questions and their possible answer sentences, learning the association between questions and answer types. This casts answer extraction as an answer sequence tagging problem for the first time, where knowledge of shared structure between question and source sentence is incorporated through features based on Tree Edit Distance (TED). Our model is free of manually created question and answer templates, fast to run (processing 200 QA pairs per second excluding parsing time), and yields an F1 of 63.3% on a new public dataset based on prior TREC QA evaluations. The developed system is open-source, and includes an implementation of the TED model that is state of the art in the task of ranking QA pairs.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>Nikolaus Augsten</author>
+<author>Denilson Barbosa</author>
+<author>Michael B¨ohlen</author>
+<author>Themis Palpanas</author>
+</authors>
+<title>TASM: Top-k Approximate Subtree Matching.</title>
+<date>2010</date>
+<booktitle>In Proceedings of the International Conference on Data Engineering (ICDE-10),</booktitle>
+<pages>353--364</pages>
+<publisher>IEEE Computer Society.</publisher>
+<location>Long Beach, California, USA,</location>
+<marker>Augsten, Barbosa, B¨ohlen, Palpanas, 2010</marker>
+<rawString>Nikolaus Augsten, Denilson Barbosa, Michael B¨ohlen, and Themis Palpanas. 2010. TASM: Top-k Approximate Subtree Matching. In Proceedings of the International Conference on Data Engineering (ICDE-10), pages 353–364, Long Beach, California, USA, March. IEEE Computer Society.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D M Bikel</author>
+<author>R Schwartz</author>
+<author>R M Weischedel</author>
+</authors>
+<title>An algorithm that learns what’s in a name.</title>
+<date>1999</date>
+<booktitle>Machine learning,</booktitle>
+<pages>34--1</pages>
+<contexts>
+<context position="13237" citStr="Bikel et al., 1999" startWordPosition="2187" endWordPosition="2190">was deemed a (noisy) positive example. Finally, TRAIN, DEV and TEST were manually corrected for errors. Those authors decided to limit candidate source sentences to be no longer than 40 words.7 Keeping with prior work, those questions with only positive or negative examples were removed, leaving 94 of the original 100 questions for evaluation. The data was processed by Wang et al. (2007) with the following tool chain: POS tags via MXPOST (Ratnaparkhi, 1996); parse trees via MSTParser (McDonald et al., 2005) with 12 coarsegrained dependency relation labels; and named entities via Identifinder (Bikel et al., 1999). Mean Average Precision (MAP) and Mean Reciprocal Rank (MRR) are reported in Table 3. Our implementation gives state of the art performance, and is furthered improved by our inclusion of semantic features drawn from WordNet.8 3 CRF with TED for Answer Extraction In this section we move from ranking source sentences, to the next QA stage: answer extraction. Given our competitive TED-based alignment model, the most obvious solution to extraction would be to report those spans aligned from a source sentence to a question’s wh- terms. However, we show that this approach is better formulated as a </context>
+</contexts>
+<marker>Bikel, Schwartz, Weischedel, 1999</marker>
+<rawString>D.M. Bikel, R. Schwartz, and R.M. Weischedel. 1999. An algorithm that learns what’s in a name. Machine learning, 34(1):211–231.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>P Bille</author>
+</authors>
+<title>A survey on tree edit distance and related problems.</title>
+<date>2005</date>
+<journal>Theoretical Computer Science,</journal>
+<volume>337</volume>
+<issue>1</issue>
+<contexts>
+<context position="6232" citStr="Bille (2005)" startWordPosition="1010" endWordPosition="1011">Magnini, 2005; Heilman and Smith, 2010; Augsten et al., 2010). We chose the variant proposed by Heilman and Smith (2010), inspired by its simplicity, generality, and effectiveness. Our approach differs from those authors in their reliance on a greedy search routine to make use of a complex tree kernel. With speed a consideration, we opted for the dynamic-programming solution of Zhang and Shasha (1989) (§2.1). We added new lexicalsemantic features §(2.2) to the model and then evaluated our implementation on the QASR task, showing strong results §(2.3). 2.1 Cost Design and Edit Search Following Bille (2005), we define an edit script between trees T1, T2 as the edit sequence transforming T1 to T2 according to a cost function, with the total summed cost known as the tree edit distance. Basic edit operations include: insert, delete and rename. With T a dependency tree, we represent each node by three fields: lemma, POS and the type of dependency relation to the node’s parent (DEP). For instance, Mary/nnp/sub is the proper noun Mary in subject position. Basic edits are refined into 9 types, where the first six (INS LEAF, INS SUBTREE, INS, DEL LEAF, DEL SUBTREE, DEL) insert or delete a leaf node, a w</context>
+</contexts>
+<marker>Bille, 2005</marker>
+<rawString>P. Bille. 2005. A survey on tree edit distance and related problems. Theoretical Computer Science, 337(1):217–239.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>P Blunsom</author>
+<author>K Kocik</author>
+<author>J R Curran</author>
+</authors>
+<title>Question classification with log-linear models.</title>
+<date>2006</date>
+<booktitle>In Proceedings of the 29th annual international ACM SIGIR conference on Research and development in information retrieval,</booktitle>
+<pages>615--616</pages>
+<publisher>ACM.</publisher>
+<contexts>
+<context position="18598" citStr="Blunsom et al., 2006" startWordPosition="3123" endWordPosition="3126">ncy tree is analyzed and the Lexical Answer • What is the name of Durst ’s group? Type (LAT) is extracted. The following are some • Limp Bizkit lead singer Fred Durst did a lot ... examples of LAT for what questions: • color: what is Crips’ gang color? • animal: what kind of animal is an agouti? The extra LAT=? feature is also used with chunking features for what/which questions. There is significant prior work in building specialized templates or classifiers for labeling question types (Hermjakob, 2001; Li and Roth, 2002; Zhang and Lee, 2003; Hacioglu and Ward, 2003; Metzler and Croft, 2005; Blunsom et al., 2006; Moschitti et al., 2007). We designed our shallow question type features based on the intuitions of these prior work, with the goal of having a relatively compact approach that still extracts useful predictive signal. One possible drawback, however, is that if an LAT is not observed during training but shows up in testing, the sequence tagger would not know which answer type to associate with the question. In this case it falls back to the more general qword=? feature and will most likely pick the type of answers that are mostly associated with what questions in training. Edit script Our TED </context>
+</contexts>
+<marker>Blunsom, Kocik, Curran, 2006</marker>
+<rawString>P. Blunsom, K. Kocik, and J.R. Curran. 2006. Question classification with log-linear models. In Proceedings of the 29th annual international ACM SIGIR conference on Research and development in information retrieval, pages 615–616. ACM.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Peter Clark</author>
+<author>Vinay Chaudhri</author>
+<author>Sunil Mishra</author>
+<author>J´erˆome Thom´er´e</author>
+<author>Ken Barker</author>
+<author>Bruce Porter</author>
+</authors>
+<title>Enabling domain experts to convey questions to a machine: a modified, template-based approach.</title>
+<date>2003</date>
+<booktitle>In Proceedings of the 2nd international conference on Knowledge Capture,</booktitle>
+<pages>13--19</pages>
+<publisher>ACM.</publisher>
+<location>New York, NY, USA.</location>
+<marker>Clark, Chaudhri, Mishra, Thom´er´e, Barker, Porter, 2003</marker>
+<rawString>Peter Clark, Vinay Chaudhri, Sunil Mishra, J´erˆome Thom´er´e, Ken Barker, and Bruce Porter. 2003. Enabling domain experts to convey questions to a machine: a modified, template-based approach. In Proceedings of the 2nd international conference on Knowledge Capture, pages 13–19, New York, NY, USA. ACM.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Shilin Ding</author>
+<author>Gao Cong</author>
+<author>Chin yew Lin</author>
+<author>Xiaoyan Zhu</author>
+</authors>
+<title>Using conditional random fields to extract contexts and answers of questions from online forums. In</title>
+<date>2008</date>
+<booktitle>In Proceedings of ACL-08: HLT.</booktitle>
+<contexts>
+<context position="3321" citStr="Ding et al., 2008" startWordPosition="549" endWordPosition="552">nstance, given an NER tool that always (i.e., in both training and test data) recognizes the pesticide DDT as an ORG, our model realizes, when a question is asked about the type of chemicals, the correct answer might be incorrectly but consistently recognized as ORG by NER. This helps reduce errors introduced by wrong answer types, which were estimated as the most significant contributer (36.4%) of errors in the then state-of-the-art QA system of Moldovan et al. (2003). The features based on TED allow us to draw the 1CRFs have been used in judging answer-bearing sentences (Shima et al., 2008; Ding et al., 2008; Wang and Manning, 2010), but not extracting exact answers from these sentences. 858 Proceedings of NAACL-HLT 2013, pages 858–867, Atlanta, Georgia, 9–14 June 2013. c�2013 Association for Computational Linguistics connection between the question and answer sentences before answer extraction, whereas traditionally the exercise of answer validation (Magnini et al., 2002; Penas et al., 2008; Rodrigo et al., 2009) has been performed after as a remedy to ensure the answer is really “about” the question. Motivated by a desire for a fast runtime,2 we base our TED implementation on the dynamicprogram</context>
+<context position="10027" citStr="Ding et al. (2008)" startWordPosition="1655" endWordPosition="1658">esultant system is fast in practice, processing 10,000 pre-parsed tree pairs per second on a contemporary machine.6 2.2 TED for Sentence Ranking The task of Question Answer Sentence Ranking (QASR) takes a question and a set of source sentences, returning a list sorted by the probability likelihood that each sentence contains an appropriate answer. Prior work in this includes that of: Punyakanok et al. (2004), based on mapping syntactic dependency trees; Wang et al. (2007) utilizing Quasi-Synchronous Grammar (Smith and Eisner, 2006); Heilman and Smith (2010) using TED; and Shima et al. (2008), Ding et al. (2008) and Wang and Manning (2010), who each employed a CRF in various ways. Wang et al. (2007) made their dataset public, which we use here for system validation. To date, models based on TED have shown the best performance for this task. Our implementation follows Heilman and Smith (2010), with the addition of 15 new features beyond their original 33 (see Table 1). Based on results 6In later tasks, feature extraction and decoding will slow down the system, but the final system was still able to process 200 pairs per second. 860 set source #ques. #pairs %pos. len. TRAIN-ALL TREC8-12 1229 53417 12.0</context>
+</contexts>
+<marker>Ding, Cong, Lin, Zhu, 2008</marker>
+<rawString>Shilin Ding, Gao Cong, Chin yew Lin, and Xiaoyan Zhu. 2008. Using conditional random fields to extract contexts and answers of questions from online forums. In In Proceedings of ACL-08: HLT.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D Ferrucci</author>
+<author>E Brown</author>
+<author>J Chu-Carroll</author>
+<author>J Fan</author>
+<author>D Gondek</author>
+<author>A A Kalyanpur</author>
+<author>A Lally</author>
+<author>J W Murdock</author>
+<author>E Nyberg</author>
+<author>J Prager</author>
+</authors>
+<title>Building Watson: An overview of the DeepQA project.</title>
+<date>2010</date>
+<journal>AI Magazine,</journal>
+<volume>31</volume>
+<issue>3</issue>
+<contexts>
+<context position="1228" citStr="Ferrucci et al., 2010" startWordPosition="194" endWordPosition="197">st time, where knowledge of shared structure between question and source sentence is incorporated through features based on Tree Edit Distance (TED). Our model is free of manually created question and answer templates, fast to run (processing 200 QA pairs per second excluding parsing time), and yields an F1 of 63.3% on a new public dataset based on prior TREC QA evaluations. The developed system is open-source, and includes an implementation of the TED model that is state of the art in the task of ranking QA pairs. 1 Introduction The success of IBM’s Watson system for Question Answering (QA) (Ferrucci et al., 2010) has illustrated a continued public interest in this topic. Watson is a sophisticated piece of software engineering consisting of many components tied together in a large parallel architecture. It took many researchers working full time for years to construct. Such resources are not available to individual academic researchers. If they are interested in evaluating new ideas on some aspect of QA, they must either construct a full system, or create a focused subtask *Performed while faculty at Johns Hopkins University. paired with a representative dataset. We follow the latter approach and focus</context>
+</contexts>
+<marker>Ferrucci, Brown, Chu-Carroll, Fan, Gondek, Kalyanpur, Lally, Murdock, Nyberg, Prager, 2010</marker>
+<rawString>D. Ferrucci, E. Brown, J. Chu-Carroll, J. Fan, D. Gondek, A.A. Kalyanpur, A. Lally, J.W. Murdock, E. Nyberg, J. Prager, et al. 2010. Building Watson: An overview of the DeepQA project. AI Magazine, 31(3):59–79.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>K Hacioglu</author>
+<author>W Ward</author>
+</authors>
+<title>Question classification with support vector machines and error correcting codes.</title>
+<date>2003</date>
+<booktitle>In Proceedings of NAACL</booktitle>
+<pages>28--30</pages>
+<contexts>
+<context position="18551" citStr="Hacioglu and Ward, 2003" startWordPosition="3115" endWordPosition="3118"> Tennis player Jennifer Capriati is 23 862 dependency tree is analyzed and the Lexical Answer • What is the name of Durst ’s group? Type (LAT) is extracted. The following are some • Limp Bizkit lead singer Fred Durst did a lot ... examples of LAT for what questions: • color: what is Crips’ gang color? • animal: what kind of animal is an agouti? The extra LAT=? feature is also used with chunking features for what/which questions. There is significant prior work in building specialized templates or classifiers for labeling question types (Hermjakob, 2001; Li and Roth, 2002; Zhang and Lee, 2003; Hacioglu and Ward, 2003; Metzler and Croft, 2005; Blunsom et al., 2006; Moschitti et al., 2007). We designed our shallow question type features based on the intuitions of these prior work, with the goal of having a relatively compact approach that still extracts useful predictive signal. One possible drawback, however, is that if an LAT is not observed during training but shows up in testing, the sequence tagger would not know which answer type to associate with the question. In this case it falls back to the more general qword=? feature and will most likely pick the type of answers that are mostly associated with w</context>
+</contexts>
+<marker>Hacioglu, Ward, 2003</marker>
+<rawString>K. Hacioglu and W. Ward. 2003. Question classification with support vector machines and error correcting codes. In Proceedings of NAACL 2003, short papers, pages 28–30.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>M Hall</author>
+<author>E Frank</author>
+<author>G Holmes</author>
+<author>B Pfahringer</author>
+<author>P Reutemann</author>
+<author>I H Witten</author>
+</authors>
+<title>The WEKA data mining software: an update.</title>
+<date>2009</date>
+<journal>ACM SIGKDD Explorations Newsletter,</journal>
+<volume>11</volume>
+<issue>1</issue>
+<contexts>
+<context position="12237" citStr="Hall et al., 2009" startWordPosition="2021" endWordPosition="2024">010). These were made into features in two ways: WNsearch loosens renaming and alignment within the TED model from requiring strict lemma equality to allowing lemmas that shared any of the above relations, leading to renaming operations such as REN ...(country, china) and REN ...(sport, tennis); WNfeature counts how many words between the sentence and answer sentence have each of the above relations, separately as 10 independent features, plus an aggregate count for a total of 11 new features beyond the earlier 48. These features were then used to train a logistic regression model using Weka (Hall et al., 2009). 2.3 QA Sentence Ranking Experiment We trained and tested on the dataset from Wang et al. (2007), which spans QA pairs from TREC QA 8-13 (see Table 2). Per question, sentences with non-stopword overlap were first retrieved from the task collection, which were then compared against the TREC answer pattern (in the form of Perl regular expressions). If a sentence matched, then it was deemed a (noisy) positive example. Finally, TRAIN, DEV and TEST were manually corrected for errors. Those authors decided to limit candidate source sentences to be no longer than 40 words.7 Keeping with prior work, </context>
+</contexts>
+<marker>Hall, Frank, Holmes, Pfahringer, Reutemann, Witten, 2009</marker>
+<rawString>M. Hall, E. Frank, G. Holmes, B. Pfahringer, P. Reutemann, and I.H. Witten. 2009. The WEKA data mining software: an update. ACM SIGKDD Explorations Newsletter, 11(1):10–18.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Michael Heilman</author>
+<author>Noah A Smith</author>
+</authors>
+<title>Tree edit models for recognizing textual entailments, paraphrases, and answers to questions.</title>
+<date>2010</date>
+<booktitle>In Proceedings of NAACL 2010,</booktitle>
+<pages>1011--1019</pages>
+<location>Los Angeles, California.</location>
+<contexts>
+<context position="5658" citStr="Heilman and Smith, 2010" startWordPosition="914" endWordPosition="917">subinsOtherRel ject, object or other relations delNMod, ... deletion mirror of above renNMod, ... rename mirror of above XEdits # basic edits plus sum of ins/del/ren edits alignNodes, # aligned nodes, and those that alignNum, are numbers, nouns, verbs, or alignN, alignV, proper nouns alignProper Table 1: Features for ranking QA pairs. 2 Tree Edit Distance Model Tree Edit Distance (§2.1) models have been shown effective in a variety of applications, including textual entailment, paraphrase identification, answer ranking and information retrieval (Reis et al., 2004; Kouylekov and Magnini, 2005; Heilman and Smith, 2010; Augsten et al., 2010). We chose the variant proposed by Heilman and Smith (2010), inspired by its simplicity, generality, and effectiveness. Our approach differs from those authors in their reliance on a greedy search routine to make use of a complex tree kernel. With speed a consideration, we opted for the dynamic-programming solution of Zhang and Shasha (1989) (§2.1). We added new lexicalsemantic features §(2.2) to the model and then evaluated our implementation on the QASR task, showing strong results §(2.3). 2.1 Cost Design and Edit Search Following Bille (2005), we define an edit script</context>
+<context position="9972" citStr="Heilman and Smith (2010)" startWordPosition="1644" endWordPosition="1647">ds “too much say” in guiding the overall edit sequence. The resultant system is fast in practice, processing 10,000 pre-parsed tree pairs per second on a contemporary machine.6 2.2 TED for Sentence Ranking The task of Question Answer Sentence Ranking (QASR) takes a question and a set of source sentences, returning a list sorted by the probability likelihood that each sentence contains an appropriate answer. Prior work in this includes that of: Punyakanok et al. (2004), based on mapping syntactic dependency trees; Wang et al. (2007) utilizing Quasi-Synchronous Grammar (Smith and Eisner, 2006); Heilman and Smith (2010) using TED; and Shima et al. (2008), Ding et al. (2008) and Wang and Manning (2010), who each employed a CRF in various ways. Wang et al. (2007) made their dataset public, which we use here for system validation. To date, models based on TED have shown the best performance for this task. Our implementation follows Heilman and Smith (2010), with the addition of 15 new features beyond their original 33 (see Table 1). Based on results 6In later tasks, feature extraction and decoding will slow down the system, but the final system was still able to process 200 pairs per second. 860 set source #que</context>
+<context position="11623" citStr="Heilman and Smith (2010)" startWordPosition="1920" endWordPosition="1923"> 0.6371 0.7301 +WNfeature (11 more feat.) 0.6307 0.7477 Table 3: Results on the QA Sentence Ranking task. in DEV, we extract edits in the direction from the source sentence to the question. In addition to syntactic features, we incorporated the following lexical-semantic relations from WordNet: hypernym and synonym (nouns and verbs); entailment and causing (verbs); and membersOf, substancesOf, partsOf, haveMember, haveSubstance, havePart (nouns). Such relations have been used in prior approaches to this task (Wang et al., 2007; Wang and Manning, 2010), but not in conjunction with the model of Heilman and Smith (2010). These were made into features in two ways: WNsearch loosens renaming and alignment within the TED model from requiring strict lemma equality to allowing lemmas that shared any of the above relations, leading to renaming operations such as REN ...(country, china) and REN ...(sport, tennis); WNfeature counts how many words between the sentence and answer sentence have each of the above relations, separately as 10 independent features, plus an aggregate count for a total of 11 new features beyond the earlier 48. These features were then used to train a logistic regression model using Weka (Hall</context>
+</contexts>
+<marker>Heilman, Smith, 2010</marker>
+<rawString>Michael Heilman and Noah A. Smith. 2010. Tree edit models for recognizing textual entailments, paraphrases, and answers to questions. In Proceedings of NAACL 2010, pages 1011–1019, Los Angeles, California.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>U Hermjakob</author>
+</authors>
+<title>Parsing and question classification for question answering.</title>
+<date>2001</date>
+<booktitle>In Proceedings of the workshop on Open-domain question answering-Volume 12,</booktitle>
+<pages>1--6</pages>
+<contexts>
+<context position="18486" citStr="Hermjakob, 2001" startWordPosition="3105" endWordPosition="3106">s per required answer types. The question B-ANS O O O O O Tennis player Jennifer Capriati is 23 862 dependency tree is analyzed and the Lexical Answer • What is the name of Durst ’s group? Type (LAT) is extracted. The following are some • Limp Bizkit lead singer Fred Durst did a lot ... examples of LAT for what questions: • color: what is Crips’ gang color? • animal: what kind of animal is an agouti? The extra LAT=? feature is also used with chunking features for what/which questions. There is significant prior work in building specialized templates or classifiers for labeling question types (Hermjakob, 2001; Li and Roth, 2002; Zhang and Lee, 2003; Hacioglu and Ward, 2003; Metzler and Croft, 2005; Blunsom et al., 2006; Moschitti et al., 2007). We designed our shallow question type features based on the intuitions of these prior work, with the goal of having a relatively compact approach that still extracts useful predictive signal. One possible drawback, however, is that if an LAT is not observed during training but shows up in testing, the sequence tagger would not know which answer type to associate with the question. In this case it falls back to the more general qword=? feature and will most </context>
+</contexts>
+<marker>Hermjakob, 2001</marker>
+<rawString>U. Hermjakob. 2001. Parsing and question classification for question answering. In Proceedings of the workshop on Open-domain question answering-Volume 12, pages 1–6.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Milen Kouylekov</author>
+<author>Bernardo Magnini</author>
+</authors>
+<title>Recognizing textual entailment with tree edit distance algorithms.</title>
+<date>2005</date>
+<booktitle>In PASCAL Challenges on RTE,</booktitle>
+<pages>17--20</pages>
+<contexts>
+<context position="5633" citStr="Kouylekov and Magnini, 2005" startWordPosition="910" endWordPosition="913">j {noun, verb, preposition}, subinsOtherRel ject, object or other relations delNMod, ... deletion mirror of above renNMod, ... rename mirror of above XEdits # basic edits plus sum of ins/del/ren edits alignNodes, # aligned nodes, and those that alignNum, are numbers, nouns, verbs, or alignN, alignV, proper nouns alignProper Table 1: Features for ranking QA pairs. 2 Tree Edit Distance Model Tree Edit Distance (§2.1) models have been shown effective in a variety of applications, including textual entailment, paraphrase identification, answer ranking and information retrieval (Reis et al., 2004; Kouylekov and Magnini, 2005; Heilman and Smith, 2010; Augsten et al., 2010). We chose the variant proposed by Heilman and Smith (2010), inspired by its simplicity, generality, and effectiveness. Our approach differs from those authors in their reliance on a greedy search routine to make use of a complex tree kernel. With speed a consideration, we opted for the dynamic-programming solution of Zhang and Shasha (1989) (§2.1). We added new lexicalsemantic features §(2.2) to the model and then evaluated our implementation on the QASR task, showing strong results §(2.3). 2.1 Cost Design and Edit Search Following Bille (2005),</context>
+</contexts>
+<marker>Kouylekov, Magnini, 2005</marker>
+<rawString>Milen Kouylekov and Bernardo Magnini. 2005. Recognizing textual entailment with tree edit distance algorithms. In PASCAL Challenges on RTE, pages 17–20.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>John D Lafferty</author>
+<author>Andrew McCallum</author>
+<author>Fernando C N Pereira</author>
+</authors>
+<title>Conditional random fields: Probabilistic models for segmenting and labeling sequence data.</title>
+<date>2001</date>
+<contexts>
+<context position="2011" citStr="Lafferty et al., 2001" startWordPosition="322" endWordPosition="325">n a large parallel architecture. It took many researchers working full time for years to construct. Such resources are not available to individual academic researchers. If they are interested in evaluating new ideas on some aspect of QA, they must either construct a full system, or create a focused subtask *Performed while faculty at Johns Hopkins University. paired with a representative dataset. We follow the latter approach and focus on the task of answer extraction, i.e., producing the exact answer strings for a question. We propose the use of a linear-chain Conditional Random Field (CRF) (Lafferty et al., 2001) in order to cast the problem as one of sequence tagging by labeling each token in a candidate sentence as either Beginning, Inside or Outside (BIO) of an answer. This is to our knowledge the first time a CRF has been used to extract answers.1 We utilize not only traditional contextual features based on POS tagging, dependency parsing and Named Entity Recognition (NER), but most importantly, features extracted from a Tree Edit Distance (TED) model for aligning an answer sentence tree with the question tree. The linear-chain CRF, when trained to learn the associations between question and answe</context>
+<context position="14908" citStr="Lafferty et al., 2001" startWordPosition="2471" endWordPosition="2474">ot statistically significant according to the Paired Randomization Test (Smucker et al., 2007), and thus should be considered on par with the current state of the art. 861 Figure 2: An example of linear-chain CRF for answer sequence tagging. bels: B-ANSWER (beginning of answer), I-ANSWER (inside of answer), O (outside of answer). Besides local POS/NER/DEP features, at each token we need to inspect the entire input to connect the answer sentence with the question sentence through tree edits, drawing features from the question and the edit script, motivating the use of a linear-chain CRF model (Lafferty et al., 2001) over HMMs. To the best of our knowledge this is the first time a CRF has been used to label answer fragments, despite success in other sequence tagging tasks. 3.2 Feature Design In this subsection we describe the local and global features used by the CRF. Chunking We use the POS/NER/DEP tags directly just as one would in a chunking task. Specifically, suppose t represents the current token position and pos[t] its POS tag, we extract unigram, bigram and trigram features over the local context, e.g., pos[t − 2], pos[t − 2] : pos[t − 1], and pos[t − 2] : pos[t − 1] : pos[t]. Similar features are</context>
+</contexts>
+<marker>Lafferty, McCallum, Pereira, 2001</marker>
+<rawString>John D. Lafferty, Andrew McCallum, and Fernando C. N. Pereira. 2001. Conditional random fields: Probabilistic models for segmenting and labeling sequence data.</rawString>
+</citation>
+<citation valid="false">
+<booktitle>In Proceedings of the Eighteenth International Conference on Machine Learning,</booktitle>
+<pages>282--289</pages>
+<publisher>Morgan Kaufmann Publishers Inc.</publisher>
+<location>San Francisco, CA, USA.</location>
+<marker></marker>
+<rawString>In Proceedings of the Eighteenth International Conference on Machine Learning, pages 282–289, San Francisco, CA, USA. Morgan Kaufmann Publishers Inc.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>X Li</author>
+<author>D Roth</author>
+</authors>
+<title>Learning question classifiers.</title>
+<date>2002</date>
+<booktitle>In Proceedings of ACL</booktitle>
+<pages>1--7</pages>
+<contexts>
+<context position="18505" citStr="Li and Roth, 2002" startWordPosition="3107" endWordPosition="3110">swer types. The question B-ANS O O O O O Tennis player Jennifer Capriati is 23 862 dependency tree is analyzed and the Lexical Answer • What is the name of Durst ’s group? Type (LAT) is extracted. The following are some • Limp Bizkit lead singer Fred Durst did a lot ... examples of LAT for what questions: • color: what is Crips’ gang color? • animal: what kind of animal is an agouti? The extra LAT=? feature is also used with chunking features for what/which questions. There is significant prior work in building specialized templates or classifiers for labeling question types (Hermjakob, 2001; Li and Roth, 2002; Zhang and Lee, 2003; Hacioglu and Ward, 2003; Metzler and Croft, 2005; Blunsom et al., 2006; Moschitti et al., 2007). We designed our shallow question type features based on the intuitions of these prior work, with the goal of having a relatively compact approach that still extracts useful predictive signal. One possible drawback, however, is that if an LAT is not observed during training but shows up in testing, the sequence tagger would not know which answer type to associate with the question. In this case it falls back to the more general qword=? feature and will most likely pick the typ</context>
+</contexts>
+<marker>Li, Roth, 2002</marker>
+<rawString>X. Li and D. Roth. 2002. Learning question classifiers. In Proceedings of ACL 2002, pages 1–7.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>B Magnini</author>
+<author>M Negri</author>
+<author>R Prevete</author>
+<author>H Tanev</author>
+</authors>
+<title>Is it the right answer?: exploiting web redundancy for answer validation.</title>
+<date>2002</date>
+<booktitle>In Proceedings ofACL 2002,</booktitle>
+<pages>425--432</pages>
+<contexts>
+<context position="3692" citStr="Magnini et al., 2002" startWordPosition="601" endWordPosition="604">ignificant contributer (36.4%) of errors in the then state-of-the-art QA system of Moldovan et al. (2003). The features based on TED allow us to draw the 1CRFs have been used in judging answer-bearing sentences (Shima et al., 2008; Ding et al., 2008; Wang and Manning, 2010), but not extracting exact answers from these sentences. 858 Proceedings of NAACL-HLT 2013, pages 858–867, Atlanta, Georgia, 9–14 June 2013. c�2013 Association for Computational Linguistics connection between the question and answer sentences before answer extraction, whereas traditionally the exercise of answer validation (Magnini et al., 2002; Penas et al., 2008; Rodrigo et al., 2009) has been performed after as a remedy to ensure the answer is really “about” the question. Motivated by a desire for a fast runtime,2 we base our TED implementation on the dynamicprogramming approach of Zhang and Shasha (1989), which helps our final system process 200 QA pairs per second on standard desktop hardware, when input is syntactically pre-parsed. In the following we first provide background on the TED model, going on to evaluate our implementation against prior work in the context of question answer sentence ranking (QASR), achieving state o</context>
+</contexts>
+<marker>Magnini, Negri, Prevete, Tanev, 2002</marker>
+<rawString>B. Magnini, M. Negri, R. Prevete, and H. Tanev. 2002. Is it the right answer?: exploiting web redundancy for answer validation. In Proceedings ofACL 2002, pages 425–432.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>R McDonald</author>
+<author>K Crammer</author>
+<author>F Pereira</author>
+</authors>
+<title>Online large-margin training of dependency parsers.</title>
+<date>2005</date>
+<booktitle>In Proceedings of ACL</booktitle>
+<pages>91--98</pages>
+<contexts>
+<context position="13130" citStr="McDonald et al., 2005" startWordPosition="2170" endWordPosition="2173">red against the TREC answer pattern (in the form of Perl regular expressions). If a sentence matched, then it was deemed a (noisy) positive example. Finally, TRAIN, DEV and TEST were manually corrected for errors. Those authors decided to limit candidate source sentences to be no longer than 40 words.7 Keeping with prior work, those questions with only positive or negative examples were removed, leaving 94 of the original 100 questions for evaluation. The data was processed by Wang et al. (2007) with the following tool chain: POS tags via MXPOST (Ratnaparkhi, 1996); parse trees via MSTParser (McDonald et al., 2005) with 12 coarsegrained dependency relation labels; and named entities via Identifinder (Bikel et al., 1999). Mean Average Precision (MAP) and Mean Reciprocal Rank (MRR) are reported in Table 3. Our implementation gives state of the art performance, and is furthered improved by our inclusion of semantic features drawn from WordNet.8 3 CRF with TED for Answer Extraction In this section we move from ranking source sentences, to the next QA stage: answer extraction. Given our competitive TED-based alignment model, the most obvious solution to extraction would be to report those spans aligned from </context>
+</contexts>
+<marker>McDonald, Crammer, Pereira, 2005</marker>
+<rawString>R. McDonald, K. Crammer, and F. Pereira. 2005. Online large-margin training of dependency parsers. In Proceedings of ACL 2005, pages 91–98.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D Metzler</author>
+<author>W B Croft</author>
+</authors>
+<title>Analysis of statistical question classification for fact-based questions.</title>
+<date>2005</date>
+<journal>Information Retrieval,</journal>
+<volume>8</volume>
+<issue>3</issue>
+<contexts>
+<context position="18576" citStr="Metzler and Croft, 2005" startWordPosition="3119" endWordPosition="3122">apriati is 23 862 dependency tree is analyzed and the Lexical Answer • What is the name of Durst ’s group? Type (LAT) is extracted. The following are some • Limp Bizkit lead singer Fred Durst did a lot ... examples of LAT for what questions: • color: what is Crips’ gang color? • animal: what kind of animal is an agouti? The extra LAT=? feature is also used with chunking features for what/which questions. There is significant prior work in building specialized templates or classifiers for labeling question types (Hermjakob, 2001; Li and Roth, 2002; Zhang and Lee, 2003; Hacioglu and Ward, 2003; Metzler and Croft, 2005; Blunsom et al., 2006; Moschitti et al., 2007). We designed our shallow question type features based on the intuitions of these prior work, with the goal of having a relatively compact approach that still extracts useful predictive signal. One possible drawback, however, is that if an LAT is not observed during training but shows up in testing, the sequence tagger would not know which answer type to associate with the question. In this case it falls back to the more general qword=? feature and will most likely pick the type of answers that are mostly associated with what questions in training</context>
+</contexts>
+<marker>Metzler, Croft, 2005</marker>
+<rawString>D. Metzler and W.B. Croft. 2005. Analysis of statistical question classification for fact-based questions. Information Retrieval, 8(3):481–504.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D Moldovan</author>
+<author>M Pas¸ca</author>
+<author>S Harabagiu</author>
+<author>M Surdeanu</author>
+</authors>
+<title>Performance issues and error analysis in an open-domain question answering system.</title>
+<date>2003</date>
+<journal>ACM Transactions on Information Systems (TOIS),</journal>
+<volume>21</volume>
+<issue>2</issue>
+<pages>154</pages>
+<marker>Moldovan, Pas¸ca, Harabagiu, Surdeanu, 2003</marker>
+<rawString>D. Moldovan, M. Pas¸ca, S. Harabagiu, and M. Surdeanu. 2003. Performance issues and error analysis in an open-domain question answering system. ACM Transactions on Information Systems (TOIS), 21(2):133– 154.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>A Moschitti</author>
+<author>S Quarteroni</author>
+<author>R Basili</author>
+<author>S Manandhar</author>
+</authors>
+<title>Exploiting syntactic and shallow semantic kernels for question answer classification.</title>
+<date>2007</date>
+<booktitle>In Proceedings of ACL</booktitle>
+<volume>45</volume>
+<pages>776</pages>
+<contexts>
+<context position="18623" citStr="Moschitti et al., 2007" startWordPosition="3127" endWordPosition="3130">nd the Lexical Answer • What is the name of Durst ’s group? Type (LAT) is extracted. The following are some • Limp Bizkit lead singer Fred Durst did a lot ... examples of LAT for what questions: • color: what is Crips’ gang color? • animal: what kind of animal is an agouti? The extra LAT=? feature is also used with chunking features for what/which questions. There is significant prior work in building specialized templates or classifiers for labeling question types (Hermjakob, 2001; Li and Roth, 2002; Zhang and Lee, 2003; Hacioglu and Ward, 2003; Metzler and Croft, 2005; Blunsom et al., 2006; Moschitti et al., 2007). We designed our shallow question type features based on the intuitions of these prior work, with the goal of having a relatively compact approach that still extracts useful predictive signal. One possible drawback, however, is that if an LAT is not observed during training but shows up in testing, the sequence tagger would not know which answer type to associate with the question. In this case it falls back to the more general qword=? feature and will most likely pick the type of answers that are mostly associated with what questions in training. Edit script Our TED module produces an edit t</context>
+</contexts>
+<marker>Moschitti, Quarteroni, Basili, Manandhar, 2007</marker>
+<rawString>A. Moschitti, S. Quarteroni, R. Basili, and S. Manandhar. 2007. Exploiting syntactic and shallow semantic kernels for question answer classification. In Proceedings of ACL 2007, volume 45, page 776.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Naoaki Okazaki</author>
+</authors>
+<title>CRFsuite: a fast implementation of Conditional Random Fields (CRFs).</title>
+<date>2007</date>
+<contexts>
+<context position="24996" citStr="Okazaki, 2007" startWordPosition="4225" endWordPosition="4226">tuned on DEV.9 4 Experiments 4.1 QA Results The dataset listed in Table 2 was not designed to include an answer for each positive answer sentence, but only a binary indicator on whether a sentence contains an answer. We used the answer pattern files (in Perl regular expressions) released along with TREC8-13 to pinpoint the exact answer fragments. Then we manually checked TRAIN, DEV, and TEST for errors. TRAIN-ALL already came as a noisy dataset so we did not manually clean it, also due to its large size. We trained on only the positive examples of TRAIN and TRAIN-ALL separately with CRFsuite (Okazaki, 2007). The reason for training solely with positive examples is that they only constitute 10% of all training data and if trained on all, the CRF tagger was very biased on negative examples and reluctant to give an answer for most of the questions. The CRF tagger attempted an answer for about 2/3 of all questions when training on just positive examples. DEV was used to help design features. A practical benefit of our compact approach is that an entire round of feature extraction, training on TRAIN and testing on DEV took less than one minute. Table 5 9One might further improve this by leveraging th</context>
+</contexts>
+<marker>Okazaki, 2007</marker>
+<rawString>Naoaki Okazaki. 2007. CRFsuite: a fast implementation of Conditional Random Fields (CRFs).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>A Penas</author>
+<author>A Rodrigo</author>
+<author>V Sama</author>
+<author>F Verdejo</author>
+</authors>
+<title>Testing the reasoning for question answering validation.</title>
+<date>2008</date>
+<journal>Journal of Logic and Computation,</journal>
+<volume>18</volume>
+<issue>3</issue>
+<pages>474</pages>
+<contexts>
+<context position="3712" citStr="Penas et al., 2008" startWordPosition="605" endWordPosition="608"> (36.4%) of errors in the then state-of-the-art QA system of Moldovan et al. (2003). The features based on TED allow us to draw the 1CRFs have been used in judging answer-bearing sentences (Shima et al., 2008; Ding et al., 2008; Wang and Manning, 2010), but not extracting exact answers from these sentences. 858 Proceedings of NAACL-HLT 2013, pages 858–867, Atlanta, Georgia, 9–14 June 2013. c�2013 Association for Computational Linguistics connection between the question and answer sentences before answer extraction, whereas traditionally the exercise of answer validation (Magnini et al., 2002; Penas et al., 2008; Rodrigo et al., 2009) has been performed after as a remedy to ensure the answer is really “about” the question. Motivated by a desire for a fast runtime,2 we base our TED implementation on the dynamicprogramming approach of Zhang and Shasha (1989), which helps our final system process 200 QA pairs per second on standard desktop hardware, when input is syntactically pre-parsed. In the following we first provide background on the TED model, going on to evaluate our implementation against prior work in the context of question answer sentence ranking (QASR), achieving state of the art in that ta</context>
+</contexts>
+<marker>Penas, Rodrigo, Sama, Verdejo, 2008</marker>
+<rawString>A. Penas, A. Rodrigo, V. Sama, and F. Verdejo. 2008. Testing the reasoning for question answering validation. Journal of Logic and Computation, 18(3):459– 474.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Vasin Punyakanok</author>
+<author>Dan Roth</author>
+<author>Wen T Yih</author>
+</authors>
+<title>Mapping Dependencies Trees: An Application to Question Answering.</title>
+<date>2004</date>
+<booktitle>In Proceedings of the 8th International Symposium on Artificial Intelligence and Mathematics,</booktitle>
+<location>Fort Lauderdale, Florida.</location>
+<contexts>
+<context position="9820" citStr="Punyakanok et al. (2004)" startWordPosition="1620" endWordPosition="1623"> 5This is aimed at minimizing node variations introduced by morphology differences, tagging or parsing errors. tent terms. In practice this gave stopwords “too much say” in guiding the overall edit sequence. The resultant system is fast in practice, processing 10,000 pre-parsed tree pairs per second on a contemporary machine.6 2.2 TED for Sentence Ranking The task of Question Answer Sentence Ranking (QASR) takes a question and a set of source sentences, returning a list sorted by the probability likelihood that each sentence contains an appropriate answer. Prior work in this includes that of: Punyakanok et al. (2004), based on mapping syntactic dependency trees; Wang et al. (2007) utilizing Quasi-Synchronous Grammar (Smith and Eisner, 2006); Heilman and Smith (2010) using TED; and Shima et al. (2008), Ding et al. (2008) and Wang and Manning (2010), who each employed a CRF in various ways. Wang et al. (2007) made their dataset public, which we use here for system validation. To date, models based on TED have shown the best performance for this task. Our implementation follows Heilman and Smith (2010), with the addition of 15 new features beyond their original 33 (see Table 1). Based on results 6In later ta</context>
+</contexts>
+<marker>Punyakanok, Roth, Yih, 2004</marker>
+<rawString>Vasin Punyakanok, Dan Roth, and Wen T. Yih. 2004. Mapping Dependencies Trees: An Application to Question Answering. In Proceedings of the 8th International Symposium on Artificial Intelligence and Mathematics, Fort Lauderdale, Florida.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>A Ratnaparkhi</author>
+</authors>
+<title>A maximum entropy model for part-of-speech tagging.</title>
+<date>1996</date>
+<booktitle>In Proceedings of EMNLP</booktitle>
+<volume>1</volume>
+<pages>133--142</pages>
+<contexts>
+<context position="13079" citStr="Ratnaparkhi, 1996" startWordPosition="2163" endWordPosition="2164">from the task collection, which were then compared against the TREC answer pattern (in the form of Perl regular expressions). If a sentence matched, then it was deemed a (noisy) positive example. Finally, TRAIN, DEV and TEST were manually corrected for errors. Those authors decided to limit candidate source sentences to be no longer than 40 words.7 Keeping with prior work, those questions with only positive or negative examples were removed, leaving 94 of the original 100 questions for evaluation. The data was processed by Wang et al. (2007) with the following tool chain: POS tags via MXPOST (Ratnaparkhi, 1996); parse trees via MSTParser (McDonald et al., 2005) with 12 coarsegrained dependency relation labels; and named entities via Identifinder (Bikel et al., 1999). Mean Average Precision (MAP) and Mean Reciprocal Rank (MRR) are reported in Table 3. Our implementation gives state of the art performance, and is furthered improved by our inclusion of semantic features drawn from WordNet.8 3 CRF with TED for Answer Extraction In this section we move from ranking source sentences, to the next QA stage: answer extraction. Given our competitive TED-based alignment model, the most obvious solution to extr</context>
+</contexts>
+<marker>Ratnaparkhi, 1996</marker>
+<rawString>A. Ratnaparkhi. 1996. A maximum entropy model for part-of-speech tagging. In Proceedings of EMNLP 1996, volume 1, pages 133–142.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Deepak Ravichandran</author>
+<author>Abraham Ittycheriah</author>
+<author>Salim Roukos</author>
+</authors>
+<title>Automatic derivation of surface text patterns for a maximum entropy based question answering system.</title>
+<date>2003</date>
+<booktitle>In Proceedings of NAACL 2003, short papers,</booktitle>
+<pages>85--87</pages>
+<location>Stroudsburg, PA, USA.</location>
+<contexts>
+<context position="20340" citStr="Ravichandran et al., 2003" startWordPosition="3416" endWordPosition="3419">DEP information. For instance, a deleted noun usually carries higher edit feature weights than an aligned adjective. Alignment distance We observed that a candidate answer often appears close to an aligned word (i.e., answer tokens tend to be located “nearby” portions of text that align across the pair), especially in compound noun constructions, restrictive clauses, preposition phrases, etc. For instance, in the following pair, the answer Limp Bizkit comes from the leading compound noun: Past work has designed large numbers of specific templates aimed at these constructions (Soubbotin, 2001; Ravichandran et al., 2003; Clark et al., 2003; Sneiders, 2002). Here we use a single general feature that we expect to pick up much of this signal, without the significant feature engineering. Thus we incorporated a simple feature to roughly model this phenomenon. It is defined as the distance to the nearest aligned nonstop word in the original word order. In the above example, the only aligned nonstop word is Durst. Then this nearest alignment distance feature for the word Limp is: nearest dist to align(Limp):5 This is the only integer-valued feature. All other features are binary-valued. Note this feature does not s</context>
+</contexts>
+<marker>Ravichandran, Ittycheriah, Roukos, 2003</marker>
+<rawString>Deepak Ravichandran, Abraham Ittycheriah, and Salim Roukos. 2003. Automatic derivation of surface text patterns for a maximum entropy based question answering system. In Proceedings of NAACL 2003, short papers, pages 85–87, Stroudsburg, PA, USA.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D C Reis</author>
+<author>P B Golgher</author>
+<author>A S Silva</author>
+<author>A F Laender</author>
+</authors>
+<title>Automatic web news extraction using tree edit distance.</title>
+<date>2004</date>
+<booktitle>In Proceedings of the 13th international conference on World Wide Web,</booktitle>
+<pages>502--511</pages>
+<publisher>ACM.</publisher>
+<location>New York, NY, USA.</location>
+<contexts>
+<context position="5604" citStr="Reis et al., 2004" startWordPosition="906" endWordPosition="909">r for insSub, insObj {noun, verb, preposition}, subinsOtherRel ject, object or other relations delNMod, ... deletion mirror of above renNMod, ... rename mirror of above XEdits # basic edits plus sum of ins/del/ren edits alignNodes, # aligned nodes, and those that alignNum, are numbers, nouns, verbs, or alignN, alignV, proper nouns alignProper Table 1: Features for ranking QA pairs. 2 Tree Edit Distance Model Tree Edit Distance (§2.1) models have been shown effective in a variety of applications, including textual entailment, paraphrase identification, answer ranking and information retrieval (Reis et al., 2004; Kouylekov and Magnini, 2005; Heilman and Smith, 2010; Augsten et al., 2010). We chose the variant proposed by Heilman and Smith (2010), inspired by its simplicity, generality, and effectiveness. Our approach differs from those authors in their reliance on a greedy search routine to make use of a complex tree kernel. With speed a consideration, we opted for the dynamic-programming solution of Zhang and Shasha (1989) (§2.1). We added new lexicalsemantic features §(2.2) to the model and then evaluated our implementation on the QASR task, showing strong results §(2.3). 2.1 Cost Design and Edit S</context>
+</contexts>
+<marker>Reis, Golgher, Silva, Laender, 2004</marker>
+<rawString>D. C. Reis, P. B. Golgher, A. S. Silva, and A. F. Laender. 2004. Automatic web news extraction using tree edit distance. In Proceedings of the 13th international conference on World Wide Web, pages 502–511, New York, NY, USA. ACM.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>´A Rodrigo</author>
+<author>A Pe˜nas</author>
+<author>F Verdejo</author>
+</authors>
+<title>Overview of the answer validation exercise 2008. Evaluating Systems for Multilingual and Multimodal Information Access,</title>
+<date>2009</date>
+<pages>296--313</pages>
+<marker>Rodrigo, Pe˜nas, Verdejo, 2009</marker>
+<rawString>´A. Rodrigo, A. Pe˜nas, and F. Verdejo. 2009. Overview of the answer validation exercise 2008. Evaluating Systems for Multilingual and Multimodal Information Access, pages 296–313.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>H Shima</author>
+<author>N Lao</author>
+<author>E Nyberg</author>
+<author>T Mitamura</author>
+</authors>
+<title>Complex cross-lingual question answering as sequential classification and multi-document summarization task.</title>
+<date>2008</date>
+<booktitle>In Proceedings of NTICIR-7 Workshop,</booktitle>
+<contexts>
+<context position="3302" citStr="Shima et al., 2008" startWordPosition="545" endWordPosition="548"> NLP pipeline. For instance, given an NER tool that always (i.e., in both training and test data) recognizes the pesticide DDT as an ORG, our model realizes, when a question is asked about the type of chemicals, the correct answer might be incorrectly but consistently recognized as ORG by NER. This helps reduce errors introduced by wrong answer types, which were estimated as the most significant contributer (36.4%) of errors in the then state-of-the-art QA system of Moldovan et al. (2003). The features based on TED allow us to draw the 1CRFs have been used in judging answer-bearing sentences (Shima et al., 2008; Ding et al., 2008; Wang and Manning, 2010), but not extracting exact answers from these sentences. 858 Proceedings of NAACL-HLT 2013, pages 858–867, Atlanta, Georgia, 9–14 June 2013. c�2013 Association for Computational Linguistics connection between the question and answer sentences before answer extraction, whereas traditionally the exercise of answer validation (Magnini et al., 2002; Penas et al., 2008; Rodrigo et al., 2009) has been performed after as a remedy to ensure the answer is really “about” the question. Motivated by a desire for a fast runtime,2 we base our TED implementation on</context>
+<context position="10007" citStr="Shima et al. (2008)" startWordPosition="1651" endWordPosition="1654"> edit sequence. The resultant system is fast in practice, processing 10,000 pre-parsed tree pairs per second on a contemporary machine.6 2.2 TED for Sentence Ranking The task of Question Answer Sentence Ranking (QASR) takes a question and a set of source sentences, returning a list sorted by the probability likelihood that each sentence contains an appropriate answer. Prior work in this includes that of: Punyakanok et al. (2004), based on mapping syntactic dependency trees; Wang et al. (2007) utilizing Quasi-Synchronous Grammar (Smith and Eisner, 2006); Heilman and Smith (2010) using TED; and Shima et al. (2008), Ding et al. (2008) and Wang and Manning (2010), who each employed a CRF in various ways. Wang et al. (2007) made their dataset public, which we use here for system validation. To date, models based on TED have shown the best performance for this task. Our implementation follows Heilman and Smith (2010), with the addition of 15 new features beyond their original 33 (see Table 1). Based on results 6In later tasks, feature extraction and decoding will slow down the system, but the final system was still able to process 200 pairs per second. 860 set source #ques. #pairs %pos. len. TRAIN-ALL TREC</context>
+</contexts>
+<marker>Shima, Lao, Nyberg, Mitamura, 2008</marker>
+<rawString>H. Shima, N. Lao, E. Nyberg, and T. Mitamura. 2008. Complex cross-lingual question answering as sequential classification and multi-document summarization task. In Proceedings of NTICIR-7 Workshop, Japan.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>David A Smith</author>
+<author>Jason Eisner</author>
+</authors>
+<title>Quasisynchronous grammars: Alignment by soft projection of syntactic dependencies.</title>
+<date>2006</date>
+<booktitle>In Proceedings of the HLTNAACL Workshop on Statistical Machine Translation,</booktitle>
+<pages>23--30</pages>
+<location>New York,</location>
+<contexts>
+<context position="9946" citStr="Smith and Eisner, 2006" startWordPosition="1639" endWordPosition="1643">ractice this gave stopwords “too much say” in guiding the overall edit sequence. The resultant system is fast in practice, processing 10,000 pre-parsed tree pairs per second on a contemporary machine.6 2.2 TED for Sentence Ranking The task of Question Answer Sentence Ranking (QASR) takes a question and a set of source sentences, returning a list sorted by the probability likelihood that each sentence contains an appropriate answer. Prior work in this includes that of: Punyakanok et al. (2004), based on mapping syntactic dependency trees; Wang et al. (2007) utilizing Quasi-Synchronous Grammar (Smith and Eisner, 2006); Heilman and Smith (2010) using TED; and Shima et al. (2008), Ding et al. (2008) and Wang and Manning (2010), who each employed a CRF in various ways. Wang et al. (2007) made their dataset public, which we use here for system validation. To date, models based on TED have shown the best performance for this task. Our implementation follows Heilman and Smith (2010), with the addition of 15 new features beyond their original 33 (see Table 1). Based on results 6In later tasks, feature extraction and decoding will slow down the system, but the final system was still able to process 200 pairs per s</context>
+</contexts>
+<marker>Smith, Eisner, 2006</marker>
+<rawString>David A. Smith and Jason Eisner. 2006. Quasisynchronous grammars: Alignment by soft projection of syntactic dependencies. In Proceedings of the HLTNAACL Workshop on Statistical Machine Translation, pages 23–30, New York, June.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Mark D Smucker</author>
+<author>James Allan</author>
+<author>Ben Carterette</author>
+</authors>
+<title>A comparison of statistical significance tests for information retrieval evaluation.</title>
+<date>2007</date>
+<booktitle>In CIKM ’07: Proceedings of the sixteenth ACM conference on Conference on information and knowledge management,</booktitle>
+<pages>623--632</pages>
+<publisher>ACM.</publisher>
+<location>New York, NY, USA.</location>
+<contexts>
+<context position="14380" citStr="Smucker et al., 2007" startWordPosition="2383" endWordPosition="2386">on’s wh- terms. However, we show that this approach is better formulated as a (strongly indicative) feature of a larger set of answer extraction signals. 3.1 Sequence Model Figure 2 illustrates the task of tagging each token in a candidate sentence with one of the following la7TRAIN-ALL is not used in QASR, but later for answer extraction; TRAIN comes from the first 100 questions of TRAINALL. 8As the test set is of limited size (94 questions), then while our MAP/MRR scores are 2.8% — 5.6% higher than prior work, this is not statistically significant according to the Paired Randomization Test (Smucker et al., 2007), and thus should be considered on par with the current state of the art. 861 Figure 2: An example of linear-chain CRF for answer sequence tagging. bels: B-ANSWER (beginning of answer), I-ANSWER (inside of answer), O (outside of answer). Besides local POS/NER/DEP features, at each token we need to inspect the entire input to connect the answer sentence with the question sentence through tree edits, drawing features from the question and the edit script, motivating the use of a linear-chain CRF model (Lafferty et al., 2001) over HMMs. To the best of our knowledge this is the first time a CRF ha</context>
+</contexts>
+<marker>Smucker, Allan, Carterette, 2007</marker>
+<rawString>Mark D. Smucker, James Allan, and Ben Carterette. 2007. A comparison of statistical significance tests for information retrieval evaluation. In CIKM ’07: Proceedings of the sixteenth ACM conference on Conference on information and knowledge management, pages 623–632, New York, NY, USA. ACM.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>E Sneiders</author>
+</authors>
+<title>Automated question answering: template-based approach.</title>
+<date>2002</date>
+<tech>Ph.D. thesis, KTH.</tech>
+<contexts>
+<context position="20377" citStr="Sneiders, 2002" startWordPosition="3424" endWordPosition="3425">sually carries higher edit feature weights than an aligned adjective. Alignment distance We observed that a candidate answer often appears close to an aligned word (i.e., answer tokens tend to be located “nearby” portions of text that align across the pair), especially in compound noun constructions, restrictive clauses, preposition phrases, etc. For instance, in the following pair, the answer Limp Bizkit comes from the leading compound noun: Past work has designed large numbers of specific templates aimed at these constructions (Soubbotin, 2001; Ravichandran et al., 2003; Clark et al., 2003; Sneiders, 2002). Here we use a single general feature that we expect to pick up much of this signal, without the significant feature engineering. Thus we incorporated a simple feature to roughly model this phenomenon. It is defined as the distance to the nearest aligned nonstop word in the original word order. In the above example, the only aligned nonstop word is Durst. Then this nearest alignment distance feature for the word Limp is: nearest dist to align(Limp):5 This is the only integer-valued feature. All other features are binary-valued. Note this feature does not specify answer types: an adverb close </context>
+</contexts>
+<marker>Sneiders, 2002</marker>
+<rawString>E. Sneiders. 2002. Automated question answering: template-based approach. Ph.D. thesis, KTH.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Martin M Soubbotin</author>
+</authors>
+<title>Patterns of potential answer expressions as clues to the right answers.</title>
+<date>2001</date>
+<booktitle>In Proceedings of the Tenth Text REtrieval Conference (TREC</booktitle>
+<contexts>
+<context position="20313" citStr="Soubbotin, 2001" startWordPosition="3414" endWordPosition="3415"> token’s POS/NER/DEP information. For instance, a deleted noun usually carries higher edit feature weights than an aligned adjective. Alignment distance We observed that a candidate answer often appears close to an aligned word (i.e., answer tokens tend to be located “nearby” portions of text that align across the pair), especially in compound noun constructions, restrictive clauses, preposition phrases, etc. For instance, in the following pair, the answer Limp Bizkit comes from the leading compound noun: Past work has designed large numbers of specific templates aimed at these constructions (Soubbotin, 2001; Ravichandran et al., 2003; Clark et al., 2003; Sneiders, 2002). Here we use a single general feature that we expect to pick up much of this signal, without the significant feature engineering. Thus we incorporated a simple feature to roughly model this phenomenon. It is defined as the distance to the nearest aligned nonstop word in the original word order. In the above example, the only aligned nonstop word is Durst. Then this nearest alignment distance feature for the word Limp is: nearest dist to align(Limp):5 This is the only integer-valued feature. All other features are binary-valued. N</context>
+</contexts>
+<marker>Soubbotin, 2001</marker>
+<rawString>Martin M. Soubbotin. 2001. Patterns of potential answer expressions as clues to the right answers. In Proceedings of the Tenth Text REtrieval Conference (TREC 2001).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Mengqiu Wang</author>
+<author>Christopher D Manning</author>
+</authors>
+<title>Probabilistic tree-edit models with structured latent variables for textual entailment and question answering.</title>
+<date>2010</date>
+<booktitle>In Proceedings of ACL 2010,</booktitle>
+<pages>1164--1172</pages>
+<location>Stroudsburg, PA, USA.</location>
+<contexts>
+<context position="3346" citStr="Wang and Manning, 2010" startWordPosition="553" endWordPosition="556">ER tool that always (i.e., in both training and test data) recognizes the pesticide DDT as an ORG, our model realizes, when a question is asked about the type of chemicals, the correct answer might be incorrectly but consistently recognized as ORG by NER. This helps reduce errors introduced by wrong answer types, which were estimated as the most significant contributer (36.4%) of errors in the then state-of-the-art QA system of Moldovan et al. (2003). The features based on TED allow us to draw the 1CRFs have been used in judging answer-bearing sentences (Shima et al., 2008; Ding et al., 2008; Wang and Manning, 2010), but not extracting exact answers from these sentences. 858 Proceedings of NAACL-HLT 2013, pages 858–867, Atlanta, Georgia, 9–14 June 2013. c�2013 Association for Computational Linguistics connection between the question and answer sentences before answer extraction, whereas traditionally the exercise of answer validation (Magnini et al., 2002; Penas et al., 2008; Rodrigo et al., 2009) has been performed after as a remedy to ensure the answer is really “about” the question. Motivated by a desire for a fast runtime,2 we base our TED implementation on the dynamicprogramming approach of Zhang an</context>
+<context position="10055" citStr="Wang and Manning (2010)" startWordPosition="1660" endWordPosition="1663"> in practice, processing 10,000 pre-parsed tree pairs per second on a contemporary machine.6 2.2 TED for Sentence Ranking The task of Question Answer Sentence Ranking (QASR) takes a question and a set of source sentences, returning a list sorted by the probability likelihood that each sentence contains an appropriate answer. Prior work in this includes that of: Punyakanok et al. (2004), based on mapping syntactic dependency trees; Wang et al. (2007) utilizing Quasi-Synchronous Grammar (Smith and Eisner, 2006); Heilman and Smith (2010) using TED; and Shima et al. (2008), Ding et al. (2008) and Wang and Manning (2010), who each employed a CRF in various ways. Wang et al. (2007) made their dataset public, which we use here for system validation. To date, models based on TED have shown the best performance for this task. Our implementation follows Heilman and Smith (2010), with the addition of 15 new features beyond their original 33 (see Table 1). Based on results 6In later tasks, feature extraction and decoding will slow down the system, but the final system was still able to process 200 pairs per second. 860 set source #ques. #pairs %pos. len. TRAIN-ALL TREC8-12 1229 53417 12.0 any TRAIN TREC8-12 94 4718 </context>
+<context position="11556" citStr="Wang and Manning, 2010" startWordPosition="1908" endWordPosition="1911">10) 0.5951 0.6951 this paper (48 features) 0.6319 0.7270 +WNsearch 0.6371 0.7301 +WNfeature (11 more feat.) 0.6307 0.7477 Table 3: Results on the QA Sentence Ranking task. in DEV, we extract edits in the direction from the source sentence to the question. In addition to syntactic features, we incorporated the following lexical-semantic relations from WordNet: hypernym and synonym (nouns and verbs); entailment and causing (verbs); and membersOf, substancesOf, partsOf, haveMember, haveSubstance, havePart (nouns). Such relations have been used in prior approaches to this task (Wang et al., 2007; Wang and Manning, 2010), but not in conjunction with the model of Heilman and Smith (2010). These were made into features in two ways: WNsearch loosens renaming and alignment within the TED model from requiring strict lemma equality to allowing lemmas that shared any of the above relations, leading to renaming operations such as REN ...(country, china) and REN ...(sport, tennis); WNfeature counts how many words between the sentence and answer sentence have each of the above relations, separately as 10 independent features, plus an aggregate count for a total of 11 new features beyond the earlier 48. These features w</context>
+</contexts>
+<marker>Wang, Manning, 2010</marker>
+<rawString>Mengqiu Wang and Christopher D. Manning. 2010. Probabilistic tree-edit models with structured latent variables for textual entailment and question answering. In Proceedings of ACL 2010, pages 1164–1172, Stroudsburg, PA, USA.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Mengqiu Wang</author>
+<author>Noah A Smith</author>
+<author>Teruko Mitamura</author>
+</authors>
+<title>What is the Jeopardy model? a quasisynchronous grammar for QA.</title>
+<date>2007</date>
+<booktitle>In Proceedings of the 2007 Joint Conference on Empirical Methods in Natural Language Processing and Computational Natural Language Learning (EMNLP-CoNLL),</booktitle>
+<pages>22--32</pages>
+<location>Prague, Czech Republic,</location>
+<contexts>
+<context position="9885" citStr="Wang et al. (2007)" startWordPosition="1631" endWordPosition="1634">differences, tagging or parsing errors. tent terms. In practice this gave stopwords “too much say” in guiding the overall edit sequence. The resultant system is fast in practice, processing 10,000 pre-parsed tree pairs per second on a contemporary machine.6 2.2 TED for Sentence Ranking The task of Question Answer Sentence Ranking (QASR) takes a question and a set of source sentences, returning a list sorted by the probability likelihood that each sentence contains an appropriate answer. Prior work in this includes that of: Punyakanok et al. (2004), based on mapping syntactic dependency trees; Wang et al. (2007) utilizing Quasi-Synchronous Grammar (Smith and Eisner, 2006); Heilman and Smith (2010) using TED; and Shima et al. (2008), Ding et al. (2008) and Wang and Manning (2010), who each employed a CRF in various ways. Wang et al. (2007) made their dataset public, which we use here for system validation. To date, models based on TED have shown the best performance for this task. Our implementation follows Heilman and Smith (2010), with the addition of 15 new features beyond their original 33 (see Table 1). Based on results 6In later tasks, feature extraction and decoding will slow down the system, b</context>
+<context position="11531" citStr="Wang et al., 2007" startWordPosition="1904" endWordPosition="1907">ang and Manning (2010) 0.5951 0.6951 this paper (48 features) 0.6319 0.7270 +WNsearch 0.6371 0.7301 +WNfeature (11 more feat.) 0.6307 0.7477 Table 3: Results on the QA Sentence Ranking task. in DEV, we extract edits in the direction from the source sentence to the question. In addition to syntactic features, we incorporated the following lexical-semantic relations from WordNet: hypernym and synonym (nouns and verbs); entailment and causing (verbs); and membersOf, substancesOf, partsOf, haveMember, haveSubstance, havePart (nouns). Such relations have been used in prior approaches to this task (Wang et al., 2007; Wang and Manning, 2010), but not in conjunction with the model of Heilman and Smith (2010). These were made into features in two ways: WNsearch loosens renaming and alignment within the TED model from requiring strict lemma equality to allowing lemmas that shared any of the above relations, leading to renaming operations such as REN ...(country, china) and REN ...(sport, tennis); WNfeature counts how many words between the sentence and answer sentence have each of the above relations, separately as 10 independent features, plus an aggregate count for a total of 11 new features beyond the ear</context>
+<context position="13008" citStr="Wang et al. (2007)" startWordPosition="2149" endWordPosition="2152">Per question, sentences with non-stopword overlap were first retrieved from the task collection, which were then compared against the TREC answer pattern (in the form of Perl regular expressions). If a sentence matched, then it was deemed a (noisy) positive example. Finally, TRAIN, DEV and TEST were manually corrected for errors. Those authors decided to limit candidate source sentences to be no longer than 40 words.7 Keeping with prior work, those questions with only positive or negative examples were removed, leaving 94 of the original 100 questions for evaluation. The data was processed by Wang et al. (2007) with the following tool chain: POS tags via MXPOST (Ratnaparkhi, 1996); parse trees via MSTParser (McDonald et al., 2005) with 12 coarsegrained dependency relation labels; and named entities via Identifinder (Bikel et al., 1999). Mean Average Precision (MAP) and Mean Reciprocal Rank (MRR) are reported in Table 3. Our implementation gives state of the art performance, and is furthered improved by our inclusion of semantic features drawn from WordNet.8 3 CRF with TED for Answer Extraction In this section we move from ranking source sentences, to the next QA stage: answer extraction. Given our c</context>
+</contexts>
+<marker>Wang, Smith, Mitamura, 2007</marker>
+<rawString>Mengqiu Wang, Noah A. Smith, and Teruko Mitamura. 2007. What is the Jeopardy model? a quasisynchronous grammar for QA. In Proceedings of the 2007 Joint Conference on Empirical Methods in Natural Language Processing and Computational Natural Language Learning (EMNLP-CoNLL), pages 22–32, Prague, Czech Republic, June.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D Zhang</author>
+<author>W S Lee</author>
+</authors>
+<title>Question classification using support vector machines.</title>
+<date>2003</date>
+<booktitle>In Proceedings of the 26th annual international ACM SIGIR conference on Research and development in informaion retrieval,</booktitle>
+<pages>26--32</pages>
+<publisher>ACM.</publisher>
+<contexts>
+<context position="18526" citStr="Zhang and Lee, 2003" startWordPosition="3111" endWordPosition="3114">stion B-ANS O O O O O Tennis player Jennifer Capriati is 23 862 dependency tree is analyzed and the Lexical Answer • What is the name of Durst ’s group? Type (LAT) is extracted. The following are some • Limp Bizkit lead singer Fred Durst did a lot ... examples of LAT for what questions: • color: what is Crips’ gang color? • animal: what kind of animal is an agouti? The extra LAT=? feature is also used with chunking features for what/which questions. There is significant prior work in building specialized templates or classifiers for labeling question types (Hermjakob, 2001; Li and Roth, 2002; Zhang and Lee, 2003; Hacioglu and Ward, 2003; Metzler and Croft, 2005; Blunsom et al., 2006; Moschitti et al., 2007). We designed our shallow question type features based on the intuitions of these prior work, with the goal of having a relatively compact approach that still extracts useful predictive signal. One possible drawback, however, is that if an LAT is not observed during training but shows up in testing, the sequence tagger would not know which answer type to associate with the question. In this case it falls back to the more general qword=? feature and will most likely pick the type of answers that are</context>
+</contexts>
+<marker>Zhang, Lee, 2003</marker>
+<rawString>D. Zhang and W.S. Lee. 2003. Question classification using support vector machines. In Proceedings of the 26th annual international ACM SIGIR conference on Research and development in informaion retrieval, pages 26–32. ACM.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>K Zhang</author>
+<author>D Shasha</author>
+</authors>
+<title>Simple fast algorithms for the editing distance between trees and related problems.</title>
+<date>1989</date>
+<journal>SIAM J. Comput.,</journal>
+<volume>18</volume>
+<issue>6</issue>
+<contexts>
+<context position="3961" citStr="Zhang and Shasha (1989)" startWordPosition="648" endWordPosition="651">g, 2010), but not extracting exact answers from these sentences. 858 Proceedings of NAACL-HLT 2013, pages 858–867, Atlanta, Georgia, 9–14 June 2013. c�2013 Association for Computational Linguistics connection between the question and answer sentences before answer extraction, whereas traditionally the exercise of answer validation (Magnini et al., 2002; Penas et al., 2008; Rodrigo et al., 2009) has been performed after as a remedy to ensure the answer is really “about” the question. Motivated by a desire for a fast runtime,2 we base our TED implementation on the dynamicprogramming approach of Zhang and Shasha (1989), which helps our final system process 200 QA pairs per second on standard desktop hardware, when input is syntactically pre-parsed. In the following we first provide background on the TED model, going on to evaluate our implementation against prior work in the context of question answer sentence ranking (QASR), achieving state of the art in that task. We then describe how we couple TED features to a linear-chain CRF for answer extraction, providing the set of features used, and finally experimental results on an extraction dataset we make public (together with the software) to the community.3</context>
+<context position="6024" citStr="Zhang and Shasha (1989)" startWordPosition="973" endWordPosition="976">ee Edit Distance (§2.1) models have been shown effective in a variety of applications, including textual entailment, paraphrase identification, answer ranking and information retrieval (Reis et al., 2004; Kouylekov and Magnini, 2005; Heilman and Smith, 2010; Augsten et al., 2010). We chose the variant proposed by Heilman and Smith (2010), inspired by its simplicity, generality, and effectiveness. Our approach differs from those authors in their reliance on a greedy search routine to make use of a complex tree kernel. With speed a consideration, we opted for the dynamic-programming solution of Zhang and Shasha (1989) (§2.1). We added new lexicalsemantic features §(2.2) to the model and then evaluated our implementation on the QASR task, showing strong results §(2.3). 2.1 Cost Design and Edit Search Following Bille (2005), we define an edit script between trees T1, T2 as the edit sequence transforming T1 to T2 according to a cost function, with the total summed cost known as the tree edit distance. Basic edit operations include: insert, delete and rename. With T a dependency tree, we represent each node by three fields: lemma, POS and the type of dependency relation to the node’s parent (DEP). For instance</context>
+<context position="8442" citStr="Zhang and Shasha (1989)" startWordPosition="1391" endWordPosition="1394">jennifer nn sport nn capriati nnp WordNet Tennis player Jennifer Capriati is 23 What sport does Jennifer Capriati play jennifer nnp We begin by uniformly assigning basic edits a cost of 1.0,4 which brings the cost of a full node insertion or deletion to 3 (all the three fields inserted or deleted). We allow renaming of POS and/or relation type iff the lemmas of source and target nodes are identical.5 When two nodes are identical and thus do not appear in the edit script, or when two nodes are renamed due to the same lemma, we say they are aligned by the tree edit model (see Figure 1). We used Zhang and Shasha (1989)’s dynamic programming algorithm to produce an optimal edit script with the lowest tree edit distance. The approach explores both trees in a bottom-up, postorder manner, running in time: O(|T1 ||T2 |min(D1, L1) min(D2, L2)) where |Ti |is the number of nodes, Di is the depth, and Li is the number of leaves, with respect to tree Ti. Additionally, we fix the cost of stopword renaming to 2.5, even in the case of identity, regardless of whether two stopwords have the same POS tags or relations. Stopwords tend to have fixed POS tags and dependency relations, which often leads to less expensive align</context>
+</contexts>
+<marker>Zhang, Shasha, 1989</marker>
+<rawString>K. Zhang and D. Shasha. 1989. Simple fast algorithms for the editing distance between trees and related problems. SIAM J. Comput., 18(6):1245–1262, December.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

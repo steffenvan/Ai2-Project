@@ -1,0 +1,1579 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.000226">
+<title confidence="0.999175">
+Tree Edit Models for Recognizing Textual Entailments, Paraphrases,
+and Answers to Questions
+</title>
+<author confidence="0.996191">
+Michael Heilman Noah A. Smith
+</author>
+<affiliation confidence="0.889984333333333">
+Language Technologies Institute
+Carnegie Mellon University
+Pittsburgh, PA 15213, USA
+</affiliation>
+<email confidence="0.998858">
+{mheilman,nasmith}@cs.cmu.edu
+</email>
+<sectionHeader confidence="0.997389" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.999832428571429">
+We describe tree edit models for representing
+sequences of tree transformations involving
+complex reordering phenomena and demon-
+strate that they offer a simple, intuitive, and
+effective method for modeling pairs of seman-
+tically related sentences. To efficiently extract
+sequences of edits, we employ a tree kernel
+as a heuristic in a greedy search routine. We
+describe a logistic regression model that uses
+33 syntactic features of edit sequences to clas-
+sify the sentence pairs. The approach leads to
+competitive performance in recognizing tex-
+tual entailment, paraphrase identification, and
+answer selection for question answering.
+</bodyText>
+<sectionHeader confidence="0.999516" genericHeader="introduction">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.971511350877193">
+Many NLP tasks involve modeling relations be-
+tween pairs of sentences or short texts in the same
+language. Examples include recognizing textual en-
+tailment, paraphrase identification, and question an-
+swering. Generic approaches are, of course, desir-
+able; we believe such approaches are also feasible
+because these tasks exhibit some similar semantic
+relationships between sentences.
+A popular method for such tasks is Tree Edit Dis-
+tance (TED), which models sentence pairs by find-
+ing a low or minimal cost sequence of editing oper-
+ations to transform a tree representation of one sen-
+tence (e.g., a dependency or phrase structure parse
+tree) into a tree for the other. Unlike grammar-
+based models and shallow-feature discriminative ap-
+proaches, TED provides an intuitive story for tree
+pairs where one tree is derived from the other by a
+sequence of simple transformations.
+The available operations in standard TED are the
+following: insertion of a node, relabeling (i.e., re-
+naming) of a node, and deletion (i.e., removal) of a
+node. While the restriction to these three operations
+permits efficient dynamic programming solutions
+for finding a minimum-cost edit sequence (Klein,
+1989; Zhang and Shasha, 1989), certain interesting
+and prevalent phenomena involving reordering and
+movement cannot be elegantly captured. For exam-
+ple, consider the following sentence pair, which is
+a simplified version of a true entailment (i.e., the
+premise entails the hypothesis) in the development
+data for the RTE-3 task.
+Premise: Pierce built the home for his daughter off
+Rossville Blvd, as he lives nearby.
+Hypothesis: Pierce lives near Rossville Blvd.
+In a plausible dependency tree representation of
+the premise, live and Rossville Blvd would be in sep-
+arate subtrees under built. In the hypothesis tree,
+however, the corresponding nodes would be in a
+grandparent-child relationship as part of the same
+phrase, lives near Rossville Blvd. In general, one
+would expect that short transformation sequences to
+provide good evidence of true entailments. How-
+ever, to account for the grandparent-child relation-
+ship in the hypothesis, TED would produce a fairly
+long sequence, relabeling nearby to be near, delet-
+ing the two nodes for Rossville Blvd, and then re-
+inserting those nodes under near.
+We describe a tree edit approach that allows for
+more effective modeling of such complex reordering
+phenomena. Our approach can find a shorter and
+more intuitive edit sequence, relabeling nearby to be
+near, and then moving the whole subtree Rossville
+Blvd to be a child of near, as shown in Figure 1.
+A model should also be able to consider character-
+istics of the tree edit sequence other than its overall
+length (e.g., how many proper nouns were deleted).
+Using a classifier with a small number of syntactic
+</bodyText>
+<page confidence="0.951811">
+1011
+</page>
+<note confidence="0.846758">
+Human Language Technologies: The 2010 Annual Conference of the North American Chapter of the ACL, pages 1011–1019,
+Los Angeles, California, June 2010. c�2010 Association for Computational Linguistics
+</note>
+<figureCaption confidence="0.988495">
+Figure 1: A tree edit sequence transforming a premise to an entailed hypothesis. Dependency types and parts of speech
+are omitted for clarity.
+</figureCaption>
+<figure confidence="0.96334025">
+Pierce built the home for his daughter off Rossville Blvd, as he lives nearby.
+RELABEL-NODE
+(nearby)
+Pierce built the home for his daughter off Rossville Blvd, as he lives near.
+MOVE-SUBTREE
+(Rossville Blvd)
+Pierce built the home for his daughter off, as he lives near Rossville Blvd.
+MOVE-SUBTREE
+(Pierce)
+built the home for his daughter off, as Pierce he lives near Rossville Blvd.
+multiple RELABEL-EDGE, DELETE-LEAF, DELETE-AND-MERGE edits
+Pierce lives near Rossville Blvd.
+</figure>
+<bodyText confidence="0.999586117647059">
+features, our approach allows us to learn—from la-
+beled examples—how different types of edits should
+affect the model’s decisions (e.g., about whether two
+sentences are paraphrases).
+The structure of this paper is as follows. §2 in-
+troduces our model and describes the edit opera-
+tions that were implemented for our experiments.
+§3 details the search-based procedure for extracting
+edit sequences for pairs of sentences. §4 describes
+the classifier for sentence pairs based on features of
+their corresponding edit sequences. §5 describes and
+presents the results of experiments involving recog-
+nizing textual entailment (Giampiccolo et al., 2007),
+paraphrase identification (Dolan et al., 2004), and an
+answer selection task for question answering (Wang
+et al., 2007). §6 addresses related work, and §7 pro-
+vides concluding remarks.
+</bodyText>
+<sectionHeader confidence="0.962563" genericHeader="method">
+2 Extended Tree Edit Sequences
+</sectionHeader>
+<bodyText confidence="0.999911368421053">
+This section defines a tree edit sequence and de-
+scribes the operations used in our experiments.
+We begin with some conventions. We use depen-
+dency trees as the structure upon which the tree ed-
+its will operate. The child nodes for a given parent
+are represented in a head-outward fashion such that
+the left and right children are separate lists, with the
+left- and right-most elements as the last members of
+their respective lists, as in most generative depen-
+dency models (Eisner, 1996). Each node consists of
+a lemmatized word token as its main label (hereafter,
+lemma), a part of speech tag (POS), and a syntactic
+relation label for the edge to its parent. We assume
+the root node has a special dummy edge label ROOT.
+Let T, be a “current tree” that is being trans-
+formed and let Tt be a “target tree” into which T,
+will ultimately be transformed. Let T (i) be a node
+with an index i into the tree T, where the indices are
+arbitrary (e.g., they could be word positions).
+</bodyText>
+<subsectionHeader confidence="0.916335">
+2.1 Definition
+</subsectionHeader>
+<bodyText confidence="0.999946833333333">
+We define a tree edit sequence to be a series of edit
+operations that transform a source tree (the initial
+T,) into a target tree Tt.1 While TED permits only
+insert, relabel, and delete operations, edit sequences
+may contain more complex operations, such as mov-
+ing entire subtrees and re-ordering child nodes.
+</bodyText>
+<subsectionHeader confidence="0.996117">
+2.2 Implemented Operations
+</subsectionHeader>
+<bodyText confidence="0.999119266666667">
+For our experiments, we used the types of edit op-
+erations listed in Table 1.2 The first six operations
+are straightforward extensions of the insert, rela-
+bel and delete operations allowed in TED. The final
+three operations, MOVE-SUBTREE, NEW-ROOT,
+and MOVE-SIBLING, enable succinct edit se-
+quences for complex transformations. For a given
+current tree, there may be many instantiations of
+each operation (e.g., DELETE-LEAF could be in-
+voked to delete any of a number of leaf nodes). Note
+that any tree can be transformed into any other sim-
+ply by deleting all nodes from the one tree and in-
+serting all the nodes in the other. However, our set
+of tree edit operations permits more concise and in-
+tuitive edit sequences.
+</bodyText>
+<sectionHeader confidence="0.996392" genericHeader="method">
+3 Searching for Tree Edit Sequences
+</sectionHeader>
+<bodyText confidence="0.999911">
+To model sentence pairs effectively, we seek a short
+sequence of tree edits that transforms one tree into
+another. The space of possible edit sequences, as
+with TED and many other methods involving trees,
+</bodyText>
+<footnote confidence="0.999066666666667">
+1Such a sequence is sometimes called a “script” for TED.
+2We leave for future work the exploration of other opera-
+tions (e.g., swapping parent and child nodes).
+</footnote>
+<page confidence="0.973022">
+1012
+</page>
+<table confidence="0.993172210526316">
+Operation Arguments Description
+INSERT-CHILD node index j, new lemma l, POS p, Insert a node with lemma l, POS p, and edge label e as the
+edge label e, side s E {left, right} last child (i.e., farthest from parent) on side s of T(j).
+INSERT-PARENT non-root node index j, new lemma l, Create a node with lemma l, POS p, and edge label e. Make
+new POS p, edge label e, T(j) a child of the new node on side s. Insert the new node
+side s E {left, right} as a child of the former parent of T(j) in the same position.
+DELETE-LEAF leaf node index j Remove the leaf node T(j).
+DELETE-&amp;-MERGE node index j Remove T(j). Insert its child as a child of T(j)’s former
+(s.t. T(j) has exactly 1 child) parent in the same position.
+RELABEL-NODE node index j, new lemma l, new POS p Set the lemma of T(j) to be l and its POS to be p.
+RELABEL-EDGE node index j, new edge label e Set the edge label of T(j) to be e.
+MOVE-SUBTREE node index j, node index k Move T(j) to be the last child on the s side of T(k).
+(s.t. T (k) is not a descendant of T(j)),
+side s E {left, right}
+NEW-ROOT non-root node index j, Make T(j) the new root node of the tree. Insert the former
+side s E {left, right} root as the last child on the s side of T(j).
+MOVE-SIBLING non-root node index j, Move T(j) to be the r child on the s side of its parent.
+side s E {left, right},
+position r E {first, last}
+</table>
+<tableCaption confidence="0.999928">
+Table 1: Possible operations in our extended tree edit implementation. All are described as operations to tree T.
+</tableCaption>
+<bodyText confidence="0.999679333333333">
+is exponentially large in the size of the trees. How-
+ever, while dynamic programming solutions exist
+for TED (Klein, 1989; Zhang and Shasha, 1989),
+it is unlikely that such efficient algorithms are avail-
+able for our problem because of the lack of locality
+restrictions on edit operations.3
+</bodyText>
+<subsectionHeader confidence="0.971257">
+3.1 Algorithm for Extracting Sequences
+</subsectionHeader>
+<bodyText confidence="0.994963173913044">
+Rather than dynamic programming, we use greedy
+best-first search (Pearl, 1984) to efficiently find sen-
+sible (if not minimal) edit sequences. The distin-
+guishing characteristic of greedy best-first search is
+that its function for evaluating search states is sim-
+ply a heuristic function that estimates the remaining
+cost, rather than a heuristic function plus the cost
+so far (e.g., number of edits), as in other types of
+search.
+Here, the initial search state is the source tree, the
+current state is T, and the goal state is Tt. The func-
+tion for generating the successors for a given state
+returns returns trees for all possible specifications of
+operations on T, (§2.2), subject to the minimal con-
+straints to be described in §3.3. The enumeration
+order of the edits in the search procedure (i.e., the
+order in which states are explored) follows the or-
+der of their presentation in Table 1. In preliminary
+3Gildea (2003) proposes a dynamic programming algorithm
+for a related tree alignment problem, but it is still exponential in
+the maximum number of children for a node.
+experiments, varying this order had no effect on the
+extracted transformations.
+</bodyText>
+<subsectionHeader confidence="0.999077">
+3.2 Tree Kernel Heuristic
+</subsectionHeader>
+<bodyText confidence="0.96621224">
+In our greedy search approach, the evaluation func-
+tion’s value for a state depends only on the heuristic
+function’s estimate of how different the current tree
+at that state is from the target tree. Using this func-
+tion, at each step, the search routine chooses the next
+state (i.e., edit) so as to minimize the difference be-
+tween the current and target trees.
+We use a tree kernel to define the heuristic func-
+tion. A kernel is a special kind of symmetric func-
+tion from a pair of objects to a real number. It
+can be interpreted as the inner product of those ob-
+jects represented in some real-valued feature space
+(Sch¨olkopf and Smola, 2001). A tree kernel, as pro-
+posed by Collins and Duffy (2001), is a convolution
+kernel4 whose input is a pair of trees and whose out-
+put is a positive number indicating the similarity of
+the sets of all their subtrees.
+The dimensionality of the feature vector associ-
+ated with a tree kernel is thus unbounded in general,
+and larger trees generally lead to larger kernel val-
+ues. Direct use as a search heuristic would lead to
+the exploration of states for larger and larger trees,
+even ones larger than the target tree. Thus, as in
+4Haussler (1999) provides a proof, which can be extended
+for our kernel, that tree kernels are valid kernel functions.
+</bodyText>
+<page confidence="0.956582">
+1013
+</page>
+<bodyText confidence="0.999957222222222">
+Equation 1, the search heuristic H “normalizes” the
+kernel K of the current tree Tc and target tree Tt
+to unit range by dividing by the geometric mean of
+the kernels comparing the individual trees to them-
+selves.5 Also, the normalized value is subtracted
+from 1 so as to make it a difference rather than a
+similarity. The search routine will thus reach the
+goal state when the heuristic reaches 0, indicating
+that the current and target trees are identical.
+</bodyText>
+<equation confidence="0.9946">
+K(Tc, Tt)
+H(Tc) = 1 − V/K(Tc,Tc) x K(Tt,Tt) (1)
+</equation>
+<bodyText confidence="0.989997435897436">
+Kernels are most commonly used in the efficient
+construction of margin-based classifiers in the im-
+plied representation space (e.g., Zelenko et al.,
+2003). Here, however, the kernel helps to find a
+representation (i.e., an edit sequence) for subsequent
+modeling steps.
+We are effectively mapping the source, current,
+and target trees to points on the surface of a high-
+dimensional unit sphere associated with the normal-
+ized kernel. In this geometric interpretation, the
+search heuristic in Equation 1 leads the search al-
+gorithm to explore reachable trees along the surface
+of this sphere, always choosing the one whose an-
+gle with the target tree is smallest, until the angle is
+0. The path on the sphere corresponds to an edit se-
+quence, from which we will derive edit features in
+§4 for classification.
+Our kernel is based on the partial tree kernel
+(PTK) proposed by Moschitti (2006). It considers
+matches between ordered subsequences of children
+in addition to the full sequences of children as in
+Collins and Duffy (2001). This permits a very fine-
+grained measure of tree pair similarity. Importantly,
+if two nodes differ only by the presence or position
+of a single child, they will still lead to a large ker-
+nel function value. We also sum over the similarities
+between all pairs of nodes, similar to (Collins and
+Duffy, 2001).
+Since the PTK considers non-contiguous subse-
+quences, it is very computationally expensive. We
+therefore restrict our kernel to consider only con-
+tiguous subsequences, as in the contiguous tree ker-
+nel (CTK) (Zelenko et al., 2003).
+5This normalized function is also guaranteed to be a kernel
+function (Sch¨olkopf and Smola, 2001).
+To define our kernel, we begin with a similarity
+function for pairs of nodes n1 and n2 that depends
+on their lemmas, POS tags, edge labels, and sides
+with respect to their parents:6
+</bodyText>
+<equation confidence="0.97046">
+s(n1,n2) =δ(l(n1),l(n2))
+�X δ(f(n1), f(n2)) (2)
+f∈{l,e,p,s}
+</equation>
+<bodyText confidence="0.999990181818182">
+where δ returns 1 if its arguments are equivalent, 0
+otherwise. l, e, p, and s are used here as functions
+to select the lemma, edge label, POS, and side of
+a node. Equation 2 encodes the linguistic intuition
+that the primary indicator of node similarity should
+be a lexical match between lemmas. If the lem-
+mas match, then edge labels, POS, and the locations
+(sides) relative to their parents are also considered.
+The kernel is defined recursively (starting from
+the roots), where ni is a node in the set of nodes
+NT, in tree Ti:
+</bodyText>
+<equation confidence="0.9724638">
+K(T1, T2) = � � Δ(n1, n2) (3)
+n1∈{NT1} n2∈{NT2}
+�Δ(n1, n2) = µ λ2s(n1, n2) + (4)
+�Δ(cn1[J1i], cn2[J2i]) �
+J1 = (J11, J12, J1a, ...) is an index sequence as-
+</equation>
+<bodyText confidence="0.997853">
+sociated with any contiguous ordered sequence of
+children cn1 of node n1 (likewise for J2). J1i and
+J2i point to the ith children in the two sequences.
+� � �returns the length of a sequence.
+The kernel includes two decay factors: λ for the
+length of child subsequences, as in Zelenko et al.
+(2003) and Moschitti (2006); and µ for the height of
+the subtree, as in Collins and Duffy (2001) and Mos-
+chitti (2006). We set both to 0.25 in our experiments
+to encourage the search to consider edits leading to
+smaller matches (e.g., of individual parent-child de-
+pendencies) before larger ones.7
+</bodyText>
+<footnote confidence="0.958406428571428">
+6The side of a node relative to its parent in a dependency tree
+is important: two parent nodes with the same children should
+not be considered exact matches if children are on different
+sides (e.g., defeated the insurgents and the insurgents defeated).
+7From experiments with the paraphrase training set (§5.2),
+performance does not appear sensitive to the decay parameters.
+Settings of 0.1, 0.2, 0.3, and 0.4 led to 10-fold cross-validation
+</footnote>
+<equation confidence="0.8893515">
+� l(J1) �
+J1,J2,|J1|=|J2 |i=1
+</equation>
+<page confidence="0.895793">
+1014
+</page>
+<bodyText confidence="0.9985978">
+The main difference between our kernel and the
+CTK is that we sum over all pairs of subtrees
+(Equation 3). In contrast, the CTK only consid-
+ers only one pair of subtrees. When the CTK
+is applied to relation extraction by Culotta and
+Sorensen (2004), each subtree is the smallest com-
+mon subtree that includes the entities between which
+a relation may exist (e.g., the subtree for Texas-
+based energy company Exxon Mobil when extract-
+ing ORGANIZATION-LOCATION relations).
+</bodyText>
+<subsectionHeader confidence="0.996054">
+3.3 Constraints on the Search Space
+</subsectionHeader>
+<bodyText confidence="0.99854575">
+For computational efficiency, we impose the follow-
+ing three constraints to simplify the search space.
+Note that the first two simply prune away obviously
+unhelpful search states.
+</bodyText>
+<listItem confidence="0.9287679375">
+1. For INSERT-CHILD, INSERT-PARENT, and
+RELABEL-NODE edits, the lemma and POS of
+the node to insert must occur in the target tree.
+Also, the pair consisting of the lemma for the
+node to insert and the lemma for its prospective
+parent must not appear more times in the result-
+ing tree than in the target tree.
+2. For MOVE-SUBTREE edits, the pair consisting
+of the lemma for the node to move and the
+lemma for its prospective parent must exist in the
+target tree.
+3. For INSERT-CHILD and INSERT-PARENT
+edits, the edge labels attaching the newly in-
+serted nodes to their parents are always the most
+frequent edge label for the given POS.8 Further
+edits can modify these edge labels.
+</listItem>
+<subsectionHeader confidence="0.999555">
+3.4 Search Error and Failure
+</subsectionHeader>
+<bodyText confidence="0.7247997">
+The search does not always find optimal edit se-
+quences, but most sequences seem reasonable upon
+inspection. However, for some cases, the search
+does not find a sequence in a reasonable number
+of iterations. We therefore set an upper limit of
+maxIters = 200 on the number of iterations.9 In
+accuracy values that were not significantly different from each
+other. However, we did observe that increased search failure
+(§3.4) resulted from settings above 0.5.
+8Edge label frequencies for each POS were computed from
+the training data for the MST parser (McDonald et al., 2005).
+9maxIters = 400 for the textual entailment experiments to
+account for multi-sentence premises. For all tasks, extracting
+sequences took about 5 seconds on average per sentence pair
+with 1 GB of RAM on a 3.0 GHz machine.
+practice, this constraint is enforced a small fraction
+of the time (e.g., less than 0.1% of the time for the
+answer selection training data). If no goal state is
+found after maxIters iterations, a special unknown
+sequence feature is recorded.
+</bodyText>
+<sectionHeader confidence="0.91743" genericHeader="method">
+4 Classification of Sequences
+</sectionHeader>
+<bodyText confidence="0.999924533333333">
+Given a training set of labeled sentence pairs, af-
+ter extracting edit sequences, we train a logistic
+regression (LR) classification model (Hastie et al.,
+2001) on the labels and features of the extracted se-
+quences.10 We optimize with a variant of Newton’s
+method (le Cessie and van Houwelingen, 1997).
+The tree edit models use a set of 33 features of
+edit sequences to classify sentence pairs. We used
+the training data for the paraphrase task (§5.2) to de-
+velop this set. All features are integer-valued, and
+most are counts of different types of edits. Five are
+counts of the nodes in the source tree that were not
+edited directly by any operations (though their an-
+cestors or descendants may have been). Table 2 de-
+scribes the features in detail.
+</bodyText>
+<sectionHeader confidence="0.999742" genericHeader="method">
+5 Experiments
+</sectionHeader>
+<bodyText confidence="0.999992222222222">
+Experiments were conducted to evaluate tree edit
+models for three tasks: recognizing textual entail-
+ment (Giampiccolo et al., 2007), paraphrase identi-
+fication (Dolan et al., 2004), and an answer selec-
+tion task (Wang et al., 2007) for question answering
+(Voorhees, 2004). The feature set and first tree edit
+model were developed for paraphrase, and then ap-
+plied to the other tasks with very few modifications
+(all explained below) and no further tuning.11
+</bodyText>
+<subsectionHeader confidence="0.99777">
+5.1 Recognizing Textual Entailment
+</subsectionHeader>
+<bodyText confidence="0.980315642857143">
+A tree edit model was trained for recognizing tex-
+tual entailment (RTE). Here, an instance consists of
+10In cross-validation experiments with the training data, we
+found that unregularized LR outperformed SVMs (Vapnik,
+1995) and 22-regularized LR, perhaps due to the small number
+of features in our models.
+11All datasets were POS-tagged using Ratnaparkhi’s (1996)
+tagger and parsed for dependencies using the MST Parser
+(McDonald et al., 2005). Features were computed from
+POS and edge label information in the dependency parses.
+The WordNet API (Miller et al., 1990) was used for
+lemmatization only. An appendix with further experimen-
+tal details is available at http://www.ark.cs.cmu.edu/
+mheilman/tree-edit-appendix/.
+</bodyText>
+<page confidence="0.994707">
+1015
+</page>
+<figureCaption confidence="0.991217904761905">
+Feature Description
+totalEdits # of edits in the sequence.
+XEdits #s of X edits (where X is
+one of the nine edit types in
+Table 1).
+relabelSamePOS, #s of RELABEL-NODE edits
+relabelSameLemma, that: preserve POS, preserve
+relablePronoun, lemmas, convert between
+relabelProper, nouns and pronouns, change
+relabelNum proper nouns, change numeric
+values by more than 5% (to
+allow rounding), respectively.
+insertVorN, #s of INSERT-CHILD or
+insertProper INSERT-PARENT edits that:
+insert nouns or verbs, insert
+proper nouns, respectively.
+removeVorN, #s of REMOVE-LEAF or
+removeProper, REMOVE-&amp;-MERGE edits
+removeSubj, that: remove nouns or verbs,
+removeObj, remove proper nouns, remove
+removeVC, nodes with subject edge la-
+removeRoot bels, remove nodes with object
+edge labels, remove nodes
+with verb complement edge
+labels, remove nodes with
+root edge labels (which may
+occur after NEW-ROOT edits),
+respectively.
+relabelEdgeSubj, #s of RELABEL-EDGE edits
+relabeledgeObj, that: change to or from subject
+relabelEdgeVC, edge labels, change to or from
+relabelEdgeRoot object edge labels, change to
+or from verb complement edge
+labels, change to or from root
+edge labels, respectively.
+uneditedNodes, #s of unedited nodes: in total,
+uneditedNum, that are numeric values, that
+uneditedVerbs, are verbs, that are nouns, that
+uneditedNouns, are proper nouns, respectively.
+uneditedProper
+unknownSeq 1 if no edit sequence was
+found and 0 otherwise (§3.4).
+</figureCaption>
+<tableCaption confidence="0.990836">
+Table 2: Tree edit sequence classification features.
+</tableCaption>
+<bodyText confidence="0.99610125">
+a “premise,” which is a sentence or paragraph about
+a particular topic or event, and a “hypothesis,” which
+is a single, usually short, sentence that may or may
+not follow from the premise. The task is to de-
+cide whether or not the hypothesis is entailed by the
+premise (Giampiccolo et al., 2007).
+Tree edit sequences were extracted in one direc-
+tion, from premise to hypothesis.12 Since premises
+</bodyText>
+<footnote confidence="0.985106">
+12It is counter-intuitive to model adding information through
+extensive insertions, for both entailment and answer selection.
+</footnote>
+<table confidence="0.989823">
+System Acc. % Prec. % Rec. %
+Harmeling, 2007 59.5 - -
+de Marneffe et al., 2006 60.5 61.8 60.2
+M&amp;M, 2007 (NL) 59.4 70.1 36.1
+M&amp;M, 2007 (Hybrid) 64.3 65.5 63.9
+Tree Edit Model 62.8 61.9 71.2
+</table>
+<tableCaption confidence="0.9979542">
+Table 3: Results for recognizing textual entailments. Pre-
+cision and recall values are for the true entailment class.
+Results for de Marneffe et al. (2006) were reported by
+MacCartney and Manning (2008). Harmeling (2007)
+only reported accuracy.
+</tableCaption>
+<bodyText confidence="0.999794172413793">
+may consist of multiple sentences, we attach sen-
+tences as children of dummy root nodes, for both
+the premise and hypothesis. The model was trained
+on the development set (i.e., training data) for RTE-
+3 along with all the data from the RTE-1 and RTE-2
+tasks. It was then evaluated on the RTE-3 test set.
+We report precision and recall for true entailments,
+and overall accuracy (i.e., percentage correct).
+We compare to four systems that use syntactic de-
+pendencies and lexical semantic information.13 De
+Marneffe et al. (2006) described an RTE system
+that finds word alignments and then classifies sen-
+tence pairs based on those alignments. MacCart-
+ney and Manning (2008) used an inference pro-
+cedure based on Natural Logic, leading to a rela-
+tively high-precision, low-recall system. MacCart-
+ney and Manning (2008) also tested a hybrid of the
+natural logic system and the complementary system
+of de Marneffe et al. (2006) to improve coverage.
+Harmeling (2007) took an approach similar to ours
+involving classification based on transformation se-
+quences, but with less general operations and a more
+complex, heuristic procedure for finding sequences.
+Table 3 presents RTE results, showing that the
+tree edit model performs competitively. While it
+does not outperform state-of-the-art RTE systems,
+the tree edit model is simpler and less tailored to this
+task than many other RTE systems based on similar
+linguistic information.
+</bodyText>
+<footnote confidence="0.702388">
+13The top-performing RTE systems often involve significant
+manual engineering for the RTE task. Also, many employ tech-
+niques that make them not very comparable to our approach
+(e.g., theorem proving). We also note that Kouylekov and
+Magnini (2005) report 55% accuracy for RTE-2 using TED. See
+Giampiccolo et al. (2007) for more RTE-3 results.
+</footnote>
+<page confidence="0.941766">
+1016
+</page>
+<table confidence="0.9988386">
+System Acc. % Prec. % Rec. %
+Wan et al., 2006 75.6 77 90
+D&amp;S, 2009 (QG) 73.9 74.9 91.3
+D&amp;S, 2009 (PoE) 76.1 79.6 86.0
+Tree Edit Model 73.2 75.7 87.8
+</table>
+<tableCaption confidence="0.923707">
+Table 4: Paraphrase identification results, with precision
+</tableCaption>
+<table confidence="0.894398181818182">
+and recall measures for true (positive) paraphrases. Wan
+et al. (2006) report precision and recall values with only
+two significant digits.
+System MAP MRR
+Punyakanok et al., 2004 0.3814 0.4462
++WN 0.4189 0.4939
+Cui et al., 2005 0.4350 0.5569
++WN 0.4271 0.5259
+Wang et al., 2007 0.4828 0.5571
++WN 0.6029 0.6852
+Tree Edit Model 0.6091 0.6917
+</table>
+<tableCaption confidence="0.9941505">
+Table 5: Results for the task of answer selection for ques-
+tion answering. +WN denotes use of WordNet features.
+</tableCaption>
+<subsectionHeader confidence="0.998925">
+5.2 Paraphrase Identification
+</subsectionHeader>
+<bodyText confidence="0.99997615">
+A tree edit model was trained and tested for para-
+phrase identification using the the Microsoft Re-
+search Paraphrase Corpus (Dolan et al., 2004). The
+task is to identify whether two sentences convey es-
+sentially the same meaning.
+The standard training set was used to train the tree
+edit classification model to distinguish between true
+and false paraphrases. Since there is no predefined
+direction for paraphrase pairs, we extracted two se-
+quences for each pair (one in each direction) and
+summed the feature values. The model was evalu-
+ated with the standard test set.
+We report accuracy, positive class precision (i.e.,
+percentage of predicted positive paraphrases that
+had positive gold-standard labels), and positive class
+recall (i.e., percentage of positive gold-standard la-
+bels that were predicted to be positive paraphrases).
+We compare to two of the best performance ap-
+proaches to paraphrase. One approach, by Wan et al.
+(2006), uses an SVM classifier with features based
+on syntactic dependencies, TED, unigram overlap,
+and BLEU scores (Papineni et al., 2002). The other
+system, by Das and Smith (2009), is based on a
+quasi-synchronous grammar (QG; Smith and Eisner,
+2006), a probabilistic model that allows loose align-
+ments between trees but prefers tree isomorphism.
+In addition to syntactic dependencies, the QG model
+utilizes entity labels from BBN Identifinder (Bikel
+et al., 1999) and lexical semantics knowledge from
+WordNet. Das and Smith (2009) also use a product
+of experts (PoE) (Hinton, 1999) to combine the QG
+model with lexical overlap features.
+Table 4 shows the test set results for all of the sys-
+tems. While the tree edit model did not outperform
+the other systems, it produced competitive results.
+Moreover, the tree edit model does not make use
+of BLEU scores (Wan et al., 2006), entity labeling
+components, lexical semantics knowledge sources
+such as WordNet (beyond lemmatization), or system
+combination techniques (Das and Smith, 2009).
+</bodyText>
+<subsectionHeader confidence="0.995663">
+5.3 Answer Selection for Question Answering
+</subsectionHeader>
+<bodyText confidence="0.999977575757576">
+A tree edit model was trained for answer selec-
+tion in question answering (QA). In this task, an
+instance consists of a short factual question (e.g.,
+Who wrote the ‘Tale of Genji’?) and a candidate an-
+swer sentence retrieved by the information retrieval
+component of a question answering system. For a
+positive instance, the text will correctly answer the
+question—though perhaps indirectly. It may also
+contain various extraneous information (e.g., Kano
+script made possible the development of a secular
+Japanese literature, beginning with such Late Heian
+classics as Lady Murasaki’s “Tales of Genji.”). For
+a given set of questions, the task here is to rank can-
+didate answers (Wang et al., 2007).
+The experimental setup is the same as in Wang
+et al. (2007). We trained the tree edit model on
+the manually judged positive and negative QA pairs
+from previous QA tracks at the Text REtrieval Con-
+ference (TREC-8 through TREC-12). The goal of
+the task is to rank answer candidates rather than clas-
+sify them; therefore, after training a logistic regres-
+sion classifier, we rank the answer candidates for a
+given question by their posterior probabilities of cor-
+rectness according to the model.
+We tested our model with QA pairs from TREC-
+13. We report Mean Average Precision (MAP) and
+Mean Reciprocal Rank (MRR), which are informa-
+tion retrieval measures for ranked lists.
+Tree edit sequences were extracted only in one di-
+rection, from answer to question. We compare our
+tree edit model to three other systems as they are re-
+ported by Wang et al. (2007). Wang et al. use a QG
+model, incorporating information from dependency
+</bodyText>
+<page confidence="0.986671">
+1017
+</page>
+<bodyText confidence="0.999595941176471">
+trees, entity labels from BBN Identifinder (Bikel et
+al., 1999), and lexical semantics knowledge from
+WordNet (Miller et al., 1990). Cui et al. (2005) de-
+veloped an information theoretic measure based on
+dependency trees. Punyakanok et al. (2004) used a
+generalization of TED to model the QA pairs. For
+their experiments, Wang et al. also extended both of
+the latter models to utilize WordNet.
+Table 5 displays answer selection results, includ-
+ing test set results for the baseline systems with and
+without lexical semantic information from Word-
+Net. The tree edit model, which does not use lex-
+ical semantics knowledge, produced the best result
+reported to date. The results for the tree edit model
+are statistically significantly different (sign test, p &lt;
+0.01) from the results for all except the Wang et al.
+(2007) system with WordNet (p &gt; 0.05).
+</bodyText>
+<subsectionHeader confidence="0.721186">
+5.4 Discussion
+</subsectionHeader>
+<bodyText confidence="0.999995235294118">
+The parameter settings learned for the features in Ta-
+ble 2 were broadly similar for the three tasks. For
+example, operations involving changes to subjects
+and proper nouns tended to be associated with non-
+paraphrases, false entailments, and incorrect an-
+swers. We did not observe any interesting differ-
+ences in the parameter values.
+While the tree edit models perform competitively
+in multiple tasks by capturing relevant syntactic phe-
+nomena, it is clear that syntax alone cannot solve
+these semantic tasks. Fortunately, this approach is
+amenable to extensions, facilitated by the separa-
+tion of the representation extraction and classifica-
+tion steps. Richer edits could be included; lexical se-
+mantics could be integrated into the classifier or the
+search heuristic; or edit sequences might be found
+for other types of trees, such as semantic parses.
+</bodyText>
+<sectionHeader confidence="0.999988" genericHeader="method">
+6 Related Work
+</sectionHeader>
+<bodyText confidence="0.999922">
+TED is a widely studied technique with many appli-
+cations (Klein, 1989; Zhang and Shasha, 1989; Pun-
+yakanok et al., 2004; Schilder and McInnes, 2006).
+See Bille (2005) for a review. Chawathe and Garcia-
+Molina (1997) describe a tree edit algorithm for
+detecting changes in structured documents that in-
+corporates edits for moving subtrees and reordering
+children. However, they make assumptions unsuit-
+able for natural language, such as the absence of re-
+cursive syntactic rewrite rules. Bernard et al. (2008)
+use EM to learn the costs for simple insert, relabel,
+and delete edits, but they only discuss experiments
+for digit recognition and a task using artificial data.
+Much research has focused on modeling word re-
+ordering phenomena and syntactic alignments (e.g.,
+Gildea, 2003; Smith and Eisner, 2006; inter alia),
+and such methods have been applied successfully to
+semantic tasks (de Marneffe et al., 2006; Wang et
+al., 2007; Das and Smith, 2009). While we not de-
+scribe connections to such approaches in detail due
+to space limitations, we note that theoretical con-
+nections are possible between transformations and
+alignments (Chawathe and Garcia-Molina, 1997).
+Tree kernels have been applied to a variety of nat-
+ural language tasks (Collins and Duffy, 2001; Ze-
+lenko et al., 2003; Culotta and Sorensen, 2004). Of
+particular interest, Zanzotto and Moschitti (2006)
+describe a kernel for RTE that takes tree pairs, rather
+than single trees, as input. To our knowledge, our
+use of a tree kernel as a search heuristic is novel.
+</bodyText>
+<sectionHeader confidence="0.99901" genericHeader="conclusions">
+7 Conclusion
+</sectionHeader>
+<bodyText confidence="0.999878">
+We described tree edit models that generalize TED
+by allowing operations that better account for com-
+plex reordering phenomena and by learning from
+data how different edits should affect the models de-
+cisions about output variables of interest (e.g., the
+correctness of answers). They offer an intuitive
+and effective method for modeling sentence pairs.
+They led to competitive performance for three tasks:
+paraphrase identification, recognizing textual entail-
+ment, and answer selection for question answering.
+</bodyText>
+<sectionHeader confidence="0.998137" genericHeader="acknowledgments">
+Acknowledgments
+</sectionHeader>
+<bodyText confidence="0.999732111111111">
+We acknowledge partial support from the Institute of Ed-
+ucation Sciences, U.S. Department of Education, through
+Grant R305B040063 to Carnegie Mellon University; and
+the National Science Foundation through a Graduate Re-
+search Fellowship for the first author and grant IIS-
+0915187 to the second author. We thank Mengqiu Wang
+and Dipanjan Das for their help with the data, Andr´e Mar-
+tins for his geometric interpretation of our search proce-
+dure, and the anonymous reviewers for their comments.
+</bodyText>
+<sectionHeader confidence="0.997323" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.7115275">
+M. Bernard, L. Boyer, A. Habrard, and M. Sebban. 2008.
+Learning probabilistic models of tree edit distance.
+</reference>
+<page confidence="0.940381">
+1018
+</page>
+<reference confidence="0.997533037037037">
+Pattern Recognition.
+D. M. Bikel, R. Schwartz, and R. M. Weischedel. 1999.
+An algorithm that learns what’s in a name. Machine
+Learning, 34.
+P. Bille. 2005. A survey on tree edit distance and related
+problems. Theoretical Computer Science, 337.
+S. Chawathe and H. Garcia-Molina. 1997. Meaningful
+change detection in structured data. In Proc. of ACM
+SIGMOD.
+M. Collins and N. Duffy. 2001. Convolution kernels for
+natural language. In Proc. of NIPS.
+H. Cui, R. Sun, K. Li, M. Kan, , and T. Chua. 2005.
+Question answering passage retrieval using depen-
+dency relations. In Proc. of ACM-SIGIR.
+A. Culotta and J. Sorensen. 2004. Dependency tree ker-
+nels for relation extraction. In Proc. of ACL.
+D. Das and N. A. Smith. 2009. Paraphrase identifica-
+tion as probabilistic quasi-synchronous recognition. In
+Proc. of ACL-IJCNLP.
+M. de Marneffe, B. MacCartney, T. Grenager, D. Cer,
+A. Rafferty, and C. D. Manning. 2006. Learning to
+distinguish valid textual entailments. In Proc. of the
+Second PASCAL Challenges Workshop.
+B. Dolan, C. Quirk, and C. Brockett. 2004. Unsuper-
+vised construction of large paraphrase corpora: Ex-
+ploiting massively parallel news sources. In Proc. of
+COLING.
+J. Eisner. 1996. Three new probabilistic models for de-
+pendency parsing: An exploration. In Proc. of COL-
+ING.
+D. Giampiccolo, B. Magnini, I. Dagan, and B. Dolan, ed-
+itors. 2007. The third pascal recognizing textual en-
+tailment challenge.
+D. Gildea. 2003. Loosely tree-based alignment for ma-
+chine translation. In Proc. of ACL.
+S. Harmeling. 2007. An extensible probabilistic
+transformation-based approach to the third Recogniz-
+ing Textual Entailment challenge. In Proc. of ACL-
+PASCAL Workshop on Textual Entailment and Para-
+phrasing.
+T. Hastie, R. Tibshirani, and J. Friedman. 2001. The Ele-
+ments of Statistical Learning: Data Mining, Inference,
+and Prediction. Springer.
+D. Haussler. 1999. Convolution kernels on discrete
+structures. Technical Report ucs-crl-99-10, University
+of California Santa Cruz.
+G. E. Hinton. 1999. Product of experts. In Proc. of
+ICANN.
+P. N. Klein. 1989. Computing the edit-distance between
+unrooted ordered trees. In Proc. of European Sympo-
+sium on Algorithms.
+M. Kouylekov and B. Magnini. 2005. Recognizing tex-
+tual entailment with tree edit distance algorithms. In
+Proc. of the PASCAL RTE Challenge.
+S. le Cessie and J. C. van Houwelingen. 1997. Ridge es-
+timators in logistic regression. Applied Statistics, 41.
+B. MacCartney and C. D. Manning. 2008. Modeling se-
+mantic containment and exclusion in natural language
+inference. In Proc. of COLING.
+R. McDonald, F. Pereira, K. Ribarov, and J. Hajiˇc. 2005.
+Non-projective dependency parsing using spanning
+tree algorithms. In Proc. of HLT-EMNLP.
+G. A. Miller, R. Beckwith, C. Fellbaum, D. Gross, and
+K. J. Miller. 1990. WordNet: An on-line lexical
+database. International Journal of Lexicography, 3(4).
+A. Moschitti. 2006. Efficient convolution kernels for
+dependency and constituent syntactic trees. In Proc.
+of ECML.
+K. Papineni, S. Roukos, T. Ward, and W.-J. Zhu. 2002.
+BLEU: a method for automatic evaluation of machine
+translation. In Proc. of ACL.
+J. Pearl. 1984. Heuristics: intelligent search strategies
+for computer problem solving. Addison-Wesley.
+V. Punyakanok, D. Roth, and W. Yih. 2004. Mapping de-
+pendencies trees: An application to question answer-
+ing. In Proc. of the 8th International Symposium on
+Artificial Intelligence and Mathematics.
+A. Ratnaparkhi. 1996. A maximum entropy part-of-
+speech tagger. In Proc. of EMNLP.
+F. Schilder and B. T. McInnes. 2006. TLR at DUC
+2006: approximate tree similarity and a new evalua-
+tion regime. In Proc. of DUC.
+B. Sch¨olkopf and A. J. Smola. 2001. Learning with Ker-
+nels. MIT Press.
+D. A. Smith and J. Eisner. 2006. Quasi-synchronous
+grammars: Alignment by soft projection of syntactic
+dependencies. In Proc. of HLT-NAACL Workshop on
+Statistical Machine Translation.
+V. N. Vapnik. 1995. The Nature of Statistical Learning
+Theory. Springer.
+E. M. Voorhees. 2004. Overview of TREC 2004. In
+Proc. of TREC.
+S. Wan, M. Dras, R. Dale, and C. Paris. 2006. Using
+dependency-based features to take the “para-farce” out
+of paraphrase. In Proc. of the Australasian Language
+Technology Workshop.
+M. Wang, N. A. Smith, and T. Mitamura. 2007. What is
+the Jeopardy model? A quasi-synchronous grammar
+for QA. In Proc. of EMNLP-CoNLL.
+F. M. Zanzotto and A. Moschitti. 2006. Automatic learn-
+ing of textual entailments with cross-pair similarities.
+In Proc. of COLING/ACL.
+D. Zelenko, C. Aone, and A. Richardella. 2003. Kernel
+methods for relation extraction. J. of Machine Learn-
+ing Research, 3.
+K. Zhang and D. Shasha. 1989. Simple fast algorithms
+for the editing distance between trees and related prob-
+lems. SIAM Journal of Computing, 18.
+</reference>
+<page confidence="0.996068">
+1019
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.782705">
+<title confidence="0.9975">Tree Edit Models for Recognizing Textual Entailments, and Answers to Questions</title>
+<author confidence="0.996138">Michael Heilman Noah A</author>
+<affiliation confidence="0.897131">Language Technologies Carnegie Mellon</affiliation>
+<address confidence="0.992782">Pittsburgh, PA 15213,</address>
+<abstract confidence="0.9994166">We describe tree edit models for representing sequences of tree transformations involving complex reordering phenomena and demonstrate that they offer a simple, intuitive, and effective method for modeling pairs of semantically related sentences. To efficiently extract sequences of edits, we employ a tree kernel as a heuristic in a greedy search routine. We describe a logistic regression model that uses 33 syntactic features of edit sequences to classify the sentence pairs. The approach leads to competitive performance in recognizing textual entailment, paraphrase identification, and answer selection for question answering.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>M Bernard</author>
+<author>L Boyer</author>
+<author>A Habrard</author>
+<author>M Sebban</author>
+</authors>
+<title>Learning probabilistic models of tree edit distance. Pattern Recognition.</title>
+<date>2008</date>
+<contexts>
+<context position="31403" citStr="Bernard et al. (2008)" startWordPosition="5157" endWordPosition="5160">e search heuristic; or edit sequences might be found for other types of trees, such as semantic parses. 6 Related Work TED is a widely studied technique with many applications (Klein, 1989; Zhang and Shasha, 1989; Punyakanok et al., 2004; Schilder and McInnes, 2006). See Bille (2005) for a review. Chawathe and GarciaMolina (1997) describe a tree edit algorithm for detecting changes in structured documents that incorporates edits for moving subtrees and reordering children. However, they make assumptions unsuitable for natural language, such as the absence of recursive syntactic rewrite rules. Bernard et al. (2008) use EM to learn the costs for simple insert, relabel, and delete edits, but they only discuss experiments for digit recognition and a task using artificial data. Much research has focused on modeling word reordering phenomena and syntactic alignments (e.g., Gildea, 2003; Smith and Eisner, 2006; inter alia), and such methods have been applied successfully to semantic tasks (de Marneffe et al., 2006; Wang et al., 2007; Das and Smith, 2009). While we not describe connections to such approaches in detail due to space limitations, we note that theoretical connections are possible between transform</context>
+</contexts>
+<marker>Bernard, Boyer, Habrard, Sebban, 2008</marker>
+<rawString>M. Bernard, L. Boyer, A. Habrard, and M. Sebban. 2008. Learning probabilistic models of tree edit distance. Pattern Recognition.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D M Bikel</author>
+<author>R Schwartz</author>
+<author>R M Weischedel</author>
+</authors>
+<title>An algorithm that learns what’s in a name.</title>
+<date>1999</date>
+<booktitle>Machine Learning,</booktitle>
+<volume>34</volume>
+<contexts>
+<context position="26940" citStr="Bikel et al., 1999" startWordPosition="4430" endWordPosition="4433"> labels that were predicted to be positive paraphrases). We compare to two of the best performance approaches to paraphrase. One approach, by Wan et al. (2006), uses an SVM classifier with features based on syntactic dependencies, TED, unigram overlap, and BLEU scores (Papineni et al., 2002). The other system, by Das and Smith (2009), is based on a quasi-synchronous grammar (QG; Smith and Eisner, 2006), a probabilistic model that allows loose alignments between trees but prefers tree isomorphism. In addition to syntactic dependencies, the QG model utilizes entity labels from BBN Identifinder (Bikel et al., 1999) and lexical semantics knowledge from WordNet. Das and Smith (2009) also use a product of experts (PoE) (Hinton, 1999) to combine the QG model with lexical overlap features. Table 4 shows the test set results for all of the systems. While the tree edit model did not outperform the other systems, it produced competitive results. Moreover, the tree edit model does not make use of BLEU scores (Wan et al., 2006), entity labeling components, lexical semantics knowledge sources such as WordNet (beyond lemmatization), or system combination techniques (Das and Smith, 2009). 5.3 Answer Selection for Qu</context>
+<context position="29239" citStr="Bikel et al., 1999" startWordPosition="4809" endWordPosition="4812">we rank the answer candidates for a given question by their posterior probabilities of correctness according to the model. We tested our model with QA pairs from TREC13. We report Mean Average Precision (MAP) and Mean Reciprocal Rank (MRR), which are information retrieval measures for ranked lists. Tree edit sequences were extracted only in one direction, from answer to question. We compare our tree edit model to three other systems as they are reported by Wang et al. (2007). Wang et al. use a QG model, incorporating information from dependency 1017 trees, entity labels from BBN Identifinder (Bikel et al., 1999), and lexical semantics knowledge from WordNet (Miller et al., 1990). Cui et al. (2005) developed an information theoretic measure based on dependency trees. Punyakanok et al. (2004) used a generalization of TED to model the QA pairs. For their experiments, Wang et al. also extended both of the latter models to utilize WordNet. Table 5 displays answer selection results, including test set results for the baseline systems with and without lexical semantic information from WordNet. The tree edit model, which does not use lexical semantics knowledge, produced the best result reported to date. The</context>
+</contexts>
+<marker>Bikel, Schwartz, Weischedel, 1999</marker>
+<rawString>D. M. Bikel, R. Schwartz, and R. M. Weischedel. 1999. An algorithm that learns what’s in a name. Machine Learning, 34.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>P Bille</author>
+</authors>
+<title>A survey on tree edit distance and related problems.</title>
+<date>2005</date>
+<journal>Theoretical Computer Science,</journal>
+<volume>337</volume>
+<contexts>
+<context position="31066" citStr="Bille (2005)" startWordPosition="5107" endWordPosition="5108">ant syntactic phenomena, it is clear that syntax alone cannot solve these semantic tasks. Fortunately, this approach is amenable to extensions, facilitated by the separation of the representation extraction and classification steps. Richer edits could be included; lexical semantics could be integrated into the classifier or the search heuristic; or edit sequences might be found for other types of trees, such as semantic parses. 6 Related Work TED is a widely studied technique with many applications (Klein, 1989; Zhang and Shasha, 1989; Punyakanok et al., 2004; Schilder and McInnes, 2006). See Bille (2005) for a review. Chawathe and GarciaMolina (1997) describe a tree edit algorithm for detecting changes in structured documents that incorporates edits for moving subtrees and reordering children. However, they make assumptions unsuitable for natural language, such as the absence of recursive syntactic rewrite rules. Bernard et al. (2008) use EM to learn the costs for simple insert, relabel, and delete edits, but they only discuss experiments for digit recognition and a task using artificial data. Much research has focused on modeling word reordering phenomena and syntactic alignments (e.g., Gild</context>
+</contexts>
+<marker>Bille, 2005</marker>
+<rawString>P. Bille. 2005. A survey on tree edit distance and related problems. Theoretical Computer Science, 337.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>S Chawathe</author>
+<author>H Garcia-Molina</author>
+</authors>
+<title>Meaningful change detection in structured data.</title>
+<date>1997</date>
+<booktitle>In Proc. of ACM SIGMOD.</booktitle>
+<contexts>
+<context position="32059" citStr="Chawathe and Garcia-Molina, 1997" startWordPosition="5260" endWordPosition="5263">sts for simple insert, relabel, and delete edits, but they only discuss experiments for digit recognition and a task using artificial data. Much research has focused on modeling word reordering phenomena and syntactic alignments (e.g., Gildea, 2003; Smith and Eisner, 2006; inter alia), and such methods have been applied successfully to semantic tasks (de Marneffe et al., 2006; Wang et al., 2007; Das and Smith, 2009). While we not describe connections to such approaches in detail due to space limitations, we note that theoretical connections are possible between transformations and alignments (Chawathe and Garcia-Molina, 1997). Tree kernels have been applied to a variety of natural language tasks (Collins and Duffy, 2001; Zelenko et al., 2003; Culotta and Sorensen, 2004). Of particular interest, Zanzotto and Moschitti (2006) describe a kernel for RTE that takes tree pairs, rather than single trees, as input. To our knowledge, our use of a tree kernel as a search heuristic is novel. 7 Conclusion We described tree edit models that generalize TED by allowing operations that better account for complex reordering phenomena and by learning from data how different edits should affect the models decisions about output vari</context>
+</contexts>
+<marker>Chawathe, Garcia-Molina, 1997</marker>
+<rawString>S. Chawathe and H. Garcia-Molina. 1997. Meaningful change detection in structured data. In Proc. of ACM SIGMOD.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>M Collins</author>
+<author>N Duffy</author>
+</authors>
+<title>Convolution kernels for natural language.</title>
+<date>2001</date>
+<booktitle>In Proc. of NIPS.</booktitle>
+<contexts>
+<context position="11470" citStr="Collins and Duffy (2001)" startWordPosition="1904" endWordPosition="1907">tate depends only on the heuristic function’s estimate of how different the current tree at that state is from the target tree. Using this function, at each step, the search routine chooses the next state (i.e., edit) so as to minimize the difference between the current and target trees. We use a tree kernel to define the heuristic function. A kernel is a special kind of symmetric function from a pair of objects to a real number. It can be interpreted as the inner product of those objects represented in some real-valued feature space (Sch¨olkopf and Smola, 2001). A tree kernel, as proposed by Collins and Duffy (2001), is a convolution kernel4 whose input is a pair of trees and whose output is a positive number indicating the similarity of the sets of all their subtrees. The dimensionality of the feature vector associated with a tree kernel is thus unbounded in general, and larger trees generally lead to larger kernel values. Direct use as a search heuristic would lead to the exploration of states for larger and larger trees, even ones larger than the target tree. Thus, as in 4Haussler (1999) provides a proof, which can be extended for our kernel, that tree kernels are valid kernel functions. 1013 Equation</context>
+<context position="13589" citStr="Collins and Duffy (2001)" startWordPosition="2266" endWordPosition="2269">ted with the normalized kernel. In this geometric interpretation, the search heuristic in Equation 1 leads the search algorithm to explore reachable trees along the surface of this sphere, always choosing the one whose angle with the target tree is smallest, until the angle is 0. The path on the sphere corresponds to an edit sequence, from which we will derive edit features in §4 for classification. Our kernel is based on the partial tree kernel (PTK) proposed by Moschitti (2006). It considers matches between ordered subsequences of children in addition to the full sequences of children as in Collins and Duffy (2001). This permits a very finegrained measure of tree pair similarity. Importantly, if two nodes differ only by the presence or position of a single child, they will still lead to a large kernel function value. We also sum over the similarities between all pairs of nodes, similar to (Collins and Duffy, 2001). Since the PTK considers non-contiguous subsequences, it is very computationally expensive. We therefore restrict our kernel to consider only contiguous subsequences, as in the contiguous tree kernel (CTK) (Zelenko et al., 2003). 5This normalized function is also guaranteed to be a kernel func</context>
+<context position="15537" citStr="Collins and Duffy (2001)" startWordPosition="2609" endWordPosition="2612">(starting from the roots), where ni is a node in the set of nodes NT, in tree Ti: K(T1, T2) = � � Δ(n1, n2) (3) n1∈{NT1} n2∈{NT2} �Δ(n1, n2) = µ λ2s(n1, n2) + (4) �Δ(cn1[J1i], cn2[J2i]) � J1 = (J11, J12, J1a, ...) is an index sequence associated with any contiguous ordered sequence of children cn1 of node n1 (likewise for J2). J1i and J2i point to the ith children in the two sequences. � � �returns the length of a sequence. The kernel includes two decay factors: λ for the length of child subsequences, as in Zelenko et al. (2003) and Moschitti (2006); and µ for the height of the subtree, as in Collins and Duffy (2001) and Moschitti (2006). We set both to 0.25 in our experiments to encourage the search to consider edits leading to smaller matches (e.g., of individual parent-child dependencies) before larger ones.7 6The side of a node relative to its parent in a dependency tree is important: two parent nodes with the same children should not be considered exact matches if children are on different sides (e.g., defeated the insurgents and the insurgents defeated). 7From experiments with the paraphrase training set (§5.2), performance does not appear sensitive to the decay parameters. Settings of 0.1, 0.2, 0.3</context>
+<context position="32155" citStr="Collins and Duffy, 2001" startWordPosition="5277" endWordPosition="5280">and a task using artificial data. Much research has focused on modeling word reordering phenomena and syntactic alignments (e.g., Gildea, 2003; Smith and Eisner, 2006; inter alia), and such methods have been applied successfully to semantic tasks (de Marneffe et al., 2006; Wang et al., 2007; Das and Smith, 2009). While we not describe connections to such approaches in detail due to space limitations, we note that theoretical connections are possible between transformations and alignments (Chawathe and Garcia-Molina, 1997). Tree kernels have been applied to a variety of natural language tasks (Collins and Duffy, 2001; Zelenko et al., 2003; Culotta and Sorensen, 2004). Of particular interest, Zanzotto and Moschitti (2006) describe a kernel for RTE that takes tree pairs, rather than single trees, as input. To our knowledge, our use of a tree kernel as a search heuristic is novel. 7 Conclusion We described tree edit models that generalize TED by allowing operations that better account for complex reordering phenomena and by learning from data how different edits should affect the models decisions about output variables of interest (e.g., the correctness of answers). They offer an intuitive and effective meth</context>
+</contexts>
+<marker>Collins, Duffy, 2001</marker>
+<rawString>M. Collins and N. Duffy. 2001. Convolution kernels for natural language. In Proc. of NIPS.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>H Cui</author>
+<author>R Sun</author>
+<author>K Li</author>
+<author>M Kan</author>
+</authors>
+<title>Question answering passage retrieval using dependency relations.</title>
+<date>2005</date>
+<booktitle>In Proc. of ACM-SIGIR.</booktitle>
+<contexts>
+<context position="25294" citStr="Cui et al., 2005" startWordPosition="4170" endWordPosition="4173">approach (e.g., theorem proving). We also note that Kouylekov and Magnini (2005) report 55% accuracy for RTE-2 using TED. See Giampiccolo et al. (2007) for more RTE-3 results. 1016 System Acc. % Prec. % Rec. % Wan et al., 2006 75.6 77 90 D&amp;S, 2009 (QG) 73.9 74.9 91.3 D&amp;S, 2009 (PoE) 76.1 79.6 86.0 Tree Edit Model 73.2 75.7 87.8 Table 4: Paraphrase identification results, with precision and recall measures for true (positive) paraphrases. Wan et al. (2006) report precision and recall values with only two significant digits. System MAP MRR Punyakanok et al., 2004 0.3814 0.4462 +WN 0.4189 0.4939 Cui et al., 2005 0.4350 0.5569 +WN 0.4271 0.5259 Wang et al., 2007 0.4828 0.5571 +WN 0.6029 0.6852 Tree Edit Model 0.6091 0.6917 Table 5: Results for the task of answer selection for question answering. +WN denotes use of WordNet features. 5.2 Paraphrase Identification A tree edit model was trained and tested for paraphrase identification using the the Microsoft Research Paraphrase Corpus (Dolan et al., 2004). The task is to identify whether two sentences convey essentially the same meaning. The standard training set was used to train the tree edit classification model to distinguish between true and false pa</context>
+<context position="29326" citStr="Cui et al. (2005)" startWordPosition="4823" endWordPosition="4826">rrectness according to the model. We tested our model with QA pairs from TREC13. We report Mean Average Precision (MAP) and Mean Reciprocal Rank (MRR), which are information retrieval measures for ranked lists. Tree edit sequences were extracted only in one direction, from answer to question. We compare our tree edit model to three other systems as they are reported by Wang et al. (2007). Wang et al. use a QG model, incorporating information from dependency 1017 trees, entity labels from BBN Identifinder (Bikel et al., 1999), and lexical semantics knowledge from WordNet (Miller et al., 1990). Cui et al. (2005) developed an information theoretic measure based on dependency trees. Punyakanok et al. (2004) used a generalization of TED to model the QA pairs. For their experiments, Wang et al. also extended both of the latter models to utilize WordNet. Table 5 displays answer selection results, including test set results for the baseline systems with and without lexical semantic information from WordNet. The tree edit model, which does not use lexical semantics knowledge, produced the best result reported to date. The results for the tree edit model are statistically significantly different (sign test, </context>
+</contexts>
+<marker>Cui, Sun, Li, Kan, 2005</marker>
+<rawString>H. Cui, R. Sun, K. Li, M. Kan, , and T. Chua. 2005. Question answering passage retrieval using dependency relations. In Proc. of ACM-SIGIR.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>A Culotta</author>
+<author>J Sorensen</author>
+</authors>
+<title>Dependency tree kernels for relation extraction.</title>
+<date>2004</date>
+<booktitle>In Proc. of ACL.</booktitle>
+<contexts>
+<context position="16461" citStr="Culotta and Sorensen (2004)" startWordPosition="2762" endWordPosition="2765">th the same children should not be considered exact matches if children are on different sides (e.g., defeated the insurgents and the insurgents defeated). 7From experiments with the paraphrase training set (§5.2), performance does not appear sensitive to the decay parameters. Settings of 0.1, 0.2, 0.3, and 0.4 led to 10-fold cross-validation � l(J1) � J1,J2,|J1|=|J2 |i=1 1014 The main difference between our kernel and the CTK is that we sum over all pairs of subtrees (Equation 3). In contrast, the CTK only considers only one pair of subtrees. When the CTK is applied to relation extraction by Culotta and Sorensen (2004), each subtree is the smallest common subtree that includes the entities between which a relation may exist (e.g., the subtree for Texasbased energy company Exxon Mobil when extracting ORGANIZATION-LOCATION relations). 3.3 Constraints on the Search Space For computational efficiency, we impose the following three constraints to simplify the search space. Note that the first two simply prune away obviously unhelpful search states. 1. For INSERT-CHILD, INSERT-PARENT, and RELABEL-NODE edits, the lemma and POS of the node to insert must occur in the target tree. Also, the pair consisting of the le</context>
+<context position="32206" citStr="Culotta and Sorensen, 2004" startWordPosition="5286" endWordPosition="5289"> has focused on modeling word reordering phenomena and syntactic alignments (e.g., Gildea, 2003; Smith and Eisner, 2006; inter alia), and such methods have been applied successfully to semantic tasks (de Marneffe et al., 2006; Wang et al., 2007; Das and Smith, 2009). While we not describe connections to such approaches in detail due to space limitations, we note that theoretical connections are possible between transformations and alignments (Chawathe and Garcia-Molina, 1997). Tree kernels have been applied to a variety of natural language tasks (Collins and Duffy, 2001; Zelenko et al., 2003; Culotta and Sorensen, 2004). Of particular interest, Zanzotto and Moschitti (2006) describe a kernel for RTE that takes tree pairs, rather than single trees, as input. To our knowledge, our use of a tree kernel as a search heuristic is novel. 7 Conclusion We described tree edit models that generalize TED by allowing operations that better account for complex reordering phenomena and by learning from data how different edits should affect the models decisions about output variables of interest (e.g., the correctness of answers). They offer an intuitive and effective method for modeling sentence pairs. They led to competi</context>
+</contexts>
+<marker>Culotta, Sorensen, 2004</marker>
+<rawString>A. Culotta and J. Sorensen. 2004. Dependency tree kernels for relation extraction. In Proc. of ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D Das</author>
+<author>N A Smith</author>
+</authors>
+<title>Paraphrase identification as probabilistic quasi-synchronous recognition.</title>
+<date>2009</date>
+<booktitle>In Proc. of ACL-IJCNLP.</booktitle>
+<contexts>
+<context position="26656" citStr="Das and Smith (2009)" startWordPosition="4387" endWordPosition="4390">ummed the feature values. The model was evaluated with the standard test set. We report accuracy, positive class precision (i.e., percentage of predicted positive paraphrases that had positive gold-standard labels), and positive class recall (i.e., percentage of positive gold-standard labels that were predicted to be positive paraphrases). We compare to two of the best performance approaches to paraphrase. One approach, by Wan et al. (2006), uses an SVM classifier with features based on syntactic dependencies, TED, unigram overlap, and BLEU scores (Papineni et al., 2002). The other system, by Das and Smith (2009), is based on a quasi-synchronous grammar (QG; Smith and Eisner, 2006), a probabilistic model that allows loose alignments between trees but prefers tree isomorphism. In addition to syntactic dependencies, the QG model utilizes entity labels from BBN Identifinder (Bikel et al., 1999) and lexical semantics knowledge from WordNet. Das and Smith (2009) also use a product of experts (PoE) (Hinton, 1999) to combine the QG model with lexical overlap features. Table 4 shows the test set results for all of the systems. While the tree edit model did not outperform the other systems, it produced competi</context>
+<context position="31845" citStr="Das and Smith, 2009" startWordPosition="5229" endWordPosition="5232"> subtrees and reordering children. However, they make assumptions unsuitable for natural language, such as the absence of recursive syntactic rewrite rules. Bernard et al. (2008) use EM to learn the costs for simple insert, relabel, and delete edits, but they only discuss experiments for digit recognition and a task using artificial data. Much research has focused on modeling word reordering phenomena and syntactic alignments (e.g., Gildea, 2003; Smith and Eisner, 2006; inter alia), and such methods have been applied successfully to semantic tasks (de Marneffe et al., 2006; Wang et al., 2007; Das and Smith, 2009). While we not describe connections to such approaches in detail due to space limitations, we note that theoretical connections are possible between transformations and alignments (Chawathe and Garcia-Molina, 1997). Tree kernels have been applied to a variety of natural language tasks (Collins and Duffy, 2001; Zelenko et al., 2003; Culotta and Sorensen, 2004). Of particular interest, Zanzotto and Moschitti (2006) describe a kernel for RTE that takes tree pairs, rather than single trees, as input. To our knowledge, our use of a tree kernel as a search heuristic is novel. 7 Conclusion We describ</context>
+</contexts>
+<marker>Das, Smith, 2009</marker>
+<rawString>D. Das and N. A. Smith. 2009. Paraphrase identification as probabilistic quasi-synchronous recognition. In Proc. of ACL-IJCNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>M de Marneffe</author>
+<author>B MacCartney</author>
+<author>T Grenager</author>
+<author>D Cer</author>
+<author>A Rafferty</author>
+<author>C D Manning</author>
+</authors>
+<title>Learning to distinguish valid textual entailments.</title>
+<date>2006</date>
+<booktitle>In Proc. of the Second PASCAL Challenges Workshop.</booktitle>
+<marker>de Marneffe, MacCartney, Grenager, Cer, Rafferty, Manning, 2006</marker>
+<rawString>M. de Marneffe, B. MacCartney, T. Grenager, D. Cer, A. Rafferty, and C. D. Manning. 2006. Learning to distinguish valid textual entailments. In Proc. of the Second PASCAL Challenges Workshop.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>B Dolan</author>
+<author>C Quirk</author>
+<author>C Brockett</author>
+</authors>
+<title>Unsupervised construction of large paraphrase corpora: Exploiting massively parallel news sources.</title>
+<date>2004</date>
+<booktitle>In Proc. of COLING.</booktitle>
+<contexts>
+<context position="5185" citStr="Dolan et al., 2004" startWordPosition="788" endWordPosition="791">ferent types of edits should affect the model’s decisions (e.g., about whether two sentences are paraphrases). The structure of this paper is as follows. §2 introduces our model and describes the edit operations that were implemented for our experiments. §3 details the search-based procedure for extracting edit sequences for pairs of sentences. §4 describes the classifier for sentence pairs based on features of their corresponding edit sequences. §5 describes and presents the results of experiments involving recognizing textual entailment (Giampiccolo et al., 2007), paraphrase identification (Dolan et al., 2004), and an answer selection task for question answering (Wang et al., 2007). §6 addresses related work, and §7 provides concluding remarks. 2 Extended Tree Edit Sequences This section defines a tree edit sequence and describes the operations used in our experiments. We begin with some conventions. We use dependency trees as the structure upon which the tree edits will operate. The child nodes for a given parent are represented in a head-outward fashion such that the left and right children are separate lists, with the left- and right-most elements as the last members of their respective lists, a</context>
+<context position="19608" citStr="Dolan et al., 2004" startWordPosition="3285" endWordPosition="3288">ls use a set of 33 features of edit sequences to classify sentence pairs. We used the training data for the paraphrase task (§5.2) to develop this set. All features are integer-valued, and most are counts of different types of edits. Five are counts of the nodes in the source tree that were not edited directly by any operations (though their ancestors or descendants may have been). Table 2 describes the features in detail. 5 Experiments Experiments were conducted to evaluate tree edit models for three tasks: recognizing textual entailment (Giampiccolo et al., 2007), paraphrase identification (Dolan et al., 2004), and an answer selection task (Wang et al., 2007) for question answering (Voorhees, 2004). The feature set and first tree edit model were developed for paraphrase, and then applied to the other tasks with very few modifications (all explained below) and no further tuning.11 5.1 Recognizing Textual Entailment A tree edit model was trained for recognizing textual entailment (RTE). Here, an instance consists of 10In cross-validation experiments with the training data, we found that unregularized LR outperformed SVMs (Vapnik, 1995) and 22-regularized LR, perhaps due to the small number of feature</context>
+<context position="25690" citStr="Dolan et al., 2004" startWordPosition="4235" endWordPosition="4238">recall measures for true (positive) paraphrases. Wan et al. (2006) report precision and recall values with only two significant digits. System MAP MRR Punyakanok et al., 2004 0.3814 0.4462 +WN 0.4189 0.4939 Cui et al., 2005 0.4350 0.5569 +WN 0.4271 0.5259 Wang et al., 2007 0.4828 0.5571 +WN 0.6029 0.6852 Tree Edit Model 0.6091 0.6917 Table 5: Results for the task of answer selection for question answering. +WN denotes use of WordNet features. 5.2 Paraphrase Identification A tree edit model was trained and tested for paraphrase identification using the the Microsoft Research Paraphrase Corpus (Dolan et al., 2004). The task is to identify whether two sentences convey essentially the same meaning. The standard training set was used to train the tree edit classification model to distinguish between true and false paraphrases. Since there is no predefined direction for paraphrase pairs, we extracted two sequences for each pair (one in each direction) and summed the feature values. The model was evaluated with the standard test set. We report accuracy, positive class precision (i.e., percentage of predicted positive paraphrases that had positive gold-standard labels), and positive class recall (i.e., perce</context>
+</contexts>
+<marker>Dolan, Quirk, Brockett, 2004</marker>
+<rawString>B. Dolan, C. Quirk, and C. Brockett. 2004. Unsupervised construction of large paraphrase corpora: Exploiting massively parallel news sources. In Proc. of COLING.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J Eisner</author>
+</authors>
+<title>Three new probabilistic models for dependency parsing: An exploration.</title>
+<date>1996</date>
+<booktitle>In Proc. of COLING.</booktitle>
+<contexts>
+<context position="5838" citStr="Eisner, 1996" startWordPosition="900" endWordPosition="901">ion answering (Wang et al., 2007). §6 addresses related work, and §7 provides concluding remarks. 2 Extended Tree Edit Sequences This section defines a tree edit sequence and describes the operations used in our experiments. We begin with some conventions. We use dependency trees as the structure upon which the tree edits will operate. The child nodes for a given parent are represented in a head-outward fashion such that the left and right children are separate lists, with the left- and right-most elements as the last members of their respective lists, as in most generative dependency models (Eisner, 1996). Each node consists of a lemmatized word token as its main label (hereafter, lemma), a part of speech tag (POS), and a syntactic relation label for the edge to its parent. We assume the root node has a special dummy edge label ROOT. Let T, be a “current tree” that is being transformed and let Tt be a “target tree” into which T, will ultimately be transformed. Let T (i) be a node with an index i into the tree T, where the indices are arbitrary (e.g., they could be word positions). 2.1 Definition We define a tree edit sequence to be a series of edit operations that transform a source tree (the </context>
+</contexts>
+<marker>Eisner, 1996</marker>
+<rawString>J. Eisner. 1996. Three new probabilistic models for dependency parsing: An exploration. In Proc. of COLING.</rawString>
+</citation>
+<citation valid="true">
+<title>The third pascal recognizing textual entailment challenge.</title>
+<date>2007</date>
+<editor>D. Giampiccolo, B. Magnini, I. Dagan, and B. Dolan, editors.</editor>
+<contexts>
+<context position="23066" citStr="(2007)" startWordPosition="3812" endWordPosition="3812">xtracted in one direction, from premise to hypothesis.12 Since premises 12It is counter-intuitive to model adding information through extensive insertions, for both entailment and answer selection. System Acc. % Prec. % Rec. % Harmeling, 2007 59.5 - - de Marneffe et al., 2006 60.5 61.8 60.2 M&amp;M, 2007 (NL) 59.4 70.1 36.1 M&amp;M, 2007 (Hybrid) 64.3 65.5 63.9 Tree Edit Model 62.8 61.9 71.2 Table 3: Results for recognizing textual entailments. Precision and recall values are for the true entailment class. Results for de Marneffe et al. (2006) were reported by MacCartney and Manning (2008). Harmeling (2007) only reported accuracy. may consist of multiple sentences, we attach sentences as children of dummy root nodes, for both the premise and hypothesis. The model was trained on the development set (i.e., training data) for RTE3 along with all the data from the RTE-1 and RTE-2 tasks. It was then evaluated on the RTE-3 test set. We report precision and recall for true entailments, and overall accuracy (i.e., percentage correct). We compare to four systems that use syntactic dependencies and lexical semantic information.13 De Marneffe et al. (2006) described an RTE system that finds word alignments</context>
+<context position="24829" citStr="(2007)" startWordPosition="4092" endWordPosition="4092">sequences. Table 3 presents RTE results, showing that the tree edit model performs competitively. While it does not outperform state-of-the-art RTE systems, the tree edit model is simpler and less tailored to this task than many other RTE systems based on similar linguistic information. 13The top-performing RTE systems often involve significant manual engineering for the RTE task. Also, many employ techniques that make them not very comparable to our approach (e.g., theorem proving). We also note that Kouylekov and Magnini (2005) report 55% accuracy for RTE-2 using TED. See Giampiccolo et al. (2007) for more RTE-3 results. 1016 System Acc. % Prec. % Rec. % Wan et al., 2006 75.6 77 90 D&amp;S, 2009 (QG) 73.9 74.9 91.3 D&amp;S, 2009 (PoE) 76.1 79.6 86.0 Tree Edit Model 73.2 75.7 87.8 Table 4: Paraphrase identification results, with precision and recall measures for true (positive) paraphrases. Wan et al. (2006) report precision and recall values with only two significant digits. System MAP MRR Punyakanok et al., 2004 0.3814 0.4462 +WN 0.4189 0.4939 Cui et al., 2005 0.4350 0.5569 +WN 0.4271 0.5259 Wang et al., 2007 0.4828 0.5571 +WN 0.6029 0.6852 Tree Edit Model 0.6091 0.6917 Table 5: Results for t</context>
+<context position="28313" citStr="(2007)" startWordPosition="4655" endWordPosition="4655">ho wrote the ‘Tale of Genji’?) and a candidate answer sentence retrieved by the information retrieval component of a question answering system. For a positive instance, the text will correctly answer the question—though perhaps indirectly. It may also contain various extraneous information (e.g., Kano script made possible the development of a secular Japanese literature, beginning with such Late Heian classics as Lady Murasaki’s “Tales of Genji.”). For a given set of questions, the task here is to rank candidate answers (Wang et al., 2007). The experimental setup is the same as in Wang et al. (2007). We trained the tree edit model on the manually judged positive and negative QA pairs from previous QA tracks at the Text REtrieval Conference (TREC-8 through TREC-12). The goal of the task is to rank answer candidates rather than classify them; therefore, after training a logistic regression classifier, we rank the answer candidates for a given question by their posterior probabilities of correctness according to the model. We tested our model with QA pairs from TREC13. We report Mean Average Precision (MAP) and Mean Reciprocal Rank (MRR), which are information retrieval measures for ranked </context>
+<context position="29990" citStr="(2007)" startWordPosition="4936" endWordPosition="4936">dency trees. Punyakanok et al. (2004) used a generalization of TED to model the QA pairs. For their experiments, Wang et al. also extended both of the latter models to utilize WordNet. Table 5 displays answer selection results, including test set results for the baseline systems with and without lexical semantic information from WordNet. The tree edit model, which does not use lexical semantics knowledge, produced the best result reported to date. The results for the tree edit model are statistically significantly different (sign test, p &lt; 0.01) from the results for all except the Wang et al. (2007) system with WordNet (p &gt; 0.05). 5.4 Discussion The parameter settings learned for the features in Table 2 were broadly similar for the three tasks. For example, operations involving changes to subjects and proper nouns tended to be associated with nonparaphrases, false entailments, and incorrect answers. We did not observe any interesting differences in the parameter values. While the tree edit models perform competitively in multiple tasks by capturing relevant syntactic phenomena, it is clear that syntax alone cannot solve these semantic tasks. Fortunately, this approach is amenable to exte</context>
+</contexts>
+<marker>2007</marker>
+<rawString>D. Giampiccolo, B. Magnini, I. Dagan, and B. Dolan, editors. 2007. The third pascal recognizing textual entailment challenge.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D Gildea</author>
+</authors>
+<title>Loosely tree-based alignment for machine translation.</title>
+<date>2003</date>
+<booktitle>In Proc. of ACL.</booktitle>
+<contexts>
+<context position="10516" citStr="Gildea (2003)" startWordPosition="1740" endWordPosition="1741">maining cost, rather than a heuristic function plus the cost so far (e.g., number of edits), as in other types of search. Here, the initial search state is the source tree, the current state is T, and the goal state is Tt. The function for generating the successors for a given state returns returns trees for all possible specifications of operations on T, (§2.2), subject to the minimal constraints to be described in §3.3. The enumeration order of the edits in the search procedure (i.e., the order in which states are explored) follows the order of their presentation in Table 1. In preliminary 3Gildea (2003) proposes a dynamic programming algorithm for a related tree alignment problem, but it is still exponential in the maximum number of children for a node. experiments, varying this order had no effect on the extracted transformations. 3.2 Tree Kernel Heuristic In our greedy search approach, the evaluation function’s value for a state depends only on the heuristic function’s estimate of how different the current tree at that state is from the target tree. Using this function, at each step, the search routine chooses the next state (i.e., edit) so as to minimize the difference between the current</context>
+<context position="31674" citStr="Gildea, 2003" startWordPosition="5202" endWordPosition="5203">005) for a review. Chawathe and GarciaMolina (1997) describe a tree edit algorithm for detecting changes in structured documents that incorporates edits for moving subtrees and reordering children. However, they make assumptions unsuitable for natural language, such as the absence of recursive syntactic rewrite rules. Bernard et al. (2008) use EM to learn the costs for simple insert, relabel, and delete edits, but they only discuss experiments for digit recognition and a task using artificial data. Much research has focused on modeling word reordering phenomena and syntactic alignments (e.g., Gildea, 2003; Smith and Eisner, 2006; inter alia), and such methods have been applied successfully to semantic tasks (de Marneffe et al., 2006; Wang et al., 2007; Das and Smith, 2009). While we not describe connections to such approaches in detail due to space limitations, we note that theoretical connections are possible between transformations and alignments (Chawathe and Garcia-Molina, 1997). Tree kernels have been applied to a variety of natural language tasks (Collins and Duffy, 2001; Zelenko et al., 2003; Culotta and Sorensen, 2004). Of particular interest, Zanzotto and Moschitti (2006) describe a k</context>
+</contexts>
+<marker>Gildea, 2003</marker>
+<rawString>D. Gildea. 2003. Loosely tree-based alignment for machine translation. In Proc. of ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>S Harmeling</author>
+</authors>
+<title>An extensible probabilistic transformation-based approach to the third Recognizing Textual Entailment challenge.</title>
+<date>2007</date>
+<booktitle>In Proc. of ACLPASCAL Workshop on Textual Entailment and Paraphrasing.</booktitle>
+<contexts>
+<context position="22702" citStr="Harmeling, 2007" startWordPosition="3748" endWordPosition="3749">ble 2: Tree edit sequence classification features. a “premise,” which is a sentence or paragraph about a particular topic or event, and a “hypothesis,” which is a single, usually short, sentence that may or may not follow from the premise. The task is to decide whether or not the hypothesis is entailed by the premise (Giampiccolo et al., 2007). Tree edit sequences were extracted in one direction, from premise to hypothesis.12 Since premises 12It is counter-intuitive to model adding information through extensive insertions, for both entailment and answer selection. System Acc. % Prec. % Rec. % Harmeling, 2007 59.5 - - de Marneffe et al., 2006 60.5 61.8 60.2 M&amp;M, 2007 (NL) 59.4 70.1 36.1 M&amp;M, 2007 (Hybrid) 64.3 65.5 63.9 Tree Edit Model 62.8 61.9 71.2 Table 3: Results for recognizing textual entailments. Precision and recall values are for the true entailment class. Results for de Marneffe et al. (2006) were reported by MacCartney and Manning (2008). Harmeling (2007) only reported accuracy. may consist of multiple sentences, we attach sentences as children of dummy root nodes, for both the premise and hypothesis. The model was trained on the development set (i.e., training data) for RTE3 along with</context>
+<context position="24044" citStr="Harmeling (2007)" startWordPosition="3971" endWordPosition="3972">true entailments, and overall accuracy (i.e., percentage correct). We compare to four systems that use syntactic dependencies and lexical semantic information.13 De Marneffe et al. (2006) described an RTE system that finds word alignments and then classifies sentence pairs based on those alignments. MacCartney and Manning (2008) used an inference procedure based on Natural Logic, leading to a relatively high-precision, low-recall system. MacCartney and Manning (2008) also tested a hybrid of the natural logic system and the complementary system of de Marneffe et al. (2006) to improve coverage. Harmeling (2007) took an approach similar to ours involving classification based on transformation sequences, but with less general operations and a more complex, heuristic procedure for finding sequences. Table 3 presents RTE results, showing that the tree edit model performs competitively. While it does not outperform state-of-the-art RTE systems, the tree edit model is simpler and less tailored to this task than many other RTE systems based on similar linguistic information. 13The top-performing RTE systems often involve significant manual engineering for the RTE task. Also, many employ techniques that mak</context>
+</contexts>
+<marker>Harmeling, 2007</marker>
+<rawString>S. Harmeling. 2007. An extensible probabilistic transformation-based approach to the third Recognizing Textual Entailment challenge. In Proc. of ACLPASCAL Workshop on Textual Entailment and Paraphrasing.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>T Hastie</author>
+<author>R Tibshirani</author>
+<author>J Friedman</author>
+</authors>
+<date>2001</date>
+<booktitle>The Elements of Statistical Learning: Data Mining, Inference, and Prediction.</booktitle>
+<publisher>Springer.</publisher>
+<contexts>
+<context position="18828" citStr="Hastie et al., 2001" startWordPosition="3153" endWordPosition="3156">entailment experiments to account for multi-sentence premises. For all tasks, extracting sequences took about 5 seconds on average per sentence pair with 1 GB of RAM on a 3.0 GHz machine. practice, this constraint is enforced a small fraction of the time (e.g., less than 0.1% of the time for the answer selection training data). If no goal state is found after maxIters iterations, a special unknown sequence feature is recorded. 4 Classification of Sequences Given a training set of labeled sentence pairs, after extracting edit sequences, we train a logistic regression (LR) classification model (Hastie et al., 2001) on the labels and features of the extracted sequences.10 We optimize with a variant of Newton’s method (le Cessie and van Houwelingen, 1997). The tree edit models use a set of 33 features of edit sequences to classify sentence pairs. We used the training data for the paraphrase task (§5.2) to develop this set. All features are integer-valued, and most are counts of different types of edits. Five are counts of the nodes in the source tree that were not edited directly by any operations (though their ancestors or descendants may have been). Table 2 describes the features in detail. 5 Experiment</context>
+</contexts>
+<marker>Hastie, Tibshirani, Friedman, 2001</marker>
+<rawString>T. Hastie, R. Tibshirani, and J. Friedman. 2001. The Elements of Statistical Learning: Data Mining, Inference, and Prediction. Springer.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D Haussler</author>
+</authors>
+<title>Convolution kernels on discrete structures.</title>
+<date>1999</date>
+<tech>Technical Report ucs-crl-99-10,</tech>
+<institution>University of California Santa Cruz.</institution>
+<contexts>
+<context position="11954" citStr="Haussler (1999)" startWordPosition="1992" endWordPosition="1993"> represented in some real-valued feature space (Sch¨olkopf and Smola, 2001). A tree kernel, as proposed by Collins and Duffy (2001), is a convolution kernel4 whose input is a pair of trees and whose output is a positive number indicating the similarity of the sets of all their subtrees. The dimensionality of the feature vector associated with a tree kernel is thus unbounded in general, and larger trees generally lead to larger kernel values. Direct use as a search heuristic would lead to the exploration of states for larger and larger trees, even ones larger than the target tree. Thus, as in 4Haussler (1999) provides a proof, which can be extended for our kernel, that tree kernels are valid kernel functions. 1013 Equation 1, the search heuristic H “normalizes” the kernel K of the current tree Tc and target tree Tt to unit range by dividing by the geometric mean of the kernels comparing the individual trees to themselves.5 Also, the normalized value is subtracted from 1 so as to make it a difference rather than a similarity. The search routine will thus reach the goal state when the heuristic reaches 0, indicating that the current and target trees are identical. K(Tc, Tt) H(Tc) = 1 − V/K(Tc,Tc) x </context>
+</contexts>
+<marker>Haussler, 1999</marker>
+<rawString>D. Haussler. 1999. Convolution kernels on discrete structures. Technical Report ucs-crl-99-10, University of California Santa Cruz.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>G E Hinton</author>
+</authors>
+<title>Product of experts.</title>
+<date>1999</date>
+<booktitle>In Proc. of ICANN.</booktitle>
+<contexts>
+<context position="27058" citStr="Hinton, 1999" startWordPosition="4451" endWordPosition="4452"> One approach, by Wan et al. (2006), uses an SVM classifier with features based on syntactic dependencies, TED, unigram overlap, and BLEU scores (Papineni et al., 2002). The other system, by Das and Smith (2009), is based on a quasi-synchronous grammar (QG; Smith and Eisner, 2006), a probabilistic model that allows loose alignments between trees but prefers tree isomorphism. In addition to syntactic dependencies, the QG model utilizes entity labels from BBN Identifinder (Bikel et al., 1999) and lexical semantics knowledge from WordNet. Das and Smith (2009) also use a product of experts (PoE) (Hinton, 1999) to combine the QG model with lexical overlap features. Table 4 shows the test set results for all of the systems. While the tree edit model did not outperform the other systems, it produced competitive results. Moreover, the tree edit model does not make use of BLEU scores (Wan et al., 2006), entity labeling components, lexical semantics knowledge sources such as WordNet (beyond lemmatization), or system combination techniques (Das and Smith, 2009). 5.3 Answer Selection for Question Answering A tree edit model was trained for answer selection in question answering (QA). In this task, an insta</context>
+</contexts>
+<marker>Hinton, 1999</marker>
+<rawString>G. E. Hinton. 1999. Product of experts. In Proc. of ICANN.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>P N Klein</author>
+</authors>
+<title>Computing the edit-distance between unrooted ordered trees.</title>
+<date>1989</date>
+<booktitle>In Proc. of European Symposium on Algorithms.</booktitle>
+<contexts>
+<context position="2068" citStr="Klein, 1989" startWordPosition="306" endWordPosition="307">ion of one sentence (e.g., a dependency or phrase structure parse tree) into a tree for the other. Unlike grammarbased models and shallow-feature discriminative approaches, TED provides an intuitive story for tree pairs where one tree is derived from the other by a sequence of simple transformations. The available operations in standard TED are the following: insertion of a node, relabeling (i.e., renaming) of a node, and deletion (i.e., removal) of a node. While the restriction to these three operations permits efficient dynamic programming solutions for finding a minimum-cost edit sequence (Klein, 1989; Zhang and Shasha, 1989), certain interesting and prevalent phenomena involving reordering and movement cannot be elegantly captured. For example, consider the following sentence pair, which is a simplified version of a true entailment (i.e., the premise entails the hypothesis) in the development data for the RTE-3 task. Premise: Pierce built the home for his daughter off Rossville Blvd, as he lives nearby. Hypothesis: Pierce lives near Rossville Blvd. In a plausible dependency tree representation of the premise, live and Rossville Blvd would be in separate subtrees under built. In the hypoth</context>
+<context position="9390" citStr="Klein, 1989" startWordPosition="1554" endWordPosition="1555">f T(k). (s.t. T (k) is not a descendant of T(j)), side s E {left, right} NEW-ROOT non-root node index j, Make T(j) the new root node of the tree. Insert the former side s E {left, right} root as the last child on the s side of T(j). MOVE-SIBLING non-root node index j, Move T(j) to be the r child on the s side of its parent. side s E {left, right}, position r E {first, last} Table 1: Possible operations in our extended tree edit implementation. All are described as operations to tree T. is exponentially large in the size of the trees. However, while dynamic programming solutions exist for TED (Klein, 1989; Zhang and Shasha, 1989), it is unlikely that such efficient algorithms are available for our problem because of the lack of locality restrictions on edit operations.3 3.1 Algorithm for Extracting Sequences Rather than dynamic programming, we use greedy best-first search (Pearl, 1984) to efficiently find sensible (if not minimal) edit sequences. The distinguishing characteristic of greedy best-first search is that its function for evaluating search states is simply a heuristic function that estimates the remaining cost, rather than a heuristic function plus the cost so far (e.g., number of ed</context>
+<context position="30970" citStr="Klein, 1989" startWordPosition="5091" endWordPosition="5092">r values. While the tree edit models perform competitively in multiple tasks by capturing relevant syntactic phenomena, it is clear that syntax alone cannot solve these semantic tasks. Fortunately, this approach is amenable to extensions, facilitated by the separation of the representation extraction and classification steps. Richer edits could be included; lexical semantics could be integrated into the classifier or the search heuristic; or edit sequences might be found for other types of trees, such as semantic parses. 6 Related Work TED is a widely studied technique with many applications (Klein, 1989; Zhang and Shasha, 1989; Punyakanok et al., 2004; Schilder and McInnes, 2006). See Bille (2005) for a review. Chawathe and GarciaMolina (1997) describe a tree edit algorithm for detecting changes in structured documents that incorporates edits for moving subtrees and reordering children. However, they make assumptions unsuitable for natural language, such as the absence of recursive syntactic rewrite rules. Bernard et al. (2008) use EM to learn the costs for simple insert, relabel, and delete edits, but they only discuss experiments for digit recognition and a task using artificial data. Much</context>
+</contexts>
+<marker>Klein, 1989</marker>
+<rawString>P. N. Klein. 1989. Computing the edit-distance between unrooted ordered trees. In Proc. of European Symposium on Algorithms.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>M Kouylekov</author>
+<author>B Magnini</author>
+</authors>
+<title>Recognizing textual entailment with tree edit distance algorithms.</title>
+<date>2005</date>
+<booktitle>In Proc. of the PASCAL RTE Challenge.</booktitle>
+<contexts>
+<context position="24758" citStr="Kouylekov and Magnini (2005)" startWordPosition="4077" endWordPosition="4080">uences, but with less general operations and a more complex, heuristic procedure for finding sequences. Table 3 presents RTE results, showing that the tree edit model performs competitively. While it does not outperform state-of-the-art RTE systems, the tree edit model is simpler and less tailored to this task than many other RTE systems based on similar linguistic information. 13The top-performing RTE systems often involve significant manual engineering for the RTE task. Also, many employ techniques that make them not very comparable to our approach (e.g., theorem proving). We also note that Kouylekov and Magnini (2005) report 55% accuracy for RTE-2 using TED. See Giampiccolo et al. (2007) for more RTE-3 results. 1016 System Acc. % Prec. % Rec. % Wan et al., 2006 75.6 77 90 D&amp;S, 2009 (QG) 73.9 74.9 91.3 D&amp;S, 2009 (PoE) 76.1 79.6 86.0 Tree Edit Model 73.2 75.7 87.8 Table 4: Paraphrase identification results, with precision and recall measures for true (positive) paraphrases. Wan et al. (2006) report precision and recall values with only two significant digits. System MAP MRR Punyakanok et al., 2004 0.3814 0.4462 +WN 0.4189 0.4939 Cui et al., 2005 0.4350 0.5569 +WN 0.4271 0.5259 Wang et al., 2007 0.4828 0.5571</context>
+</contexts>
+<marker>Kouylekov, Magnini, 2005</marker>
+<rawString>M. Kouylekov and B. Magnini. 2005. Recognizing textual entailment with tree edit distance algorithms. In Proc. of the PASCAL RTE Challenge.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>S le Cessie</author>
+<author>J C van Houwelingen</author>
+</authors>
+<title>Ridge estimators in logistic regression.</title>
+<date>1997</date>
+<journal>Applied Statistics,</journal>
+<volume>41</volume>
+<marker>le Cessie, van Houwelingen, 1997</marker>
+<rawString>S. le Cessie and J. C. van Houwelingen. 1997. Ridge estimators in logistic regression. Applied Statistics, 41.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>B MacCartney</author>
+<author>C D Manning</author>
+</authors>
+<title>Modeling semantic containment and exclusion in natural language inference.</title>
+<date>2008</date>
+<booktitle>In Proc. of COLING.</booktitle>
+<contexts>
+<context position="23048" citStr="MacCartney and Manning (2008)" startWordPosition="3807" endWordPosition="3810">et al., 2007). Tree edit sequences were extracted in one direction, from premise to hypothesis.12 Since premises 12It is counter-intuitive to model adding information through extensive insertions, for both entailment and answer selection. System Acc. % Prec. % Rec. % Harmeling, 2007 59.5 - - de Marneffe et al., 2006 60.5 61.8 60.2 M&amp;M, 2007 (NL) 59.4 70.1 36.1 M&amp;M, 2007 (Hybrid) 64.3 65.5 63.9 Tree Edit Model 62.8 61.9 71.2 Table 3: Results for recognizing textual entailments. Precision and recall values are for the true entailment class. Results for de Marneffe et al. (2006) were reported by MacCartney and Manning (2008). Harmeling (2007) only reported accuracy. may consist of multiple sentences, we attach sentences as children of dummy root nodes, for both the premise and hypothesis. The model was trained on the development set (i.e., training data) for RTE3 along with all the data from the RTE-1 and RTE-2 tasks. It was then evaluated on the RTE-3 test set. We report precision and recall for true entailments, and overall accuracy (i.e., percentage correct). We compare to four systems that use syntactic dependencies and lexical semantic information.13 De Marneffe et al. (2006) described an RTE system that fin</context>
+</contexts>
+<marker>MacCartney, Manning, 2008</marker>
+<rawString>B. MacCartney and C. D. Manning. 2008. Modeling semantic containment and exclusion in natural language inference. In Proc. of COLING.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>R McDonald</author>
+<author>F Pereira</author>
+<author>K Ribarov</author>
+<author>J Hajiˇc</author>
+</authors>
+<title>Non-projective dependency parsing using spanning tree algorithms.</title>
+<date>2005</date>
+<booktitle>In Proc. of HLT-EMNLP.</booktitle>
+<marker>McDonald, Pereira, Ribarov, Hajiˇc, 2005</marker>
+<rawString>R. McDonald, F. Pereira, K. Ribarov, and J. Hajiˇc. 2005. Non-projective dependency parsing using spanning tree algorithms. In Proc. of HLT-EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>G A Miller</author>
+<author>R Beckwith</author>
+<author>C Fellbaum</author>
+<author>D Gross</author>
+<author>K J Miller</author>
+</authors>
+<title>WordNet: An on-line lexical database.</title>
+<date>1990</date>
+<journal>International Journal of Lexicography,</journal>
+<volume>3</volume>
+<issue>4</issue>
+<contexts>
+<context position="20486" citStr="Miller et al., 1990" startWordPosition="3422" endWordPosition="3425">further tuning.11 5.1 Recognizing Textual Entailment A tree edit model was trained for recognizing textual entailment (RTE). Here, an instance consists of 10In cross-validation experiments with the training data, we found that unregularized LR outperformed SVMs (Vapnik, 1995) and 22-regularized LR, perhaps due to the small number of features in our models. 11All datasets were POS-tagged using Ratnaparkhi’s (1996) tagger and parsed for dependencies using the MST Parser (McDonald et al., 2005). Features were computed from POS and edge label information in the dependency parses. The WordNet API (Miller et al., 1990) was used for lemmatization only. An appendix with further experimental details is available at http://www.ark.cs.cmu.edu/ mheilman/tree-edit-appendix/. 1015 Feature Description totalEdits # of edits in the sequence. XEdits #s of X edits (where X is one of the nine edit types in Table 1). relabelSamePOS, #s of RELABEL-NODE edits relabelSameLemma, that: preserve POS, preserve relablePronoun, lemmas, convert between relabelProper, nouns and pronouns, change relabelNum proper nouns, change numeric values by more than 5% (to allow rounding), respectively. insertVorN, #s of INSERT-CHILD or insertPr</context>
+<context position="29307" citStr="Miller et al., 1990" startWordPosition="4819" endWordPosition="4822">or probabilities of correctness according to the model. We tested our model with QA pairs from TREC13. We report Mean Average Precision (MAP) and Mean Reciprocal Rank (MRR), which are information retrieval measures for ranked lists. Tree edit sequences were extracted only in one direction, from answer to question. We compare our tree edit model to three other systems as they are reported by Wang et al. (2007). Wang et al. use a QG model, incorporating information from dependency 1017 trees, entity labels from BBN Identifinder (Bikel et al., 1999), and lexical semantics knowledge from WordNet (Miller et al., 1990). Cui et al. (2005) developed an information theoretic measure based on dependency trees. Punyakanok et al. (2004) used a generalization of TED to model the QA pairs. For their experiments, Wang et al. also extended both of the latter models to utilize WordNet. Table 5 displays answer selection results, including test set results for the baseline systems with and without lexical semantic information from WordNet. The tree edit model, which does not use lexical semantics knowledge, produced the best result reported to date. The results for the tree edit model are statistically significantly dif</context>
+</contexts>
+<marker>Miller, Beckwith, Fellbaum, Gross, Miller, 1990</marker>
+<rawString>G. A. Miller, R. Beckwith, C. Fellbaum, D. Gross, and K. J. Miller. 1990. WordNet: An on-line lexical database. International Journal of Lexicography, 3(4).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>A Moschitti</author>
+</authors>
+<title>Efficient convolution kernels for dependency and constituent syntactic trees.</title>
+<date>2006</date>
+<booktitle>In Proc. of ECML.</booktitle>
+<contexts>
+<context position="13449" citStr="Moschitti (2006)" startWordPosition="2246" endWordPosition="2247">. We are effectively mapping the source, current, and target trees to points on the surface of a highdimensional unit sphere associated with the normalized kernel. In this geometric interpretation, the search heuristic in Equation 1 leads the search algorithm to explore reachable trees along the surface of this sphere, always choosing the one whose angle with the target tree is smallest, until the angle is 0. The path on the sphere corresponds to an edit sequence, from which we will derive edit features in §4 for classification. Our kernel is based on the partial tree kernel (PTK) proposed by Moschitti (2006). It considers matches between ordered subsequences of children in addition to the full sequences of children as in Collins and Duffy (2001). This permits a very finegrained measure of tree pair similarity. Importantly, if two nodes differ only by the presence or position of a single child, they will still lead to a large kernel function value. We also sum over the similarities between all pairs of nodes, similar to (Collins and Duffy, 2001). Since the PTK considers non-contiguous subsequences, it is very computationally expensive. We therefore restrict our kernel to consider only contiguous s</context>
+<context position="15468" citStr="Moschitti (2006)" startWordPosition="2597" endWordPosition="2598">rents are also considered. The kernel is defined recursively (starting from the roots), where ni is a node in the set of nodes NT, in tree Ti: K(T1, T2) = � � Δ(n1, n2) (3) n1∈{NT1} n2∈{NT2} �Δ(n1, n2) = µ λ2s(n1, n2) + (4) �Δ(cn1[J1i], cn2[J2i]) � J1 = (J11, J12, J1a, ...) is an index sequence associated with any contiguous ordered sequence of children cn1 of node n1 (likewise for J2). J1i and J2i point to the ith children in the two sequences. � � �returns the length of a sequence. The kernel includes two decay factors: λ for the length of child subsequences, as in Zelenko et al. (2003) and Moschitti (2006); and µ for the height of the subtree, as in Collins and Duffy (2001) and Moschitti (2006). We set both to 0.25 in our experiments to encourage the search to consider edits leading to smaller matches (e.g., of individual parent-child dependencies) before larger ones.7 6The side of a node relative to its parent in a dependency tree is important: two parent nodes with the same children should not be considered exact matches if children are on different sides (e.g., defeated the insurgents and the insurgents defeated). 7From experiments with the paraphrase training set (§5.2), performance does no</context>
+<context position="32261" citStr="Moschitti (2006)" startWordPosition="5295" endWordPosition="5296">lignments (e.g., Gildea, 2003; Smith and Eisner, 2006; inter alia), and such methods have been applied successfully to semantic tasks (de Marneffe et al., 2006; Wang et al., 2007; Das and Smith, 2009). While we not describe connections to such approaches in detail due to space limitations, we note that theoretical connections are possible between transformations and alignments (Chawathe and Garcia-Molina, 1997). Tree kernels have been applied to a variety of natural language tasks (Collins and Duffy, 2001; Zelenko et al., 2003; Culotta and Sorensen, 2004). Of particular interest, Zanzotto and Moschitti (2006) describe a kernel for RTE that takes tree pairs, rather than single trees, as input. To our knowledge, our use of a tree kernel as a search heuristic is novel. 7 Conclusion We described tree edit models that generalize TED by allowing operations that better account for complex reordering phenomena and by learning from data how different edits should affect the models decisions about output variables of interest (e.g., the correctness of answers). They offer an intuitive and effective method for modeling sentence pairs. They led to competitive performance for three tasks: paraphrase identifica</context>
+</contexts>
+<marker>Moschitti, 2006</marker>
+<rawString>A. Moschitti. 2006. Efficient convolution kernels for dependency and constituent syntactic trees. In Proc. of ECML.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>K Papineni</author>
+<author>S Roukos</author>
+<author>T Ward</author>
+<author>W-J Zhu</author>
+</authors>
+<title>BLEU: a method for automatic evaluation of machine translation.</title>
+<date>2002</date>
+<booktitle>In Proc. of ACL.</booktitle>
+<contexts>
+<context position="26613" citStr="Papineni et al., 2002" startWordPosition="4379" endWordPosition="4382">s for each pair (one in each direction) and summed the feature values. The model was evaluated with the standard test set. We report accuracy, positive class precision (i.e., percentage of predicted positive paraphrases that had positive gold-standard labels), and positive class recall (i.e., percentage of positive gold-standard labels that were predicted to be positive paraphrases). We compare to two of the best performance approaches to paraphrase. One approach, by Wan et al. (2006), uses an SVM classifier with features based on syntactic dependencies, TED, unigram overlap, and BLEU scores (Papineni et al., 2002). The other system, by Das and Smith (2009), is based on a quasi-synchronous grammar (QG; Smith and Eisner, 2006), a probabilistic model that allows loose alignments between trees but prefers tree isomorphism. In addition to syntactic dependencies, the QG model utilizes entity labels from BBN Identifinder (Bikel et al., 1999) and lexical semantics knowledge from WordNet. Das and Smith (2009) also use a product of experts (PoE) (Hinton, 1999) to combine the QG model with lexical overlap features. Table 4 shows the test set results for all of the systems. While the tree edit model did not outper</context>
+</contexts>
+<marker>Papineni, Roukos, Ward, Zhu, 2002</marker>
+<rawString>K. Papineni, S. Roukos, T. Ward, and W.-J. Zhu. 2002. BLEU: a method for automatic evaluation of machine translation. In Proc. of ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J Pearl</author>
+</authors>
+<title>Heuristics: intelligent search strategies for computer problem solving.</title>
+<date>1984</date>
+<publisher>Addison-Wesley.</publisher>
+<contexts>
+<context position="9676" citStr="Pearl, 1984" startWordPosition="1597" endWordPosition="1598">the r child on the s side of its parent. side s E {left, right}, position r E {first, last} Table 1: Possible operations in our extended tree edit implementation. All are described as operations to tree T. is exponentially large in the size of the trees. However, while dynamic programming solutions exist for TED (Klein, 1989; Zhang and Shasha, 1989), it is unlikely that such efficient algorithms are available for our problem because of the lack of locality restrictions on edit operations.3 3.1 Algorithm for Extracting Sequences Rather than dynamic programming, we use greedy best-first search (Pearl, 1984) to efficiently find sensible (if not minimal) edit sequences. The distinguishing characteristic of greedy best-first search is that its function for evaluating search states is simply a heuristic function that estimates the remaining cost, rather than a heuristic function plus the cost so far (e.g., number of edits), as in other types of search. Here, the initial search state is the source tree, the current state is T, and the goal state is Tt. The function for generating the successors for a given state returns returns trees for all possible specifications of operations on T, (§2.2), subject</context>
+</contexts>
+<marker>Pearl, 1984</marker>
+<rawString>J. Pearl. 1984. Heuristics: intelligent search strategies for computer problem solving. Addison-Wesley.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>V Punyakanok</author>
+<author>D Roth</author>
+<author>W Yih</author>
+</authors>
+<title>Mapping dependencies trees: An application to question answering.</title>
+<date>2004</date>
+<booktitle>In Proc. of the 8th International Symposium on Artificial Intelligence and Mathematics.</booktitle>
+<contexts>
+<context position="25245" citStr="Punyakanok et al., 2004" startWordPosition="4161" endWordPosition="4164">oy techniques that make them not very comparable to our approach (e.g., theorem proving). We also note that Kouylekov and Magnini (2005) report 55% accuracy for RTE-2 using TED. See Giampiccolo et al. (2007) for more RTE-3 results. 1016 System Acc. % Prec. % Rec. % Wan et al., 2006 75.6 77 90 D&amp;S, 2009 (QG) 73.9 74.9 91.3 D&amp;S, 2009 (PoE) 76.1 79.6 86.0 Tree Edit Model 73.2 75.7 87.8 Table 4: Paraphrase identification results, with precision and recall measures for true (positive) paraphrases. Wan et al. (2006) report precision and recall values with only two significant digits. System MAP MRR Punyakanok et al., 2004 0.3814 0.4462 +WN 0.4189 0.4939 Cui et al., 2005 0.4350 0.5569 +WN 0.4271 0.5259 Wang et al., 2007 0.4828 0.5571 +WN 0.6029 0.6852 Tree Edit Model 0.6091 0.6917 Table 5: Results for the task of answer selection for question answering. +WN denotes use of WordNet features. 5.2 Paraphrase Identification A tree edit model was trained and tested for paraphrase identification using the the Microsoft Research Paraphrase Corpus (Dolan et al., 2004). The task is to identify whether two sentences convey essentially the same meaning. The standard training set was used to train the tree edit classificati</context>
+<context position="29421" citStr="Punyakanok et al. (2004)" startWordPosition="4837" endWordPosition="4840">rt Mean Average Precision (MAP) and Mean Reciprocal Rank (MRR), which are information retrieval measures for ranked lists. Tree edit sequences were extracted only in one direction, from answer to question. We compare our tree edit model to three other systems as they are reported by Wang et al. (2007). Wang et al. use a QG model, incorporating information from dependency 1017 trees, entity labels from BBN Identifinder (Bikel et al., 1999), and lexical semantics knowledge from WordNet (Miller et al., 1990). Cui et al. (2005) developed an information theoretic measure based on dependency trees. Punyakanok et al. (2004) used a generalization of TED to model the QA pairs. For their experiments, Wang et al. also extended both of the latter models to utilize WordNet. Table 5 displays answer selection results, including test set results for the baseline systems with and without lexical semantic information from WordNet. The tree edit model, which does not use lexical semantics knowledge, produced the best result reported to date. The results for the tree edit model are statistically significantly different (sign test, p &lt; 0.01) from the results for all except the Wang et al. (2007) system with WordNet (p &gt; 0.05)</context>
+<context position="31019" citStr="Punyakanok et al., 2004" startWordPosition="5097" endWordPosition="5101">perform competitively in multiple tasks by capturing relevant syntactic phenomena, it is clear that syntax alone cannot solve these semantic tasks. Fortunately, this approach is amenable to extensions, facilitated by the separation of the representation extraction and classification steps. Richer edits could be included; lexical semantics could be integrated into the classifier or the search heuristic; or edit sequences might be found for other types of trees, such as semantic parses. 6 Related Work TED is a widely studied technique with many applications (Klein, 1989; Zhang and Shasha, 1989; Punyakanok et al., 2004; Schilder and McInnes, 2006). See Bille (2005) for a review. Chawathe and GarciaMolina (1997) describe a tree edit algorithm for detecting changes in structured documents that incorporates edits for moving subtrees and reordering children. However, they make assumptions unsuitable for natural language, such as the absence of recursive syntactic rewrite rules. Bernard et al. (2008) use EM to learn the costs for simple insert, relabel, and delete edits, but they only discuss experiments for digit recognition and a task using artificial data. Much research has focused on modeling word reordering</context>
+</contexts>
+<marker>Punyakanok, Roth, Yih, 2004</marker>
+<rawString>V. Punyakanok, D. Roth, and W. Yih. 2004. Mapping dependencies trees: An application to question answering. In Proc. of the 8th International Symposium on Artificial Intelligence and Mathematics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>A Ratnaparkhi</author>
+</authors>
+<title>A maximum entropy part-ofspeech tagger.</title>
+<date>1996</date>
+<booktitle>In Proc. of EMNLP.</booktitle>
+<marker>Ratnaparkhi, 1996</marker>
+<rawString>A. Ratnaparkhi. 1996. A maximum entropy part-ofspeech tagger. In Proc. of EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>F Schilder</author>
+<author>B T McInnes</author>
+</authors>
+<title>TLR at DUC 2006: approximate tree similarity and a new evaluation regime.</title>
+<date>2006</date>
+<booktitle>In Proc. of DUC.</booktitle>
+<contexts>
+<context position="31048" citStr="Schilder and McInnes, 2006" startWordPosition="5102" endWordPosition="5105">multiple tasks by capturing relevant syntactic phenomena, it is clear that syntax alone cannot solve these semantic tasks. Fortunately, this approach is amenable to extensions, facilitated by the separation of the representation extraction and classification steps. Richer edits could be included; lexical semantics could be integrated into the classifier or the search heuristic; or edit sequences might be found for other types of trees, such as semantic parses. 6 Related Work TED is a widely studied technique with many applications (Klein, 1989; Zhang and Shasha, 1989; Punyakanok et al., 2004; Schilder and McInnes, 2006). See Bille (2005) for a review. Chawathe and GarciaMolina (1997) describe a tree edit algorithm for detecting changes in structured documents that incorporates edits for moving subtrees and reordering children. However, they make assumptions unsuitable for natural language, such as the absence of recursive syntactic rewrite rules. Bernard et al. (2008) use EM to learn the costs for simple insert, relabel, and delete edits, but they only discuss experiments for digit recognition and a task using artificial data. Much research has focused on modeling word reordering phenomena and syntactic alig</context>
+</contexts>
+<marker>Schilder, McInnes, 2006</marker>
+<rawString>F. Schilder and B. T. McInnes. 2006. TLR at DUC 2006: approximate tree similarity and a new evaluation regime. In Proc. of DUC.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>B Sch¨olkopf</author>
+<author>A J Smola</author>
+</authors>
+<title>Learning with Kernels.</title>
+<date>2001</date>
+<publisher>MIT Press.</publisher>
+<marker>Sch¨olkopf, Smola, 2001</marker>
+<rawString>B. Sch¨olkopf and A. J. Smola. 2001. Learning with Kernels. MIT Press.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D A Smith</author>
+<author>J Eisner</author>
+</authors>
+<title>Quasi-synchronous grammars: Alignment by soft projection of syntactic dependencies.</title>
+<date>2006</date>
+<booktitle>In Proc. of HLT-NAACL Workshop on Statistical Machine Translation.</booktitle>
+<contexts>
+<context position="26726" citStr="Smith and Eisner, 2006" startWordPosition="4398" endWordPosition="4401"> test set. We report accuracy, positive class precision (i.e., percentage of predicted positive paraphrases that had positive gold-standard labels), and positive class recall (i.e., percentage of positive gold-standard labels that were predicted to be positive paraphrases). We compare to two of the best performance approaches to paraphrase. One approach, by Wan et al. (2006), uses an SVM classifier with features based on syntactic dependencies, TED, unigram overlap, and BLEU scores (Papineni et al., 2002). The other system, by Das and Smith (2009), is based on a quasi-synchronous grammar (QG; Smith and Eisner, 2006), a probabilistic model that allows loose alignments between trees but prefers tree isomorphism. In addition to syntactic dependencies, the QG model utilizes entity labels from BBN Identifinder (Bikel et al., 1999) and lexical semantics knowledge from WordNet. Das and Smith (2009) also use a product of experts (PoE) (Hinton, 1999) to combine the QG model with lexical overlap features. Table 4 shows the test set results for all of the systems. While the tree edit model did not outperform the other systems, it produced competitive results. Moreover, the tree edit model does not make use of BLEU </context>
+<context position="31698" citStr="Smith and Eisner, 2006" startWordPosition="5204" endWordPosition="5207">iew. Chawathe and GarciaMolina (1997) describe a tree edit algorithm for detecting changes in structured documents that incorporates edits for moving subtrees and reordering children. However, they make assumptions unsuitable for natural language, such as the absence of recursive syntactic rewrite rules. Bernard et al. (2008) use EM to learn the costs for simple insert, relabel, and delete edits, but they only discuss experiments for digit recognition and a task using artificial data. Much research has focused on modeling word reordering phenomena and syntactic alignments (e.g., Gildea, 2003; Smith and Eisner, 2006; inter alia), and such methods have been applied successfully to semantic tasks (de Marneffe et al., 2006; Wang et al., 2007; Das and Smith, 2009). While we not describe connections to such approaches in detail due to space limitations, we note that theoretical connections are possible between transformations and alignments (Chawathe and Garcia-Molina, 1997). Tree kernels have been applied to a variety of natural language tasks (Collins and Duffy, 2001; Zelenko et al., 2003; Culotta and Sorensen, 2004). Of particular interest, Zanzotto and Moschitti (2006) describe a kernel for RTE that takes</context>
+</contexts>
+<marker>Smith, Eisner, 2006</marker>
+<rawString>D. A. Smith and J. Eisner. 2006. Quasi-synchronous grammars: Alignment by soft projection of syntactic dependencies. In Proc. of HLT-NAACL Workshop on Statistical Machine Translation.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>V N Vapnik</author>
+</authors>
+<title>The Nature of Statistical Learning Theory.</title>
+<date>1995</date>
+<publisher>Springer.</publisher>
+<contexts>
+<context position="20142" citStr="Vapnik, 1995" startWordPosition="3370" endWordPosition="3371">ment (Giampiccolo et al., 2007), paraphrase identification (Dolan et al., 2004), and an answer selection task (Wang et al., 2007) for question answering (Voorhees, 2004). The feature set and first tree edit model were developed for paraphrase, and then applied to the other tasks with very few modifications (all explained below) and no further tuning.11 5.1 Recognizing Textual Entailment A tree edit model was trained for recognizing textual entailment (RTE). Here, an instance consists of 10In cross-validation experiments with the training data, we found that unregularized LR outperformed SVMs (Vapnik, 1995) and 22-regularized LR, perhaps due to the small number of features in our models. 11All datasets were POS-tagged using Ratnaparkhi’s (1996) tagger and parsed for dependencies using the MST Parser (McDonald et al., 2005). Features were computed from POS and edge label information in the dependency parses. The WordNet API (Miller et al., 1990) was used for lemmatization only. An appendix with further experimental details is available at http://www.ark.cs.cmu.edu/ mheilman/tree-edit-appendix/. 1015 Feature Description totalEdits # of edits in the sequence. XEdits #s of X edits (where X is one of</context>
+</contexts>
+<marker>Vapnik, 1995</marker>
+<rawString>V. N. Vapnik. 1995. The Nature of Statistical Learning Theory. Springer.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>E M Voorhees</author>
+</authors>
+<title>Overview of TREC</title>
+<date>2004</date>
+<booktitle>In Proc. of TREC.</booktitle>
+<contexts>
+<context position="19698" citStr="Voorhees, 2004" startWordPosition="3302" endWordPosition="3303"> data for the paraphrase task (§5.2) to develop this set. All features are integer-valued, and most are counts of different types of edits. Five are counts of the nodes in the source tree that were not edited directly by any operations (though their ancestors or descendants may have been). Table 2 describes the features in detail. 5 Experiments Experiments were conducted to evaluate tree edit models for three tasks: recognizing textual entailment (Giampiccolo et al., 2007), paraphrase identification (Dolan et al., 2004), and an answer selection task (Wang et al., 2007) for question answering (Voorhees, 2004). The feature set and first tree edit model were developed for paraphrase, and then applied to the other tasks with very few modifications (all explained below) and no further tuning.11 5.1 Recognizing Textual Entailment A tree edit model was trained for recognizing textual entailment (RTE). Here, an instance consists of 10In cross-validation experiments with the training data, we found that unregularized LR outperformed SVMs (Vapnik, 1995) and 22-regularized LR, perhaps due to the small number of features in our models. 11All datasets were POS-tagged using Ratnaparkhi’s (1996) tagger and pars</context>
+</contexts>
+<marker>Voorhees, 2004</marker>
+<rawString>E. M. Voorhees. 2004. Overview of TREC 2004. In Proc. of TREC.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>S Wan</author>
+<author>M Dras</author>
+<author>R Dale</author>
+<author>C Paris</author>
+</authors>
+<title>Using dependency-based features to take the “para-farce” out of paraphrase.</title>
+<date>2006</date>
+<booktitle>In Proc. of the Australasian Language Technology Workshop.</booktitle>
+<contexts>
+<context position="24904" citStr="Wan et al., 2006" startWordPosition="4105" endWordPosition="4108">it model performs competitively. While it does not outperform state-of-the-art RTE systems, the tree edit model is simpler and less tailored to this task than many other RTE systems based on similar linguistic information. 13The top-performing RTE systems often involve significant manual engineering for the RTE task. Also, many employ techniques that make them not very comparable to our approach (e.g., theorem proving). We also note that Kouylekov and Magnini (2005) report 55% accuracy for RTE-2 using TED. See Giampiccolo et al. (2007) for more RTE-3 results. 1016 System Acc. % Prec. % Rec. % Wan et al., 2006 75.6 77 90 D&amp;S, 2009 (QG) 73.9 74.9 91.3 D&amp;S, 2009 (PoE) 76.1 79.6 86.0 Tree Edit Model 73.2 75.7 87.8 Table 4: Paraphrase identification results, with precision and recall measures for true (positive) paraphrases. Wan et al. (2006) report precision and recall values with only two significant digits. System MAP MRR Punyakanok et al., 2004 0.3814 0.4462 +WN 0.4189 0.4939 Cui et al., 2005 0.4350 0.5569 +WN 0.4271 0.5259 Wang et al., 2007 0.4828 0.5571 +WN 0.6029 0.6852 Tree Edit Model 0.6091 0.6917 Table 5: Results for the task of answer selection for question answering. +WN denotes use of Word</context>
+<context position="26480" citStr="Wan et al. (2006)" startWordPosition="4359" endWordPosition="4362">guish between true and false paraphrases. Since there is no predefined direction for paraphrase pairs, we extracted two sequences for each pair (one in each direction) and summed the feature values. The model was evaluated with the standard test set. We report accuracy, positive class precision (i.e., percentage of predicted positive paraphrases that had positive gold-standard labels), and positive class recall (i.e., percentage of positive gold-standard labels that were predicted to be positive paraphrases). We compare to two of the best performance approaches to paraphrase. One approach, by Wan et al. (2006), uses an SVM classifier with features based on syntactic dependencies, TED, unigram overlap, and BLEU scores (Papineni et al., 2002). The other system, by Das and Smith (2009), is based on a quasi-synchronous grammar (QG; Smith and Eisner, 2006), a probabilistic model that allows loose alignments between trees but prefers tree isomorphism. In addition to syntactic dependencies, the QG model utilizes entity labels from BBN Identifinder (Bikel et al., 1999) and lexical semantics knowledge from WordNet. Das and Smith (2009) also use a product of experts (PoE) (Hinton, 1999) to combine the QG mod</context>
+</contexts>
+<marker>Wan, Dras, Dale, Paris, 2006</marker>
+<rawString>S. Wan, M. Dras, R. Dale, and C. Paris. 2006. Using dependency-based features to take the “para-farce” out of paraphrase. In Proc. of the Australasian Language Technology Workshop.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>M Wang</author>
+<author>N A Smith</author>
+<author>T Mitamura</author>
+</authors>
+<title>What is the Jeopardy model? A quasi-synchronous grammar for QA.</title>
+<date>2007</date>
+<booktitle>In Proc. of EMNLP-CoNLL.</booktitle>
+<contexts>
+<context position="5258" citStr="Wang et al., 2007" startWordPosition="800" endWordPosition="803">ther two sentences are paraphrases). The structure of this paper is as follows. §2 introduces our model and describes the edit operations that were implemented for our experiments. §3 details the search-based procedure for extracting edit sequences for pairs of sentences. §4 describes the classifier for sentence pairs based on features of their corresponding edit sequences. §5 describes and presents the results of experiments involving recognizing textual entailment (Giampiccolo et al., 2007), paraphrase identification (Dolan et al., 2004), and an answer selection task for question answering (Wang et al., 2007). §6 addresses related work, and §7 provides concluding remarks. 2 Extended Tree Edit Sequences This section defines a tree edit sequence and describes the operations used in our experiments. We begin with some conventions. We use dependency trees as the structure upon which the tree edits will operate. The child nodes for a given parent are represented in a head-outward fashion such that the left and right children are separate lists, with the left- and right-most elements as the last members of their respective lists, as in most generative dependency models (Eisner, 1996). Each node consists</context>
+<context position="19658" citStr="Wang et al., 2007" startWordPosition="3295" endWordPosition="3298">assify sentence pairs. We used the training data for the paraphrase task (§5.2) to develop this set. All features are integer-valued, and most are counts of different types of edits. Five are counts of the nodes in the source tree that were not edited directly by any operations (though their ancestors or descendants may have been). Table 2 describes the features in detail. 5 Experiments Experiments were conducted to evaluate tree edit models for three tasks: recognizing textual entailment (Giampiccolo et al., 2007), paraphrase identification (Dolan et al., 2004), and an answer selection task (Wang et al., 2007) for question answering (Voorhees, 2004). The feature set and first tree edit model were developed for paraphrase, and then applied to the other tasks with very few modifications (all explained below) and no further tuning.11 5.1 Recognizing Textual Entailment A tree edit model was trained for recognizing textual entailment (RTE). Here, an instance consists of 10In cross-validation experiments with the training data, we found that unregularized LR outperformed SVMs (Vapnik, 1995) and 22-regularized LR, perhaps due to the small number of features in our models. 11All datasets were POS-tagged us</context>
+<context position="25344" citStr="Wang et al., 2007" startWordPosition="4179" endWordPosition="4182">at Kouylekov and Magnini (2005) report 55% accuracy for RTE-2 using TED. See Giampiccolo et al. (2007) for more RTE-3 results. 1016 System Acc. % Prec. % Rec. % Wan et al., 2006 75.6 77 90 D&amp;S, 2009 (QG) 73.9 74.9 91.3 D&amp;S, 2009 (PoE) 76.1 79.6 86.0 Tree Edit Model 73.2 75.7 87.8 Table 4: Paraphrase identification results, with precision and recall measures for true (positive) paraphrases. Wan et al. (2006) report precision and recall values with only two significant digits. System MAP MRR Punyakanok et al., 2004 0.3814 0.4462 +WN 0.4189 0.4939 Cui et al., 2005 0.4350 0.5569 +WN 0.4271 0.5259 Wang et al., 2007 0.4828 0.5571 +WN 0.6029 0.6852 Tree Edit Model 0.6091 0.6917 Table 5: Results for the task of answer selection for question answering. +WN denotes use of WordNet features. 5.2 Paraphrase Identification A tree edit model was trained and tested for paraphrase identification using the the Microsoft Research Paraphrase Corpus (Dolan et al., 2004). The task is to identify whether two sentences convey essentially the same meaning. The standard training set was used to train the tree edit classification model to distinguish between true and false paraphrases. Since there is no predefined direction </context>
+<context position="28252" citStr="Wang et al., 2007" startWordPosition="4640" endWordPosition="4643">. In this task, an instance consists of a short factual question (e.g., Who wrote the ‘Tale of Genji’?) and a candidate answer sentence retrieved by the information retrieval component of a question answering system. For a positive instance, the text will correctly answer the question—though perhaps indirectly. It may also contain various extraneous information (e.g., Kano script made possible the development of a secular Japanese literature, beginning with such Late Heian classics as Lady Murasaki’s “Tales of Genji.”). For a given set of questions, the task here is to rank candidate answers (Wang et al., 2007). The experimental setup is the same as in Wang et al. (2007). We trained the tree edit model on the manually judged positive and negative QA pairs from previous QA tracks at the Text REtrieval Conference (TREC-8 through TREC-12). The goal of the task is to rank answer candidates rather than classify them; therefore, after training a logistic regression classifier, we rank the answer candidates for a given question by their posterior probabilities of correctness according to the model. We tested our model with QA pairs from TREC13. We report Mean Average Precision (MAP) and Mean Reciprocal Ran</context>
+<context position="29990" citStr="Wang et al. (2007)" startWordPosition="4933" endWordPosition="4936">sed on dependency trees. Punyakanok et al. (2004) used a generalization of TED to model the QA pairs. For their experiments, Wang et al. also extended both of the latter models to utilize WordNet. Table 5 displays answer selection results, including test set results for the baseline systems with and without lexical semantic information from WordNet. The tree edit model, which does not use lexical semantics knowledge, produced the best result reported to date. The results for the tree edit model are statistically significantly different (sign test, p &lt; 0.01) from the results for all except the Wang et al. (2007) system with WordNet (p &gt; 0.05). 5.4 Discussion The parameter settings learned for the features in Table 2 were broadly similar for the three tasks. For example, operations involving changes to subjects and proper nouns tended to be associated with nonparaphrases, false entailments, and incorrect answers. We did not observe any interesting differences in the parameter values. While the tree edit models perform competitively in multiple tasks by capturing relevant syntactic phenomena, it is clear that syntax alone cannot solve these semantic tasks. Fortunately, this approach is amenable to exte</context>
+<context position="31823" citStr="Wang et al., 2007" startWordPosition="5225" endWordPosition="5228">es edits for moving subtrees and reordering children. However, they make assumptions unsuitable for natural language, such as the absence of recursive syntactic rewrite rules. Bernard et al. (2008) use EM to learn the costs for simple insert, relabel, and delete edits, but they only discuss experiments for digit recognition and a task using artificial data. Much research has focused on modeling word reordering phenomena and syntactic alignments (e.g., Gildea, 2003; Smith and Eisner, 2006; inter alia), and such methods have been applied successfully to semantic tasks (de Marneffe et al., 2006; Wang et al., 2007; Das and Smith, 2009). While we not describe connections to such approaches in detail due to space limitations, we note that theoretical connections are possible between transformations and alignments (Chawathe and Garcia-Molina, 1997). Tree kernels have been applied to a variety of natural language tasks (Collins and Duffy, 2001; Zelenko et al., 2003; Culotta and Sorensen, 2004). Of particular interest, Zanzotto and Moschitti (2006) describe a kernel for RTE that takes tree pairs, rather than single trees, as input. To our knowledge, our use of a tree kernel as a search heuristic is novel. 7</context>
+</contexts>
+<marker>Wang, Smith, Mitamura, 2007</marker>
+<rawString>M. Wang, N. A. Smith, and T. Mitamura. 2007. What is the Jeopardy model? A quasi-synchronous grammar for QA. In Proc. of EMNLP-CoNLL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>F M Zanzotto</author>
+<author>A Moschitti</author>
+</authors>
+<title>Automatic learning of textual entailments with cross-pair similarities.</title>
+<date>2006</date>
+<booktitle>In Proc. of COLING/ACL.</booktitle>
+<contexts>
+<context position="32261" citStr="Zanzotto and Moschitti (2006)" startWordPosition="5293" endWordPosition="5296">d syntactic alignments (e.g., Gildea, 2003; Smith and Eisner, 2006; inter alia), and such methods have been applied successfully to semantic tasks (de Marneffe et al., 2006; Wang et al., 2007; Das and Smith, 2009). While we not describe connections to such approaches in detail due to space limitations, we note that theoretical connections are possible between transformations and alignments (Chawathe and Garcia-Molina, 1997). Tree kernels have been applied to a variety of natural language tasks (Collins and Duffy, 2001; Zelenko et al., 2003; Culotta and Sorensen, 2004). Of particular interest, Zanzotto and Moschitti (2006) describe a kernel for RTE that takes tree pairs, rather than single trees, as input. To our knowledge, our use of a tree kernel as a search heuristic is novel. 7 Conclusion We described tree edit models that generalize TED by allowing operations that better account for complex reordering phenomena and by learning from data how different edits should affect the models decisions about output variables of interest (e.g., the correctness of answers). They offer an intuitive and effective method for modeling sentence pairs. They led to competitive performance for three tasks: paraphrase identifica</context>
+</contexts>
+<marker>Zanzotto, Moschitti, 2006</marker>
+<rawString>F. M. Zanzotto and A. Moschitti. 2006. Automatic learning of textual entailments with cross-pair similarities. In Proc. of COLING/ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D Zelenko</author>
+<author>C Aone</author>
+<author>A Richardella</author>
+</authors>
+<title>Kernel methods for relation extraction.</title>
+<date>2003</date>
+<journal>J. of Machine Learning Research,</journal>
+<volume>3</volume>
+<contexts>
+<context position="12720" citStr="Zelenko et al., 2003" startWordPosition="2121" endWordPosition="2124">ormalizes” the kernel K of the current tree Tc and target tree Tt to unit range by dividing by the geometric mean of the kernels comparing the individual trees to themselves.5 Also, the normalized value is subtracted from 1 so as to make it a difference rather than a similarity. The search routine will thus reach the goal state when the heuristic reaches 0, indicating that the current and target trees are identical. K(Tc, Tt) H(Tc) = 1 − V/K(Tc,Tc) x K(Tt,Tt) (1) Kernels are most commonly used in the efficient construction of margin-based classifiers in the implied representation space (e.g., Zelenko et al., 2003). Here, however, the kernel helps to find a representation (i.e., an edit sequence) for subsequent modeling steps. We are effectively mapping the source, current, and target trees to points on the surface of a highdimensional unit sphere associated with the normalized kernel. In this geometric interpretation, the search heuristic in Equation 1 leads the search algorithm to explore reachable trees along the surface of this sphere, always choosing the one whose angle with the target tree is smallest, until the angle is 0. The path on the sphere corresponds to an edit sequence, from which we will</context>
+<context position="14123" citStr="Zelenko et al., 2003" startWordPosition="2355" endWordPosition="2358">f children in addition to the full sequences of children as in Collins and Duffy (2001). This permits a very finegrained measure of tree pair similarity. Importantly, if two nodes differ only by the presence or position of a single child, they will still lead to a large kernel function value. We also sum over the similarities between all pairs of nodes, similar to (Collins and Duffy, 2001). Since the PTK considers non-contiguous subsequences, it is very computationally expensive. We therefore restrict our kernel to consider only contiguous subsequences, as in the contiguous tree kernel (CTK) (Zelenko et al., 2003). 5This normalized function is also guaranteed to be a kernel function (Sch¨olkopf and Smola, 2001). To define our kernel, we begin with a similarity function for pairs of nodes n1 and n2 that depends on their lemmas, POS tags, edge labels, and sides with respect to their parents:6 s(n1,n2) =δ(l(n1),l(n2)) �X δ(f(n1), f(n2)) (2) f∈{l,e,p,s} where δ returns 1 if its arguments are equivalent, 0 otherwise. l, e, p, and s are used here as functions to select the lemma, edge label, POS, and side of a node. Equation 2 encodes the linguistic intuition that the primary indicator of node similarity sho</context>
+<context position="15447" citStr="Zelenko et al. (2003)" startWordPosition="2592" endWordPosition="2595">ides) relative to their parents are also considered. The kernel is defined recursively (starting from the roots), where ni is a node in the set of nodes NT, in tree Ti: K(T1, T2) = � � Δ(n1, n2) (3) n1∈{NT1} n2∈{NT2} �Δ(n1, n2) = µ λ2s(n1, n2) + (4) �Δ(cn1[J1i], cn2[J2i]) � J1 = (J11, J12, J1a, ...) is an index sequence associated with any contiguous ordered sequence of children cn1 of node n1 (likewise for J2). J1i and J2i point to the ith children in the two sequences. � � �returns the length of a sequence. The kernel includes two decay factors: λ for the length of child subsequences, as in Zelenko et al. (2003) and Moschitti (2006); and µ for the height of the subtree, as in Collins and Duffy (2001) and Moschitti (2006). We set both to 0.25 in our experiments to encourage the search to consider edits leading to smaller matches (e.g., of individual parent-child dependencies) before larger ones.7 6The side of a node relative to its parent in a dependency tree is important: two parent nodes with the same children should not be considered exact matches if children are on different sides (e.g., defeated the insurgents and the insurgents defeated). 7From experiments with the paraphrase training set (§5.2)</context>
+<context position="32177" citStr="Zelenko et al., 2003" startWordPosition="5281" endWordPosition="5285">al data. Much research has focused on modeling word reordering phenomena and syntactic alignments (e.g., Gildea, 2003; Smith and Eisner, 2006; inter alia), and such methods have been applied successfully to semantic tasks (de Marneffe et al., 2006; Wang et al., 2007; Das and Smith, 2009). While we not describe connections to such approaches in detail due to space limitations, we note that theoretical connections are possible between transformations and alignments (Chawathe and Garcia-Molina, 1997). Tree kernels have been applied to a variety of natural language tasks (Collins and Duffy, 2001; Zelenko et al., 2003; Culotta and Sorensen, 2004). Of particular interest, Zanzotto and Moschitti (2006) describe a kernel for RTE that takes tree pairs, rather than single trees, as input. To our knowledge, our use of a tree kernel as a search heuristic is novel. 7 Conclusion We described tree edit models that generalize TED by allowing operations that better account for complex reordering phenomena and by learning from data how different edits should affect the models decisions about output variables of interest (e.g., the correctness of answers). They offer an intuitive and effective method for modeling senten</context>
+</contexts>
+<marker>Zelenko, Aone, Richardella, 2003</marker>
+<rawString>D. Zelenko, C. Aone, and A. Richardella. 2003. Kernel methods for relation extraction. J. of Machine Learning Research, 3.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>K Zhang</author>
+<author>D Shasha</author>
+</authors>
+<title>Simple fast algorithms for the editing distance between trees and related problems.</title>
+<date>1989</date>
+<journal>SIAM Journal of Computing,</journal>
+<volume>18</volume>
+<contexts>
+<context position="2093" citStr="Zhang and Shasha, 1989" startWordPosition="308" endWordPosition="311">ntence (e.g., a dependency or phrase structure parse tree) into a tree for the other. Unlike grammarbased models and shallow-feature discriminative approaches, TED provides an intuitive story for tree pairs where one tree is derived from the other by a sequence of simple transformations. The available operations in standard TED are the following: insertion of a node, relabeling (i.e., renaming) of a node, and deletion (i.e., removal) of a node. While the restriction to these three operations permits efficient dynamic programming solutions for finding a minimum-cost edit sequence (Klein, 1989; Zhang and Shasha, 1989), certain interesting and prevalent phenomena involving reordering and movement cannot be elegantly captured. For example, consider the following sentence pair, which is a simplified version of a true entailment (i.e., the premise entails the hypothesis) in the development data for the RTE-3 task. Premise: Pierce built the home for his daughter off Rossville Blvd, as he lives nearby. Hypothesis: Pierce lives near Rossville Blvd. In a plausible dependency tree representation of the premise, live and Rossville Blvd would be in separate subtrees under built. In the hypothesis tree, however, the c</context>
+<context position="9415" citStr="Zhang and Shasha, 1989" startWordPosition="1556" endWordPosition="1559"> T (k) is not a descendant of T(j)), side s E {left, right} NEW-ROOT non-root node index j, Make T(j) the new root node of the tree. Insert the former side s E {left, right} root as the last child on the s side of T(j). MOVE-SIBLING non-root node index j, Move T(j) to be the r child on the s side of its parent. side s E {left, right}, position r E {first, last} Table 1: Possible operations in our extended tree edit implementation. All are described as operations to tree T. is exponentially large in the size of the trees. However, while dynamic programming solutions exist for TED (Klein, 1989; Zhang and Shasha, 1989), it is unlikely that such efficient algorithms are available for our problem because of the lack of locality restrictions on edit operations.3 3.1 Algorithm for Extracting Sequences Rather than dynamic programming, we use greedy best-first search (Pearl, 1984) to efficiently find sensible (if not minimal) edit sequences. The distinguishing characteristic of greedy best-first search is that its function for evaluating search states is simply a heuristic function that estimates the remaining cost, rather than a heuristic function plus the cost so far (e.g., number of edits), as in other types o</context>
+<context position="30994" citStr="Zhang and Shasha, 1989" startWordPosition="5093" endWordPosition="5096">le the tree edit models perform competitively in multiple tasks by capturing relevant syntactic phenomena, it is clear that syntax alone cannot solve these semantic tasks. Fortunately, this approach is amenable to extensions, facilitated by the separation of the representation extraction and classification steps. Richer edits could be included; lexical semantics could be integrated into the classifier or the search heuristic; or edit sequences might be found for other types of trees, such as semantic parses. 6 Related Work TED is a widely studied technique with many applications (Klein, 1989; Zhang and Shasha, 1989; Punyakanok et al., 2004; Schilder and McInnes, 2006). See Bille (2005) for a review. Chawathe and GarciaMolina (1997) describe a tree edit algorithm for detecting changes in structured documents that incorporates edits for moving subtrees and reordering children. However, they make assumptions unsuitable for natural language, such as the absence of recursive syntactic rewrite rules. Bernard et al. (2008) use EM to learn the costs for simple insert, relabel, and delete edits, but they only discuss experiments for digit recognition and a task using artificial data. Much research has focused on</context>
+</contexts>
+<marker>Zhang, Shasha, 1989</marker>
+<rawString>K. Zhang and D. Shasha. 1989. Simple fast algorithms for the editing distance between trees and related problems. SIAM Journal of Computing, 18.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

@@ -1,0 +1,1463 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.000849">
+<title confidence="0.825243">
+Scalable Decipherment for Machine Translation via Hash Sampling
+</title>
+<author confidence="0.635931">
+Sujith Ravi
+</author>
+<affiliation confidence="0.532287">
+Google
+</affiliation>
+<address confidence="0.756489">
+Mountain View, CA 94043
+</address>
+<email confidence="0.996317">
+sravi@gooogle.com
+</email>
+<sectionHeader confidence="0.994728" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.999885846153846">
+In this paper, we propose a new Bayesian
+inference method to train statistical ma-
+chine translation systems using only non-
+parallel corpora. Following a probabilis-
+tic decipherment approach, we first intro-
+duce a new framework for decipherment
+training that is flexible enough to incorpo-
+rate any number/type of features (besides
+simple bag-of-words) as side-information
+used for estimating translation models. In
+order to perform fast, efficient Bayesian
+inference in this framework, we then de-
+rive a hash sampling strategy that is in-
+spired by the work of Ahmed et al. (2012).
+The new translation hash sampler enables
+us to scale elegantly to complex mod-
+els (for the first time) and large vocab-
+ulary/corpora sizes. We show empirical
+results on the OPUS data—our method
+yields the best BLEU scores compared to
+existing approaches, while achieving sig-
+nificant computational speedups (several
+orders faster). We also report for the
+first time—BLEU score results for a large-
+scale MT task using only non-parallel data
+(EMEA corpus).
+</bodyText>
+<sectionHeader confidence="0.999163" genericHeader="keywords">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.999789108695652">
+Statistical machine translation (SMT) systems
+these days are built using large amounts of bilin-
+gual parallel corpora. The parallel corpora are
+used to estimate translation model parameters in-
+volving word-to-word translation tables, fertilities,
+distortion, phrase translations, syntactic transfor-
+mations, etc. But obtaining parallel data is an ex-
+pensive process and not available for all language
+pairs or domains. On the other hand, monolin-
+gual data (in written form) exists and is easier to
+obtain for many languages. Learning translation
+models from monolingual corpora could help ad-
+dress the challenges faced by modern-day MT sys-
+tems, especially for low resource language pairs.
+Recently, this topic has been receiving increasing
+attention from researchers and new methods have
+been proposed to train statistical machine trans-
+lation models using only monolingual data in the
+source and target language. The underlying moti-
+vation behind most of these methods is that statis-
+tical properties for linguistic elements are shared
+across different languages and some of these sim-
+ilarities (mappings) could be automatically identi-
+fied from large amounts of monolingual data.
+The MT literature does cover some prior work
+on extracting or augmenting partial lexicons using
+non-parallel corpora (Rapp, 1995; Fung and McK-
+eown, 1997; Koehn and Knight, 2000; Haghighi
+et al., 2008). However, none of these meth-
+ods attempt to train end-to-end MT models, in-
+stead they focus on mining bilingual lexicons from
+monolingual corpora and often they require par-
+allel seed lexicons as a starting point. Some of
+them (Haghighi et al., 2008) also rely on addi-
+tional linguistic knowledge such as orthography,
+etc. to mine word translation pairs across related
+languages (e.g., Spanish/English). Unsupervised
+training methods have also been proposed in the
+past for related problems in decipherment (Knight
+and Yamada, 1999; Snyder et al., 2010; Ravi and
+Knight, 2011a) where the goal is to decode un-
+known scripts or ciphers.
+The body of work that is more closely related to
+ours include that of Ravi and Knight (2011b) who
+introduced a decipherment approach for training
+translation models using only monolingual cor-
+</bodyText>
+<page confidence="0.96286">
+362
+</page>
+<note confidence="0.914494">
+Proceedings of the 51st Annual Meeting of the Association for Computational Linguistics, pages 362–371,
+Sofia, Bulgaria, August 4-9 2013. c�2013 Association for Computational Linguistics
+</note>
+<bodyText confidence="0.999741769230769">
+pora. Their best performing method uses an EM
+algorithm to train a word translation model and
+they show results on a Spanish/English task. Nuhn
+et al. (2012) extend the former approach and im-
+prove training efficiency by pruning translation
+candidates prior to EM training with the help of
+context similarities computed from monolingual
+corpora.
+In this work we propose a new Bayesian in-
+ference method for estimating translation mod-
+els from scratch using only monolingual corpora.
+Secondly, we introduce a new feature-based repre-
+sentation for sampling translation candidates that
+allows one to incorporate any amount of additional
+features (beyond simple bag-of-words) as side-
+information during decipherment training. Fi-
+nally, we also derive a new accelerated sampling
+mechanism using locality sensitive hashing in-
+spired by recent work on fast, probabilistic infer-
+ence for unsupervised clustering (Ahmed et al.,
+2012). The new sampler allows us to perform fast,
+efficient inference with more complex translation
+models (than previously used) and scale better to
+large vocabulary and corpora sizes compared to
+existing methods as evidenced by our experimen-
+tal results on two different corpora.
+</bodyText>
+<sectionHeader confidence="0.9933125" genericHeader="introduction">
+2 Decipherment Model for Machine
+Translation
+</sectionHeader>
+<bodyText confidence="0.999847071428571">
+We now describe the decipherment problem for-
+mulation for machine translation.
+Problem Formulation: Given a source text f
+(i.e., source word sequences f1...f,,t) and a mono-
+lingual target language corpus, our goal is to deci-
+pher the source text and produce a target transla-
+tion.
+Contrary to standard machine translation train-
+ing scenarios, here we have to estimate the transla-
+tion model PB(f|e) parameters using only mono-
+lingual data. During decipherment training, our
+objective is to estimate the model parameters in or-
+der to maximize the probability of the source text
+f as suggested by Ravi and Knight (2011b).
+</bodyText>
+<equation confidence="0.934123">
+� 1:
+arg max P (e) - PB(f|e) (1)
+B f e
+</equation>
+<bodyText confidence="0.983931038461538">
+For P(e), we use a word n-gram language
+model (LM) trained on monolingual target text.
+We then estimate the parameters of the translation
+model PB(f|e) during training.
+Translation Model: Machine translation is a
+much more complex task than solving other de-
+cipherment tasks such as word substitution ci-
+phers (Ravi and Knight, 2011b; Dou and Knight,
+2012). The mappings between languages involve
+non-determinism (i.e., words can have multiple
+translations), re-ordering of words can occur as
+grammar and syntax varies with language, and
+in addition word insertion and deletion operations
+are also involved.
+Ideally, for the translation model P(f|e) we
+would like to use well-known statistical models
+such as IBM Model 3 and estimate its parame-
+ters 0 using the EM algorithm (Dempster et al.,
+1977). But training becomes intractable with com-
+plex translation models and scalability is also an
+issue when large corpora sizes are involved and the
+translation tables become huge to fit in memory.
+So, instead we use a simplified generative process
+for the translation model as proposed by Ravi and
+Knight (2011b) and used by others (Nuhn et al.,
+2012) for this task:
+</bodyText>
+<listItem confidence="0.998928357142857">
+1. Generate a target (e.g., English) string e =
+e1...el, with probability P(e) according to an
+n-gram language model.
+2. Insert a NULL word at any position in the
+English string, with uniform probability.
+3. For each target word token ez (including
+NULLs), choose a source word translation fz,
+with probability PB(fz|ez). The source word
+may be NULL.
+4. Swap any pair of adjacent source words
+fz−1, fz, with probability P(swap); set to
+0.1.
+5. Output the foreign string f = f1...f,,t, skip-
+ping over NULLs.
+</listItem>
+<bodyText confidence="0.995741363636364">
+Previous approaches (Ravi and Knight, 2011b;
+Nuhn et al., 2012) use the EM algorithm to es-
+timate all the parameters 0 in order to maximize
+likelihood of the foreign corpus. Instead, we pro-
+pose a new Bayesian inference framework to esti-
+mate the translation model parameters. In spite of
+using Bayesian inference which is typically slow
+in practice (with standard Gibbs sampling), we
+show later that our method is scalable and permits
+decipherment training using more complex trans-
+lation models (with several additional parameters).
+</bodyText>
+<page confidence="0.998557">
+363
+</page>
+<subsectionHeader confidence="0.9465115">
+2.1 Adding Phrases, Flexible Reordering and
+Fertility to Translation Model
+</subsectionHeader>
+<bodyText confidence="0.998668222222222">
+We now extend the generative process (described
+earlier) to more complex translation models.
+Non-local Re-ordering: The generative process
+described earlier limits re-ordering to local or ad-
+jacent word pairs in a source sentence. We ex-
+tend this to allow re-ordering between any pair of
+words in the sentence.
+Fertility: We also add a fertility model Pθfert to
+the translation model using the formula:
+</bodyText>
+<equation confidence="0.9993845">
+�Pθfert = nθ(Oi|ei) · pφ0 (2)
+i 1
+nθ(Oi |ei) = αfert · P0(Oi |ei) + C−i(ei, Oi)(3)
+αfert + C−i(ei)
+</equation>
+<bodyText confidence="0.998745192307692">
+where, P0 represents the base distribution
+(which is set to uniform) in a Chinese Restau-
+rant Process (CRP)1 for the fertility model and
+C−i represents the count of events occurring in
+the history excluding the observation at position i.
+Oi is the number of source words aligned to (i.e.,
+generated by) the target word ei. We use sparse
+Dirichlet priors for all the translation model com-
+ponents.2 O0 represents the target NULL word fer-
+tility and p1 is the insertion probability which is
+fixed to 0.1. In addition, we set a maximum thresh-
+old for fertility values Oi &lt; -y · m, where m is the
+length of the source sentence. This discourages
+a particular target word (e.g., NULL word) from
+generating too many source words in the same sen-
+tence. In our experiments, we set -y = 0.3. We en-
+force this constraint in the training process during
+sampling.3
+Modeling Phrases: Finally, we extend the trans-
+lation candidate set in Pθ(fi|ei) to model phrases
+in addition to words for the target side (i.e., ei can
+now be a word or a phrase4 previously seen in the
+monolingual target corpus). This greatly increases
+the training time since in each sampling step, we
+now have many more ei candidates to choose
+from. In Section 4, we describe how we deal
+</bodyText>
+<footnote confidence="0.993999363636364">
+1Each component in the translation model (word/phrase
+translations Po(fi|ei), fertility Pofeta, etc.) is modeled using
+a CRP formulation.
+2i.e., All the concentration parameters are set to low val-
+ues; αf|e = αfert = 0.01.
+3We only apply this constraint when training on source
+text/corpora made of long sentences (&gt;10 words) where the
+sampler might converge very slowly. For short sentences, a
+sparse prior on fertility αfert typically discourages a target
+word from being aligned to too many different source words.
+4Phrase size is limited to two words in our experiments.
+</footnote>
+<bodyText confidence="0.99972175">
+with this problem by using a fast, efficient sam-
+pler based on hashing that allows us to speed up
+the Bayesian inference significantly whereas stan-
+dard Gibbs sampling would be extremely slow.
+</bodyText>
+<sectionHeader confidence="0.6885385" genericHeader="method">
+3 Feature-based representation for
+Source and Target
+</sectionHeader>
+<bodyText confidence="0.999956068181818">
+The model described in the previous section while
+being flexible in describing the translation pro-
+cess, poses several challenges for training. As
+the source and target vocabulary sizes increase the
+size of the translation table (|Vf |· |Ve|) increases
+significantly and often becomes too huge to fit in
+memory. Additionally, performing Bayesian in-
+ference with such a complex model using stan-
+dard Gibbs sampling can be very slow in prac-
+tice. Here, we describe a new method for doing
+Bayesian inference by first introducing a feature-
+based representation for the source and target
+words (or phrases) from which we then derive a
+novel proposal distribution for sampling transla-
+tion candidates.
+We represent both source and target words in
+a vector space similar to how documents are rep-
+resented in typical information retrieval settings.
+But unlike documents, here each word w is as-
+sociated with a feature vector w1...wd (where wi
+represents the weight for the feature indexed by i)
+which is constructed from monolingual corpora.
+For instance, context features for word w may in-
+clude other words (or phrases) that appear in the
+immediate context (n-gram window) surrounding
+w in the monolingual corpus. Similarly, we can
+add other features based on topic models, orthog-
+raphy (Haghighi et al., 2008), temporal (Klemen-
+tiev et al., 2012), etc. to our representation all of
+which can be extracted from monolingual corpora.
+Next, given two high dimensional vectors u and
+v it is possible to calculate the similarity between
+the two words denoted by s(u, v). The feature
+construction process is described in more detail
+below:
+Target Language: We represent each word (or
+phrase) ei with the following contextual features
+along with their counts: (a) f−context: every (word
+n-gram, position) pair immediately preceding ei
+in the monolingual corpus (n=1, position=-1), (b)
+similar features f+context to model the context fol-
+lowing ei, and (c) we also throw in generic context
+features fscontext without position information—
+every word that co-occurs with ei in the same sen-
+</bodyText>
+<page confidence="0.994143">
+364
+</page>
+<bodyText confidence="0.9999768">
+tence. While the two position-features provide
+specific context information (may be sparse for
+large monolingual corpora), this feature is more
+generic and captures long-distance co-occurrence
+statistics.
+Source Language: Words appearing in a source
+sentence f are represented using the correspond-
+ing target translation e = e1...em generated for
+f in the current sample during training. For each
+source word fj ∈ f, we look at the corresponding
+word ej in the target translation. We then extract
+all the context features of ej in the target trans-
+lation sample sentence e and add these features
+(f−context, f+context, fscontext) with weights to the
+feature representation for fj.
+Unlike the target word feature vectors (which
+can be pre-computed from the monolingual tar-
+get corpus), the feature vector for every source
+word fj is dynamically constructed from the tar-
+get translation sampled in each training iteration.
+This is a key distinction of our framework com-
+pared to previous approaches that use contextual
+similarity (or any other) features constructed from
+static monolingual corpora (Rapp, 1995; Koehn
+and Knight, 2000; Nuhn et al., 2012).
+Note that as we add more and more features for
+a particular word (by training on larger monolin-
+gual corpora or adding new types of features, etc.),
+it results in the feature representation becoming
+more sparse (especially for source feature vectors)
+which can cause problems in efficiency as well
+as robustness when computing similarity against
+other vectors. In the next section, we will describe
+how we mitigate this problem by projecting into a
+low-dimensional space by computing hash signa-
+tures.
+In all our experiments, we only use the features
+described above for representing source and tar-
+get words. We note that the new sampling frame-
+work is easily extensible to many additional fea-
+ture types (for example, monolingual topic model
+features, etc.) which can be efficiently handled by
+our inference algorithm and could further improve
+translation performance but we leave this for fu-
+ture work.
+</bodyText>
+<sectionHeader confidence="0.825469" genericHeader="method">
+4 Bayesian MT Decipherment via Hash
+Sampling
+</sectionHeader>
+<bodyText confidence="0.98131562962963">
+The next step is to use the feature representations
+described earlier and iteratively sample a target
+word (or phrase) translation candidate ez for every
+word fz in the source text f. This involves choos-
+ing from |Ve |possible target candidates in every
+step which can be highly inefficient (and infeasi-
+ble for large vocabulary sizes). One possible strat-
+egy is to compute similarity scores s(wf,, wee) be-
+tween the current source word feature vector wf,
+and feature vectors we&apos;∈Ve for all possible candi-
+dates in the target vocabulary. Following this, we
+can prune the translation candidate set by keeping
+only the top candidates e∗ according to the sim-
+ilarity scores. Nuhn et al. (2012) use a similar
+strategy to obtain a more compact translation table
+that improves runtime efficiency for EM training.
+Their approach requires calculating and sorting all
+|Ve|·|Vf |distances in time O(V 2 ·log(V )), where
+V = max(|Ve|,|Vf|).
+Challenges: Unfortunately, there are several ad-
+ditional challenges which makes inference very
+hard in our case. Firstly, we would like to in-
+clude as many features as possible to represent
+the source/target words in our framework besides
+simple bag-of-words context similarity (for exam-
+ple, left-context, right-context, and other general-
+purpose features based on topic models, etc.). This
+makes the complexity far worse (in practice) since
+the dimensionality of the feature vectors d is a
+much higher value than |Ve|. Computing similar-
+ity scores alone (naively) would incur O(|Ve |· d)
+time which is prohibitively huge since we have to
+do this for every token in the source language cor-
+pus. Secondly, for Bayesian inference we need to
+sample from a distribution that involves comput-
+ing probabilities for all the components (language
+model, translation model, fertility, etc.) described
+in Equation 1. This distribution needs to be com-
+puted for every source word token fz in the corpus,
+for all possible candidates ez ∈ Ve and the process
+has to be repeated for multiple sampling iterations
+(typically more than 1000). Doing standard col-
+lapsed Gibbs sampling in this scenario would be
+very slow and intractable.
+We now present an alternative fast, efficient
+inference strategy that overcomes many of the
+challenges described above and helps acceler-
+ate the sampling process significantly. First,
+we set our translation models within the con-
+text of a more generic and widely known fam-
+ily of distributions—mixtures of exponential fam-
+ilies. Then we derive a novel proposal distribu-
+tion for sampling translation candidates and intro-
+duce a new sampler for decipherment training that
+</bodyText>
+<page confidence="0.9955">
+365
+</page>
+<bodyText confidence="0.999369583333333">
+is based on locality sensitive hashing (LSH).
+Hashing methods such as LSH have been
+widely used in the past in several scenarios in-
+cluding NLP applications (Ravichandran et al.,
+2005). Most of these approaches employ LSH
+within heuristic methods for speeding up nearest-
+neighbor look up and similarity computation tech-
+niques. However, we use LSH hashing within
+a probabilistic framework which is very different
+from the typical use of LSH.
+Our work is inspired by some recent work by
+Ahmed et al. (2012) on speeding up Bayesian in-
+ference for unsupervised clustering. We use a sim-
+ilar technique as theirs but a different approximate
+distribution for the proposal, one that is better-
+suited for machine translation models and without
+some of the additional overhead required for com-
+puting certain terms in the original formulation.
+Mixtures of Exponential Families: The transla-
+tion models described earlier (Section 2) can be
+represented as mixtures of exponential families,
+specifically mixtures of multinomials. In exponen-
+tial families, distributions over random variables
+are given by:
+</bodyText>
+<equation confidence="0.973765">
+p(x; θ) = exp(hφ(x), θi) − g(θ) (4)
+</equation>
+<bodyText confidence="0.999929105263158">
+where, φ : X → F is a map from x to the space
+of sufficient statistics and θ ∈ F. The term g(θ)
+ensures that p(x; θ) is properly normalized. X is
+the domain of observations X = xi, ..., xm drawn
+from some distribution p. Our goal is to estimate
+p. In our case, this refers to the translation model
+from Equation 1.
+We also choose corresponding conjugate
+Dirichlet distributions for priors which have the
+property that the posterior distribution p(θ|X)
+over θ remains in the same family as p(θ).
+Note that the (translation) model in our
+case consists of multiple exponential families
+components—a multinomial pertaining to the lan-
+guage model (which remains fixed5), and other
+components pertaining to translation probabilities
+Pθ(fi|ei), fertility Pθfeat, etc. To do collapsed
+Gibbs sampling under this model, we would per-
+form the following steps during sampling:
+</bodyText>
+<listItem confidence="0.532277">
+1. For a given source word token fi draw target
+</listItem>
+<footnote confidence="0.983056333333333">
+5A high value for the LM concentration parameter α en-
+sures that the LM probabilities do not deviate too far from the
+original fixed base distribution during sampling.
+</footnote>
+<equation confidence="0.9615785">
+translation
+ei ∼ p(ei|F, E−i)
+∝ p(e) · p(fi|ei, F−i, E−i)
+· pfert(·|ei, F−i, E−i) · ... (5)
+</equation>
+<bodyText confidence="0.997888">
+where, F is the full source text and E the full
+target translation generated during sampling.
+2. Update the sufficient statistics for the changed
+target translation assignments.
+For large target vocabularies, computing
+p(fi|ei, F−i, E−i) dominates the inference pro-
+cedure. We can accelerate this step significantly
+using a good proposal distribution via hashing.
+Locality Sensitive Hash Sampling: For general
+exponential families, here is a Taylor approxima-
+tion for the data likelihood term (Ahmed et al.,
+2012):
+</bodyText>
+<equation confidence="0.993761">
+p(x|·) ≈ exp(hφ(x), θ∗i) − g(θ∗) (6)
+</equation>
+<bodyText confidence="0.9867035">
+where, θ∗ is the expected parameter (sufficient
+statistics).
+For sampling the translation model, this involves
+computing an expensive inner product hφ(fi), θ∗e,i
+for each source word fi which has to be repeated
+for every translation candidate e0, including candi-
+dates that have very low probabilities and are un-
+likely to be chosen as the translation for fj.
+So, during decipherment training a standard
+collapsed Gibbs sampler will waste most of its
+time on expensive computations that will be dis-
+carded in the end anyways. Also, unlike some
+standard generative models used in other unsu-
+pervised learning scenarios (e.g., clustering) that
+model only observed features (namely words ap-
+pearing in the document), here we would like to
+enrich the translation model with a lot more fea-
+tures (side-information).
+Instead, we can accelerate the computation of
+the inner product hφ(fi),θ∗e,i using a hash sam-
+pling strategy similar to (Ahmed et al., 2012).
+The underlying idea here is to use binary hash-
+ing (Charikar, 2002) to explore only those can-
+didates e0 that are sufficiently close to the best
+matching translation via a proposal distribution.
+Next, we briefly introduce some notations and ex-
+isting theoretical results related to binary hashing
+before describing the hash sampling procedure.
+For any two vectors u, v ∈ Rn,
+hu, vi = kuk · kvk · cos Z(u, v) (7)
+</bodyText>
+<page confidence="0.991687">
+366
+</page>
+<bodyText confidence="0.995641222222222">
+Z(u, v) = πPr{sgn[(u, w)] =� sgn[(v, w)]}
+(8)
+where, w is a random vector drawn from a sym-
+metric spherical distribution and the term inside
+Pr{·} represents the relation between the signs of
+the two inner products.
+Let hl(v) E {0,1}l be an l-bit binary hash of v
+where: [hl(v)]i := sgn[(v,wi)]; wi ∼ Um. Then
+the probability of matching signs is given by:
+</bodyText>
+<equation confidence="0.831793">
+zl(u, v) := 1l 11h(u) − h(v)111 (9)
+</equation>
+<bodyText confidence="0.9992208125">
+So, zl(u, v) measures how many bits differ be-
+tween the hash vectors h(u) and h(v) associated
+with u, v. Combining this with Equations 6 and 7
+we can estimate the unnormalized log-likelihood
+of a source word fi being translated as target e&apos;
+via:
+sl(fi, e) a 11θe,11 · 11φ(fi)11 · COS πzl(φ(fi), θe,)
+(10)
+For each source word fi, we now sample from
+this new distribution (after normalization) instead
+of the original one. The binary hash representa-
+tion for the two vectors yield significant speedups
+during sampling since Hamming distance compu-
+tation between h(u) and h(v) is highly optimized
+on modern CPUs. Hence, we can compute an es-
+timate for the inner product quite efficiently.6
+Updating the hash signatures: During training,
+we compute the target candidate projection h(θe,)
+and corresponding norm only once7 which is dif-
+ferent from the setup of Ahmed et al. (2012). The
+source word projection φ(fi) is dynamically up-
+dated in every sampling step. Note that doing this
+naively would scale slowly as O(Dl) where D is
+the total number of features but instead we can up-
+date the hash signatures in a more efficient manner
+that scales as O(Di,,.,l) where Di,,., is the number
+of non-zero entries in the feature representation for
+the source word φ(fi). Also, we do not need to
+store the random vectors w in practice since these
+can be computed on the fly using hash functions.
+The inner product approximation also yields some
+theoretical guarantees for the hash sampler.8
+</bodyText>
+<footnote confidence="0.9749465">
+6We set l = 32 bits in our experiments.
+7In practice, we can ignore the norm terms to further
+speed up sampling since this is only an estimate for the pro-
+posal distribution and we follow this with the Metropolis
+Hastings step.
+8For further details, please refer to (Ahmed et al., 2012).
+</footnote>
+<subsectionHeader confidence="0.984988">
+4.1 Metropolis Hastings
+</subsectionHeader>
+<bodyText confidence="0.999854222222222">
+In each sampling step, we use the distribution
+from Equation 10 as a proposal distribution in
+a Metropolis Hastings scheme to sample target
+translations for each source word.
+Once a new target translation e&apos; is sampled
+for source word fi from the proposal distribution
+q(·) a exps&apos;(fz,e,), we accept the proposal (and
+update the corresponding hash signatures) accord-
+ing to the probability r
+</bodyText>
+<equation confidence="0.994515">
+r = q(eoldi) · pnew(·) (11)
+q(ei new) · pold(·)
+</equation>
+<bodyText confidence="0.9997195">
+where, pold(·), pnew(·) are the true conditional
+likelihood probabilities according to our model
+(including the language model component) for the
+old, new sample respectively.
+</bodyText>
+<sectionHeader confidence="0.995" genericHeader="method">
+5 Training Algorithm
+</sectionHeader>
+<bodyText confidence="0.983569">
+Putting together all the pieces described in the pre-
+vious section, we perform the following steps:
+</bodyText>
+<listItem confidence="0.965122833333333">
+1. Initialization: We initialize the starting sample
+as follows: for each source word token, randomly
+sample a target word. If the source word also ex-
+ists in the target vocabulary, then choose identity
+translation instead of the random one.9
+2. Hash Sampling Steps: For each source word
+token fi, run the hash sampler:
+(a) Generate a proposal distribution by comput-
+ing the hamming distance between the feature vec-
+tors for the source word and each target translation
+candidate. Sample a new target translation ei for
+fi from this distribution.
+(b) Compute the acceptance probability for the
+chosen translation using a Metropolis Hastings
+scheme and accept (or reject) the sample. In prac-
+tice, computation of the acceptance probability
+only needs to be done every r iterations (where
+r can be anywhere from 5 or 100).
+</listItem>
+<bodyText confidence="0.915007">
+Iterate through steps (2a) and (2b) for every word
+in the source text and then repeat this process for
+multiple iterations (usually 1000).
+</bodyText>
+<listItem confidence="0.990906">
+3. Other Sampling Operators: After every k it-
+erations,10 perform the following sampling opera-
+tions:
+(a) Re-ordering: For each source word token fi
+at position i, randomly choose another position j
+</listItem>
+<footnote confidence="0.9767835">
+9Initializing with identity translation rather than random
+choice helps in some cases, especially for unknown words
+that involve named entities, etc.
+10We set k = 3 in our experiments.
+</footnote>
+<page confidence="0.991017">
+367
+</page>
+<table confidence="0.9996424">
+Corpus Language Sent. Words Vocab.
+OPUS Spanish 13,181 39,185 562
+English 19,770 61,835 411
+EMEA French 550,000 8,566,321 41,733
+Spanish 550,000 7,245,672 67,446
+</table>
+<tableCaption confidence="0.8504535">
+Table 1: Statistics of non-parallel corpora used
+here.
+</tableCaption>
+<bodyText confidence="0.976866071428572">
+in the source sentence and swap the translations ei
+with ej. During the sampling process, we compute
+the probabilities for the two samples—the origi-
+nal and the swapped versions, and then sample an
+alignment from this distribution.
+(b) Deletion: For each source word token,
+delete the current target translation (i.e., align it
+with the target NULL token). As with the re-
+ordering operation, we sample from a distribution
+consisting of the original and the deleted versions.
+4. Decoding the foreign sentence: Finally, once
+the training is done (i.e., after all sampling iter-
+ations) we choose the final sample as our target
+translation output for the source text.
+</bodyText>
+<sectionHeader confidence="0.991031" genericHeader="evaluation">
+6 Experiments and Results
+</sectionHeader>
+<bodyText confidence="0.999621807692308">
+We test our method on two different corpora.
+To evaluate translation quality, we use BLEU
+score (Papineni et al., 2002), a standard evaluation
+measure used in machine translation.
+First, we present MT results on non-parallel
+Spanish/English data from the OPUS cor-
+pus (Tiedemann, 2009) which was used by Ravi
+and Knight (2011b) and Nuhn et al. (2012).
+We show that our method achieves the best
+performance (BLEU scores) on this task while
+being significantly faster than both the previous
+approaches. We then apply our method to a
+much larger non-parallel French/Spanish corpus
+constructed from the EMEA corpus (Tiedemann,
+2009). Here the vocabulary sizes are much larger
+and we show how our new Bayesian decipherment
+method scales well to this task inspite of using
+complex translation models. We also report the
+first BLEU results on such a large-scale MT task
+under truly non-parallel settings (without using
+any parallel data or seed lexicon).
+For both the MT tasks, we also report BLEU
+scores for a baseline system using identity trans-
+lations for common words (words appearing in
+both source/target vocabularies) and random trans-
+lations for other words.
+</bodyText>
+<subsectionHeader confidence="0.999212">
+6.1 MT Task and Data
+</subsectionHeader>
+<bodyText confidence="0.999970142857143">
+OPUS movie subtitle corpus (Tiedemann, 2009):
+This is a large open source collection of parallel
+corpora available for multiple language pairs. We
+use the same non-parallel Spanish/English corpus
+used in previous works (Ravi and Knight, 2011b;
+Nuhn et al., 2012). The details of the corpus are
+listed in Table 1. We use the entire Spanish source
+text for decipherment training and evaluate the fi-
+nal English output to report BLEU scores.
+EMEA corpus (Tiedemann, 2009): This is a par-
+allel corpus made out of PDF documents (arti-
+cles from the medical domain) from the Euro-
+pean Medicines Agency. We reserve the first 1k
+sentences in French as our source text (also used
+in decipherment training). To construct a non-
+parallel corpus, we split the remaining 1.1M lines
+as follows: first 550k sentences in French, last
+550k sentences in Spanish. The latter is used to
+construct a target language model used for deci-
+pherment training. The corpus statistics are shown
+in Table 1.
+</bodyText>
+<subsectionHeader confidence="0.94143">
+6.2 Results
+</subsectionHeader>
+<bodyText confidence="0.999647259259259">
+OPUS: We compare the MT results (BLEU
+scores) from different systems on the OPUS cor-
+pus in Table 2. The first row displays baseline
+performance. The next three rows 1a–1c display
+performance achieved by two methods from Ravi
+and Knight (2011b). Rows 2a, 2b show results
+from the of Nuhn et al. (2012). The last two rows
+display results for the new method using Bayesian
+hash sampling. Overall, using a 3-gram language
+model (instead of 2-gram) for decipherment train-
+ing improves the performance for all methods. We
+observe that our method produces much better re-
+sults than the others even with a 2-gram LM. With
+a 3-gram LM, the new method achieves the best
+performance; the highest BLEU score reported on
+this task. It is also interesting to note that the hash
+sampling method yields much better results than
+the Bayesian inference method presented in (Ravi
+and Knight, 2011b). This is due to the accelerated
+sampling scheme introduced earlier which helps it
+converge to better solutions faster.
+Table 2 (last column) also compares the effi-
+ciency of different methods in terms of CPU time
+required for training. Both our 2-gram and 3-gram
+based methods are significantly faster than those
+previously reported for EM based training meth-
+ods presented in (Ravi and Knight, 2011b; Nuhn
+</bodyText>
+<page confidence="0.995064">
+368
+</page>
+<table confidence="0.999934272727273">
+Method BLEU Time (hours)
+Baseline system (identity translations) 6.9
+1a. EM with 2-gram LM (Ravi and Knight, 2011b) 15.3 ∼850h
+1b. EM with whole-segment LM (Ravi and Knight, 2011b) 19.3
+1c. Bayesian IBM Model 3 with 2-gram LM (Ravi and Knight, 2011b) 15.1
+2a. EM+Context with 2-gram LM (Nuhn et al., 2012) 15.2 50h
+2b. EM+Context with 3-gram LM (Nuhn et al., 2012) 20.9 200h
+3. Bayesian (standard) Gibbs sampling with 2-gram LM 222h
+4a. Bayesian Hash Sampling* with 2-gram LM (this work) 20.3 2.6h
+4b. Bayesian Hash Sampling* with 3-gram LM (this work) 21.2 2.7h
+(*sampler was run for 1000 iterations)
+</table>
+<tableCaption confidence="0.9869446">
+Table 2: Comparison of MT performance (BLEU scores) and efficiency (running time in CPU hours)
+on the Spanish/English OPUS corpus using only non-parallel corpora for training. For the Bayesian
+methods 4a and 4b, the samplers were run for 1000 iterations each on a single machine (1.8GHz Intel
+processor). For 1a, 2a, 2b, we list the training times as reported by Nuhn et al. (2012) based on their EM
+implementation for different settings.
+</tableCaption>
+<table confidence="0.999357">
+Method BLEU
+Baseline system (identity translations) 3.0
+Bayesian Hash Sampling with 2-gram LM 4.2
+vocab=full (Ve), add fertility=no
+vocab=pruned*, add fertility=yes 5.3
+</table>
+<tableCaption confidence="0.97977">
+Table 3: MT results on the French/Spanish EMEA
+</tableCaption>
+<bodyText confidence="0.99932224">
+corpus using the new hash sampling method. *The
+last row displays results when we sample target
+translations from a pruned candidate set (most fre-
+quent 1k Spanish words + identity translation can-
+didates) which enables the sampler to run much
+faster when using more complex models.
+et al., 2012). This is very encouraging since Nuhn
+et al. (2012) reported obtaining a speedup by prun-
+ing translation candidates (to ∼1/8th the original
+size) prior to EM training. On the other hand, we
+sample from the full set of translation candidates
+including additional target phrase (of size 2) can-
+didates which results in a much larger vocabulary
+consisting of 1600 candidates (∼4 times the orig-
+inal size), yet our method runs much faster and
+yields better results. The table also demonstrates
+the siginificant speedup achieved by the hash sam-
+pler over a standard Gibbs sampler for the same
+model (∼85 times faster when using a 2-gram
+LM).
+We also compare the results against MT per-
+formance from parallel training—MOSES sys-
+tem (Koehn et al., 2007) trained on 20k sentence
+pairs. The comparable number for Table 2 is 63.6
+BLEU.
+</bodyText>
+<equation confidence="0.894666166666667">
+Spanish (e) French (f)
+el → les
+la → la
+por → des
+secci´on → rubrique
+administraci´on → administration
+</equation>
+<bodyText confidence="0.995184041666667">
+Table 4: Sample (1-best) Spanish/French transla-
+tions produced by the new method on the EMEA
+corpus using word translation models trained with
+non-parallel corpora.
+EMEA Results Table 3 shows the results achieved
+by our method on the larger task involving EMEA
+corpus. Here, the target vocabulary Ve is much
+higher (67k). In spite of this challenge and the
+model complexity, we can still perform decipher-
+ment training using Bayesian inference. We report
+the first BLEU score results on such a large-scale
+task using a 2-gram LM. This is achieved without
+using any seed lexicon or parallel corpora. The re-
+sults are encouraging and demonstrates the ability
+of the method to scale to large-scale settings while
+performing efficient inference with complex mod-
+els, which we believe will be especially useful for
+future MT application in scenarios where parallel
+data is hard to obtain. Table 4 displays some sam-
+ple 1-best translations learned using this method.
+For comparison purposes, we also evaluate MT
+performance on this task using parallel training
+(MOSES trained with hundred sentence pairs) and
+observe a BLEU score of 11.7.
+</bodyText>
+<page confidence="0.998512">
+369
+</page>
+<sectionHeader confidence="0.987943" genericHeader="discussions">
+7 Discussion and Future Work
+</sectionHeader>
+<bodyText confidence="0.999992957446809">
+There exists some work (Dou and Knight, 2012;
+Klementiev et al., 2012) that uses monolingual
+corpora to induce phrase tables, etc. These when
+combined with standard MT systems such as
+Moses (Koehn et al., 2007) trained on parallel cor-
+pora, have been shown to yield some BLEU score
+improvements. Nuhn et al. (2012) show some
+sample English/French lexicon entries learnt us-
+ing EM algorithm with a pruned translation can-
+didate set on a portion of the Gigaword corpus11
+but do not report any actual MT results. In ad-
+dition, as we showed earlier our method can use
+Bayesian inference (which has a lot of nice proper-
+ties compared to EM for unsupervised natural lan-
+guage tasks (Johnson, 2007; Goldwater and Grif-
+fiths, 2007)) and still scale easily to large vocabu-
+lary, data sizes while allowing the models to grow
+in complexity. Most importantly, our method pro-
+duces better translation results (as demonstrated
+on the OPUS MT task). And to our knowledge,
+this is the first time that anyone has reported MT
+results under truly non-parallel settings on such a
+large-scale task (EMEA).
+Our method is also easily extensible to out-
+of-domain translation scenarios similar to (Dou
+and Knight, 2012). While their work also uses
+Bayesian inference with a slice sampling scheme,
+our new approach uses a novel hash sampling
+scheme for decipherment that can easily scale
+to more complex models. The new decipher-
+ment framework also allows one to easily incorpo-
+rate additional information (besides standard word
+translations) as features (e.g., context features,
+topic features, etc.) for unsupervised machine
+translation which can help further improve the per-
+formance in addition to accelerating the sampling
+process. We already demonstrated the utility of
+this system by going beyond words and incorpo-
+rating phrase translations in a decipherment model
+for the first time.
+In the future, we can obtain further speedups
+(especially for large-scale tasks) by parallelizing
+the sampling scheme seamlessly across multiple
+machines and CPU cores. The new framework can
+also be stacked with complementary techniques
+such as slice sampling, blocked (and type) sam-
+pling to further improve inference efficiency.
+</bodyText>
+<footnote confidence="0.7401515">
+11http://www.ldc.upenn.edu/Catalog/catalogEntry.jsp?
+catalogId=LDC2003T05
+</footnote>
+<sectionHeader confidence="0.982247" genericHeader="acknowledgments">
+8 Conclusion
+</sectionHeader>
+<bodyText confidence="0.999969">
+To summarize, our method is significantly faster
+than previous methods based on EM or Bayesian
+with standard Gibbs sampling and obtains better
+results than any previously published methods for
+the same task. The new framework also allows
+performing Bayesian inference for decipherment
+applications with more complex models than pre-
+viously shown. We believe this framework will
+be useful for further extending MT models in the
+future to improve translation performance and for
+many other unsupervised decipherment applica-
+tion scenarios.
+</bodyText>
+<sectionHeader confidence="0.999208" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.999557486486486">
+Amr Ahmed, Sujith Ravi, Shravan Narayanamurthy,
+and Alex Smola. 2012. Fastex: Hash clustering
+with exponential families. In Proceedings of the
+26th Conference on Neural Information Processing
+Systems (NIPS).
+Moses S. Charikar. 2002. Similarity estimation tech-
+niques from rounding algorithms. In Proceedings of
+the thiry-fourth annual ACM Symposium on Theory
+of Computing, pages 380–388.
+A. P. Dempster, N. M. Laird, and D. B. Rubin. 1977.
+Maximum likelihood from incomplete data via the
+em algorithm. Journal of the Royal Statistical Soci-
+ety, Series B, 39(1):1–38.
+Qing Dou and Kevin Knight. 2012. Large scale deci-
+pherment for out-of-domain machine translation. In
+Proceedings of the 2012 Joint Conference on Empir-
+ical Methods in Natural Language Processing and
+Computational Natural Language Learning, pages
+266–275.
+Pascale Fung and Kathleen McKeown. 1997. Finding
+terminology translations from non-parallel corpora.
+In Proceedings of the 5th Annual Workshop on Very
+Large Corpora, pages 192–202.
+Sharon Goldwater and Tom Griffiths. 2007. A fully
+bayesian approach to unsupervised part-of-speech
+tagging. In Proceedings of the 45th Annual Meet-
+ing of the Association of Computational Linguistics,
+pages 744–751.
+Aria Haghighi, Percy Liang, Taylor Berg-Kirkpatrick,
+and Dan Klein. 2008. Learning bilingual lexicons
+from monolingual corpora. In Proceedings of ACL:
+HLT, pages 771–779.
+Mark Johnson. 2007. Why doesn’t EM find good
+HMM POS-taggers? In Proceedings of the Joint
+Conference on Empirical Methods in Natural Lan-
+guage Processing and Computational Natural Lan-
+guage Learning (EMNLP-CoNLL), pages 296–305.
+</reference>
+<page confidence="0.974949">
+370
+</page>
+<reference confidence="0.999868641791045">
+Alex Klementiev, Ann Irvine, Chris Callison-Burch,
+and David Yarowsky. 2012. Toward statistical ma-
+chine translation without parallel corpora. In Pro-
+ceedings of the 13th Conference of the European
+Chapter of the Association for Computational Lin-
+guistics.
+Kevin Knight and Kenji Yamada. 1999. A computa-
+tional approach to deciphering unknown scripts. In
+Proceedings of the ACL Workshop on Unsupervised
+Learning in Natural Language Processing, pages
+37–44.
+Philipp Koehn and Kevin Knight. 2000. Estimating
+word translation probabilities from unrelated mono-
+lingual corpora using the em algorithm. In Proceed-
+ings of the Seventeenth National Conference on Ar-
+tificial Intelligence and Twelfth Conference on Inno-
+vative Applications of Artificial Intelligence, pages
+711–715.
+Philipp Koehn, Hieu Hoang, Alexandra Birch, Chris
+Callison-Burch, Marcello Federico, Nicola Bertoldi,
+Brooke Cowan, Wade Shen, Christine Moran,
+Richard Zens, Chris Dyer, Ondˇrej Bojar, Alexandra
+Constantin, and Evan Herbst. 2007. Moses: open
+source toolkit for statistical machine translation. In
+Proceedings of the 45th Annual Meeting of the ACL
+on Interactive Poster and Demonstration Sessions,
+pages 177–180.
+Malte Nuhn, Arne Mauser, and Hermann Ney. 2012.
+Deciphering foreign language by combining lan-
+guage models and context vectors. In Proceedings
+of the 50th Annual Meeting of the Association for
+Computational Linguistics, pages 156–164.
+Kishore Papineni, Salim Roukos, Todd Ward, and Wei-
+Jing Zhu. 2002. Bleu: a method for automatic eval-
+uation of machine translation. In Proceedings of the
+40th Annual Meeting on Association for Computa-
+tional Linguistics, pages 311–318.
+Reinhard Rapp. 1995. Identifying word translations
+in non-parallel texts. In Proceedings of the 33rd An-
+nual Meeting on Association for Computational Lin-
+guistics, pages 320–322.
+Sujith Ravi and Kevin Knight. 2011a. Bayesian in-
+ference for zodiac and other homophonic ciphers.
+In Proceedings of the 49th Annual Meeting of the
+Association for Computational Linguistics: Human
+Language Technologies - Volume 1, pages 239–247.
+Sujith Ravi and Kevin Knight. 2011b. Deciphering
+foreign language. In Proceedings of the 49th An-
+nual Meeting of the Association for Computational
+Linguistics: Human Language Technologies, pages
+12–21.
+Deepak Ravichandran, Patrick Pantel, and Eduard
+Hovy. 2005. Randomized algorithms and nlp: us-
+ing locality sensitive hash function for high speed
+noun clustering. In Proceedings of the 43rd Annual
+Meeting on Association for Computational Linguis-
+tics, pages 622–629.
+Benjamin Snyder, Regina Barzilay, and Kevin Knight.
+2010. A statistical model for lost language deci-
+pherment. In Proceedings of the 48th Annual Meet-
+ing of the Association for Computational Linguis-
+tics, pages 1048–1057.
+J¨org Tiedemann. 2009. News from opus - a collection
+of multilingual parallel corpora with tools and inter-
+faces. In N. Nicolov, K. Bontcheva, G. Angelova,
+and R. Mitkov, editors, Recent Advances in Natural
+Language Processing, volume V, pages 237–248.
+</reference>
+<page confidence="0.998751">
+371
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.323447">
+<title confidence="0.9573545">Scalable Decipherment for Machine Translation via Hash Sampling Sujith</title>
+<author confidence="0.546073">Mountain View</author>
+<author confidence="0.546073">CA</author>
+<email confidence="0.999168">sravi@gooogle.com</email>
+<abstract confidence="0.984910333333334">In this paper, we propose a new Bayesian inference method to train statistical machine translation systems using only nonparallel corpora. Following a probabiliswe first introduce a new framework for decipherment training that is flexible enough to incorporate any number/type of features (besides simple bag-of-words) as side-information used for estimating translation models. In order to perform fast, efficient Bayesian inference in this framework, we then dea sampling that is inspired by the work of Ahmed et al. (2012). The new translation hash sampler enables us to scale elegantly to complex models (for the first time) and large vocabulary/corpora sizes. We show empirical results on the OPUS data—our method yields the best BLEU scores compared to existing approaches, while achieving significant computational speedups (several orders faster). We also report for the first time—BLEU score results for a largescale MT task using only non-parallel data (EMEA corpus).</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>Amr Ahmed</author>
+<author>Sujith Ravi</author>
+<author>Shravan Narayanamurthy</author>
+<author>Alex Smola</author>
+</authors>
+<title>Fastex: Hash clustering with exponential families.</title>
+<date>2012</date>
+<booktitle>In Proceedings of the 26th Conference on Neural Information Processing Systems (NIPS).</booktitle>
+<contexts>
+<context position="705" citStr="Ahmed et al. (2012)" startWordPosition="103" endWordPosition="106">ntain View, CA 94043 sravi@gooogle.com Abstract In this paper, we propose a new Bayesian inference method to train statistical machine translation systems using only nonparallel corpora. Following a probabilistic decipherment approach, we first introduce a new framework for decipherment training that is flexible enough to incorporate any number/type of features (besides simple bag-of-words) as side-information used for estimating translation models. In order to perform fast, efficient Bayesian inference in this framework, we then derive a hash sampling strategy that is inspired by the work of Ahmed et al. (2012). The new translation hash sampler enables us to scale elegantly to complex models (for the first time) and large vocabulary/corpora sizes. We show empirical results on the OPUS data—our method yields the best BLEU scores compared to existing approaches, while achieving significant computational speedups (several orders faster). We also report for the first time—BLEU score results for a largescale MT task using only non-parallel data (EMEA corpus). 1 Introduction Statistical machine translation (SMT) systems these days are built using large amounts of bilingual parallel corpora. The parallel c</context>
+<context position="4473" citStr="Ahmed et al., 2012" startWordPosition="677" endWordPosition="680">similarities computed from monolingual corpora. In this work we propose a new Bayesian inference method for estimating translation models from scratch using only monolingual corpora. Secondly, we introduce a new feature-based representation for sampling translation candidates that allows one to incorporate any amount of additional features (beyond simple bag-of-words) as sideinformation during decipherment training. Finally, we also derive a new accelerated sampling mechanism using locality sensitive hashing inspired by recent work on fast, probabilistic inference for unsupervised clustering (Ahmed et al., 2012). The new sampler allows us to perform fast, efficient inference with more complex translation models (than previously used) and scale better to large vocabulary and corpora sizes compared to existing methods as evidenced by our experimental results on two different corpora. 2 Decipherment Model for Machine Translation We now describe the decipherment problem formulation for machine translation. Problem Formulation: Given a source text f (i.e., source word sequences f1...f,,t) and a monolingual target language corpus, our goal is to decipher the source text and produce a target translation. Co</context>
+<context position="17539" citStr="Ahmed et al. (2012)" startWordPosition="2796" endWordPosition="2799">osal distribution for sampling translation candidates and introduce a new sampler for decipherment training that 365 is based on locality sensitive hashing (LSH). Hashing methods such as LSH have been widely used in the past in several scenarios including NLP applications (Ravichandran et al., 2005). Most of these approaches employ LSH within heuristic methods for speeding up nearestneighbor look up and similarity computation techniques. However, we use LSH hashing within a probabilistic framework which is very different from the typical use of LSH. Our work is inspired by some recent work by Ahmed et al. (2012) on speeding up Bayesian inference for unsupervised clustering. We use a similar technique as theirs but a different approximate distribution for the proposal, one that is bettersuited for machine translation models and without some of the additional overhead required for computing certain terms in the original formulation. Mixtures of Exponential Families: The translation models described earlier (Section 2) can be represented as mixtures of exponential families, specifically mixtures of multinomials. In exponential families, distributions over random variables are given by: p(x; θ) = exp(hφ(</context>
+<context position="19839" citStr="Ahmed et al., 2012" startWordPosition="3166" endWordPosition="3169">uring sampling. translation ei ∼ p(ei|F, E−i) ∝ p(e) · p(fi|ei, F−i, E−i) · pfert(·|ei, F−i, E−i) · ... (5) where, F is the full source text and E the full target translation generated during sampling. 2. Update the sufficient statistics for the changed target translation assignments. For large target vocabularies, computing p(fi|ei, F−i, E−i) dominates the inference procedure. We can accelerate this step significantly using a good proposal distribution via hashing. Locality Sensitive Hash Sampling: For general exponential families, here is a Taylor approximation for the data likelihood term (Ahmed et al., 2012): p(x|·) ≈ exp(hφ(x), θ∗i) − g(θ∗) (6) where, θ∗ is the expected parameter (sufficient statistics). For sampling the translation model, this involves computing an expensive inner product hφ(fi), θ∗e,i for each source word fi which has to be repeated for every translation candidate e0, including candidates that have very low probabilities and are unlikely to be chosen as the translation for fj. So, during decipherment training a standard collapsed Gibbs sampler will waste most of its time on expensive computations that will be discarded in the end anyways. Also, unlike some standard generative </context>
+<context position="22500" citStr="Ahmed et al. (2012)" startWordPosition="3615" endWordPosition="3618">e) a 11θe,11 · 11φ(fi)11 · COS πzl(φ(fi), θe,) (10) For each source word fi, we now sample from this new distribution (after normalization) instead of the original one. The binary hash representation for the two vectors yield significant speedups during sampling since Hamming distance computation between h(u) and h(v) is highly optimized on modern CPUs. Hence, we can compute an estimate for the inner product quite efficiently.6 Updating the hash signatures: During training, we compute the target candidate projection h(θe,) and corresponding norm only once7 which is different from the setup of Ahmed et al. (2012). The source word projection φ(fi) is dynamically updated in every sampling step. Note that doing this naively would scale slowly as O(Dl) where D is the total number of features but instead we can update the hash signatures in a more efficient manner that scales as O(Di,,.,l) where Di,,., is the number of non-zero entries in the feature representation for the source word φ(fi). Also, we do not need to store the random vectors w in practice since these can be computed on the fly using hash functions. The inner product approximation also yields some theoretical guarantees for the hash sampler.8</context>
+</contexts>
+<marker>Ahmed, Ravi, Narayanamurthy, Smola, 2012</marker>
+<rawString>Amr Ahmed, Sujith Ravi, Shravan Narayanamurthy, and Alex Smola. 2012. Fastex: Hash clustering with exponential families. In Proceedings of the 26th Conference on Neural Information Processing Systems (NIPS).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Moses S Charikar</author>
+</authors>
+<title>Similarity estimation techniques from rounding algorithms.</title>
+<date>2002</date>
+<booktitle>In Proceedings of the thiry-fourth annual ACM Symposium on Theory of Computing,</booktitle>
+<pages>380--388</pages>
+<contexts>
+<context position="20890" citStr="Charikar, 2002" startWordPosition="3337" endWordPosition="3338">dard collapsed Gibbs sampler will waste most of its time on expensive computations that will be discarded in the end anyways. Also, unlike some standard generative models used in other unsupervised learning scenarios (e.g., clustering) that model only observed features (namely words appearing in the document), here we would like to enrich the translation model with a lot more features (side-information). Instead, we can accelerate the computation of the inner product hφ(fi),θ∗e,i using a hash sampling strategy similar to (Ahmed et al., 2012). The underlying idea here is to use binary hashing (Charikar, 2002) to explore only those candidates e0 that are sufficiently close to the best matching translation via a proposal distribution. Next, we briefly introduce some notations and existing theoretical results related to binary hashing before describing the hash sampling procedure. For any two vectors u, v ∈ Rn, hu, vi = kuk · kvk · cos Z(u, v) (7) 366 Z(u, v) = πPr{sgn[(u, w)] =� sgn[(v, w)]} (8) where, w is a random vector drawn from a symmetric spherical distribution and the term inside Pr{·} represents the relation between the signs of the two inner products. Let hl(v) E {0,1}l be an l-bit binary </context>
+</contexts>
+<marker>Charikar, 2002</marker>
+<rawString>Moses S. Charikar. 2002. Similarity estimation techniques from rounding algorithms. In Proceedings of the thiry-fourth annual ACM Symposium on Theory of Computing, pages 380–388.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>A P Dempster</author>
+<author>N M Laird</author>
+<author>D B Rubin</author>
+</authors>
+<title>Maximum likelihood from incomplete data via the em algorithm.</title>
+<date>1977</date>
+<journal>Journal of the Royal Statistical Society, Series B,</journal>
+<volume>39</volume>
+<issue>1</issue>
+<contexts>
+<context position="6240" citStr="Dempster et al., 1977" startWordPosition="961" endWordPosition="964">slation Model: Machine translation is a much more complex task than solving other decipherment tasks such as word substitution ciphers (Ravi and Knight, 2011b; Dou and Knight, 2012). The mappings between languages involve non-determinism (i.e., words can have multiple translations), re-ordering of words can occur as grammar and syntax varies with language, and in addition word insertion and deletion operations are also involved. Ideally, for the translation model P(f|e) we would like to use well-known statistical models such as IBM Model 3 and estimate its parameters 0 using the EM algorithm (Dempster et al., 1977). But training becomes intractable with complex translation models and scalability is also an issue when large corpora sizes are involved and the translation tables become huge to fit in memory. So, instead we use a simplified generative process for the translation model as proposed by Ravi and Knight (2011b) and used by others (Nuhn et al., 2012) for this task: 1. Generate a target (e.g., English) string e = e1...el, with probability P(e) according to an n-gram language model. 2. Insert a NULL word at any position in the English string, with uniform probability. 3. For each target word token </context>
+</contexts>
+<marker>Dempster, Laird, Rubin, 1977</marker>
+<rawString>A. P. Dempster, N. M. Laird, and D. B. Rubin. 1977. Maximum likelihood from incomplete data via the em algorithm. Journal of the Royal Statistical Society, Series B, 39(1):1–38.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Qing Dou</author>
+<author>Kevin Knight</author>
+</authors>
+<title>Large scale decipherment for out-of-domain machine translation.</title>
+<date>2012</date>
+<booktitle>In Proceedings of the 2012 Joint Conference on Empirical Methods in Natural Language Processing and Computational Natural Language Learning,</booktitle>
+<pages>266--275</pages>
+<contexts>
+<context position="5799" citStr="Dou and Knight, 2012" startWordPosition="893" endWordPosition="896"> PB(f|e) parameters using only monolingual data. During decipherment training, our objective is to estimate the model parameters in order to maximize the probability of the source text f as suggested by Ravi and Knight (2011b). � 1: arg max P (e) - PB(f|e) (1) B f e For P(e), we use a word n-gram language model (LM) trained on monolingual target text. We then estimate the parameters of the translation model PB(f|e) during training. Translation Model: Machine translation is a much more complex task than solving other decipherment tasks such as word substitution ciphers (Ravi and Knight, 2011b; Dou and Knight, 2012). The mappings between languages involve non-determinism (i.e., words can have multiple translations), re-ordering of words can occur as grammar and syntax varies with language, and in addition word insertion and deletion operations are also involved. Ideally, for the translation model P(f|e) we would like to use well-known statistical models such as IBM Model 3 and estimate its parameters 0 using the EM algorithm (Dempster et al., 1977). But training becomes intractable with complex translation models and scalability is also an issue when large corpora sizes are involved and the translation t</context>
+<context position="33519" citStr="Dou and Knight, 2012" startWordPosition="5423" endWordPosition="5426">el corpora. The results are encouraging and demonstrates the ability of the method to scale to large-scale settings while performing efficient inference with complex models, which we believe will be especially useful for future MT application in scenarios where parallel data is hard to obtain. Table 4 displays some sample 1-best translations learned using this method. For comparison purposes, we also evaluate MT performance on this task using parallel training (MOSES trained with hundred sentence pairs) and observe a BLEU score of 11.7. 369 7 Discussion and Future Work There exists some work (Dou and Knight, 2012; Klementiev et al., 2012) that uses monolingual corpora to induce phrase tables, etc. These when combined with standard MT systems such as Moses (Koehn et al., 2007) trained on parallel corpora, have been shown to yield some BLEU score improvements. Nuhn et al. (2012) show some sample English/French lexicon entries learnt using EM algorithm with a pruned translation candidate set on a portion of the Gigaword corpus11 but do not report any actual MT results. In addition, as we showed earlier our method can use Bayesian inference (which has a lot of nice properties compared to EM for unsupervis</context>
+</contexts>
+<marker>Dou, Knight, 2012</marker>
+<rawString>Qing Dou and Kevin Knight. 2012. Large scale decipherment for out-of-domain machine translation. In Proceedings of the 2012 Joint Conference on Empirical Methods in Natural Language Processing and Computational Natural Language Learning, pages 266–275.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Pascale Fung</author>
+<author>Kathleen McKeown</author>
+</authors>
+<title>Finding terminology translations from non-parallel corpora.</title>
+<date>1997</date>
+<booktitle>In Proceedings of the 5th Annual Workshop on Very Large Corpora,</booktitle>
+<pages>192--202</pages>
+<contexts>
+<context position="2496" citStr="Fung and McKeown, 1997" startWordPosition="373" endWordPosition="377">ic has been receiving increasing attention from researchers and new methods have been proposed to train statistical machine translation models using only monolingual data in the source and target language. The underlying motivation behind most of these methods is that statistical properties for linguistic elements are shared across different languages and some of these similarities (mappings) could be automatically identified from large amounts of monolingual data. The MT literature does cover some prior work on extracting or augmenting partial lexicons using non-parallel corpora (Rapp, 1995; Fung and McKeown, 1997; Koehn and Knight, 2000; Haghighi et al., 2008). However, none of these methods attempt to train end-to-end MT models, instead they focus on mining bilingual lexicons from monolingual corpora and often they require parallel seed lexicons as a starting point. Some of them (Haghighi et al., 2008) also rely on additional linguistic knowledge such as orthography, etc. to mine word translation pairs across related languages (e.g., Spanish/English). Unsupervised training methods have also been proposed in the past for related problems in decipherment (Knight and Yamada, 1999; Snyder et al., 2010; R</context>
+</contexts>
+<marker>Fung, McKeown, 1997</marker>
+<rawString>Pascale Fung and Kathleen McKeown. 1997. Finding terminology translations from non-parallel corpora. In Proceedings of the 5th Annual Workshop on Very Large Corpora, pages 192–202.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Sharon Goldwater</author>
+<author>Tom Griffiths</author>
+</authors>
+<title>A fully bayesian approach to unsupervised part-of-speech tagging.</title>
+<date>2007</date>
+<booktitle>In Proceedings of the 45th Annual Meeting of the Association of Computational Linguistics,</booktitle>
+<pages>744--751</pages>
+<contexts>
+<context position="34191" citStr="Goldwater and Griffiths, 2007" startWordPosition="5537" endWordPosition="5541">ingual corpora to induce phrase tables, etc. These when combined with standard MT systems such as Moses (Koehn et al., 2007) trained on parallel corpora, have been shown to yield some BLEU score improvements. Nuhn et al. (2012) show some sample English/French lexicon entries learnt using EM algorithm with a pruned translation candidate set on a portion of the Gigaword corpus11 but do not report any actual MT results. In addition, as we showed earlier our method can use Bayesian inference (which has a lot of nice properties compared to EM for unsupervised natural language tasks (Johnson, 2007; Goldwater and Griffiths, 2007)) and still scale easily to large vocabulary, data sizes while allowing the models to grow in complexity. Most importantly, our method produces better translation results (as demonstrated on the OPUS MT task). And to our knowledge, this is the first time that anyone has reported MT results under truly non-parallel settings on such a large-scale task (EMEA). Our method is also easily extensible to outof-domain translation scenarios similar to (Dou and Knight, 2012). While their work also uses Bayesian inference with a slice sampling scheme, our new approach uses a novel hash sampling scheme for</context>
+</contexts>
+<marker>Goldwater, Griffiths, 2007</marker>
+<rawString>Sharon Goldwater and Tom Griffiths. 2007. A fully bayesian approach to unsupervised part-of-speech tagging. In Proceedings of the 45th Annual Meeting of the Association of Computational Linguistics, pages 744–751.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Aria Haghighi</author>
+<author>Percy Liang</author>
+<author>Taylor Berg-Kirkpatrick</author>
+<author>Dan Klein</author>
+</authors>
+<title>Learning bilingual lexicons from monolingual corpora.</title>
+<date>2008</date>
+<booktitle>In Proceedings of ACL: HLT,</booktitle>
+<pages>771--779</pages>
+<contexts>
+<context position="2544" citStr="Haghighi et al., 2008" startWordPosition="382" endWordPosition="385">researchers and new methods have been proposed to train statistical machine translation models using only monolingual data in the source and target language. The underlying motivation behind most of these methods is that statistical properties for linguistic elements are shared across different languages and some of these similarities (mappings) could be automatically identified from large amounts of monolingual data. The MT literature does cover some prior work on extracting or augmenting partial lexicons using non-parallel corpora (Rapp, 1995; Fung and McKeown, 1997; Koehn and Knight, 2000; Haghighi et al., 2008). However, none of these methods attempt to train end-to-end MT models, instead they focus on mining bilingual lexicons from monolingual corpora and often they require parallel seed lexicons as a starting point. Some of them (Haghighi et al., 2008) also rely on additional linguistic knowledge such as orthography, etc. to mine word translation pairs across related languages (e.g., Spanish/English). Unsupervised training methods have also been proposed in the past for related problems in decipherment (Knight and Yamada, 1999; Snyder et al., 2010; Ravi and Knight, 2011a) where the goal is to deco</context>
+<context position="11569" citStr="Haghighi et al., 2008" startWordPosition="1844" endWordPosition="1847">ation candidates. We represent both source and target words in a vector space similar to how documents are represented in typical information retrieval settings. But unlike documents, here each word w is associated with a feature vector w1...wd (where wi represents the weight for the feature indexed by i) which is constructed from monolingual corpora. For instance, context features for word w may include other words (or phrases) that appear in the immediate context (n-gram window) surrounding w in the monolingual corpus. Similarly, we can add other features based on topic models, orthography (Haghighi et al., 2008), temporal (Klementiev et al., 2012), etc. to our representation all of which can be extracted from monolingual corpora. Next, given two high dimensional vectors u and v it is possible to calculate the similarity between the two words denoted by s(u, v). The feature construction process is described in more detail below: Target Language: We represent each word (or phrase) ei with the following contextual features along with their counts: (a) f−context: every (word n-gram, position) pair immediately preceding ei in the monolingual corpus (n=1, position=-1), (b) similar features f+context to mod</context>
+</contexts>
+<marker>Haghighi, Liang, Berg-Kirkpatrick, Klein, 2008</marker>
+<rawString>Aria Haghighi, Percy Liang, Taylor Berg-Kirkpatrick, and Dan Klein. 2008. Learning bilingual lexicons from monolingual corpora. In Proceedings of ACL: HLT, pages 771–779.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Mark Johnson</author>
+</authors>
+<title>Why doesn’t EM find good HMM POS-taggers?</title>
+<date>2007</date>
+<booktitle>In Proceedings of the Joint Conference on Empirical Methods in Natural Language Processing and Computational Natural Language Learning (EMNLP-CoNLL),</booktitle>
+<pages>296--305</pages>
+<contexts>
+<context position="34159" citStr="Johnson, 2007" startWordPosition="5535" endWordPosition="5536">that uses monolingual corpora to induce phrase tables, etc. These when combined with standard MT systems such as Moses (Koehn et al., 2007) trained on parallel corpora, have been shown to yield some BLEU score improvements. Nuhn et al. (2012) show some sample English/French lexicon entries learnt using EM algorithm with a pruned translation candidate set on a portion of the Gigaword corpus11 but do not report any actual MT results. In addition, as we showed earlier our method can use Bayesian inference (which has a lot of nice properties compared to EM for unsupervised natural language tasks (Johnson, 2007; Goldwater and Griffiths, 2007)) and still scale easily to large vocabulary, data sizes while allowing the models to grow in complexity. Most importantly, our method produces better translation results (as demonstrated on the OPUS MT task). And to our knowledge, this is the first time that anyone has reported MT results under truly non-parallel settings on such a large-scale task (EMEA). Our method is also easily extensible to outof-domain translation scenarios similar to (Dou and Knight, 2012). While their work also uses Bayesian inference with a slice sampling scheme, our new approach uses </context>
+</contexts>
+<marker>Johnson, 2007</marker>
+<rawString>Mark Johnson. 2007. Why doesn’t EM find good HMM POS-taggers? In Proceedings of the Joint Conference on Empirical Methods in Natural Language Processing and Computational Natural Language Learning (EMNLP-CoNLL), pages 296–305.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Alex Klementiev</author>
+<author>Ann Irvine</author>
+<author>Chris Callison-Burch</author>
+<author>David Yarowsky</author>
+</authors>
+<title>Toward statistical machine translation without parallel corpora.</title>
+<date>2012</date>
+<booktitle>In Proceedings of the 13th Conference of the European Chapter of the Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="11605" citStr="Klementiev et al., 2012" startWordPosition="1849" endWordPosition="1853">h source and target words in a vector space similar to how documents are represented in typical information retrieval settings. But unlike documents, here each word w is associated with a feature vector w1...wd (where wi represents the weight for the feature indexed by i) which is constructed from monolingual corpora. For instance, context features for word w may include other words (or phrases) that appear in the immediate context (n-gram window) surrounding w in the monolingual corpus. Similarly, we can add other features based on topic models, orthography (Haghighi et al., 2008), temporal (Klementiev et al., 2012), etc. to our representation all of which can be extracted from monolingual corpora. Next, given two high dimensional vectors u and v it is possible to calculate the similarity between the two words denoted by s(u, v). The feature construction process is described in more detail below: Target Language: We represent each word (or phrase) ei with the following contextual features along with their counts: (a) f−context: every (word n-gram, position) pair immediately preceding ei in the monolingual corpus (n=1, position=-1), (b) similar features f+context to model the context following ei, and (c)</context>
+<context position="33545" citStr="Klementiev et al., 2012" startWordPosition="5427" endWordPosition="5430">s are encouraging and demonstrates the ability of the method to scale to large-scale settings while performing efficient inference with complex models, which we believe will be especially useful for future MT application in scenarios where parallel data is hard to obtain. Table 4 displays some sample 1-best translations learned using this method. For comparison purposes, we also evaluate MT performance on this task using parallel training (MOSES trained with hundred sentence pairs) and observe a BLEU score of 11.7. 369 7 Discussion and Future Work There exists some work (Dou and Knight, 2012; Klementiev et al., 2012) that uses monolingual corpora to induce phrase tables, etc. These when combined with standard MT systems such as Moses (Koehn et al., 2007) trained on parallel corpora, have been shown to yield some BLEU score improvements. Nuhn et al. (2012) show some sample English/French lexicon entries learnt using EM algorithm with a pruned translation candidate set on a portion of the Gigaword corpus11 but do not report any actual MT results. In addition, as we showed earlier our method can use Bayesian inference (which has a lot of nice properties compared to EM for unsupervised natural language tasks </context>
+</contexts>
+<marker>Klementiev, Irvine, Callison-Burch, Yarowsky, 2012</marker>
+<rawString>Alex Klementiev, Ann Irvine, Chris Callison-Burch, and David Yarowsky. 2012. Toward statistical machine translation without parallel corpora. In Proceedings of the 13th Conference of the European Chapter of the Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Kevin Knight</author>
+<author>Kenji Yamada</author>
+</authors>
+<title>A computational approach to deciphering unknown scripts.</title>
+<date>1999</date>
+<booktitle>In Proceedings of the ACL Workshop on Unsupervised Learning in Natural Language Processing,</booktitle>
+<pages>37--44</pages>
+<contexts>
+<context position="3072" citStr="Knight and Yamada, 1999" startWordPosition="464" endWordPosition="467">lel corpora (Rapp, 1995; Fung and McKeown, 1997; Koehn and Knight, 2000; Haghighi et al., 2008). However, none of these methods attempt to train end-to-end MT models, instead they focus on mining bilingual lexicons from monolingual corpora and often they require parallel seed lexicons as a starting point. Some of them (Haghighi et al., 2008) also rely on additional linguistic knowledge such as orthography, etc. to mine word translation pairs across related languages (e.g., Spanish/English). Unsupervised training methods have also been proposed in the past for related problems in decipherment (Knight and Yamada, 1999; Snyder et al., 2010; Ravi and Knight, 2011a) where the goal is to decode unknown scripts or ciphers. The body of work that is more closely related to ours include that of Ravi and Knight (2011b) who introduced a decipherment approach for training translation models using only monolingual cor362 Proceedings of the 51st Annual Meeting of the Association for Computational Linguistics, pages 362–371, Sofia, Bulgaria, August 4-9 2013. c�2013 Association for Computational Linguistics pora. Their best performing method uses an EM algorithm to train a word translation model and they show results on </context>
+</contexts>
+<marker>Knight, Yamada, 1999</marker>
+<rawString>Kevin Knight and Kenji Yamada. 1999. A computational approach to deciphering unknown scripts. In Proceedings of the ACL Workshop on Unsupervised Learning in Natural Language Processing, pages 37–44.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Philipp Koehn</author>
+<author>Kevin Knight</author>
+</authors>
+<title>Estimating word translation probabilities from unrelated monolingual corpora using the em algorithm.</title>
+<date>2000</date>
+<booktitle>In Proceedings of the Seventeenth National Conference on Artificial Intelligence and Twelfth Conference on Innovative Applications of Artificial Intelligence,</booktitle>
+<pages>711--715</pages>
+<contexts>
+<context position="2520" citStr="Koehn and Knight, 2000" startWordPosition="378" endWordPosition="381">creasing attention from researchers and new methods have been proposed to train statistical machine translation models using only monolingual data in the source and target language. The underlying motivation behind most of these methods is that statistical properties for linguistic elements are shared across different languages and some of these similarities (mappings) could be automatically identified from large amounts of monolingual data. The MT literature does cover some prior work on extracting or augmenting partial lexicons using non-parallel corpora (Rapp, 1995; Fung and McKeown, 1997; Koehn and Knight, 2000; Haghighi et al., 2008). However, none of these methods attempt to train end-to-end MT models, instead they focus on mining bilingual lexicons from monolingual corpora and often they require parallel seed lexicons as a starting point. Some of them (Haghighi et al., 2008) also rely on additional linguistic knowledge such as orthography, etc. to mine word translation pairs across related languages (e.g., Spanish/English). Unsupervised training methods have also been proposed in the past for related problems in decipherment (Knight and Yamada, 1999; Snyder et al., 2010; Ravi and Knight, 2011a) w</context>
+<context position="13467" citStr="Koehn and Knight, 2000" startWordPosition="2140" endWordPosition="2143">context features of ej in the target translation sample sentence e and add these features (f−context, f+context, fscontext) with weights to the feature representation for fj. Unlike the target word feature vectors (which can be pre-computed from the monolingual target corpus), the feature vector for every source word fj is dynamically constructed from the target translation sampled in each training iteration. This is a key distinction of our framework compared to previous approaches that use contextual similarity (or any other) features constructed from static monolingual corpora (Rapp, 1995; Koehn and Knight, 2000; Nuhn et al., 2012). Note that as we add more and more features for a particular word (by training on larger monolingual corpora or adding new types of features, etc.), it results in the feature representation becoming more sparse (especially for source feature vectors) which can cause problems in efficiency as well as robustness when computing similarity against other vectors. In the next section, we will describe how we mitigate this problem by projecting into a low-dimensional space by computing hash signatures. In all our experiments, we only use the features described above for represent</context>
+</contexts>
+<marker>Koehn, Knight, 2000</marker>
+<rawString>Philipp Koehn and Kevin Knight. 2000. Estimating word translation probabilities from unrelated monolingual corpora using the em algorithm. In Proceedings of the Seventeenth National Conference on Artificial Intelligence and Twelfth Conference on Innovative Applications of Artificial Intelligence, pages 711–715.</rawString>
+</citation>
+<citation valid="false">
+<authors>
+<author>Philipp Koehn</author>
+<author>Hieu Hoang</author>
+<author>Alexandra Birch</author>
+<author>Chris Callison-Burch</author>
+<author>Marcello Federico</author>
+<author>Nicola Bertoldi</author>
+<author>Brooke Cowan</author>
+<author>Wade Shen</author>
+<author>Christine Moran</author>
+<author>Richard Zens</author>
+</authors>
+<title>Chris Dyer, Ondˇrej Bojar,</title>
+<date>2007</date>
+<booktitle>In Proceedings of the 45th Annual Meeting of the ACL on Interactive Poster and Demonstration Sessions,</booktitle>
+<pages>177--180</pages>
+<location>Alexandra</location>
+<contexts>
+<context position="32131" citStr="Koehn et al., 2007" startWordPosition="5195" endWordPosition="5198">/8th the original size) prior to EM training. On the other hand, we sample from the full set of translation candidates including additional target phrase (of size 2) candidates which results in a much larger vocabulary consisting of 1600 candidates (∼4 times the original size), yet our method runs much faster and yields better results. The table also demonstrates the siginificant speedup achieved by the hash sampler over a standard Gibbs sampler for the same model (∼85 times faster when using a 2-gram LM). We also compare the results against MT performance from parallel training—MOSES system (Koehn et al., 2007) trained on 20k sentence pairs. The comparable number for Table 2 is 63.6 BLEU. Spanish (e) French (f) el → les la → la por → des secci´on → rubrique administraci´on → administration Table 4: Sample (1-best) Spanish/French translations produced by the new method on the EMEA corpus using word translation models trained with non-parallel corpora. EMEA Results Table 3 shows the results achieved by our method on the larger task involving EMEA corpus. Here, the target vocabulary Ve is much higher (67k). In spite of this challenge and the model complexity, we can still perform decipherment training </context>
+<context position="33685" citStr="Koehn et al., 2007" startWordPosition="5450" endWordPosition="5453">odels, which we believe will be especially useful for future MT application in scenarios where parallel data is hard to obtain. Table 4 displays some sample 1-best translations learned using this method. For comparison purposes, we also evaluate MT performance on this task using parallel training (MOSES trained with hundred sentence pairs) and observe a BLEU score of 11.7. 369 7 Discussion and Future Work There exists some work (Dou and Knight, 2012; Klementiev et al., 2012) that uses monolingual corpora to induce phrase tables, etc. These when combined with standard MT systems such as Moses (Koehn et al., 2007) trained on parallel corpora, have been shown to yield some BLEU score improvements. Nuhn et al. (2012) show some sample English/French lexicon entries learnt using EM algorithm with a pruned translation candidate set on a portion of the Gigaword corpus11 but do not report any actual MT results. In addition, as we showed earlier our method can use Bayesian inference (which has a lot of nice properties compared to EM for unsupervised natural language tasks (Johnson, 2007; Goldwater and Griffiths, 2007)) and still scale easily to large vocabulary, data sizes while allowing the models to grow in </context>
+</contexts>
+<marker>Koehn, Hoang, Birch, Callison-Burch, Federico, Bertoldi, Cowan, Shen, Moran, Zens, 2007</marker>
+<rawString>Philipp Koehn, Hieu Hoang, Alexandra Birch, Chris Callison-Burch, Marcello Federico, Nicola Bertoldi, Brooke Cowan, Wade Shen, Christine Moran, Richard Zens, Chris Dyer, Ondˇrej Bojar, Alexandra Constantin, and Evan Herbst. 2007. Moses: open source toolkit for statistical machine translation. In Proceedings of the 45th Annual Meeting of the ACL on Interactive Poster and Demonstration Sessions, pages 177–180.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Malte Nuhn</author>
+<author>Arne Mauser</author>
+<author>Hermann Ney</author>
+</authors>
+<title>Deciphering foreign language by combining language models and context vectors.</title>
+<date>2012</date>
+<booktitle>In Proceedings of the 50th Annual Meeting of the Association for Computational Linguistics,</booktitle>
+<pages>156--164</pages>
+<contexts>
+<context position="3714" citStr="Nuhn et al. (2012)" startWordPosition="566" endWordPosition="569">avi and Knight, 2011a) where the goal is to decode unknown scripts or ciphers. The body of work that is more closely related to ours include that of Ravi and Knight (2011b) who introduced a decipherment approach for training translation models using only monolingual cor362 Proceedings of the 51st Annual Meeting of the Association for Computational Linguistics, pages 362–371, Sofia, Bulgaria, August 4-9 2013. c�2013 Association for Computational Linguistics pora. Their best performing method uses an EM algorithm to train a word translation model and they show results on a Spanish/English task. Nuhn et al. (2012) extend the former approach and improve training efficiency by pruning translation candidates prior to EM training with the help of context similarities computed from monolingual corpora. In this work we propose a new Bayesian inference method for estimating translation models from scratch using only monolingual corpora. Secondly, we introduce a new feature-based representation for sampling translation candidates that allows one to incorporate any amount of additional features (beyond simple bag-of-words) as sideinformation during decipherment training. Finally, we also derive a new accelerate</context>
+<context position="6589" citStr="Nuhn et al., 2012" startWordPosition="1019" endWordPosition="1022">uage, and in addition word insertion and deletion operations are also involved. Ideally, for the translation model P(f|e) we would like to use well-known statistical models such as IBM Model 3 and estimate its parameters 0 using the EM algorithm (Dempster et al., 1977). But training becomes intractable with complex translation models and scalability is also an issue when large corpora sizes are involved and the translation tables become huge to fit in memory. So, instead we use a simplified generative process for the translation model as proposed by Ravi and Knight (2011b) and used by others (Nuhn et al., 2012) for this task: 1. Generate a target (e.g., English) string e = e1...el, with probability P(e) according to an n-gram language model. 2. Insert a NULL word at any position in the English string, with uniform probability. 3. For each target word token ez (including NULLs), choose a source word translation fz, with probability PB(fz|ez). The source word may be NULL. 4. Swap any pair of adjacent source words fz−1, fz, with probability P(swap); set to 0.1. 5. Output the foreign string f = f1...f,,t, skipping over NULLs. Previous approaches (Ravi and Knight, 2011b; Nuhn et al., 2012) use the EM alg</context>
+<context position="13487" citStr="Nuhn et al., 2012" startWordPosition="2144" endWordPosition="2147">n the target translation sample sentence e and add these features (f−context, f+context, fscontext) with weights to the feature representation for fj. Unlike the target word feature vectors (which can be pre-computed from the monolingual target corpus), the feature vector for every source word fj is dynamically constructed from the target translation sampled in each training iteration. This is a key distinction of our framework compared to previous approaches that use contextual similarity (or any other) features constructed from static monolingual corpora (Rapp, 1995; Koehn and Knight, 2000; Nuhn et al., 2012). Note that as we add more and more features for a particular word (by training on larger monolingual corpora or adding new types of features, etc.), it results in the feature representation becoming more sparse (especially for source feature vectors) which can cause problems in efficiency as well as robustness when computing similarity against other vectors. In the next section, we will describe how we mitigate this problem by projecting into a low-dimensional space by computing hash signatures. In all our experiments, we only use the features described above for representing source and targe</context>
+<context position="15118" citStr="Nuhn et al. (2012)" startWordPosition="2410" endWordPosition="2413">ier and iteratively sample a target word (or phrase) translation candidate ez for every word fz in the source text f. This involves choosing from |Ve |possible target candidates in every step which can be highly inefficient (and infeasible for large vocabulary sizes). One possible strategy is to compute similarity scores s(wf,, wee) between the current source word feature vector wf, and feature vectors we&apos;∈Ve for all possible candidates in the target vocabulary. Following this, we can prune the translation candidate set by keeping only the top candidates e∗ according to the similarity scores. Nuhn et al. (2012) use a similar strategy to obtain a more compact translation table that improves runtime efficiency for EM training. Their approach requires calculating and sorting all |Ve|·|Vf |distances in time O(V 2 ·log(V )), where V = max(|Ve|,|Vf|). Challenges: Unfortunately, there are several additional challenges which makes inference very hard in our case. Firstly, we would like to include as many features as possible to represent the source/target words in our framework besides simple bag-of-words context similarity (for example, left-context, right-context, and other generalpurpose features based o</context>
+<context position="26741" citStr="Nuhn et al. (2012)" startWordPosition="4306" endWordPosition="4309">n consisting of the original and the deleted versions. 4. Decoding the foreign sentence: Finally, once the training is done (i.e., after all sampling iterations) we choose the final sample as our target translation output for the source text. 6 Experiments and Results We test our method on two different corpora. To evaluate translation quality, we use BLEU score (Papineni et al., 2002), a standard evaluation measure used in machine translation. First, we present MT results on non-parallel Spanish/English data from the OPUS corpus (Tiedemann, 2009) which was used by Ravi and Knight (2011b) and Nuhn et al. (2012). We show that our method achieves the best performance (BLEU scores) on this task while being significantly faster than both the previous approaches. We then apply our method to a much larger non-parallel French/Spanish corpus constructed from the EMEA corpus (Tiedemann, 2009). Here the vocabulary sizes are much larger and we show how our new Bayesian decipherment method scales well to this task inspite of using complex translation models. We also report the first BLEU results on such a large-scale MT task under truly non-parallel settings (without using any parallel data or seed lexicon). Fo</context>
+<context position="28853" citStr="Nuhn et al. (2012)" startWordPosition="4656" endWordPosition="4659">d in decipherment training). To construct a nonparallel corpus, we split the remaining 1.1M lines as follows: first 550k sentences in French, last 550k sentences in Spanish. The latter is used to construct a target language model used for decipherment training. The corpus statistics are shown in Table 1. 6.2 Results OPUS: We compare the MT results (BLEU scores) from different systems on the OPUS corpus in Table 2. The first row displays baseline performance. The next three rows 1a–1c display performance achieved by two methods from Ravi and Knight (2011b). Rows 2a, 2b show results from the of Nuhn et al. (2012). The last two rows display results for the new method using Bayesian hash sampling. Overall, using a 3-gram language model (instead of 2-gram) for decipherment training improves the performance for all methods. We observe that our method produces much better results than the others even with a 2-gram LM. With a 3-gram LM, the new method achieves the best performance; the highest BLEU score reported on this task. It is also interesting to note that the hash sampling method yields much better results than the Bayesian inference method presented in (Ravi and Knight, 2011b). This is due to the ac</context>
+<context position="30145" citStr="Nuhn et al., 2012" startWordPosition="4870" endWordPosition="4873">tter solutions faster. Table 2 (last column) also compares the efficiency of different methods in terms of CPU time required for training. Both our 2-gram and 3-gram based methods are significantly faster than those previously reported for EM based training methods presented in (Ravi and Knight, 2011b; Nuhn 368 Method BLEU Time (hours) Baseline system (identity translations) 6.9 1a. EM with 2-gram LM (Ravi and Knight, 2011b) 15.3 ∼850h 1b. EM with whole-segment LM (Ravi and Knight, 2011b) 19.3 1c. Bayesian IBM Model 3 with 2-gram LM (Ravi and Knight, 2011b) 15.1 2a. EM+Context with 2-gram LM (Nuhn et al., 2012) 15.2 50h 2b. EM+Context with 3-gram LM (Nuhn et al., 2012) 20.9 200h 3. Bayesian (standard) Gibbs sampling with 2-gram LM 222h 4a. Bayesian Hash Sampling* with 2-gram LM (this work) 20.3 2.6h 4b. Bayesian Hash Sampling* with 3-gram LM (this work) 21.2 2.7h (*sampler was run for 1000 iterations) Table 2: Comparison of MT performance (BLEU scores) and efficiency (running time in CPU hours) on the Spanish/English OPUS corpus using only non-parallel corpora for training. For the Bayesian methods 4a and 4b, the samplers were run for 1000 iterations each on a single machine (1.8GHz Intel processor)</context>
+<context position="31442" citStr="Nuhn et al. (2012)" startWordPosition="5080" endWordPosition="5083">based on their EM implementation for different settings. Method BLEU Baseline system (identity translations) 3.0 Bayesian Hash Sampling with 2-gram LM 4.2 vocab=full (Ve), add fertility=no vocab=pruned*, add fertility=yes 5.3 Table 3: MT results on the French/Spanish EMEA corpus using the new hash sampling method. *The last row displays results when we sample target translations from a pruned candidate set (most frequent 1k Spanish words + identity translation candidates) which enables the sampler to run much faster when using more complex models. et al., 2012). This is very encouraging since Nuhn et al. (2012) reported obtaining a speedup by pruning translation candidates (to ∼1/8th the original size) prior to EM training. On the other hand, we sample from the full set of translation candidates including additional target phrase (of size 2) candidates which results in a much larger vocabulary consisting of 1600 candidates (∼4 times the original size), yet our method runs much faster and yields better results. The table also demonstrates the siginificant speedup achieved by the hash sampler over a standard Gibbs sampler for the same model (∼85 times faster when using a 2-gram LM). We also compare th</context>
+<context position="33788" citStr="Nuhn et al. (2012)" startWordPosition="5468" endWordPosition="5471">data is hard to obtain. Table 4 displays some sample 1-best translations learned using this method. For comparison purposes, we also evaluate MT performance on this task using parallel training (MOSES trained with hundred sentence pairs) and observe a BLEU score of 11.7. 369 7 Discussion and Future Work There exists some work (Dou and Knight, 2012; Klementiev et al., 2012) that uses monolingual corpora to induce phrase tables, etc. These when combined with standard MT systems such as Moses (Koehn et al., 2007) trained on parallel corpora, have been shown to yield some BLEU score improvements. Nuhn et al. (2012) show some sample English/French lexicon entries learnt using EM algorithm with a pruned translation candidate set on a portion of the Gigaword corpus11 but do not report any actual MT results. In addition, as we showed earlier our method can use Bayesian inference (which has a lot of nice properties compared to EM for unsupervised natural language tasks (Johnson, 2007; Goldwater and Griffiths, 2007)) and still scale easily to large vocabulary, data sizes while allowing the models to grow in complexity. Most importantly, our method produces better translation results (as demonstrated on the OP</context>
+</contexts>
+<marker>Nuhn, Mauser, Ney, 2012</marker>
+<rawString>Malte Nuhn, Arne Mauser, and Hermann Ney. 2012. Deciphering foreign language by combining language models and context vectors. In Proceedings of the 50th Annual Meeting of the Association for Computational Linguistics, pages 156–164.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Kishore Papineni</author>
+<author>Salim Roukos</author>
+<author>Todd Ward</author>
+<author>WeiJing Zhu</author>
+</authors>
+<title>Bleu: a method for automatic evaluation of machine translation.</title>
+<date>2002</date>
+<booktitle>In Proceedings of the 40th Annual Meeting on Association for Computational Linguistics,</booktitle>
+<pages>311--318</pages>
+<contexts>
+<context position="26511" citStr="Papineni et al., 2002" startWordPosition="4269" endWordPosition="4272">en sample an alignment from this distribution. (b) Deletion: For each source word token, delete the current target translation (i.e., align it with the target NULL token). As with the reordering operation, we sample from a distribution consisting of the original and the deleted versions. 4. Decoding the foreign sentence: Finally, once the training is done (i.e., after all sampling iterations) we choose the final sample as our target translation output for the source text. 6 Experiments and Results We test our method on two different corpora. To evaluate translation quality, we use BLEU score (Papineni et al., 2002), a standard evaluation measure used in machine translation. First, we present MT results on non-parallel Spanish/English data from the OPUS corpus (Tiedemann, 2009) which was used by Ravi and Knight (2011b) and Nuhn et al. (2012). We show that our method achieves the best performance (BLEU scores) on this task while being significantly faster than both the previous approaches. We then apply our method to a much larger non-parallel French/Spanish corpus constructed from the EMEA corpus (Tiedemann, 2009). Here the vocabulary sizes are much larger and we show how our new Bayesian decipherment me</context>
+</contexts>
+<marker>Papineni, Roukos, Ward, Zhu, 2002</marker>
+<rawString>Kishore Papineni, Salim Roukos, Todd Ward, and WeiJing Zhu. 2002. Bleu: a method for automatic evaluation of machine translation. In Proceedings of the 40th Annual Meeting on Association for Computational Linguistics, pages 311–318.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Reinhard Rapp</author>
+</authors>
+<title>Identifying word translations in non-parallel texts.</title>
+<date>1995</date>
+<booktitle>In Proceedings of the 33rd Annual Meeting on Association for Computational Linguistics,</booktitle>
+<pages>320--322</pages>
+<contexts>
+<context position="2472" citStr="Rapp, 1995" startWordPosition="371" endWordPosition="372">ly, this topic has been receiving increasing attention from researchers and new methods have been proposed to train statistical machine translation models using only monolingual data in the source and target language. The underlying motivation behind most of these methods is that statistical properties for linguistic elements are shared across different languages and some of these similarities (mappings) could be automatically identified from large amounts of monolingual data. The MT literature does cover some prior work on extracting or augmenting partial lexicons using non-parallel corpora (Rapp, 1995; Fung and McKeown, 1997; Koehn and Knight, 2000; Haghighi et al., 2008). However, none of these methods attempt to train end-to-end MT models, instead they focus on mining bilingual lexicons from monolingual corpora and often they require parallel seed lexicons as a starting point. Some of them (Haghighi et al., 2008) also rely on additional linguistic knowledge such as orthography, etc. to mine word translation pairs across related languages (e.g., Spanish/English). Unsupervised training methods have also been proposed in the past for related problems in decipherment (Knight and Yamada, 1999</context>
+<context position="13443" citStr="Rapp, 1995" startWordPosition="2138" endWordPosition="2139">act all the context features of ej in the target translation sample sentence e and add these features (f−context, f+context, fscontext) with weights to the feature representation for fj. Unlike the target word feature vectors (which can be pre-computed from the monolingual target corpus), the feature vector for every source word fj is dynamically constructed from the target translation sampled in each training iteration. This is a key distinction of our framework compared to previous approaches that use contextual similarity (or any other) features constructed from static monolingual corpora (Rapp, 1995; Koehn and Knight, 2000; Nuhn et al., 2012). Note that as we add more and more features for a particular word (by training on larger monolingual corpora or adding new types of features, etc.), it results in the feature representation becoming more sparse (especially for source feature vectors) which can cause problems in efficiency as well as robustness when computing similarity against other vectors. In the next section, we will describe how we mitigate this problem by projecting into a low-dimensional space by computing hash signatures. In all our experiments, we only use the features descr</context>
+</contexts>
+<marker>Rapp, 1995</marker>
+<rawString>Reinhard Rapp. 1995. Identifying word translations in non-parallel texts. In Proceedings of the 33rd Annual Meeting on Association for Computational Linguistics, pages 320–322.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Sujith Ravi</author>
+<author>Kevin Knight</author>
+</authors>
+<title>Bayesian inference for zodiac and other homophonic ciphers.</title>
+<date>2011</date>
+<booktitle>In Proceedings of the 49th Annual Meeting of the Association for Computational Linguistics: Human Language Technologies -</booktitle>
+<volume>1</volume>
+<pages>239--247</pages>
+<contexts>
+<context position="3116" citStr="Ravi and Knight, 2011" startWordPosition="472" endWordPosition="475">7; Koehn and Knight, 2000; Haghighi et al., 2008). However, none of these methods attempt to train end-to-end MT models, instead they focus on mining bilingual lexicons from monolingual corpora and often they require parallel seed lexicons as a starting point. Some of them (Haghighi et al., 2008) also rely on additional linguistic knowledge such as orthography, etc. to mine word translation pairs across related languages (e.g., Spanish/English). Unsupervised training methods have also been proposed in the past for related problems in decipherment (Knight and Yamada, 1999; Snyder et al., 2010; Ravi and Knight, 2011a) where the goal is to decode unknown scripts or ciphers. The body of work that is more closely related to ours include that of Ravi and Knight (2011b) who introduced a decipherment approach for training translation models using only monolingual cor362 Proceedings of the 51st Annual Meeting of the Association for Computational Linguistics, pages 362–371, Sofia, Bulgaria, August 4-9 2013. c�2013 Association for Computational Linguistics pora. Their best performing method uses an EM algorithm to train a word translation model and they show results on a Spanish/English task. Nuhn et al. (2012) e</context>
+<context position="5402" citStr="Ravi and Knight (2011" startWordPosition="824" endWordPosition="827"> Translation We now describe the decipherment problem formulation for machine translation. Problem Formulation: Given a source text f (i.e., source word sequences f1...f,,t) and a monolingual target language corpus, our goal is to decipher the source text and produce a target translation. Contrary to standard machine translation training scenarios, here we have to estimate the translation model PB(f|e) parameters using only monolingual data. During decipherment training, our objective is to estimate the model parameters in order to maximize the probability of the source text f as suggested by Ravi and Knight (2011b). � 1: arg max P (e) - PB(f|e) (1) B f e For P(e), we use a word n-gram language model (LM) trained on monolingual target text. We then estimate the parameters of the translation model PB(f|e) during training. Translation Model: Machine translation is a much more complex task than solving other decipherment tasks such as word substitution ciphers (Ravi and Knight, 2011b; Dou and Knight, 2012). The mappings between languages involve non-determinism (i.e., words can have multiple translations), re-ordering of words can occur as grammar and syntax varies with language, and in addition word inse</context>
+<context position="7153" citStr="Ravi and Knight, 2011" startWordPosition="1114" endWordPosition="1117">and Knight (2011b) and used by others (Nuhn et al., 2012) for this task: 1. Generate a target (e.g., English) string e = e1...el, with probability P(e) according to an n-gram language model. 2. Insert a NULL word at any position in the English string, with uniform probability. 3. For each target word token ez (including NULLs), choose a source word translation fz, with probability PB(fz|ez). The source word may be NULL. 4. Swap any pair of adjacent source words fz−1, fz, with probability P(swap); set to 0.1. 5. Output the foreign string f = f1...f,,t, skipping over NULLs. Previous approaches (Ravi and Knight, 2011b; Nuhn et al., 2012) use the EM algorithm to estimate all the parameters 0 in order to maximize likelihood of the foreign corpus. Instead, we propose a new Bayesian inference framework to estimate the translation model parameters. In spite of using Bayesian inference which is typically slow in practice (with standard Gibbs sampling), we show later that our method is scalable and permits decipherment training using more complex translation models (with several additional parameters). 363 2.1 Adding Phrases, Flexible Reordering and Fertility to Translation Model We now extend the generative pro</context>
+<context position="26716" citStr="Ravi and Knight (2011" startWordPosition="4301" endWordPosition="4304">we sample from a distribution consisting of the original and the deleted versions. 4. Decoding the foreign sentence: Finally, once the training is done (i.e., after all sampling iterations) we choose the final sample as our target translation output for the source text. 6 Experiments and Results We test our method on two different corpora. To evaluate translation quality, we use BLEU score (Papineni et al., 2002), a standard evaluation measure used in machine translation. First, we present MT results on non-parallel Spanish/English data from the OPUS corpus (Tiedemann, 2009) which was used by Ravi and Knight (2011b) and Nuhn et al. (2012). We show that our method achieves the best performance (BLEU scores) on this task while being significantly faster than both the previous approaches. We then apply our method to a much larger non-parallel French/Spanish corpus constructed from the EMEA corpus (Tiedemann, 2009). Here the vocabulary sizes are much larger and we show how our new Bayesian decipherment method scales well to this task inspite of using complex translation models. We also report the first BLEU results on such a large-scale MT task under truly non-parallel settings (without using any parallel </context>
+<context position="28794" citStr="Ravi and Knight (2011" startWordPosition="4644" endWordPosition="4647"> the first 1k sentences in French as our source text (also used in decipherment training). To construct a nonparallel corpus, we split the remaining 1.1M lines as follows: first 550k sentences in French, last 550k sentences in Spanish. The latter is used to construct a target language model used for decipherment training. The corpus statistics are shown in Table 1. 6.2 Results OPUS: We compare the MT results (BLEU scores) from different systems on the OPUS corpus in Table 2. The first row displays baseline performance. The next three rows 1a–1c display performance achieved by two methods from Ravi and Knight (2011b). Rows 2a, 2b show results from the of Nuhn et al. (2012). The last two rows display results for the new method using Bayesian hash sampling. Overall, using a 3-gram language model (instead of 2-gram) for decipherment training improves the performance for all methods. We observe that our method produces much better results than the others even with a 2-gram LM. With a 3-gram LM, the new method achieves the best performance; the highest BLEU score reported on this task. It is also interesting to note that the hash sampling method yields much better results than the Bayesian inference method p</context>
+<context position="30018" citStr="Ravi and Knight, 2011" startWordPosition="4847" endWordPosition="4850">ented in (Ravi and Knight, 2011b). This is due to the accelerated sampling scheme introduced earlier which helps it converge to better solutions faster. Table 2 (last column) also compares the efficiency of different methods in terms of CPU time required for training. Both our 2-gram and 3-gram based methods are significantly faster than those previously reported for EM based training methods presented in (Ravi and Knight, 2011b; Nuhn 368 Method BLEU Time (hours) Baseline system (identity translations) 6.9 1a. EM with 2-gram LM (Ravi and Knight, 2011b) 15.3 ∼850h 1b. EM with whole-segment LM (Ravi and Knight, 2011b) 19.3 1c. Bayesian IBM Model 3 with 2-gram LM (Ravi and Knight, 2011b) 15.1 2a. EM+Context with 2-gram LM (Nuhn et al., 2012) 15.2 50h 2b. EM+Context with 3-gram LM (Nuhn et al., 2012) 20.9 200h 3. Bayesian (standard) Gibbs sampling with 2-gram LM 222h 4a. Bayesian Hash Sampling* with 2-gram LM (this work) 20.3 2.6h 4b. Bayesian Hash Sampling* with 3-gram LM (this work) 21.2 2.7h (*sampler was run for 1000 iterations) Table 2: Comparison of MT performance (BLEU scores) and efficiency (running time in CPU hours) on the Spanish/English OPUS corpus using only non-parallel corpora for training. </context>
+</contexts>
+<marker>Ravi, Knight, 2011</marker>
+<rawString>Sujith Ravi and Kevin Knight. 2011a. Bayesian inference for zodiac and other homophonic ciphers. In Proceedings of the 49th Annual Meeting of the Association for Computational Linguistics: Human Language Technologies - Volume 1, pages 239–247.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Sujith Ravi</author>
+<author>Kevin Knight</author>
+</authors>
+<title>Deciphering foreign language.</title>
+<date>2011</date>
+<booktitle>In Proceedings of the 49th Annual Meeting of the Association for Computational Linguistics: Human Language Technologies,</booktitle>
+<pages>12--21</pages>
+<contexts>
+<context position="3116" citStr="Ravi and Knight, 2011" startWordPosition="472" endWordPosition="475">7; Koehn and Knight, 2000; Haghighi et al., 2008). However, none of these methods attempt to train end-to-end MT models, instead they focus on mining bilingual lexicons from monolingual corpora and often they require parallel seed lexicons as a starting point. Some of them (Haghighi et al., 2008) also rely on additional linguistic knowledge such as orthography, etc. to mine word translation pairs across related languages (e.g., Spanish/English). Unsupervised training methods have also been proposed in the past for related problems in decipherment (Knight and Yamada, 1999; Snyder et al., 2010; Ravi and Knight, 2011a) where the goal is to decode unknown scripts or ciphers. The body of work that is more closely related to ours include that of Ravi and Knight (2011b) who introduced a decipherment approach for training translation models using only monolingual cor362 Proceedings of the 51st Annual Meeting of the Association for Computational Linguistics, pages 362–371, Sofia, Bulgaria, August 4-9 2013. c�2013 Association for Computational Linguistics pora. Their best performing method uses an EM algorithm to train a word translation model and they show results on a Spanish/English task. Nuhn et al. (2012) e</context>
+<context position="5402" citStr="Ravi and Knight (2011" startWordPosition="824" endWordPosition="827"> Translation We now describe the decipherment problem formulation for machine translation. Problem Formulation: Given a source text f (i.e., source word sequences f1...f,,t) and a monolingual target language corpus, our goal is to decipher the source text and produce a target translation. Contrary to standard machine translation training scenarios, here we have to estimate the translation model PB(f|e) parameters using only monolingual data. During decipherment training, our objective is to estimate the model parameters in order to maximize the probability of the source text f as suggested by Ravi and Knight (2011b). � 1: arg max P (e) - PB(f|e) (1) B f e For P(e), we use a word n-gram language model (LM) trained on monolingual target text. We then estimate the parameters of the translation model PB(f|e) during training. Translation Model: Machine translation is a much more complex task than solving other decipherment tasks such as word substitution ciphers (Ravi and Knight, 2011b; Dou and Knight, 2012). The mappings between languages involve non-determinism (i.e., words can have multiple translations), re-ordering of words can occur as grammar and syntax varies with language, and in addition word inse</context>
+<context position="7153" citStr="Ravi and Knight, 2011" startWordPosition="1114" endWordPosition="1117">and Knight (2011b) and used by others (Nuhn et al., 2012) for this task: 1. Generate a target (e.g., English) string e = e1...el, with probability P(e) according to an n-gram language model. 2. Insert a NULL word at any position in the English string, with uniform probability. 3. For each target word token ez (including NULLs), choose a source word translation fz, with probability PB(fz|ez). The source word may be NULL. 4. Swap any pair of adjacent source words fz−1, fz, with probability P(swap); set to 0.1. 5. Output the foreign string f = f1...f,,t, skipping over NULLs. Previous approaches (Ravi and Knight, 2011b; Nuhn et al., 2012) use the EM algorithm to estimate all the parameters 0 in order to maximize likelihood of the foreign corpus. Instead, we propose a new Bayesian inference framework to estimate the translation model parameters. In spite of using Bayesian inference which is typically slow in practice (with standard Gibbs sampling), we show later that our method is scalable and permits decipherment training using more complex translation models (with several additional parameters). 363 2.1 Adding Phrases, Flexible Reordering and Fertility to Translation Model We now extend the generative pro</context>
+<context position="26716" citStr="Ravi and Knight (2011" startWordPosition="4301" endWordPosition="4304">we sample from a distribution consisting of the original and the deleted versions. 4. Decoding the foreign sentence: Finally, once the training is done (i.e., after all sampling iterations) we choose the final sample as our target translation output for the source text. 6 Experiments and Results We test our method on two different corpora. To evaluate translation quality, we use BLEU score (Papineni et al., 2002), a standard evaluation measure used in machine translation. First, we present MT results on non-parallel Spanish/English data from the OPUS corpus (Tiedemann, 2009) which was used by Ravi and Knight (2011b) and Nuhn et al. (2012). We show that our method achieves the best performance (BLEU scores) on this task while being significantly faster than both the previous approaches. We then apply our method to a much larger non-parallel French/Spanish corpus constructed from the EMEA corpus (Tiedemann, 2009). Here the vocabulary sizes are much larger and we show how our new Bayesian decipherment method scales well to this task inspite of using complex translation models. We also report the first BLEU results on such a large-scale MT task under truly non-parallel settings (without using any parallel </context>
+<context position="28794" citStr="Ravi and Knight (2011" startWordPosition="4644" endWordPosition="4647"> the first 1k sentences in French as our source text (also used in decipherment training). To construct a nonparallel corpus, we split the remaining 1.1M lines as follows: first 550k sentences in French, last 550k sentences in Spanish. The latter is used to construct a target language model used for decipherment training. The corpus statistics are shown in Table 1. 6.2 Results OPUS: We compare the MT results (BLEU scores) from different systems on the OPUS corpus in Table 2. The first row displays baseline performance. The next three rows 1a–1c display performance achieved by two methods from Ravi and Knight (2011b). Rows 2a, 2b show results from the of Nuhn et al. (2012). The last two rows display results for the new method using Bayesian hash sampling. Overall, using a 3-gram language model (instead of 2-gram) for decipherment training improves the performance for all methods. We observe that our method produces much better results than the others even with a 2-gram LM. With a 3-gram LM, the new method achieves the best performance; the highest BLEU score reported on this task. It is also interesting to note that the hash sampling method yields much better results than the Bayesian inference method p</context>
+<context position="30018" citStr="Ravi and Knight, 2011" startWordPosition="4847" endWordPosition="4850">ented in (Ravi and Knight, 2011b). This is due to the accelerated sampling scheme introduced earlier which helps it converge to better solutions faster. Table 2 (last column) also compares the efficiency of different methods in terms of CPU time required for training. Both our 2-gram and 3-gram based methods are significantly faster than those previously reported for EM based training methods presented in (Ravi and Knight, 2011b; Nuhn 368 Method BLEU Time (hours) Baseline system (identity translations) 6.9 1a. EM with 2-gram LM (Ravi and Knight, 2011b) 15.3 ∼850h 1b. EM with whole-segment LM (Ravi and Knight, 2011b) 19.3 1c. Bayesian IBM Model 3 with 2-gram LM (Ravi and Knight, 2011b) 15.1 2a. EM+Context with 2-gram LM (Nuhn et al., 2012) 15.2 50h 2b. EM+Context with 3-gram LM (Nuhn et al., 2012) 20.9 200h 3. Bayesian (standard) Gibbs sampling with 2-gram LM 222h 4a. Bayesian Hash Sampling* with 2-gram LM (this work) 20.3 2.6h 4b. Bayesian Hash Sampling* with 3-gram LM (this work) 21.2 2.7h (*sampler was run for 1000 iterations) Table 2: Comparison of MT performance (BLEU scores) and efficiency (running time in CPU hours) on the Spanish/English OPUS corpus using only non-parallel corpora for training. </context>
+</contexts>
+<marker>Ravi, Knight, 2011</marker>
+<rawString>Sujith Ravi and Kevin Knight. 2011b. Deciphering foreign language. In Proceedings of the 49th Annual Meeting of the Association for Computational Linguistics: Human Language Technologies, pages 12–21.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Deepak Ravichandran</author>
+<author>Patrick Pantel</author>
+<author>Eduard Hovy</author>
+</authors>
+<title>Randomized algorithms and nlp: using locality sensitive hash function for high speed noun clustering.</title>
+<date>2005</date>
+<booktitle>In Proceedings of the 43rd Annual Meeting on Association for Computational Linguistics,</booktitle>
+<pages>622--629</pages>
+<contexts>
+<context position="17220" citStr="Ravichandran et al., 2005" startWordPosition="2743" endWordPosition="2746">ive fast, efficient inference strategy that overcomes many of the challenges described above and helps accelerate the sampling process significantly. First, we set our translation models within the context of a more generic and widely known family of distributions—mixtures of exponential families. Then we derive a novel proposal distribution for sampling translation candidates and introduce a new sampler for decipherment training that 365 is based on locality sensitive hashing (LSH). Hashing methods such as LSH have been widely used in the past in several scenarios including NLP applications (Ravichandran et al., 2005). Most of these approaches employ LSH within heuristic methods for speeding up nearestneighbor look up and similarity computation techniques. However, we use LSH hashing within a probabilistic framework which is very different from the typical use of LSH. Our work is inspired by some recent work by Ahmed et al. (2012) on speeding up Bayesian inference for unsupervised clustering. We use a similar technique as theirs but a different approximate distribution for the proposal, one that is bettersuited for machine translation models and without some of the additional overhead required for computin</context>
+</contexts>
+<marker>Ravichandran, Pantel, Hovy, 2005</marker>
+<rawString>Deepak Ravichandran, Patrick Pantel, and Eduard Hovy. 2005. Randomized algorithms and nlp: using locality sensitive hash function for high speed noun clustering. In Proceedings of the 43rd Annual Meeting on Association for Computational Linguistics, pages 622–629.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Benjamin Snyder</author>
+<author>Regina Barzilay</author>
+<author>Kevin Knight</author>
+</authors>
+<title>A statistical model for lost language decipherment.</title>
+<date>2010</date>
+<booktitle>In Proceedings of the 48th Annual Meeting of the Association for Computational Linguistics,</booktitle>
+<pages>1048--1057</pages>
+<contexts>
+<context position="3093" citStr="Snyder et al., 2010" startWordPosition="468" endWordPosition="471">Fung and McKeown, 1997; Koehn and Knight, 2000; Haghighi et al., 2008). However, none of these methods attempt to train end-to-end MT models, instead they focus on mining bilingual lexicons from monolingual corpora and often they require parallel seed lexicons as a starting point. Some of them (Haghighi et al., 2008) also rely on additional linguistic knowledge such as orthography, etc. to mine word translation pairs across related languages (e.g., Spanish/English). Unsupervised training methods have also been proposed in the past for related problems in decipherment (Knight and Yamada, 1999; Snyder et al., 2010; Ravi and Knight, 2011a) where the goal is to decode unknown scripts or ciphers. The body of work that is more closely related to ours include that of Ravi and Knight (2011b) who introduced a decipherment approach for training translation models using only monolingual cor362 Proceedings of the 51st Annual Meeting of the Association for Computational Linguistics, pages 362–371, Sofia, Bulgaria, August 4-9 2013. c�2013 Association for Computational Linguistics pora. Their best performing method uses an EM algorithm to train a word translation model and they show results on a Spanish/English tas</context>
+</contexts>
+<marker>Snyder, Barzilay, Knight, 2010</marker>
+<rawString>Benjamin Snyder, Regina Barzilay, and Kevin Knight. 2010. A statistical model for lost language decipherment. In Proceedings of the 48th Annual Meeting of the Association for Computational Linguistics, pages 1048–1057.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J¨org Tiedemann</author>
+</authors>
+<title>News from opus - a collection of multilingual parallel corpora with tools and interfaces.</title>
+<date>2009</date>
+<booktitle>Recent Advances in Natural Language Processing,</booktitle>
+<volume>volume V,</volume>
+<pages>237--248</pages>
+<editor>In N. Nicolov, K. Bontcheva, G. Angelova, and R. Mitkov, editors,</editor>
+<contexts>
+<context position="26676" citStr="Tiedemann, 2009" startWordPosition="4295" endWordPosition="4296"> As with the reordering operation, we sample from a distribution consisting of the original and the deleted versions. 4. Decoding the foreign sentence: Finally, once the training is done (i.e., after all sampling iterations) we choose the final sample as our target translation output for the source text. 6 Experiments and Results We test our method on two different corpora. To evaluate translation quality, we use BLEU score (Papineni et al., 2002), a standard evaluation measure used in machine translation. First, we present MT results on non-parallel Spanish/English data from the OPUS corpus (Tiedemann, 2009) which was used by Ravi and Knight (2011b) and Nuhn et al. (2012). We show that our method achieves the best performance (BLEU scores) on this task while being significantly faster than both the previous approaches. We then apply our method to a much larger non-parallel French/Spanish corpus constructed from the EMEA corpus (Tiedemann, 2009). Here the vocabulary sizes are much larger and we show how our new Bayesian decipherment method scales well to this task inspite of using complex translation models. We also report the first BLEU results on such a large-scale MT task under truly non-parall</context>
+<context position="28038" citStr="Tiedemann, 2009" startWordPosition="4516" endWordPosition="4517">ity translations for common words (words appearing in both source/target vocabularies) and random translations for other words. 6.1 MT Task and Data OPUS movie subtitle corpus (Tiedemann, 2009): This is a large open source collection of parallel corpora available for multiple language pairs. We use the same non-parallel Spanish/English corpus used in previous works (Ravi and Knight, 2011b; Nuhn et al., 2012). The details of the corpus are listed in Table 1. We use the entire Spanish source text for decipherment training and evaluate the final English output to report BLEU scores. EMEA corpus (Tiedemann, 2009): This is a parallel corpus made out of PDF documents (articles from the medical domain) from the European Medicines Agency. We reserve the first 1k sentences in French as our source text (also used in decipherment training). To construct a nonparallel corpus, we split the remaining 1.1M lines as follows: first 550k sentences in French, last 550k sentences in Spanish. The latter is used to construct a target language model used for decipherment training. The corpus statistics are shown in Table 1. 6.2 Results OPUS: We compare the MT results (BLEU scores) from different systems on the OPUS corp</context>
+</contexts>
+<marker>Tiedemann, 2009</marker>
+<rawString>J¨org Tiedemann. 2009. News from opus - a collection of multilingual parallel corpora with tools and interfaces. In N. Nicolov, K. Bontcheva, G. Angelova, and R. Mitkov, editors, Recent Advances in Natural Language Processing, volume V, pages 237–248.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

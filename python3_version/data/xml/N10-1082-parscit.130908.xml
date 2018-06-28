@@ -1,0 +1,1345 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.000000">
+<title confidence="0.394581">
+Type-Based MCMC
+</title>
+<author confidence="0.74704">
+Percy Liang
+</author>
+<affiliation confidence="0.414748">
+UC Berkeley
+</affiliation>
+<email confidence="0.994762">
+pliang@cs.berkeley.edu
+</email>
+<note confidence="0.7366825">
+Michael I. Jordan
+UC Berkeley
+</note>
+<email confidence="0.994242">
+jordan@cs.berkeley.edu
+</email>
+<author confidence="0.756598">
+Dan Klein
+</author>
+<affiliation confidence="0.418461">
+UC Berkeley
+</affiliation>
+<email confidence="0.996279">
+klein@cs.berkeley.edu
+</email>
+<sectionHeader confidence="0.998591" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.998088461538462">
+Most existing algorithms for learning latent-
+variable models—such as EM and existing
+Gibbs samplers—are token-based, meaning
+that they update the variables associated with
+one sentence at a time. The incremental na-
+ture of these methods makes them suscepti-
+ble to local optima/slow mixing. In this paper,
+we introduce a type-based sampler, which up-
+dates a block of variables, identified by a type,
+which spans multiple sentences. We show im-
+provements on part-of-speech induction, word
+segmentation, and learning tree-substitution
+grammars.
+</bodyText>
+<sectionHeader confidence="0.999517" genericHeader="introduction">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.9983245">
+A long-standing challenge in NLP is the unsu-
+pervised induction of linguistic structures, for ex-
+ample, grammars from raw sentences or lexicons
+from phoneme sequences. A fundamental property
+of these unsupervised learning problems is multi-
+modality. In grammar induction, for example, we
+could analyze subject-verb-object sequences as ei-
+ther ((subject verb) object) (mode 1) or (subject
+(verb object)) (mode 2).
+Multimodality causes problems for token-based
+procedures that update variables for one example at
+a time. In EM, for example, if the parameters al-
+ready assign high probability to the ((subject verb)
+object) analysis, re-analyzing the sentences in E-step
+only reinforces the analysis, resulting in EM getting
+stuck in a local optimum. In (collapsed) Gibbs sam-
+pling, if all sentences are already analyzed as ((sub-
+ject verb) object), sampling a sentence conditioned
+</bodyText>
+<figure confidence="0.992285">
+(a) token-based (b) sentence-based (c) type-based
+</figure>
+<figureCaption confidence="0.9868058">
+Figure 1: Consider a dataset of 3 sentences, each of
+length 5. Each variable is labeled with a type (1 or 2). The
+unshaded variables are the ones that are updated jointly
+by a sampler. The token-based sampler updates the vari-
+able for one token at a time (a). The sentence-based sam-
+pler updates all variables in a sentence, thus dealing with
+intra-sentential dependencies (b). The type-based sam-
+pler updates all variables of a particular type (1 in this ex-
+ample), thus dealing with dependencies due to common
+parameters (c).
+</figureCaption>
+<bodyText confidence="0.9994375">
+on all others will most likely not change its analysis,
+resulting in slow mixing.
+To combat the problems associated with token-
+based algorithms, we propose a new sampling algo-
+rithm that operates on types. Our sampler would, for
+example, be able to change all occurrences of ((sub-
+ject verb) object) to (subject (verb object)) in one
+step. These type-based operations are reminiscent of
+the type-based grammar operations of early chunk-
+merge systems (Wolff, 1988; Stolcke and Omohun-
+dro, 1994), but we work within a sampling frame-
+work for increased robustness.
+In NLP, perhaps the the most simple and popu-
+lar sampler is the token-based Gibbs sampler,1 used
+in Goldwater et al. (2006), Goldwater and Griffiths
+(2007), and many others. By sampling only one
+</bodyText>
+<footnote confidence="0.9923605">
+1In NLP, this is sometimes referred to as simply the col-
+lapsed Gibbs sampler.
+</footnote>
+<equation confidence="0.984129111111111">
+2 1 2 2 1
+2 2 2 1 2
+1 2 1 2 2
+2 1 2 2 1
+2 2 2 1 2
+1 2 1 2 2
+2 1 2 2 1
+2 2 2 1 2
+1 2 1 2 2
+</equation>
+<page confidence="0.983772">
+573
+</page>
+<note confidence="0.752402">
+Human Language Technologies: The 2010 Annual Conference of the North American Chapter of the ACL, pages 573–581,
+Los Angeles, California, June 2010. c�2010 Association for Computational Linguistics
+</note>
+<figure confidence="0.994583764705882">
+200 400 600 8001000 2 4 6 8 10
+M iteration
+(a) bimodal posterior (b) sampling run
+log g(m)
+-1060.3
+-1411.4
+-358.0
+-709.1
+-6.8
+m
+1000
+800
+600
+400
+200
+Token
+Type
+</figure>
+<bodyText confidence="0.999002727272727">
+variable at a time, this sampler is prone to slow mix-
+ing due to the strong coupling between variables.
+A general remedy is to sample blocks of coupled
+variables. For example, the sentence-based sampler
+samples all the variables associated with a sentence
+at once (e.g., the entire tag sequence). However, this
+blocking does not deal with the strong type-based
+coupling (e.g., all instances of a word should be
+tagged similarly). The type-based sampler we will
+present is designed exactly to tackle this coupling,
+which we argue is stronger and more important to
+deal with in unsupervised learning. Figure 1 depicts
+the updates made by each of the three samplers.
+We tested our sampler on three models: a
+Bayesian HMM for part-of-speech induction (Gold-
+water and Griffiths, 2007), a nonparametric
+Bayesian model for word segmentation (Goldwater
+et al., 2006), and a nonparametric Bayesian model of
+tree substitution grammars (Cohn et al., 2009; Post
+and Gildea, 2009). Empirically, we find that type-
+based sampling improves performance and is less
+sensitive to initialization (Section 5).
+</bodyText>
+<sectionHeader confidence="0.857725" genericHeader="method">
+2 Basic Idea via a Motivating Example
+</sectionHeader>
+<bodyText confidence="0.997506117647059">
+The key technical problem we solve in this paper is
+finding a block of variables which are both highly
+coupled and yet tractable to sample jointly. This
+section illustrates the main idea behind type-based
+sampling on a small word segmentation example.
+Suppose our dataset x consists of n occurrences
+of the sequence a b. Our goal is infer z =
+(z1, ... , zn), where zi = 0 if the sequence is one
+word ab, and zi = 1 if the sequence is two, a
+and b. We can model this situation with a simple
+generative model: for each i = 1, ... , n, gener-
+ate one or two words with equal probability. Each
+word is drawn independently based on probabilities
+θ = (θa, θb, θab) which we endow with a uniform
+prior θ — Dirichlet(1,1,1).
+We marginalize out θ to get the following standard
+expression (Goldwater et al., 2009):
+</bodyText>
+<equation confidence="0.9944765">
+1(m)1(m)1(n_m) def
+p(z  |x) a
+=
+3(n+m)
+</equation>
+<bodyText confidence="0.9893155">
+where m = Eni=1 zi is the number of two-word se-
+quences and a(k) = a(a + 1)···(a + k − 1) is the
+</bodyText>
+<figureCaption confidence="0.90926925">
+Figure 2: (a) The posterior (1) is sharply bimodal (note
+the log-scale). (b) A run of the token-based and type-
+based samplers. We initialize both samplers with m = n
+(n = 1000). The type-based sampler mixes instantly
+(in fact, it makes independent draws from the posterior)
+whereas the token-based sampler requires five passes
+through the data before finding the high probability re-
+gion m = 0.
+</figureCaption>
+<bodyText confidence="0.996785904761905">
+ascending factorial.2 Figure 2(a) depicts the result-
+ing bimodal posterior.
+A token-based sampler chooses one zi to update
+according to the posterior p(zi  |z_i, x). To illus-
+trate the mixing problem, consider the case where
+m = n, i.e., all sequences are analyzed as two
+words. From (1), we can verify that p(zi = 0 |
+z_i,x) = O(1n). When n = 1000, this means that
+there is only a 0.002 probability of setting zi = 0,
+a very unlikely but necessary first step to take to es-
+cape this local optimum. Indeed, Figure 2(b) shows
+how the token-based sampler requires five passes
+over the data to finally escape.
+Type-based sampling completely eradicates the
+local optimum problem in this example. Let us take
+a closer look at (1). Note that p(z  |x) only depends
+on a single integer m, which only takes one of n + 1
+values, not on the particular z. This shows that the
+zis are exchangeable. There are (m) possible val-
+ues of z satisfying m = �i zi, each with the same
+probability g(m). Summing, we get:
+</bodyText>
+<equation confidence="0.986706666666667">
+� p(x, z) = C m/ g(m). (2)
+p(m  |x) a
+z:m=Ei zi
+</equation>
+<bodyText confidence="0.986228">
+A sampling strategy falls out naturally: First, sample
+the number m via (2). Conditioned on m, choose
+</bodyText>
+<footnote confidence="0.994376">
+2The ascending factorial function arises from marginaliz-
+ing Dirichlet distributions and is responsible the rich-gets-richer
+phenomenon: the larger n is, more we gain by increasing it.
+</footnote>
+<equation confidence="0.79022">
+g(m), (1)
+</equation>
+<page confidence="0.990503">
+574
+</page>
+<bodyText confidence="0.999902846153846">
+the particular z uniformly out of the (m) possibili-
+ties. Figure 2(b) shows the effectiveness of this type-
+based sampler.
+This simple example exposes the fundamental
+challenge of multimodality in unsupervised learn-
+ing. Both m = 0 and m = n are modes due to the
+rich-gets-richer property which arises by virtue of
+all n examples sharing the same parameters 0. This
+sharing is a double-edged sword: It provides us with
+clustering structure but also makes inference hard.
+Even though m = n is much worse (by a factor ex-
+ponential in n) than m = 0, a naive algorithm can
+easily have trouble escaping m = n.
+</bodyText>
+<sectionHeader confidence="0.998182" genericHeader="method">
+3 Setup
+</sectionHeader>
+<bodyText confidence="0.999988785714286">
+We will now present the type-based sampler in full
+generality. Our sampler is applicable to any model
+which is built out of local multinomial choices,
+where each multinomial has a Dirichlet process prior
+(a Dirichlet prior if the number of choices is finite).
+This includes most probabilistic models in NLP (ex-
+cluding ones built from log-linear features).
+As we develop the sampler, we will pro-
+vide concrete examples for the Bayesian hidden
+Markov model (HMM), the Dirichlet process uni-
+gram segmentation model (USM) (Goldwater et al.,
+2006), and the probabilistic tree-substitution gram-
+mar (PTSG) (Cohn et al., 2009; Post and Gildea,
+2009).
+</bodyText>
+<subsectionHeader confidence="0.999902">
+3.1 Model parameters
+</subsectionHeader>
+<bodyText confidence="0.99746575">
+A model is specified by a collection of multino-
+mial parameters 0 = {Br}rER, where R is an in-
+dex set. Each vector Br specifies a distribution over
+outcomes: outcome o has probability Bro.
+</bodyText>
+<listItem confidence="0.931907636363636">
+• HMM: Let K is the number of states. The set
+R = {(q, k) : q E {T, E}, k = 1, ... , K}
+indexes the K transition distributions {B(T�k)}
+(each over outcomes {1, ... , K}) and K emis-
+sion distributions {B(E�k)} (each over the set of
+words).
+• USM: R = {0}, and B0 is a distribution over (an
+infinite number of) words.
+• PTSG: R is the set of grammar symbols, and
+each Br is a distribution over labeled tree frag-
+ments with root label r.
+</listItem>
+<equation confidence="0.4814464">
+R index set for parameters
+0 = {Br}rER multinomial parameters
+µ = {µr}rER base distributions (fixed)
+S set of sites
+b = {bs}sES binary variables (to be sampled)
+</equation>
+<bodyText confidence="0.432559571428571">
+z latent structure (set of choices)
+z−s choices not depending on site s
+zs:b choices after setting bs = b
+Ozs:b zs:b\z−s: new choices from bs = b
+SCS sites selected for sampling
+m # sites in S assigned bs = 1
+n = {nro} counts (sufficient statistics of z)
+</bodyText>
+<tableCaption confidence="0.6857668">
+Table 1: Notation used in this paper. Note that there is a
+one-to-one mapping between z and (b, x). The informa-
+tion relevant for evaluating the likelihood is n. We use
+the following parallel notation: n−s = n(z−s), ns:b =
+n(zs:b), Ons = n(Ozs).
+</tableCaption>
+<subsectionHeader confidence="0.999565">
+3.2 Choice representation of latent structure z
+</subsectionHeader>
+<bodyText confidence="0.9987705">
+We represent the latent structure z as a set of local
+choices:3
+</bodyText>
+<listItem confidence="0.815373571428571">
+• HMM: z contains elements of the form
+(T, i, a, b), denoting a transition from state
+a at position i to state b at position i + 1; and
+(E, i, a, w), denoting an emission of word w
+from state a at position i.
+• USM: z contains elements of the form (i, w), de-
+noting the generation of word w at character po-
+</listItem>
+<bodyText confidence="0.838327">
+sition i extending to position i + |w |- 1.
+</bodyText>
+<listItem confidence="0.9964365">
+• PTSG: z contains elements of the form (x, t), de-
+noting the generation of tree fragment t rooted at
+</listItem>
+<equation confidence="0.3590305">
+node x.
+The choices z are connected to the parameters 0
+</equation>
+<bodyText confidence="0.96929">
+as follows: p(z  |0) = MzEz Bz.r�z.o. Each choice
+z E z is identified with some z.r E R and out-
+come z.o. Intuitively, choice z was made by drawing
+drawing z.o from the multinomial distribution Bz.r.
+</bodyText>
+<subsectionHeader confidence="0.996786">
+3.3 Prior
+</subsectionHeader>
+<bodyText confidence="0.89080375">
+We place a Dirichlet process prior on Br (Dirichlet
+prior for finite outcome spaces): Br - DP(αr, µr),
+where αr is a concentration parameter and µr is a
+fixed base distribution.
+</bodyText>
+<footnote confidence="0.90873">
+3We assume that z contains both a latent part and the ob-
+served input x, i.e., x is a deterministic function of z.
+</footnote>
+<page confidence="0.996657">
+575
+</page>
+<bodyText confidence="0.999985857142857">
+Let nro(z) = |{z ∈ z : z.r = r, z.o = o} |be the
+number of draws from θr resulting in outcome o, and
+nr· = Po nro be the number of times θr was drawn
+from. Let n(z) = {nro(z)} denote the vector of
+sufficient statistics associated with choices z. When
+it is clear from context, we simply write n for n(z).
+Using these sufficient statistics, we can write p(z |
+</bodyText>
+<equation confidence="0.8737215">
+0) = Qr,o θnro(z)
+ro .
+</equation>
+<bodyText confidence="0.999853833333333">
+We now marginalize out 0 using Dirichlet-
+multinomial conjugacy, producing the following ex-
+pression for the likelihood:
+where a(k) = a(a+1) · · · (a+k−1) is the ascending
+factorial. (3) is the distribution that we will use for
+sampling.
+</bodyText>
+<sectionHeader confidence="0.995911" genericHeader="method">
+4 Type-Based Sampling
+</sectionHeader>
+<bodyText confidence="0.999862">
+Having described the setup of the model, we now
+turn to posterior inference of p(z  |x).
+</bodyText>
+<subsectionHeader confidence="0.998459">
+4.1 Binary Representation
+</subsectionHeader>
+<bodyText confidence="0.999979">
+We first define a new representation of the latent
+structure based on binary variables b so that there is
+a bijection between z and (b, x); z was used to de-
+fine the model, b will be used for inference. We will
+use b to exploit the ideas from Section 2. Specifi-
+cally, let b = {bs}s∈S be a collection of binary vari-
+ables indexed by a set of sites S.
+</bodyText>
+<listItem confidence="0.992208545454545">
+• HMM: If the HMM has K = 2 states, S is the set
+of positions in the sequence. For each s ∈ S, bs
+is the hidden state at s. The extension to general
+K is considered at the end of Section 4.4.
+• USM: S is the set of non-final positions in the
+sequence. For each s ∈ S, bs denotes whether
+a word boundary exists between positions s and
+s + 1.
+• PTSG: S is the set of internal nodes in the parse
+tree. For s ∈ S, bs denotes whether a tree frag-
+ment is rooted at node s.
+</listItem>
+<bodyText confidence="0.9816925">
+For each site s ∈ S, let zs:0 and zs:1 denote the
+choices associated with the structures obtained by
+setting the binary variable bs = 0 and bs = 1, re-
+spectively. Define z−s def = zs:0 ∩ zs:1 to be the set
+of choices that do not depend on the value of bs, and
+n−s def = n(z−s) be the corresponding counts.
+</bodyText>
+<listItem confidence="0.999250111111111">
+• HMM: z−s includes all but the transitions into
+and out of the state at s plus the emission at s.
+• USM: z−s includes all except the word ending at
+s and the one starting at s + 1 if there is a bound-
+ary (bs = 1); except the word covering s if no
+boundary exists (bs = 0).
+• PTSG: z−s includes all except the tree fragment
+rooted at node s and the one with leaf s if bs = 1;
+except the single fragment containing s if bs = 0.
+</listItem>
+<subsectionHeader confidence="0.913371">
+4.2 Sampling One Site
+</subsectionHeader>
+<bodyText confidence="0.999906769230769">
+A token-based sampler considers one site s at a time.
+Specifically, we evaluate the likelihoods of zs:0 and
+zs:1 according to (3) and sample bs with probability
+proportional to the likelihoods. Intuitively, this can
+be accomplished by removing choices that depend
+on bs (resulting in z−s), evaluating the likelihood re-
+sulting from setting bs to 0 or 1, and then adding the
+appropriate choices back in.
+More formally, let Ozs:b def = zs:b\z−s be the new
+choices that would be added if we set bs = b ∈
+{0, 1}, and let Ons:b def = n(Ozs:b) be the corre-
+sponding counts. With this notation, we can write
+the posterior as follows:
+</bodyText>
+<equation confidence="0.982493142857143">
+p(bs = b  |b\bs) ∝ (4)
+Q o (αroµro + n−s
+ro )(Δns:b
+ro )
+r· ) .
+(αr + n−s
+r· )(Δns:b
+</equation>
+<bodyText confidence="0.9997312">
+The form of the conditional (4) follows from the
+joint (3) via two properties: additivity of counts
+(ns:b = n−s + Ons:b) and a simple property of as-
+cending factorials (a(k+δ) = a(k)(a + k)(δ)).
+In practice, most of the entries of Ons:b are zero.
+For the HMM, ns:b
+ro would be nonzero only for
+the transitions into the new state (b) at position s
+(zs−1 → b), transitions out of that state (b → zs+1),
+and emissions from that state (b → xs).
+</bodyText>
+<subsectionHeader confidence="0.999784">
+4.3 Sampling Multiple Sites
+</subsectionHeader>
+<bodyText confidence="0.9406402">
+We would like to sample multiple sites jointly as in
+Section 2, but we cannot choose any arbitrary subset
+S ⊂ S, as the likelihood will in general depend on
+def
+the exact assignment of bS = {bs}s∈S, of which
+</bodyText>
+<equation confidence="0.6882362">
+Y Qo (αroµro)(nro(z))
+p(z) = , (3)
+r∈R αr(nr·(z))
+Y
+r∈R
+</equation>
+<page confidence="0.760273">
+576
+</page>
+<figure confidence="0.999825866666667">
+(a) USM
+1 1 2 2 1 1 2 2
+a b a b c b b e
+(b) HMM
+a
+a a
+b c
+d e
+d
+b c
+a b
+e
+b
+c
+a b c a a b c a b c b
+</figure>
+<bodyText confidence="0.9847031">
+shows that types depend on z. For example, s, s&apos; ∈
+S conflict when s&apos; = s + 1 in the HMM or when
+s and s&apos; are boundaries of one segment (USM) or
+one tree fragment (PTSG). Therefore, one additional
+concept is necessary: We say two sites s and s&apos; con-
+flict if there is some choice that depends on both bs
+and bs0; formally, (z\z−s) ∩ (z\z−s0) =6 ∅ .
+Our key mathematical result is as follows:
+Proposition 1 For any set S ⊂ S of non-conflicting
+sites with the same type,
+</bodyText>
+<figure confidence="0.803018">
+(c) PTSG
+</figure>
+<figureCaption confidence="0.774602">
+Figure 3: The type-based sampler jointly samples all vari-
+ables at a set of sites S (in green boxes). Sites in S are
+chosen based on types (denoted in red). (a) HMM: two
+sites have the same type if they have the same previous
+and next states and emit the same word; they conflict un-
+less separated by at least one position. (b) USM: two sites
+have the same type if they are both of the form ab|c or
+abc; note that occurrences of the same letters with other
+segmentations do not match the type. (c) PTSG: analo-
+gous to the USM, only for tree rather than sequences.
+</figureCaption>
+<bodyText confidence="0.989655">
+there are an exponential number. To exploit the ex-
+changeability property in Section 2, we need to find
+sites which look “the same” from the model’s point
+of view, that is, the likelihood only depends on bS
+def
+via m = EsES bs.
+To do this, we need to define two notions, type and
+conflict. We say sites s and s&apos; have the same type if
+the counts added by setting either bs or bs0 are the
+same, that is, Ans:b = Ans0:b for b ∈ {0, 1}. This
+motivates the following definition of the type of site
+s with respect to z:
+</bodyText>
+<equation confidence="0.950368">
+t(z, s) def = (Ans:O, Ans:1), (5)
+</equation>
+<bodyText confidence="0.999977272727273">
+We say that s and s&apos; have the same type if t(z, s) =
+t(z, s&apos;). Note that the actual choices added (Azs:b
+and Azs0:b) are in general different as s and s&apos; cor-
+respond to different parts of the latent structure, but
+the model only depends on counts and is indifferent
+to this. Figure 3 shows examples of same-type sites
+for our three models.
+However, even if all sites in S have the same
+type, we still cannot sample bS jointly, since chang-
+ing one bs might change the type of another site s&apos;;
+indeed, this dependence is reflected in (5), which
+</bodyText>
+<equation confidence="0.9849486">
+p(bS  |b\bS) ∝ g(m) (6)
+C|S|g(m), (7)
+m)
+for some easily computable g(m), where m =
+EsES bs.
+</equation>
+<bodyText confidence="0.964179136363636">
+We will derive g(m) shortly, but first note from
+(6) that the likelihood for a particular setting of bS
+depends on bS only via m as desired. (7) sums
+over all (S|) settings of bS with m = EsES bs.
+m
+The algorithmic consequences of this result is that
+to sample bS, we can first compute (7) for each
+m ∈ {0, ... , |S|}, sample m according to the nor-
+malized distribution, and then choose the actual bS
+uniformly subject to m.
+Let us now derive g(m) by generalizing (4).
+Imagine removing all sites S and their dependent
+choices and adding in choices corresponding to
+some assignment bS. Since all sites in S are non-
+conflicting and of the same type, the count contribu-
+tion Ans:b is the same for every s ∈ S (i.e., sites
+in S are exchangeable). Therefore, the likelihood
+of the new assignment bS depends only on the new
+counts:
+AnS:m def = mAns:1 + (|S |− m)Ans:O. (8)
+Using these new counts in place of the ones in (4),
+we get the following expression:
+</bodyText>
+<equation confidence="0.9221398">
+H llo (αroµro + nro(z−S))
+g(m) = (Onso
+rEIZ m)
+S (OnS.m) . (9)
+αr + nr· (z )
+</equation>
+<subsectionHeader confidence="0.97596">
+4.4 Full Algorithm
+</subsectionHeader>
+<bodyText confidence="0.999835">
+Thus far, we have shown how to sample bS given
+a set S ⊂ S of non-conflicting sites with the same
+type. To complete the description of the type-based
+</bodyText>
+<equation confidence="0.89241">
+p(m  |b\bS) ∝
+</equation>
+<page confidence="0.682959">
+577
+</page>
+<figure confidence="0.304266">
+Type-Based Sampler
+for each iteration t = 1, ... , T:
+for each pivot site so E S:
+S �-- TB(z, so) (S is the type block centered at so)
+decrement n and remove from z based on bs
+sample m according to (7)
+sample M C S with |M |= m uniformly at random
+set b8 = R[s E M] for each s E S
+increment n and add to z accordingly
+</figure>
+<figureCaption confidence="0.77144625">
+Figure 4: Pseudocode for the general type-based sampler.
+We operate in the binary variable representation b of z.
+Each step, we jointly sample |S |variables (of the same
+type).
+</figureCaption>
+<bodyText confidence="0.999887027777778">
+sampler, we need to specify how to choose S. Our
+general strategy is to first choose a pivot site s0 E S
+uniformly at random and then set S = TB(z, s0) for
+some function TB. Call S the type block centered at
+s0. The following two criteria on TB are sufficient
+for a valid sampler: (A) s0 E S, and (B) the type
+blocks are stable, which means that if we change bS
+to any b0S (resulting in a new z0), the type block cen-
+tered at s0 with respect to z0 does not change (that
+is, TB(z0, s0) = S). (A) ensures ergodicity; (B),
+reversibility.
+Now we define TB as follows: First set S = {s0}.
+Next, loop through all sites s E S with the same type
+as s0 in some fixed order, adding s to S if it does
+not conflict with any sites already in S. Figure 4
+provides the pseudocode for the full algorithm.
+Formally, this sampler cycles over |S |transition
+kernels, one for each pivot site. Each kernel (in-
+dexed by s0 E S) defines a blocked Gibbs move,
+i.e. sampling from p(bTB(Z,so)  |··· ).
+Efficient Implementation There are two oper-
+ations we must perform efficiently: (A) looping
+through sites with the same type as the pivot site s0,
+and (B) checking whether such a site s conflicts with
+any site in S. We can perform (B) in O(1) time by
+checking if any element of Ozs:b3 has already been
+removed; if so, there is a conflict and we skip s. To
+do (A) efficiently, we maintain a hash table mapping
+type t to a doubly-linked list of sites with type t.
+There is an O(1) cost for maintaining this data struc-
+ture: When we add or remove a site s, we just need
+to add or remove neighboring sites s0 from their re-
+spective linked lists, since their types depend on bs.
+For example, in the HMM, when we remove site s,
+we also remove sites s−1 and s+1.
+For the USM, we use a simpler solution: main-
+tain a hash table mapping each word w to a list of
+positions where w occurs. Suppose site (position) s
+straddles words a and b. Then, to perform (A), we
+retrieve the list of positions where a, b, and ab occur,
+intersecting the a and b lists to obtain a list of posi-
+tions where a b occurs. While this intersection is
+often much smaller than the pre-intersected lists, we
+found in practice that the smaller amount of book-
+keeping balanced out the extra time spent intersect-
+ing. We used a similar strategy for the PTSG, which
+significantly reduces the amount of bookkeeping.
+Skip Approximation Large type blocks mean
+larger moves. However, such a block S is also sam-
+pled more frequently—once for every choice of a
+pivot site s0 E S. However, we found that empir-
+ically, bS changes very infrequently. To eliminate
+this apparent waste, we use the following approxi-
+mation of our sampler: do not consider s0 E S as
+a pivot site if s0 belongs to some block which was
+already sampled in the current iteration. This way,
+each site is considered roughly once per iteration.4
+Sampling Non-Binary Representations We can
+sample in models without a natural binary represen-
+tation (e.g., HMMs with with more than two states)
+by considering random binary slices. Specifically,
+suppose bs E {1, ... , K} for each site s E S.
+We modify Figure 4 as follows: After choosing a
+pivot site s0 E S, let k = bso and choose k0 uni-
+formly from {1, ... , K}. Only include sites in one
+of these two states by re-defining the type block to
+be S = {s E TB(z, s0) : bs E {k, k0}}, and sam-
+ple bS restricted to these two states by drawing from
+p(bS  |bS E {k, k0}|S|, · · · ). By choosing a random
+k0 each time, we allow b to reach any point in the
+space, thus achieving ergodicity just by using these
+binary restrictions.
+</bodyText>
+<sectionHeader confidence="0.999276" genericHeader="evaluation">
+5 Experiments
+</sectionHeader>
+<bodyText confidence="0.9989515">
+We now compare our proposed type-based sampler
+to various alternatives, evaluating on marginal like-
+</bodyText>
+<footnote confidence="0.855862666666667">
+4A site could be sampled more than once if it belonged to
+more than one type block during the iteration (recall that types
+depend on z and thus could change during sampling).
+</footnote>
+<page confidence="0.983477">
+578
+</page>
+<listItem confidence="0.911934">
+lihood (3) and accuracy for our three models:
+• HMM: We learned a K = 45 state HMM on
+the Wall Street Journal (WSJ) portion of the Penn
+</listItem>
+<bodyText confidence="0.841568375">
+Treebank (49208 sentences, 45 tags) for part-of-
+speech induction. We fixed αr to 0.1 and µr to
+uniform for all r.
+For accuracy, we used the standard metric based
+on greedy mapping, where each state is mapped
+to the POS tag that maximizes the number of cor-
+rect matches (Haghighi and Klein, 2006). We did
+not use a tagging dictionary.
+</bodyText>
+<listItem confidence="0.703697222222222">
+• USM: We learned a USM model on the
+Bernstein-Ratner corpus from the CHILDES
+database used in Goldwater et al. (2006) (9790
+sentences) for word segmentation. We fixed α0 to
+0.1. The base distribution µ0 penalizes the length
+of words (see Goldwater et al. (2009) for details).
+For accuracy, we used word token F1.
+• PTSG: We learned a PTSG model on sections 2–
+21 of the WSJ treebank.5 For accuracy, we used
+</listItem>
+<bodyText confidence="0.763669666666667">
+EVALB parsing F1 on section 22.6 Note this is a
+supervised task with latent-variables, whereas the
+other two are purely unsupervised.
+</bodyText>
+<subsectionHeader confidence="0.997242">
+5.1 Basic Comparison
+</subsectionHeader>
+<bodyText confidence="0.998953272727273">
+Figure 5(a)–(c) compares the likelihood and accu-
+racy (we use the term accuracy loosely to also in-
+clude F1). The initial observation is that the type-
+based sampler (TYPE) outperforms the token-based
+sampler (TOKEN) across all three models on both
+metrics.
+We further evaluated the PTSG on parsing. Our
+standard treebank PCFG estimated using maximum
+likelihood obtained 79% F1. TOKEN obtained an F1
+of 82.2%, and TYPE obtained a comparable F1 of
+83.2%. Running the PTSG for longer continued to
+</bodyText>
+<footnote confidence="0.975696666666667">
+5Following Petrov et al. (2006), we performed an initial pre-
+processing step on the trees involving Markovization, binariza-
+tion, and collapsing of unary chains; words occurring once are
+replaced with one of 50 “unknown word” tokens, using base
+distributions {µr} that penalize the size of trees, and sampling
+the hyperparameters (see Cohn et al. (2009) for details).
+6To evaluate, we created a grammar where the rule proba-
+bilities are the mean values under the PTSG distribution: this
+involves taking a weighted combination (based on the concen-
+tration parameters) of the rule counts from the PTSG samples
+and the PCFG-derived base distribution. We used the decoder
+of DeNero et al. (2009) to parse.
+</footnote>
+<bodyText confidence="0.99992658974359">
+improve the likelihood but actually hurt parsing ac-
+curacy, suggesting that the PTSG model is overfit-
+ting.
+To better understand the gains from TYPE
+over TOKEN, we consider three other alterna-
+tive samplers. First, annealing (TOKENanneal) is
+a commonly-used technique to improve mixing,
+where (3) is raised to some inverse temperature.7
+In Figure 5(a)–(c), we see that unlike TYPE,
+TOKENanneal does not improve over TOKEN uni-
+formly: it hurts for the HMM, improves slightly for
+the USM, and makes no difference for the PTSG. Al-
+though annealing does increase mobility of the sam-
+pler, this mobility is undirected, whereas type-based
+sampling increases mobility in purely model-driven
+directions.
+Unlike past work that operated on types (Wolff,
+1988; Brown et al., 1992; Stolcke and Omohun-
+dro, 1994), type-based sampling makes stochastic
+choices, and moreover, these choices are reversible.
+Is this stochasticity important? To answer this, we
+consider a variant of TYPE, TYPEgreedy: instead
+of sampling from (7), TYPEgreedy considers a type
+block S and sets bs to 0 for all s E S if p(bS =
+(0, ... , 0)  |··· ) &gt; p(bS = (1, ... ,1)  |··· ); else
+it sets bs to 1 for all s E S. From Figure 5(a)–(c),
+we see that greediness is disastrous for the HMM,
+hurts a little for USM, and makes no difference on
+the PTSG. These results show that stochasticity can
+indeed be important.
+We consider another block sampler, SENTENCE,
+which uses dynamic programming to sample all
+variables in a sentence (using Metropolis-Hastings
+to correct for intra-sentential type-level coupling).
+For USM, we see that SENTENCE performs worse
+than TYPE and is comparable to TOKEN, suggesting
+that type-based dependencies are stronger and more
+important to deal with than intra-sentential depen-
+dencies.
+</bodyText>
+<subsectionHeader confidence="0.960936">
+5.2 Initialization
+</subsectionHeader>
+<bodyText confidence="0.99999025">
+We initialized all samplers as follows: For the USM
+and PTSG, for each site s, we place a boundary (set
+bs = 1) with probability q. For the HMM, we set bs
+to state 1 with probability q and a random state with
+</bodyText>
+<footnote confidence="0.792876666666667">
+7We started with a temperature of 10 and gradually de-
+creased it to 1 during the first half of the run, and kept it at 1
+thereafter.
+</footnote>
+<page confidence="0.992548">
+579
+</page>
+<figure confidence="0.999903471264368">
+2 4 6 8
+time (min.)
+3 6 9 12
+time (hr.)
+3 6 9 12
+time (hr.)
+3 6 9 12
+time (hr.)
+log-likelihood
+log-likelihood
+F1
+0.6
+0.5
+0.4
+0.2
+0.1
+2 4 6 8
+time (min.)
+-6.7e6
+-7.9e6
+-9.1e6
+-0.9e7
+-1.1e7
+accuracy
+0.6
+0.5
+0.4
+0.2
+0.1
+-1.9e5
+-2.4e5
+-2.8e5
+-3.2e5
+-3.7e5
+TOKEN
+TOKENS W
+TYPE_dy
+TYPE
+SENTENCE
+-5.5e6
+log-likelihood
+-5.7e6
+-5.8e6
+-6.0e6
+-6.2e6
+(a) HMM (b) USM (c) PTSG
+0.2 0.4 0.6 0.8 1.0
+77
+0.2 0.4 0.6 0.8 1.0
+77
+0.2 0.4 0.6 0.8 1.0
+77
+0.2 0.4 0.6 0.8 1.0
+77
+0.2 0.4 0.6 0.8 1.0
+77
+log-likelihood
+-5.5e6
+-5.5e6
+-5.6e6
+-5.6e6
+-5.7e6
+log-likelihood
+-6.7e6
+-6.8e6
+-6.9e6
+-7.0e6
+-7.1e6
+log-likelihood
+-1.9e5
+-2.3e5
+-2.7e5
+-3.1e5
+-3.5e5
+F1
+0.6
+0.5
+0.4
+0.3
+0.2
+accuracy
+0.6
+0.5
+0.4
+0.3
+0.2
+(d) HMM (e) USM (f) PTSG
+</figure>
+<figureCaption confidence="0.983683">
+Figure 5: (a)–(c): Log-likelihood and accuracy over time. TYPE performs the best. Relative to TYPE, TYPEgreedy
+tends to hurt performance. TOKEN generally works worse. Relative to TOKEN, TOKENanneal produces mixed results.
+SENTENCE behaves like TOKEN. (d)–(f): Effect of initialization. The metrics were applied to the current sample after
+15 hours for the HMM and PTSG and 10 minutes for the USM. TYPE generally prefers larger η and outperform the
+other samplers.
+</figureCaption>
+<bodyText confidence="0.994430333333333">
+probability 1 − η. Results in Figure 5(a)–(c) were
+obtained by setting η to maximize likelihood.
+Since samplers tend to be sensitive to initializa-
+tion, it is important to explore the effect of initial-
+ization (parametrized by η E [0, 1]). Figure 5(d)–(f)
+shows that TYPE is consistently the best, whereas
+other samplers can underperform TYPE by a large
+margin. Note that TYPE favors η = 1 in general.
+This setting maximizes the number of initial types,
+and thus creates larger type blocks and thus enables
+larger moves. Larger type blocks also mean more
+dependencies that TOKEN is unable to deal with.
+</bodyText>
+<sectionHeader confidence="0.99995" genericHeader="conclusions">
+6 Related Work and Discussion
+</sectionHeader>
+<bodyText confidence="0.999806851851852">
+Block sampling, on which our work is built, is a clas-
+sical idea, but is used restrictively since sampling
+large blocks is computationally expensive. Past
+work for clustering models maintained tractabil-
+ity by using Metropolis-Hastings proposals (Dahl,
+2003) or introducing auxiliary variables (Swendsen
+and Wang, 1987; Liang et al., 2007). In contrast,
+our type-based sampler simply identifies tractable
+blocks based on exchangeability.
+Other methods for learning latent-variable models
+include EM, variational approximations, and uncol-
+lapsed samplers. All of these methods maintain dis-
+tributions over (or settings of) the latent variables of
+the model and update the representation iteratively
+(see Gao and Johnson (2008) for an overview in the
+context of POS induction). However, these methods
+are at the core all token-based, since they only up-
+date variables in a single example at a time.8
+Blocking variables by type—the key idea of
+this paper—is a fundamental departure from token-
+based methods. Though type-based changes have
+also been proposed (Brown et al., 1992; Stolcke and
+Omohundro, 1994), these methods operated greed-
+ily, and in Section 5.1, we saw that being greedy led
+to more brittle results. By working in a sampling
+framework, we were able bring type-based changes
+to fruition.
+</bodyText>
+<footnote confidence="0.99459975">
+8While EM technically updates all distributions over latent
+variables in the E-step, this update is performed conditioned on
+model parameters; it is this coupling (made more explicit in
+collapsed samplers) that makes EM susceptible to local optima.
+</footnote>
+<page confidence="0.996792">
+580
+</page>
+<sectionHeader confidence="0.998323" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.999797542372881">
+P. F. Brown, V. J. D. Pietra, P. V. deSouza, J. C. Lai, and
+R. L. Mercer. 1992. Class-based n-gram models of
+natural language. Computational Linguistics, 18:467–
+479.
+T. Cohn, S. Goldwater, and P. Blunsom. 2009. Inducing
+compact but accurate tree-substitution grammars. In
+North American Association for Computational Lin-
+guistics (NAACL), pages 548–556.
+D. B. Dahl. 2003. An improved merge-split sampler for
+conjugate Dirichlet process mixture models. Techni-
+cal report, Department of Statistics, University of Wis-
+consin.
+J. DeNero, M. Bansal, A. Pauls, and D. Klein. 2009.
+Efficient parsing for transducer grammars. In North
+American Association for Computational Linguistics
+(NAACL), pages 227–235.
+J. Gao and M. Johnson. 2008. A comparison of
+Bayesian estimators for unsupervised hidden Markov
+model POS taggers. In Empirical Methods in Natural
+Language Processing (EMNLP), pages 344–352.
+S. Goldwater and T. Griffiths. 2007. A fully Bayesian
+approach to unsupervised part-of-speech tagging. In
+Association for Computational Linguistics (ACL).
+S. Goldwater, T. Griffiths, and M. Johnson. 2006. Con-
+textual dependencies in unsupervised word segmenta-
+tion. In International Conference on Computational
+Linguistics and Association for Computational Lin-
+guistics (COLING/ACL).
+S. Goldwater, T. Griffiths, and M. Johnson. 2009. A
+Bayesian framework for word segmentation: Explor-
+ing the effects of context. Cognition, 112:21–54.
+A. Haghighi and D. Klein. 2006. Prototype-driven learn-
+ing for sequence models. In North American Associ-
+ation for Computational Linguistics (NAACL), pages
+320–327.
+P. Liang, M. I. Jordan, and B. Taskar. 2007. A
+permutation-augmented sampler for Dirichlet process
+mixture models. In International Conference on Ma-
+chine Learning (ICML).
+S. Petrov, L. Barrett, R. Thibaux, and D. Klein. 2006.
+Learning accurate, compact, and interpretable tree an-
+notation. In International Conference on Computa-
+tional Linguistics and Association for Computational
+Linguistics (COLING/ACL), pages 433–440.
+M. Post and D. Gildea. 2009. Bayesian learning of a
+tree substitution grammar. In Association for Com-
+putational Linguistics and International Joint Confer-
+ence on Natural Language Processing (ACL-IJCNLP).
+A. Stolcke and S. Omohundro. 1994. Inducing prob-
+abilistic grammars by Bayesian model merging. In
+International Colloquium on Grammatical Inference
+and Applications, pages 106–118.
+R. H. Swendsen and J. S. Wang. 1987. Nonuniversal
+critical dynamics in MC simulations. Physics Review
+Letters, 58:86–88.
+J. G. Wolff. 1988. Learning syntax and meanings
+through optimization and distributional analysis. In
+Categories and processes in language acquisition,
+pages 179–215.
+</reference>
+<page confidence="0.998239">
+581
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.693699">
+<title confidence="0.998115">Type-Based MCMC</title>
+<author confidence="0.997551">Percy</author>
+<affiliation confidence="0.990442">UC</affiliation>
+<email confidence="0.998083">pliang@cs.berkeley.edu</email>
+<author confidence="0.997562">I Michael</author>
+<affiliation confidence="0.987733">UC</affiliation>
+<email confidence="0.998563">jordan@cs.berkeley.edu</email>
+<author confidence="0.95628">Dan</author>
+<affiliation confidence="0.996406">UC</affiliation>
+<email confidence="0.999187">klein@cs.berkeley.edu</email>
+<abstract confidence="0.975172214285714">Most existing algorithms for learning latentvariable models—such as EM and existing samplers—are meaning that they update the variables associated with one sentence at a time. The incremental nature of these methods makes them susceptible to local optima/slow mixing. In this paper, introduce a which upa block of variables, identified by a which spans multiple sentences. We show improvements on part-of-speech induction, word segmentation, and learning tree-substitution grammars.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>P F Brown</author>
+<author>V J D Pietra</author>
+<author>P V deSouza</author>
+<author>J C Lai</author>
+<author>R L Mercer</author>
+</authors>
+<title>Class-based n-gram models of natural language.</title>
+<date>1992</date>
+<journal>Computational Linguistics,</journal>
+<volume>18</volume>
+<pages>479</pages>
+<contexts>
+<context position="25530" citStr="Brown et al., 1992" startWordPosition="4709" endWordPosition="4712">PE over TOKEN, we consider three other alternative samplers. First, annealing (TOKENanneal) is a commonly-used technique to improve mixing, where (3) is raised to some inverse temperature.7 In Figure 5(a)–(c), we see that unlike TYPE, TOKENanneal does not improve over TOKEN uniformly: it hurts for the HMM, improves slightly for the USM, and makes no difference for the PTSG. Although annealing does increase mobility of the sampler, this mobility is undirected, whereas type-based sampling increases mobility in purely model-driven directions. Unlike past work that operated on types (Wolff, 1988; Brown et al., 1992; Stolcke and Omohundro, 1994), type-based sampling makes stochastic choices, and moreover, these choices are reversible. Is this stochasticity important? To answer this, we consider a variant of TYPE, TYPEgreedy: instead of sampling from (7), TYPEgreedy considers a type block S and sets bs to 0 for all s E S if p(bS = (0, ... , 0) |··· ) &gt; p(bS = (1, ... ,1) |··· ); else it sets bs to 1 for all s E S. From Figure 5(a)–(c), we see that greediness is disastrous for the HMM, hurts a little for USM, and makes no difference on the PTSG. These results show that stochasticity can indeed be important</context>
+</contexts>
+<marker>Brown, Pietra, deSouza, Lai, Mercer, 1992</marker>
+<rawString>P. F. Brown, V. J. D. Pietra, P. V. deSouza, J. C. Lai, and R. L. Mercer. 1992. Class-based n-gram models of natural language. Computational Linguistics, 18:467– 479.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>T Cohn</author>
+<author>S Goldwater</author>
+<author>P Blunsom</author>
+</authors>
+<title>Inducing compact but accurate tree-substitution grammars.</title>
+<date>2009</date>
+<booktitle>In North American Association for Computational Linguistics (NAACL),</booktitle>
+<pages>548--556</pages>
+<contexts>
+<context position="4388" citStr="Cohn et al., 2009" startWordPosition="716" endWordPosition="719">not deal with the strong type-based coupling (e.g., all instances of a word should be tagged similarly). The type-based sampler we will present is designed exactly to tackle this coupling, which we argue is stronger and more important to deal with in unsupervised learning. Figure 1 depicts the updates made by each of the three samplers. We tested our sampler on three models: a Bayesian HMM for part-of-speech induction (Goldwater and Griffiths, 2007), a nonparametric Bayesian model for word segmentation (Goldwater et al., 2006), and a nonparametric Bayesian model of tree substitution grammars (Cohn et al., 2009; Post and Gildea, 2009). Empirically, we find that typebased sampling improves performance and is less sensitive to initialization (Section 5). 2 Basic Idea via a Motivating Example The key technical problem we solve in this paper is finding a block of variables which are both highly coupled and yet tractable to sample jointly. This section illustrates the main idea behind type-based sampling on a small word segmentation example. Suppose our dataset x consists of n occurrences of the sequence a b. Our goal is infer z = (z1, ... , zn), where zi = 0 if the sequence is one word ab, and zi = 1 if</context>
+<context position="8463" citStr="Cohn et al., 2009" startWordPosition="1442" endWordPosition="1445">p We will now present the type-based sampler in full generality. Our sampler is applicable to any model which is built out of local multinomial choices, where each multinomial has a Dirichlet process prior (a Dirichlet prior if the number of choices is finite). This includes most probabilistic models in NLP (excluding ones built from log-linear features). As we develop the sampler, we will provide concrete examples for the Bayesian hidden Markov model (HMM), the Dirichlet process unigram segmentation model (USM) (Goldwater et al., 2006), and the probabilistic tree-substitution grammar (PTSG) (Cohn et al., 2009; Post and Gildea, 2009). 3.1 Model parameters A model is specified by a collection of multinomial parameters 0 = {Br}rER, where R is an index set. Each vector Br specifies a distribution over outcomes: outcome o has probability Bro. • HMM: Let K is the number of states. The set R = {(q, k) : q E {T, E}, k = 1, ... , K} indexes the K transition distributions {B(T�k)} (each over outcomes {1, ... , K}) and K emission distributions {B(E�k)} (each over the set of words). • USM: R = {0}, and B0 is a distribution over (an infinite number of) words. • PTSG: R is the set of grammar symbols, and each B</context>
+<context position="24421" citStr="Cohn et al. (2009)" startWordPosition="4532" endWordPosition="4535">three models on both metrics. We further evaluated the PTSG on parsing. Our standard treebank PCFG estimated using maximum likelihood obtained 79% F1. TOKEN obtained an F1 of 82.2%, and TYPE obtained a comparable F1 of 83.2%. Running the PTSG for longer continued to 5Following Petrov et al. (2006), we performed an initial preprocessing step on the trees involving Markovization, binarization, and collapsing of unary chains; words occurring once are replaced with one of 50 “unknown word” tokens, using base distributions {µr} that penalize the size of trees, and sampling the hyperparameters (see Cohn et al. (2009) for details). 6To evaluate, we created a grammar where the rule probabilities are the mean values under the PTSG distribution: this involves taking a weighted combination (based on the concentration parameters) of the rule counts from the PTSG samples and the PCFG-derived base distribution. We used the decoder of DeNero et al. (2009) to parse. improve the likelihood but actually hurt parsing accuracy, suggesting that the PTSG model is overfitting. To better understand the gains from TYPE over TOKEN, we consider three other alternative samplers. First, annealing (TOKENanneal) is a commonly-use</context>
+</contexts>
+<marker>Cohn, Goldwater, Blunsom, 2009</marker>
+<rawString>T. Cohn, S. Goldwater, and P. Blunsom. 2009. Inducing compact but accurate tree-substitution grammars. In North American Association for Computational Linguistics (NAACL), pages 548–556.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D B Dahl</author>
+</authors>
+<title>An improved merge-split sampler for conjugate Dirichlet process mixture models.</title>
+<date>2003</date>
+<tech>Technical report,</tech>
+<institution>Department of Statistics, University of Wisconsin.</institution>
+<contexts>
+<context position="28952" citStr="Dahl, 2003" startWordPosition="5306" endWordPosition="5307">sistently the best, whereas other samplers can underperform TYPE by a large margin. Note that TYPE favors η = 1 in general. This setting maximizes the number of initial types, and thus creates larger type blocks and thus enables larger moves. Larger type blocks also mean more dependencies that TOKEN is unable to deal with. 6 Related Work and Discussion Block sampling, on which our work is built, is a classical idea, but is used restrictively since sampling large blocks is computationally expensive. Past work for clustering models maintained tractability by using Metropolis-Hastings proposals (Dahl, 2003) or introducing auxiliary variables (Swendsen and Wang, 1987; Liang et al., 2007). In contrast, our type-based sampler simply identifies tractable blocks based on exchangeability. Other methods for learning latent-variable models include EM, variational approximations, and uncollapsed samplers. All of these methods maintain distributions over (or settings of) the latent variables of the model and update the representation iteratively (see Gao and Johnson (2008) for an overview in the context of POS induction). However, these methods are at the core all token-based, since they only update varia</context>
+</contexts>
+<marker>Dahl, 2003</marker>
+<rawString>D. B. Dahl. 2003. An improved merge-split sampler for conjugate Dirichlet process mixture models. Technical report, Department of Statistics, University of Wisconsin.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J DeNero</author>
+<author>M Bansal</author>
+<author>A Pauls</author>
+<author>D Klein</author>
+</authors>
+<title>Efficient parsing for transducer grammars.</title>
+<date>2009</date>
+<booktitle>In North American Association for Computational Linguistics (NAACL),</booktitle>
+<pages>227--235</pages>
+<contexts>
+<context position="24757" citStr="DeNero et al. (2009)" startWordPosition="4587" endWordPosition="4590">ing step on the trees involving Markovization, binarization, and collapsing of unary chains; words occurring once are replaced with one of 50 “unknown word” tokens, using base distributions {µr} that penalize the size of trees, and sampling the hyperparameters (see Cohn et al. (2009) for details). 6To evaluate, we created a grammar where the rule probabilities are the mean values under the PTSG distribution: this involves taking a weighted combination (based on the concentration parameters) of the rule counts from the PTSG samples and the PCFG-derived base distribution. We used the decoder of DeNero et al. (2009) to parse. improve the likelihood but actually hurt parsing accuracy, suggesting that the PTSG model is overfitting. To better understand the gains from TYPE over TOKEN, we consider three other alternative samplers. First, annealing (TOKENanneal) is a commonly-used technique to improve mixing, where (3) is raised to some inverse temperature.7 In Figure 5(a)–(c), we see that unlike TYPE, TOKENanneal does not improve over TOKEN uniformly: it hurts for the HMM, improves slightly for the USM, and makes no difference for the PTSG. Although annealing does increase mobility of the sampler, this mobil</context>
+</contexts>
+<marker>DeNero, Bansal, Pauls, Klein, 2009</marker>
+<rawString>J. DeNero, M. Bansal, A. Pauls, and D. Klein. 2009. Efficient parsing for transducer grammars. In North American Association for Computational Linguistics (NAACL), pages 227–235.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J Gao</author>
+<author>M Johnson</author>
+</authors>
+<title>A comparison of Bayesian estimators for unsupervised hidden Markov model POS taggers.</title>
+<date>2008</date>
+<booktitle>In Empirical Methods in Natural Language Processing (EMNLP),</booktitle>
+<pages>344--352</pages>
+<contexts>
+<context position="29417" citStr="Gao and Johnson (2008)" startWordPosition="5369" endWordPosition="5372">mpling large blocks is computationally expensive. Past work for clustering models maintained tractability by using Metropolis-Hastings proposals (Dahl, 2003) or introducing auxiliary variables (Swendsen and Wang, 1987; Liang et al., 2007). In contrast, our type-based sampler simply identifies tractable blocks based on exchangeability. Other methods for learning latent-variable models include EM, variational approximations, and uncollapsed samplers. All of these methods maintain distributions over (or settings of) the latent variables of the model and update the representation iteratively (see Gao and Johnson (2008) for an overview in the context of POS induction). However, these methods are at the core all token-based, since they only update variables in a single example at a time.8 Blocking variables by type—the key idea of this paper—is a fundamental departure from tokenbased methods. Though type-based changes have also been proposed (Brown et al., 1992; Stolcke and Omohundro, 1994), these methods operated greedily, and in Section 5.1, we saw that being greedy led to more brittle results. By working in a sampling framework, we were able bring type-based changes to fruition. 8While EM technically updat</context>
+</contexts>
+<marker>Gao, Johnson, 2008</marker>
+<rawString>J. Gao and M. Johnson. 2008. A comparison of Bayesian estimators for unsupervised hidden Markov model POS taggers. In Empirical Methods in Natural Language Processing (EMNLP), pages 344–352.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>S Goldwater</author>
+<author>T Griffiths</author>
+</authors>
+<title>A fully Bayesian approach to unsupervised part-of-speech tagging.</title>
+<date>2007</date>
+<booktitle>In Association for Computational Linguistics (ACL).</booktitle>
+<contexts>
+<context position="2877" citStr="Goldwater and Griffiths (2007)" startWordPosition="439" endWordPosition="442">. To combat the problems associated with tokenbased algorithms, we propose a new sampling algorithm that operates on types. Our sampler would, for example, be able to change all occurrences of ((subject verb) object) to (subject (verb object)) in one step. These type-based operations are reminiscent of the type-based grammar operations of early chunkmerge systems (Wolff, 1988; Stolcke and Omohundro, 1994), but we work within a sampling framework for increased robustness. In NLP, perhaps the the most simple and popular sampler is the token-based Gibbs sampler,1 used in Goldwater et al. (2006), Goldwater and Griffiths (2007), and many others. By sampling only one 1In NLP, this is sometimes referred to as simply the collapsed Gibbs sampler. 2 1 2 2 1 2 2 2 1 2 1 2 1 2 2 2 1 2 2 1 2 2 2 1 2 1 2 1 2 2 2 1 2 2 1 2 2 2 1 2 1 2 1 2 2 573 Human Language Technologies: The 2010 Annual Conference of the North American Chapter of the ACL, pages 573–581, Los Angeles, California, June 2010. c�2010 Association for Computational Linguistics 200 400 600 8001000 2 4 6 8 10 M iteration (a) bimodal posterior (b) sampling run log g(m) -1060.3 -1411.4 -358.0 -709.1 -6.8 m 1000 800 600 400 200 Token Type variable at a time, this sampl</context>
+<context position="4224" citStr="Goldwater and Griffiths, 2007" startWordPosition="691" endWordPosition="695">led variables. For example, the sentence-based sampler samples all the variables associated with a sentence at once (e.g., the entire tag sequence). However, this blocking does not deal with the strong type-based coupling (e.g., all instances of a word should be tagged similarly). The type-based sampler we will present is designed exactly to tackle this coupling, which we argue is stronger and more important to deal with in unsupervised learning. Figure 1 depicts the updates made by each of the three samplers. We tested our sampler on three models: a Bayesian HMM for part-of-speech induction (Goldwater and Griffiths, 2007), a nonparametric Bayesian model for word segmentation (Goldwater et al., 2006), and a nonparametric Bayesian model of tree substitution grammars (Cohn et al., 2009; Post and Gildea, 2009). Empirically, we find that typebased sampling improves performance and is less sensitive to initialization (Section 5). 2 Basic Idea via a Motivating Example The key technical problem we solve in this paper is finding a block of variables which are both highly coupled and yet tractable to sample jointly. This section illustrates the main idea behind type-based sampling on a small word segmentation example. S</context>
+</contexts>
+<marker>Goldwater, Griffiths, 2007</marker>
+<rawString>S. Goldwater and T. Griffiths. 2007. A fully Bayesian approach to unsupervised part-of-speech tagging. In Association for Computational Linguistics (ACL).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>S Goldwater</author>
+<author>T Griffiths</author>
+<author>M Johnson</author>
+</authors>
+<title>Contextual dependencies in unsupervised word segmentation.</title>
+<date>2006</date>
+<booktitle>In International Conference on Computational Linguistics and Association for Computational Linguistics (COLING/ACL).</booktitle>
+<contexts>
+<context position="2845" citStr="Goldwater et al. (2006)" startWordPosition="435" endWordPosition="438"> resulting in slow mixing. To combat the problems associated with tokenbased algorithms, we propose a new sampling algorithm that operates on types. Our sampler would, for example, be able to change all occurrences of ((subject verb) object) to (subject (verb object)) in one step. These type-based operations are reminiscent of the type-based grammar operations of early chunkmerge systems (Wolff, 1988; Stolcke and Omohundro, 1994), but we work within a sampling framework for increased robustness. In NLP, perhaps the the most simple and popular sampler is the token-based Gibbs sampler,1 used in Goldwater et al. (2006), Goldwater and Griffiths (2007), and many others. By sampling only one 1In NLP, this is sometimes referred to as simply the collapsed Gibbs sampler. 2 1 2 2 1 2 2 2 1 2 1 2 1 2 2 2 1 2 2 1 2 2 2 1 2 1 2 1 2 2 2 1 2 2 1 2 2 2 1 2 1 2 1 2 2 573 Human Language Technologies: The 2010 Annual Conference of the North American Chapter of the ACL, pages 573–581, Los Angeles, California, June 2010. c�2010 Association for Computational Linguistics 200 400 600 8001000 2 4 6 8 10 M iteration (a) bimodal posterior (b) sampling run log g(m) -1060.3 -1411.4 -358.0 -709.1 -6.8 m 1000 800 600 400 200 Token Typ</context>
+<context position="4303" citStr="Goldwater et al., 2006" startWordPosition="703" endWordPosition="706">iated with a sentence at once (e.g., the entire tag sequence). However, this blocking does not deal with the strong type-based coupling (e.g., all instances of a word should be tagged similarly). The type-based sampler we will present is designed exactly to tackle this coupling, which we argue is stronger and more important to deal with in unsupervised learning. Figure 1 depicts the updates made by each of the three samplers. We tested our sampler on three models: a Bayesian HMM for part-of-speech induction (Goldwater and Griffiths, 2007), a nonparametric Bayesian model for word segmentation (Goldwater et al., 2006), and a nonparametric Bayesian model of tree substitution grammars (Cohn et al., 2009; Post and Gildea, 2009). Empirically, we find that typebased sampling improves performance and is less sensitive to initialization (Section 5). 2 Basic Idea via a Motivating Example The key technical problem we solve in this paper is finding a block of variables which are both highly coupled and yet tractable to sample jointly. This section illustrates the main idea behind type-based sampling on a small word segmentation example. Suppose our dataset x consists of n occurrences of the sequence a b. Our goal is</context>
+<context position="8388" citStr="Goldwater et al., 2006" startWordPosition="1431" endWordPosition="1434">n n) than m = 0, a naive algorithm can easily have trouble escaping m = n. 3 Setup We will now present the type-based sampler in full generality. Our sampler is applicable to any model which is built out of local multinomial choices, where each multinomial has a Dirichlet process prior (a Dirichlet prior if the number of choices is finite). This includes most probabilistic models in NLP (excluding ones built from log-linear features). As we develop the sampler, we will provide concrete examples for the Bayesian hidden Markov model (HMM), the Dirichlet process unigram segmentation model (USM) (Goldwater et al., 2006), and the probabilistic tree-substitution grammar (PTSG) (Cohn et al., 2009; Post and Gildea, 2009). 3.1 Model parameters A model is specified by a collection of multinomial parameters 0 = {Br}rER, where R is an index set. Each vector Br specifies a distribution over outcomes: outcome o has probability Bro. • HMM: Let K is the number of states. The set R = {(q, k) : q E {T, E}, k = 1, ... , K} indexes the K transition distributions {B(T�k)} (each over outcomes {1, ... , K}) and K emission distributions {B(E�k)} (each over the set of words). • USM: R = {0}, and B0 is a distribution over (an inf</context>
+<context position="23134" citStr="Goldwater et al. (2006)" startWordPosition="4321" endWordPosition="4324">s could change during sampling). 578 lihood (3) and accuracy for our three models: • HMM: We learned a K = 45 state HMM on the Wall Street Journal (WSJ) portion of the Penn Treebank (49208 sentences, 45 tags) for part-ofspeech induction. We fixed αr to 0.1 and µr to uniform for all r. For accuracy, we used the standard metric based on greedy mapping, where each state is mapped to the POS tag that maximizes the number of correct matches (Haghighi and Klein, 2006). We did not use a tagging dictionary. • USM: We learned a USM model on the Bernstein-Ratner corpus from the CHILDES database used in Goldwater et al. (2006) (9790 sentences) for word segmentation. We fixed α0 to 0.1. The base distribution µ0 penalizes the length of words (see Goldwater et al. (2009) for details). For accuracy, we used word token F1. • PTSG: We learned a PTSG model on sections 2– 21 of the WSJ treebank.5 For accuracy, we used EVALB parsing F1 on section 22.6 Note this is a supervised task with latent-variables, whereas the other two are purely unsupervised. 5.1 Basic Comparison Figure 5(a)–(c) compares the likelihood and accuracy (we use the term accuracy loosely to also include F1). The initial observation is that the typebased s</context>
+</contexts>
+<marker>Goldwater, Griffiths, Johnson, 2006</marker>
+<rawString>S. Goldwater, T. Griffiths, and M. Johnson. 2006. Contextual dependencies in unsupervised word segmentation. In International Conference on Computational Linguistics and Association for Computational Linguistics (COLING/ACL).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>S Goldwater</author>
+<author>T Griffiths</author>
+<author>M Johnson</author>
+</authors>
+<title>A Bayesian framework for word segmentation: Exploring the effects of context.</title>
+<date>2009</date>
+<journal>Cognition,</journal>
+<pages>112--21</pages>
+<contexts>
+<context position="5372" citStr="Goldwater et al., 2009" startWordPosition="895" endWordPosition="898">ain idea behind type-based sampling on a small word segmentation example. Suppose our dataset x consists of n occurrences of the sequence a b. Our goal is infer z = (z1, ... , zn), where zi = 0 if the sequence is one word ab, and zi = 1 if the sequence is two, a and b. We can model this situation with a simple generative model: for each i = 1, ... , n, generate one or two words with equal probability. Each word is drawn independently based on probabilities θ = (θa, θb, θab) which we endow with a uniform prior θ — Dirichlet(1,1,1). We marginalize out θ to get the following standard expression (Goldwater et al., 2009): 1(m)1(m)1(n_m) def p(z |x) a = 3(n+m) where m = Eni=1 zi is the number of two-word sequences and a(k) = a(a + 1)···(a + k − 1) is the Figure 2: (a) The posterior (1) is sharply bimodal (note the log-scale). (b) A run of the token-based and typebased samplers. We initialize both samplers with m = n (n = 1000). The type-based sampler mixes instantly (in fact, it makes independent draws from the posterior) whereas the token-based sampler requires five passes through the data before finding the high probability region m = 0. ascending factorial.2 Figure 2(a) depicts the resulting bimodal posteri</context>
+<context position="23278" citStr="Goldwater et al. (2009)" startWordPosition="4345" endWordPosition="4348">al (WSJ) portion of the Penn Treebank (49208 sentences, 45 tags) for part-ofspeech induction. We fixed αr to 0.1 and µr to uniform for all r. For accuracy, we used the standard metric based on greedy mapping, where each state is mapped to the POS tag that maximizes the number of correct matches (Haghighi and Klein, 2006). We did not use a tagging dictionary. • USM: We learned a USM model on the Bernstein-Ratner corpus from the CHILDES database used in Goldwater et al. (2006) (9790 sentences) for word segmentation. We fixed α0 to 0.1. The base distribution µ0 penalizes the length of words (see Goldwater et al. (2009) for details). For accuracy, we used word token F1. • PTSG: We learned a PTSG model on sections 2– 21 of the WSJ treebank.5 For accuracy, we used EVALB parsing F1 on section 22.6 Note this is a supervised task with latent-variables, whereas the other two are purely unsupervised. 5.1 Basic Comparison Figure 5(a)–(c) compares the likelihood and accuracy (we use the term accuracy loosely to also include F1). The initial observation is that the typebased sampler (TYPE) outperforms the token-based sampler (TOKEN) across all three models on both metrics. We further evaluated the PTSG on parsing. Our</context>
+</contexts>
+<marker>Goldwater, Griffiths, Johnson, 2009</marker>
+<rawString>S. Goldwater, T. Griffiths, and M. Johnson. 2009. A Bayesian framework for word segmentation: Exploring the effects of context. Cognition, 112:21–54.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>A Haghighi</author>
+<author>D Klein</author>
+</authors>
+<title>Prototype-driven learning for sequence models.</title>
+<date>2006</date>
+<booktitle>In North American Association for Computational Linguistics (NAACL),</booktitle>
+<pages>320--327</pages>
+<contexts>
+<context position="22977" citStr="Haghighi and Klein, 2006" startWordPosition="4293" endWordPosition="4296"> on marginal like4A site could be sampled more than once if it belonged to more than one type block during the iteration (recall that types depend on z and thus could change during sampling). 578 lihood (3) and accuracy for our three models: • HMM: We learned a K = 45 state HMM on the Wall Street Journal (WSJ) portion of the Penn Treebank (49208 sentences, 45 tags) for part-ofspeech induction. We fixed αr to 0.1 and µr to uniform for all r. For accuracy, we used the standard metric based on greedy mapping, where each state is mapped to the POS tag that maximizes the number of correct matches (Haghighi and Klein, 2006). We did not use a tagging dictionary. • USM: We learned a USM model on the Bernstein-Ratner corpus from the CHILDES database used in Goldwater et al. (2006) (9790 sentences) for word segmentation. We fixed α0 to 0.1. The base distribution µ0 penalizes the length of words (see Goldwater et al. (2009) for details). For accuracy, we used word token F1. • PTSG: We learned a PTSG model on sections 2– 21 of the WSJ treebank.5 For accuracy, we used EVALB parsing F1 on section 22.6 Note this is a supervised task with latent-variables, whereas the other two are purely unsupervised. 5.1 Basic Compariso</context>
+</contexts>
+<marker>Haghighi, Klein, 2006</marker>
+<rawString>A. Haghighi and D. Klein. 2006. Prototype-driven learning for sequence models. In North American Association for Computational Linguistics (NAACL), pages 320–327.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>P Liang</author>
+<author>M I Jordan</author>
+<author>B Taskar</author>
+</authors>
+<title>A permutation-augmented sampler for Dirichlet process mixture models.</title>
+<date>2007</date>
+<booktitle>In International Conference on Machine Learning (ICML).</booktitle>
+<contexts>
+<context position="29033" citStr="Liang et al., 2007" startWordPosition="5316" endWordPosition="5319">ge margin. Note that TYPE favors η = 1 in general. This setting maximizes the number of initial types, and thus creates larger type blocks and thus enables larger moves. Larger type blocks also mean more dependencies that TOKEN is unable to deal with. 6 Related Work and Discussion Block sampling, on which our work is built, is a classical idea, but is used restrictively since sampling large blocks is computationally expensive. Past work for clustering models maintained tractability by using Metropolis-Hastings proposals (Dahl, 2003) or introducing auxiliary variables (Swendsen and Wang, 1987; Liang et al., 2007). In contrast, our type-based sampler simply identifies tractable blocks based on exchangeability. Other methods for learning latent-variable models include EM, variational approximations, and uncollapsed samplers. All of these methods maintain distributions over (or settings of) the latent variables of the model and update the representation iteratively (see Gao and Johnson (2008) for an overview in the context of POS induction). However, these methods are at the core all token-based, since they only update variables in a single example at a time.8 Blocking variables by type—the key idea of t</context>
+</contexts>
+<marker>Liang, Jordan, Taskar, 2007</marker>
+<rawString>P. Liang, M. I. Jordan, and B. Taskar. 2007. A permutation-augmented sampler for Dirichlet process mixture models. In International Conference on Machine Learning (ICML).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>S Petrov</author>
+<author>L Barrett</author>
+<author>R Thibaux</author>
+<author>D Klein</author>
+</authors>
+<title>Learning accurate, compact, and interpretable tree annotation.</title>
+<date>2006</date>
+<booktitle>In International Conference on Computational Linguistics and Association for Computational Linguistics (COLING/ACL),</booktitle>
+<pages>433--440</pages>
+<contexts>
+<context position="24101" citStr="Petrov et al. (2006)" startWordPosition="4482" endWordPosition="4485">d task with latent-variables, whereas the other two are purely unsupervised. 5.1 Basic Comparison Figure 5(a)–(c) compares the likelihood and accuracy (we use the term accuracy loosely to also include F1). The initial observation is that the typebased sampler (TYPE) outperforms the token-based sampler (TOKEN) across all three models on both metrics. We further evaluated the PTSG on parsing. Our standard treebank PCFG estimated using maximum likelihood obtained 79% F1. TOKEN obtained an F1 of 82.2%, and TYPE obtained a comparable F1 of 83.2%. Running the PTSG for longer continued to 5Following Petrov et al. (2006), we performed an initial preprocessing step on the trees involving Markovization, binarization, and collapsing of unary chains; words occurring once are replaced with one of 50 “unknown word” tokens, using base distributions {µr} that penalize the size of trees, and sampling the hyperparameters (see Cohn et al. (2009) for details). 6To evaluate, we created a grammar where the rule probabilities are the mean values under the PTSG distribution: this involves taking a weighted combination (based on the concentration parameters) of the rule counts from the PTSG samples and the PCFG-derived base d</context>
+</contexts>
+<marker>Petrov, Barrett, Thibaux, Klein, 2006</marker>
+<rawString>S. Petrov, L. Barrett, R. Thibaux, and D. Klein. 2006. Learning accurate, compact, and interpretable tree annotation. In International Conference on Computational Linguistics and Association for Computational Linguistics (COLING/ACL), pages 433–440.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>M Post</author>
+<author>D Gildea</author>
+</authors>
+<title>Bayesian learning of a tree substitution grammar.</title>
+<date>2009</date>
+<booktitle>In Association for Computational Linguistics and International Joint Conference on Natural Language Processing (ACL-IJCNLP).</booktitle>
+<contexts>
+<context position="4412" citStr="Post and Gildea, 2009" startWordPosition="720" endWordPosition="723">trong type-based coupling (e.g., all instances of a word should be tagged similarly). The type-based sampler we will present is designed exactly to tackle this coupling, which we argue is stronger and more important to deal with in unsupervised learning. Figure 1 depicts the updates made by each of the three samplers. We tested our sampler on three models: a Bayesian HMM for part-of-speech induction (Goldwater and Griffiths, 2007), a nonparametric Bayesian model for word segmentation (Goldwater et al., 2006), and a nonparametric Bayesian model of tree substitution grammars (Cohn et al., 2009; Post and Gildea, 2009). Empirically, we find that typebased sampling improves performance and is less sensitive to initialization (Section 5). 2 Basic Idea via a Motivating Example The key technical problem we solve in this paper is finding a block of variables which are both highly coupled and yet tractable to sample jointly. This section illustrates the main idea behind type-based sampling on a small word segmentation example. Suppose our dataset x consists of n occurrences of the sequence a b. Our goal is infer z = (z1, ... , zn), where zi = 0 if the sequence is one word ab, and zi = 1 if the sequence is two, a </context>
+<context position="8487" citStr="Post and Gildea, 2009" startWordPosition="1446" endWordPosition="1449">nt the type-based sampler in full generality. Our sampler is applicable to any model which is built out of local multinomial choices, where each multinomial has a Dirichlet process prior (a Dirichlet prior if the number of choices is finite). This includes most probabilistic models in NLP (excluding ones built from log-linear features). As we develop the sampler, we will provide concrete examples for the Bayesian hidden Markov model (HMM), the Dirichlet process unigram segmentation model (USM) (Goldwater et al., 2006), and the probabilistic tree-substitution grammar (PTSG) (Cohn et al., 2009; Post and Gildea, 2009). 3.1 Model parameters A model is specified by a collection of multinomial parameters 0 = {Br}rER, where R is an index set. Each vector Br specifies a distribution over outcomes: outcome o has probability Bro. • HMM: Let K is the number of states. The set R = {(q, k) : q E {T, E}, k = 1, ... , K} indexes the K transition distributions {B(T�k)} (each over outcomes {1, ... , K}) and K emission distributions {B(E�k)} (each over the set of words). • USM: R = {0}, and B0 is a distribution over (an infinite number of) words. • PTSG: R is the set of grammar symbols, and each Br is a distribution over</context>
+</contexts>
+<marker>Post, Gildea, 2009</marker>
+<rawString>M. Post and D. Gildea. 2009. Bayesian learning of a tree substitution grammar. In Association for Computational Linguistics and International Joint Conference on Natural Language Processing (ACL-IJCNLP).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>A Stolcke</author>
+<author>S Omohundro</author>
+</authors>
+<title>Inducing probabilistic grammars by Bayesian model merging.</title>
+<date>1994</date>
+<booktitle>In International Colloquium on Grammatical Inference and Applications,</booktitle>
+<pages>106--118</pages>
+<contexts>
+<context position="2655" citStr="Stolcke and Omohundro, 1994" startWordPosition="401" endWordPosition="405">-based sampler updates all variables of a particular type (1 in this example), thus dealing with dependencies due to common parameters (c). on all others will most likely not change its analysis, resulting in slow mixing. To combat the problems associated with tokenbased algorithms, we propose a new sampling algorithm that operates on types. Our sampler would, for example, be able to change all occurrences of ((subject verb) object) to (subject (verb object)) in one step. These type-based operations are reminiscent of the type-based grammar operations of early chunkmerge systems (Wolff, 1988; Stolcke and Omohundro, 1994), but we work within a sampling framework for increased robustness. In NLP, perhaps the the most simple and popular sampler is the token-based Gibbs sampler,1 used in Goldwater et al. (2006), Goldwater and Griffiths (2007), and many others. By sampling only one 1In NLP, this is sometimes referred to as simply the collapsed Gibbs sampler. 2 1 2 2 1 2 2 2 1 2 1 2 1 2 2 2 1 2 2 1 2 2 2 1 2 1 2 1 2 2 2 1 2 2 1 2 2 2 1 2 1 2 1 2 2 573 Human Language Technologies: The 2010 Annual Conference of the North American Chapter of the ACL, pages 573–581, Los Angeles, California, June 2010. c�2010 Associatio</context>
+<context position="25560" citStr="Stolcke and Omohundro, 1994" startWordPosition="4713" endWordPosition="4717">nsider three other alternative samplers. First, annealing (TOKENanneal) is a commonly-used technique to improve mixing, where (3) is raised to some inverse temperature.7 In Figure 5(a)–(c), we see that unlike TYPE, TOKENanneal does not improve over TOKEN uniformly: it hurts for the HMM, improves slightly for the USM, and makes no difference for the PTSG. Although annealing does increase mobility of the sampler, this mobility is undirected, whereas type-based sampling increases mobility in purely model-driven directions. Unlike past work that operated on types (Wolff, 1988; Brown et al., 1992; Stolcke and Omohundro, 1994), type-based sampling makes stochastic choices, and moreover, these choices are reversible. Is this stochasticity important? To answer this, we consider a variant of TYPE, TYPEgreedy: instead of sampling from (7), TYPEgreedy considers a type block S and sets bs to 0 for all s E S if p(bS = (0, ... , 0) |··· ) &gt; p(bS = (1, ... ,1) |··· ); else it sets bs to 1 for all s E S. From Figure 5(a)–(c), we see that greediness is disastrous for the HMM, hurts a little for USM, and makes no difference on the PTSG. These results show that stochasticity can indeed be important. We consider another block sa</context>
+</contexts>
+<marker>Stolcke, Omohundro, 1994</marker>
+<rawString>A. Stolcke and S. Omohundro. 1994. Inducing probabilistic grammars by Bayesian model merging. In International Colloquium on Grammatical Inference and Applications, pages 106–118.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>R H Swendsen</author>
+<author>J S Wang</author>
+</authors>
+<title>Nonuniversal critical dynamics in MC simulations. Physics Review Letters,</title>
+<date>1987</date>
+<pages>58--86</pages>
+<contexts>
+<context position="29012" citStr="Swendsen and Wang, 1987" startWordPosition="5312" endWordPosition="5315">nderperform TYPE by a large margin. Note that TYPE favors η = 1 in general. This setting maximizes the number of initial types, and thus creates larger type blocks and thus enables larger moves. Larger type blocks also mean more dependencies that TOKEN is unable to deal with. 6 Related Work and Discussion Block sampling, on which our work is built, is a classical idea, but is used restrictively since sampling large blocks is computationally expensive. Past work for clustering models maintained tractability by using Metropolis-Hastings proposals (Dahl, 2003) or introducing auxiliary variables (Swendsen and Wang, 1987; Liang et al., 2007). In contrast, our type-based sampler simply identifies tractable blocks based on exchangeability. Other methods for learning latent-variable models include EM, variational approximations, and uncollapsed samplers. All of these methods maintain distributions over (or settings of) the latent variables of the model and update the representation iteratively (see Gao and Johnson (2008) for an overview in the context of POS induction). However, these methods are at the core all token-based, since they only update variables in a single example at a time.8 Blocking variables by t</context>
+</contexts>
+<marker>Swendsen, Wang, 1987</marker>
+<rawString>R. H. Swendsen and J. S. Wang. 1987. Nonuniversal critical dynamics in MC simulations. Physics Review Letters, 58:86–88.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J G Wolff</author>
+</authors>
+<title>Learning syntax and meanings through optimization and distributional analysis. In Categories and processes in language acquisition,</title>
+<date>1988</date>
+<pages>179--215</pages>
+<contexts>
+<context position="2625" citStr="Wolff, 1988" startWordPosition="399" endWordPosition="400">(b). The type-based sampler updates all variables of a particular type (1 in this example), thus dealing with dependencies due to common parameters (c). on all others will most likely not change its analysis, resulting in slow mixing. To combat the problems associated with tokenbased algorithms, we propose a new sampling algorithm that operates on types. Our sampler would, for example, be able to change all occurrences of ((subject verb) object) to (subject (verb object)) in one step. These type-based operations are reminiscent of the type-based grammar operations of early chunkmerge systems (Wolff, 1988; Stolcke and Omohundro, 1994), but we work within a sampling framework for increased robustness. In NLP, perhaps the the most simple and popular sampler is the token-based Gibbs sampler,1 used in Goldwater et al. (2006), Goldwater and Griffiths (2007), and many others. By sampling only one 1In NLP, this is sometimes referred to as simply the collapsed Gibbs sampler. 2 1 2 2 1 2 2 2 1 2 1 2 1 2 2 2 1 2 2 1 2 2 2 1 2 1 2 1 2 2 2 1 2 2 1 2 2 2 1 2 1 2 1 2 2 573 Human Language Technologies: The 2010 Annual Conference of the North American Chapter of the ACL, pages 573–581, Los Angeles, California</context>
+<context position="25510" citStr="Wolff, 1988" startWordPosition="4707" endWordPosition="4708">gains from TYPE over TOKEN, we consider three other alternative samplers. First, annealing (TOKENanneal) is a commonly-used technique to improve mixing, where (3) is raised to some inverse temperature.7 In Figure 5(a)–(c), we see that unlike TYPE, TOKENanneal does not improve over TOKEN uniformly: it hurts for the HMM, improves slightly for the USM, and makes no difference for the PTSG. Although annealing does increase mobility of the sampler, this mobility is undirected, whereas type-based sampling increases mobility in purely model-driven directions. Unlike past work that operated on types (Wolff, 1988; Brown et al., 1992; Stolcke and Omohundro, 1994), type-based sampling makes stochastic choices, and moreover, these choices are reversible. Is this stochasticity important? To answer this, we consider a variant of TYPE, TYPEgreedy: instead of sampling from (7), TYPEgreedy considers a type block S and sets bs to 0 for all s E S if p(bS = (0, ... , 0) |··· ) &gt; p(bS = (1, ... ,1) |··· ); else it sets bs to 1 for all s E S. From Figure 5(a)–(c), we see that greediness is disastrous for the HMM, hurts a little for USM, and makes no difference on the PTSG. These results show that stochasticity can</context>
+</contexts>
+<marker>Wolff, 1988</marker>
+<rawString>J. G. Wolff. 1988. Learning syntax and meanings through optimization and distributional analysis. In Categories and processes in language acquisition, pages 179–215.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

@@ -1,0 +1,1105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.001412">
+<title confidence="0.935651">
+A Practical Part-of-Speech Tagger
+</title>
+<author confidence="0.886694">
+Doug Cutting and Julian Kupiec and Jan Pedersen and Penelope Sibun
+</author>
+<affiliation confidence="0.779578">
+Xerox Palo Alto Research Center
+3333 Coyote Hill Road, Palo Alto, CA 94304, USA
+</affiliation>
+<sectionHeader confidence="0.973276" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.999010090909091">
+We present an implementation of a part-of-speech
+tagger based on a hidden Markov model. The
+methodology enables robust and accurate tagging
+with few resource requirements. Only a lexicon
+and some unlabeled training text are required.
+Accuracy exceeds 96%. We describe implemen-
+tation strategies and optimizations which result
+in high-speed operation. Three applications for
+tagging are described: phrase recognition; word
+sense disambiguation; and grammatical function
+assignment.
+</bodyText>
+<sectionHeader confidence="0.993851" genericHeader="keywords">
+1 Desiderata
+</sectionHeader>
+<bodyText confidence="0.99991075">
+Many words are ambiguous in their part of speech. For
+example, &amp;quot;tag&amp;quot; can be a noun or a verb. However, when a
+word appears in the context of other words, the ambiguity
+is often reduced: in &amp;quot;a tag is a part-of-speech label,&amp;quot; the
+word &amp;quot;tag&amp;quot; can only be a noun. A part-of-speech tagger
+is a system that uses context to assign parts of speech to
+words.
+Automatic text tagging is an important first step in
+discovering the linguistic structure of large text corpora.
+Part-of-speech information facilitates higher-level analysis,
+such as recognizing noun phrases and other patterns in
+text.
+For a tagger to function as a practical component in a
+language processing system, we believe that a tagger must
+be:
+Robust Text corpora contain ungrammatical con-
+structions, isolated phrases (such as titles), and non-
+linguistic data (such as tables). Corpora are also likely
+to contain words that are unknown to the tagger. It
+is desirable that a tagger deal gracefully with these
+situations.
+Efficient If a tagger is to be used to analyze arbi-
+trarily large corpora, it must be efficient—performing
+in time linear in the number of words tagged. Any
+training required should also be fast, enabling rapid
+turnaround with new corpora and new text genres.
+Accurate A tagger should attempt to assign the cor-
+rect part-of-speech tag to every word encountered.
+Tunable A tagger should be able to take advantage
+of linguistic insights. One should be able to correct
+systematic errors by supplying appropriate a priori
+&amp;quot;hints.&amp;quot; It should be possible to give different hints
+for different corpora.
+Reusable The effort required to retarget a tagger to
+new corpora, new tagsets, and new languages should
+be minimal.
+</bodyText>
+<sectionHeader confidence="0.997278" genericHeader="introduction">
+2 Methodology
+</sectionHeader>
+<subsectionHeader confidence="0.817545">
+2.1 Background
+</subsectionHeader>
+<bodyText confidence="0.999989886363637">
+Several different approaches have been used for building
+text taggers. Greene and Rubin used a rule-based ap-
+proach in the TAGGIT program [Greene and Rubin, 1971],
+which was an aid in tagging the Brown corpus [Francis and
+KuEera, 1982]. TAGGIT disambiguated 77% of the cor-
+pus; the rest was done manually over a period of several
+years. More recently, Koskenniemi also used a rule-based
+approach implemented with finite-state machines [Kosken-
+niemi, 1990].
+Statistical methods have also been used (e.g., [DeRose,
+1988], [Garside et al., 1987]). These provide the capability
+of resolving ambiguity on the basis of most likely interpre-
+tation. A form of Markov model has been widely used that
+assumes that a word depends probabilistically on just its
+part-of-speech category, which in turn depends solely on
+the categories of the preceding two words.
+Two types of training (i.e., parameter estimation) have
+been used with this model. The first makes use of a tagged
+training corpus. Derouault and Merialdo use a bootstrap
+method for training [Derouault and Merialdo, 1986]. At
+first, a relatively small amount of text is manually tagged
+and used to train a partially accurate model. The model
+is then used to tag more text, and the tags are manu-
+ally corrected and then used to retrain the model. Church
+uses the tagged Brown corpus for training [Church, 1988].
+These models involve probabilities for each word in the
+lexicon, so large tagged corpora are required for reliable
+estimation.
+The second method of training does not require a tagged
+training corpus. In this situation the Baum-Welch algo-
+rithm (also known as the forward-backward algorithm) can
+be used [Baum, 1972]. Under this regime the model is
+called a hidden Markov model (HMM), as state transitions
+(i.e., part-of-speech categories) are assumed to be unob-
+servable. Jelinek has used this method for training a text
+tagger [Jelinek, 1985]. Parameter smoothing can be con-
+veniently achieved using the method of deleted interpola-
+tion in which weighted estimates are taken from second-
+and first-order models and a uniform probability distribu-
+tion [Jelinek and Mercer, 1980]. Kupiec used word equiv-
+alence classes (referred to here as ambiguity classes) based
+on parts of speech, to pool data from individual words [Ku-
+piec, 1989b]. The most common words are still represented
+individually, as sufficient data exist for robust estimation.
+</bodyText>
+<page confidence="0.998506">
+133
+</page>
+<bodyText confidence="0.999699181818182">
+However all other words are represented according to the
+set of possible categories they can assume. In this manner,
+the vocabulary of 50,000 words in the Brown corpus can
+be reduced to approximately 400 distinct ambiguity classes
+[Kupiec, 1992]. To further reduce the number of param-
+eters, a first-order model can be employed (this assumes
+that a word&apos;s category depends only on the immediately
+preceding word&apos;s category). In [Kupiec, 1989a], networks
+are used to selectively augment the context in a basic first-
+order model, rather than using uniformly second-order de-
+pendencies.
+</bodyText>
+<subsectionHeader confidence="0.999896">
+2.2 Our approach
+</subsectionHeader>
+<bodyText confidence="0.999973">
+We next describe how our choice of techniques satisfies the
+criteria listed in section 1. The use of an HMM permits
+complete flexibility in the choice of training corpora. Text
+from any desired domain can be used, and a tagger can be
+tailored for use with a particular text database by training
+on a portion of that database. Lexicons containing alter-
+native tag sets can be easily accommodated without any
+need for re-labeling the training corpus, affording further
+flexibility in the use of specialized tags. As the resources
+required are simply a lexicon and a suitably large sam-
+ple of ordinary text, taggers can be built with minimal
+effort, even for other languages, such as French (e.g., [Ku-
+piec, 1992]). The use of ambiguity classes and a first-order
+model reduces the number of parameters to be estimated
+without significant reduction in accuracy (discussed in sec-
+tion 5). This also enables a tagger to be reliably trained us-
+ing only moderate amounts of text. We have produced rea-
+sonable results training on as few as 3,000 sentences. Fewer
+parameters also reduce the time required for training. Rel-
+atively few ambiguity classes are sufficient for wide cover-
+age, so it is unlikely that adding new words to the lexicon
+requires retraining, as their ambiguity classes are already
+accommodated. Vocabulary independence is achieved by
+predicting categories for words not in the lexicon, using
+both context and suffix information. Probabilities corre-
+sponding to category sequences that never occurred in the
+training data are assigned small, non-zero values, ensuring
+that the model will accept any sequence of tokens, while
+still providing the most likely tagging. By using the fact
+that words are typically associated with only a few part-of-
+speech categories, and carefully ordering the computation,
+the algorithms have linear complexity (section 3.3).
+</bodyText>
+<sectionHeader confidence="0.98869" genericHeader="method">
+3 Hidden Markov Modeling
+</sectionHeader>
+<bodyText confidence="0.9998975">
+The hidden Markov modeling component of our tagger is
+implemented as an independent module following the spec-
+ification given in [Levinson et al., 1983], with special at-
+tention to space and time efficiency issues. Only first-order
+modeling is addressed and will be presumed for the remain-
+der of this discussion.
+</bodyText>
+<subsectionHeader confidence="0.991753">
+3.1 Formalism
+</subsectionHeader>
+<bodyText confidence="0.981132">
+In brief, an HMM is a doubly stochastic process that gen-
+erates sequence of symbols
+S ={Sl,S2, , ST}, S,EW 1 &lt;i&lt; T,
+where W is some finite set of possible symbols, by compos-
+ing an underlying Markov process with a state-dependent
+symbol generator (i.e., a Markov process with noise).&apos; Th
+Markov process captures the notion of sequence depen
+dency and is described by a set of N states, a matrix c
+transition probabilities A -= la,11 1 &lt; i, j &lt; N where a,
+is the probability of moving from state i to state j, and
+vector of initial probabilities H = {70 1 &lt; i &lt; N where 71
+is the probability of starting in state i. The symbol ger
+erator is a state-dependent measure on V described by
+matrix of symbol probabilities B {kik} 1 &lt; j &lt; N an
+1 &lt; k &lt; M where M = IW I and kik is the probability (
+generating symbol sk given that the Markov process is i
+state j.2
+In part-of-speech tagging, we will model word order di
+pendency through an underlying Markov process that 01
+erates in terms of lexical tags,&apos; yet we will only be ab
+to observe the sets of tags, or ambiguity classes, that ai
+possible for individual words. The ambiguity class of eac
+word is the set of its permitted parts of speech, only or
+of which is correct in context. Given the parameters .4,
+and II, hidden Markov modeling allows us to compute ti
+most probable sequence of state transitions, and hence a
+mostly likely sequence of lexical tags, corresponding to
+sequence of ambiguity classes. In the following, N can
+identified with the number of possible .tags, and W wil
+the set of all ambiguity classes.
+Applying an HMM consists of two tasks: estimating ti
+model parameters A, B and H from a training set; ar
+computing the most likely sequence of underlying sta
+transitions given new observations. Maximum likeliho(
+estimates (that is, estimates that maximize the probabili
+of the training set) can be found through application of z
+ternating expectation in a procedure known as the Baur
+Welch, or forward-backward, algorithm [Baum, 1972].
+proceeds by recursively defining two sets of probabiliti(
+the forward probabilities
+</bodyText>
+<equation confidence="0.981381">
+eft+1.(i) = at(i)aii bi(St+i) 1 &lt; t &lt; T — 1, (
+</equation>
+<bodyText confidence="0.985973">
+where ot1(i) = ribi(51) for all i; and the backward prob
+bilities,
+</bodyText>
+<equation confidence="0.961462">
+i3(i) = at b2(St+i))3t4-1(3) T — 1 &lt; t &lt; 1, (
+1.1
+</equation>
+<bodyText confidence="0.99254225">
+where OT(j) = 1 for all j. The forward probabili
+oet(i) is the joint probability of the sequence up to tir
+t, {S1, S2, , St}, and the event that the Markov pr
+cess is in state i at time t. Similarly, the backwa
+probability Ot(j) is the probability of seeing the sequen
+{St+i, St+2, , ST} given that the Markov process is
+state i at time t. It follows that the probability of t
+entire sequence is
+</bodyText>
+<equation confidence="0.961400666666667">
+N N
+P = EEat(i)az bj(St+i)Ot+i(i)
+2..,1 3.1
+</equation>
+<bodyText confidence="0.653802666666667">
+for any tin the range 1 &lt;t &lt; T — 1.3
+&apos;For an introduction to hidden Markov modeling see [F
+biner and Juang, 1986].
+</bodyText>
+<footnote confidence="0.913503">
+2In the following we will write b(St) for bp, if St = 3k.
+3This is most conveniently evaluated at t = T — 1, in whi
+case P = ar(i)
+</footnote>
+<page confidence="0.994642">
+134
+</page>
+<bodyText confidence="0.998252714285714">
+Given an initial choice for the parameters A, B, and H
+the expected number of transitions, , from state i to
+state j conditioned on the observation sequence S may be
+computed as follows:
+rescale. One approach premultiplies the a and 0 probabil-
+ities with an accumulating product depending on t [Levin-
+son et al., 1983]. Let ei1(i) = ai(i) and define
+</bodyText>
+<equation confidence="0.9748294">
+1 &lt;t &lt;T.
+i=1
+N
+Ct = [ E 6-,t -1(i)
+T -1
+1
+72i = — E at(i)aiibi(St+i)Ot+10)•
+t=1
+Hence we can estimate a3 by:
+yj ott(i)aii (St+1 ))3t+i.(i)
+= (3)
+E 7_ 1 ET=7,1atcoot(i)
+Similarly, bik and 7ri can be estimated as follows:
+Et3st=3„ t(i)13t
+ET-1 at(j)/3t(j)
+</equation>
+<bodyText confidence="0.917579055555556">
+and
+1 .
+= —(Y1(001(0. (5)
+In summary, to find maximum likelihood estimates for
+A, B, and H, via the Baum-Welch algorithm, one chooses
+some starting values, applies equations 3-5 to compute
+new values, and then iterates until convergence. It can be
+shown that this algorithm will converge, although possibly
+to a non-global maximum [Baum, 19721.
+Once a model has been estimated, selecting the most
+likely underlying sequence of state transitions correspond-
+ing to an observation S can be thought of as a maxi-
+mization over all sequences that might generate S. An
+efficient dynamic programming procedure, known as the
+Viterbi algorithm [Viterbi, 1967], arranges for this com-
+putation to proceed in time proportional to T. Suppose
+V = {v(t)} 1 &lt; t &lt; T is a state sequence that generates
+S, then the probability that V generates S is,
+</bodyText>
+<equation confidence="0.971701">
+P(v)= fl av(t-l)v(t)bv(t)(St)•
+t=2
+</equation>
+<bodyText confidence="0.995141666666667">
+To find the most probable such sequence we start by defin-
+ing 01(i) = rabi(Si) for 1 &lt; i &lt; N and then perform the
+recursion
+</bodyText>
+<equation confidence="0.9653404">
+Ot(i) = max [Ot-1(i)ai3]ki(St)
+1&lt;i&lt;N (6)
+and
+&apos;t(j) = max -1-0t_i(i)
+l&lt;z&lt;N
+</equation>
+<bodyText confidence="0.999157714285714">
+for 2 &lt; t &lt; T and 1 &lt; j &lt; N. The crucial observa-
+tion is that for each time t and each state i one need
+only consider the most probable sequence arriving at state
+i at time t. The probability of the most probable se-
+quence is maxi&lt;,&lt;N[OT(i)] while the sequence itself can
+be reconstructed by defining v(T) = max&lt;N OT(i) and
+v(t - 1) = Ike(qt) for T &gt; t &gt; 2.
+</bodyText>
+<subsectionHeader confidence="0.999442">
+3.2 Numerical Stability
+</subsectionHeader>
+<bodyText confidence="0.999904">
+The Baum-Welch algorithm (equations 1-5) and the Viter-
+bi algorithm (equation 6) involve operations on products
+of numbers constrained to be between 0 and 1. Since these
+products can easily underflow, measures must be taken to
+Now define &amp;t(i) = cicit(i) and use a&apos; in place of a in
+equation 1 to define &amp; for the next iteration:
+</bodyText>
+<equation confidence="0.903319">
+[N
+a t+1(i) = Ea t(i)aij b)(St+1)
+</equation>
+<bodyText confidence="0.870327666666667">
+Note that Ein_i eet(i) = 1 for 1 &lt; t &lt; T. Similarly, let
+OT(i) = OT(i) and define $t(i) = ct4t(i) for T &gt; t &gt; 1
+where
+</bodyText>
+<equation confidence="0.998115">
+ljt(i) = aiikot+04t+i(J) T -1 &lt;t &lt;1.
+j=1
+</equation>
+<bodyText confidence="0.9970468">
+The scaled backward and forward probabilities, &amp; and
+0-, can be exchanged for the unscaled probabilities in equa-
+tions 3-5 without affecting the value of the ratios. To
+see this, note that &amp;t(i) = Cat(i) and 0t(i)
+where
+</bodyText>
+<equation confidence="0.602869">
+H ct.
+</equation>
+<bodyText confidence="0.813161">
+Now, in terms of the scaled probabilities, equation 5, for
+example, can be seen to be unchanged:
+</bodyText>
+<equation confidence="0.98413175">
+( i)th (i)CT
+=
+E (i) N T
+Ei=1 °T. (i)
+</equation>
+<bodyText confidence="0.990638">
+A slight difficulty occurs in equation 3 that can be cured
+by the addition of a new term, ct+i, in each product of the
+upper sum:
+</bodyText>
+<equation confidence="0.999486">
+E eit(i)aiiki(st+0/3.t+I(i)ct+,
+ET---11,64(i)/3t(i) =
+</equation>
+<bodyText confidence="0.9815255">
+Numerical instability in the Viterbi algorithm can be
+ameliorated by operating on a logarithmic scale [Levinson
+et al., 1983]. That is, one maximizes the log probability of
+each sequence of state transitions,
+</bodyText>
+<equation confidence="0.915859">
+log(P(v)) = log(1r,(1)) + log(b„(1)(S1)) +
+log(av(t_1),(0) + log(bv(t)(St))•
+t=2
+Hence, equation 6 is replaced by
+t(i) = ma&lt;xN [(lit_ + log(c1,3 )] + log bj ( ).
+</equation>
+<bodyText confidence="0.993020333333333">
+Care must be taken with zero probabilities. However, this
+can be elegantly handled through the use of IEEE negative
+infinity [P754, 1981].
+</bodyText>
+<equation confidence="0.926050333333333">
+(4)
+1 &lt; t &lt;T -1.
+i=1
+</equation>
+<page confidence="0.99151">
+135
+</page>
+<subsectionHeader confidence="0.998434">
+3.3 Reducing Time Complexity
+</subsectionHeader>
+<bodyText confidence="0.9999524">
+As can be seen from equations 1-5, the time cost of training
+is 0(TN2). Similarly, as given in equation 6, the Viterbi
+algorithm is also 0(TN2). However, in part-of-speech tag-
+ging, the problem structure dictates that the matrix of
+symbol probabilities B is sparsely populated. That is,
+0 if the ambiguity class corresponding to symbol j
+includes the part-of-speech tag associated with state i. In
+practice, the degree of overlap between ambiguity classes
+is relatively low; some tokens are assigned unique tags, and
+hence have only one non-zero symbol probability.
+The sparseness of B leads one to consider restructuring
+equations 1-6 so a check for zero symbol probability can
+obviate the need for further computation. Equation 1 is
+already conveniently factored so that the dependence on
+bj(St+i ) is outside the inner sum. Hence, if k is the average
+number of non-zero entries in each row of B, the cost of
+computing equation 1 can be reduced to 0(kTN).
+Equations 2-4 can be similarly reduced by switching the
+order of iteration. For example, in equation 2, rather than
+for a given t computing ot(i) for each i one at a time, one
+can accumulate terms for all i in parallel. The net effect of
+this rewriting is to place a b3(St+i) = 0 check outside the
+innermost iteration. Equations 3 and 4 submit to a similar
+approach. Equation 5 is already only 0(N). Hence, the
+overall cost of training can be reduced to 0(kTN), which,
+in our experience, amounts to an order of magnitude speed-
+up. 4
+The time complexity of the Viterbi algorithm can also be
+reduced to 0(kTN) by noting that b3 (S) can be factored
+out of the maximization of equation 6.
+</bodyText>
+<subsectionHeader confidence="0.995074">
+3.4 Controlling Space Complexity
+</subsectionHeader>
+<bodyText confidence="0.999589191489362">
+Adding up the sizes of the probability matrices A, B, and
+H, it is easy to see that the storage cost for directly re-
+presenting one model is proportional to N(N M 1).
+Running the Baum-Welch algorithm requires storage for
+the sequence of observations, the a and 3 probabilities,
+the vector {c}, and copies of the A and B matrices (since
+the originals cannot be overwritten until the end of each
+iteration). Hence, the grand total of space required for
+training is proportional to T +2N(T N M + 1).
+Since N and M are fixed by the model, the only param-
+eter that can be varied to reduce storage costs is T. Now,
+adequate training requires processing from tens of thou-
+sands to hundreds of thousands of tokens [Kupiec, 1989a].
+The training set can be considered one long sequence, it
+which case T is very large indeed, or it can be broken up
+into a number of smaller sequences at convenient bound-
+aries. In first-order hidden Markov modeling, the stochas-
+tic process effectively restarts at unambiguous tokens, such
+as sentence and paragraph markers, hence these tokens
+are convenient points at which to break the training set.
+If the Baum-Welch algorithm is run separately (from the
+same starting point) on each piece, the resulting trained
+models must be recombined in some way. One obvious ap-
+proach is simply to average. However, this fails if any two
+&apos;An equivalent approach maintains a mapping from states i
+to non-zero symbol probabilities and simply avoids, in the in-
+ner iteration, computing products which must be zero [Kupiec,
+1992].
+states are indistinguishable (in the sense that they had the
+same transition probabilities and the same symbol prob-
+abilities at start), because states are then not matched
+across trained models. It is therefore important that each
+state have a distinguished role, which is relatively easy to
+achieve in part-of-speech tagging.
+Our implementation of the Baum-Welch algorithm
+breaks up the input into fixed-sized pieces of training text.
+The Baum-Welch algorithm is then run separately on each
+piece and the results are averaged together.
+Running the Viterbi algorithm requires storage for the
+sequence of observations, a vector of current maxes, a
+scratch array of the same size, and a matrix of i,b indices,
+for a total proportional to T + N(2 +T) and a grand total
+(including the model) of T N(N + M +T +3). Again, N
+and M are fixed. However, T need not be longer than a sin-
+gle sentence, since, as was observed above, the HMM, and
+hence the Viterbi algorithm, restarts at sentence bound-
+aries.
+</bodyText>
+<subsectionHeader confidence="0.9856">
+3.5 Model Tuning
+</subsectionHeader>
+<bodyText confidence="0.999885142857143">
+An HMM for part-of-speech tagging can be tuned in a
+variety of ways. First, the choice of tagset and lexicon
+determines the initial model. Second, empirical and a pri-
+ori information can influence the choice of starting values
+for the Baum-Welch algorithm. For example, counting in-
+stances of ambiguity classes in running text allows one to
+assign non-uniform starting probabilities in A for a partic-
+ular tag&apos;s realization as a particular ambiguity class. Alter-
+natively, one can state a priori that a particular ambiguity
+class is most likely to be the reflection of some subset of its
+component tags. For example, if an ambiguity class con-
+sisting of the open class tags is used for unknown words,
+one may encode the fact that most unknown words are
+nouns or proper nouns by biasing the initial probabilities
+in B.
+Another biasing of starting values can arises from not-
+ing that some tags are unlikely to be followed by others.
+For example, the lexical item &amp;quot;to&amp;quot; maps to an ambigu-
+ity class containing two tags, infinitive-marker and to-as-
+preposition, neither of which occurs in any other ambigu-
+ity class. If nothing more were stated, the HMM would
+have two states which were indistinguishable. This can
+be remedied by setting the initial transition probabilities
+from infinitive-marker to strongly favor transitions to such
+states as verb-uninflected and adverb.
+Our implementation allows for two sorts of biasing of
+starting values: ambiguity classes can be annotated with
+favored tags; and states can be annotated with favored
+transitions. These biases may be specified either as sets or
+as set complements. Biases are implemented by replacing
+the disfavored probabilities with a small constant (machine
+epsilon) and redistributing mass to the other possibilities.
+This has the effect of disfavoring the indicated outcomes
+without disallowing them; sufficient converse data can re-
+habilitate these values.
+</bodyText>
+<sectionHeader confidence="0.995879" genericHeader="method">
+4 Architecture
+</sectionHeader>
+<bodyText confidence="0.999825">
+In support of this and other work, we have developed a
+system architecture for text access [Cutting et al., 1991].
+This architecture defines five components for such systems:
+</bodyText>
+<page confidence="0.99388">
+136
+</page>
+<figure confidence="0.995611909090909">
+ambiguity class, &lt;stem,tag&gt;* ambiguity class
+Lexicon
+token
+Tokenizer
+........ ........................
+(further analysis)
+stem, tag
+Tagging
+trained HMM
+character ...••
+••••... ............................ ..••••••••
+</figure>
+<figureCaption confidence="0.999989">
+Figure 1: Tagger Modules in System Context
+</figureCaption>
+<bodyText confidence="0.999962088888889">
+corpus, which provides text in a generic manner; analysis,
+which extracts terms from the text; index which stores
+term occurrence statistics; and search, which utilizes these
+statistics to resolve queries.
+The part-of-speech tagger described here is implemented
+as an analysis module. Figure 1 illustrates the overall ar-
+chitecture, showing the tagger analysis implementation in
+detail. The tagger itself has a modular architecture, isolat-
+ing behind standard protocols those elements which may
+vary, enabling easy substitution of alternate implementa-
+tions.
+Also illustrated here are the data types which flow be-
+tween tagger components. As an analysis implementation,
+the tagger must generate terms from text. In this context,
+a term is a word stem annotated with part of speech.
+Text enters the analysis sub-system where the first pro-
+cessing module it encounters is the tokenizer, whose duty
+is to convert text (a sequence of characters) into a sequence
+of tokens. Sentence boundaries are also identified by the
+tokenizer and are passed as reserved tokens.
+The tokenizer subsequently passes tokens to the lexicon.
+Here tokens are converted into a set of stems, each anno-
+tated with a part-of-speech tag. The set of tags identifies
+an ambiguity class. The identification of these classes is
+also the responsibility of the lexicon. Thus the lexicon de-
+livers a set of stems paired with tags, and an ambiguity
+class.
+The training module takes long sequences of ambiguity
+classes as input. It uses the Baum-Welch algorithm to
+produce a trained HMM, an input to the tagging module.
+Training is typically performed on a sample of the corpus
+at hand, with the trained HMM being saved for subsequent
+use on the corpus at large.
+The tagging module buffers sequences of ambiguity
+classes between sentence boundaries. These sequences are
+disambiguated by computing the maximal path through
+the HMM with the Viterbi algorithm. Operating at sen-
+tence granularity provides fast throughput without loss of
+accuracy, as sentence boundaries are unambiguous. The
+resulting sequence of tags is used to select the appropriate
+stems. Pairs of stems and tags are subsequently emitted.
+The tagger may function as a complete analysis compo-
+nent, providing tagged text to search and indexing com-
+ponents, or as a sub-system of a more elaborate analysis,
+such as phrase recognition.
+</bodyText>
+<subsectionHeader confidence="0.992885">
+4.1 Tokenizer Implementation
+</subsectionHeader>
+<bodyText confidence="0.999989761904762">
+The problem of tokenization has been well addressed by
+much work in compilation of programming languages. The
+accepted approach is to specify token classes with reg-
+ular expressions. These may be compiled into a sin-
+gle deterministic finite state automaton which partitions
+character streams into labeled tokens [Aho et al., 1986,
+Lesk, 19751.
+In the context of tagging, we require at least two to-
+ken classes: sentence boundary and word. Other classes
+may include numbers, paragraph boundaries and various
+sorts of punctuation (e.g., braces of various types, com-
+mas). However, for simplicity, we will henceforth assume
+only words and sentence boundaries are extracted.
+Just as with programming languages, with text it is not
+always possible to unambiguously specify the required to-
+ken classes with regular expressions. However the addition
+of a simple lookahead mechanism which allows specifica-
+tion of right context ameliorates this [Aho et al., 1986,
+Lesk, 1975]. For example, a sentence boundary in English
+text might be identified by a period, followed bywhite-
+space, followed by an uppercase letter. However the up-
+</bodyText>
+<page confidence="0.995355">
+137
+</page>
+<bodyText confidence="0.9999278">
+percase letter must not be consumed, as it is the first com-
+ponent of the next token. A lookahead mechanism allows
+us to specify in the sentence-boundary regular expression
+that the final character matched should not be considered
+a part of the token.
+This method meets our stated goals for the overall sys-
+tem. It is efficient, requiring that each character be exam-
+ined only once (modulo lookahead). It is easily parameter-
+izable, providing the expressive power to concisely define
+accurate and robust token classes.
+</bodyText>
+<subsectionHeader confidence="0.989797">
+4.2 Lexicon Implementation
+</subsectionHeader>
+<bodyText confidence="0.999982758620689">
+The lexicon module is responsible for enumerating parts of
+speech and their associated stems for each word it is given.
+For the English word &amp;quot;does,&amp;quot; the lexicon might return &amp;quot;do,
+verb&amp;quot; and &amp;quot;doe, plural-noun.&amp;quot; It is also responsible for
+identifying ambiguity classes based upon sets of tags.
+We have employed a three-stage implementation:
+First, we consult a manually-constructed lexicon to find
+stems and parts of speech. Exhaustive lexicons of this sort
+are expensive, if not impossible, to produce. Fortunately,
+a small set of words accounts for the vast majority of word
+occurences. Thus high coverage can be obtained without
+prohibitive effort.
+Words not found in the manually constructed lexicon
+are generally both open class and regularly inflected. As
+a second stage, a language-specific method can be em-
+ployed to guess ambiguity classes for unknown words. For
+many languages (e.g., English and French), word suffixes
+provide strong cues to words&apos; possible categories. Prob-
+abalistic predictions of a word&apos;s category can be made
+by analyzing suffixes in untagged text [Kupiec, 1992,
+Meteer et al., 1991].
+As a final stage, if a word is not in the manually con-
+structed lexicon, and its suffix is not recognized, a default
+ambiguity class is used. This class typically contains all
+the open class categories in the language.
+Dictionaries and suffix tables are both efficiently imple-
+mentable as letter trees, or tries [Knuth, 1973], which re-
+quire that each character of a word be examined only once
+during a lookup.
+</bodyText>
+<sectionHeader confidence="0.987754" genericHeader="evaluation">
+5 Performance
+</sectionHeader>
+<bodyText confidence="0.99983">
+In this section, we detail how our tagger meets the desider-
+ata that we outlined in section 1.
+</bodyText>
+<subsectionHeader confidence="0.925304">
+5.1 Efficient
+</subsectionHeader>
+<bodyText confidence="0.992287863636364">
+The system is implemented in Common Lisp [Steele, 1990].
+All timings reported are for a Sun SPARCStation2. The
+English lexicon used contains 38 tags (M = 38) and 174
+ambiguity classes (N = 174).
+Training was performed on 25,000 words in articles se-
+lected randomly from Grolier&apos;s Encyclopedia. Five itera-
+tions of training were performed in a total time of 115 CPU
+seconds. Following is a time breakdown by component:
+Training: average pseconds per token
+tokenizer lexicon 1 iteration 5 iterations total
+640 400 680 3400 4600
+Tagging was performed on 115,822 words in a collection
+of articles by the journalist Dave Barry. This required a
+total of of 143 CPU seconds. The time breakdown for this
+was as follows:
+Tagging: average pseconds per token
+tokenizer lexicon Viterbi total
+604 388 233 1235
+It can be seen from these figures that training on a new
+corpus may be accomplished in a matter of minutes, and
+that tens of megabytes of text may then be tagged per
+hour.
+</bodyText>
+<subsectionHeader confidence="0.995771">
+5.2 Accurate and Robust
+</subsectionHeader>
+<bodyText confidence="0.9999138">
+When using a lexicon and tagset built from the tagged text
+of the Brown corpus [Francis and KuEera, 1982], training
+on one half of the corpus (about 500,000 words) and tag-
+ging the other, 96% of word instances were assigned the
+correct tag. Eight iterations of training were used. This
+level of accuracy is comparable to the best achieved by
+other taggers [Church, 1988, Merialdo, 1991].
+The Brown Corpus contains fragments and ungrammat-
+icalities, thus providing a good demonstration of robust-
+ness.
+</bodyText>
+<subsectionHeader confidence="0.957527">
+5.3 Tunable and Reusable
+</subsectionHeader>
+<bodyText confidence="0.999994352941177">
+A tagger should be tunable, so that systematic tagging
+errors and anomalies can be addressed. Similarly, it is im-
+portant that it be fast and easy to target the tagger to
+new genres and languages, and to experiment with differ-
+ent tagsets reflecting different insights into the linguistic
+phenomena found in text. In section 3.5, we describe how
+the HMM implementation itself supports tuning. In ad-
+dition, our implementation supports a number of explicit
+parameters to facilitate tuning and reuse, including specifi-
+cation of lexicon and training corpus. There is also support
+for a flexible tagset. For example, if we want to collapse
+distinctions in the lexicon, such as those between positive,
+comparative, and superlative adjectives, we only have to
+make a small change in the mapping from lexicon to tagset.
+Similarly, if we wish to make finer grain distinctions than
+those available in the lexicon, such as case marking on pro-
+nouns, there is a simple way to note such exceptions.
+</bodyText>
+<sectionHeader confidence="0.998281" genericHeader="conclusions">
+6 Applications
+</sectionHeader>
+<bodyText confidence="0.999985333333333">
+We have used the tagger in a number of applications. We
+describe three applications here: phrase recognition; word
+sense disambiguation; and grammatical function assign-
+ment. These projects are part of a research effort to use
+shallow analysis techniques to extract content from unre-
+stricted text.
+</bodyText>
+<subsectionHeader confidence="0.991346">
+6.1 Phrase Recognition
+</subsectionHeader>
+<bodyText confidence="0.999978">
+We have constructed a system that recognizes simple
+phrases when given as input the sequence of tags for a sen-
+tence. There are recognizers for noun phrases, verb groups
+adverbial phrases, and prepositional phrases. Each of these
+phrases comprises a contiguous sequence of tags that sat is.
+fies a simple grammar. For example, a noun phrase can be
+a unary sequence containing a pronoun tag or an arbitrar.
+ily long sequence of noun and adjective tags, possibly pre.
+ceded by a determiner tag and possibly with an embeddec
+possessive marker. The longest possible sequence is founc
+(e.g., &amp;quot;the program committee&amp;quot; but not &amp;quot;the program&apos;)
+</bodyText>
+<page confidence="0.995361">
+138
+</page>
+<bodyText confidence="0.99980725">
+Conjunctions are not recognized as part of any phrase; for
+example, in the fragment &amp;quot;the cats and dogs,&amp;quot; &amp;quot;the cats&amp;quot;
+and &amp;quot;dogs&amp;quot; will be recognized as two noun phrases. Prepo-
+sitional phrase attachment is not performed at this stage of
+processing. This approach to phrase recognition in some
+cases captures only parts of some phrases; however, our
+approach minimizes false positives, so that we can rely on
+the recognizers&apos; results.
+</bodyText>
+<subsectionHeader confidence="0.998723">
+6.2 Word Sense Disambiguation
+</subsectionHeader>
+<bodyText confidence="0.999981130434783">
+Part-of-speech tagging in and of itself is a useful tool in
+lexical disambiguation; for example, knowing that &amp;quot;dig&amp;quot; is
+being used as a noun rather than as a verb indicates the
+word&apos;s appropriate meaning. But many words have multi-
+ple meanings even while occupying the same part of speech.
+To this end, the tagger has been used in the implementa-
+tion of an experimental noun homograph disambiguation
+algorithm [Hearst, 1991]. The algorithm (known as Catch-
+Word) performs supervised training over a large text cor-
+pus, gathering lexical, orthographic, and simple syntactic
+evidence for each sense of the ambiguous noun. After a pe-
+riod of training, Catch Word classifies new instances of the
+noun by checking its context against that of previously ob-
+served instances and choosing the sense for which the most
+evidence is found. Because the sense distinctions made are
+coarse, the disambiguation can be accomplished without
+the expense of knowledge bases or inference mechanisms.
+Initial tests resulted in accuracies of around 90% for nouns
+with strongly distinct senses.
+This algorithm uses the tagger in two ways: (i) to de-
+termine the part of speech of the target word (filtering
+out the non-noun usages) and (ii) as a step in the phrase
+recognition analysis of the context surrounding the noun.
+</bodyText>
+<subsectionHeader confidence="0.957134">
+6.3 Grammatical Function Assignment
+</subsectionHeader>
+<bodyText confidence="0.999996347826087">
+The phrase recognizers also provide input to a system,
+Sopa [Sibun, 1991], which recognizes nominal arguments
+of verbs, specifically, Subject, Object, and Predicative Ar-
+guments. Sopa does not rely on information (such as arity
+or voice) specific to the particular verbs involved. The
+first step in assigning grammatical functions is to parti-
+tion the tag sequence of each sentence into phrases. The
+phrase types include those mentioned in section 6.1, addi-
+tional types to account for conjunctions, complementizers,
+and indicators of sentence boundaries, and an &amp;quot;unknown&amp;quot;
+type. After a sentence has been partitioned, each simple
+noun phrase is examined in the context of the phrase to its
+left and the phrase to its right. On the basis of this local
+context and a set of rules, the noun phrase is marked as
+a syntactic Subject, Object, Predicative, or is not marked
+at all. A label of Predicative is assigned only if it can be
+determined that the governing verb group is a form of a
+predicating verb (e.g., a form of &amp;quot;be&amp;quot;). Because this can-
+not always be determined, some Predicatives are labeled
+Objects. If a noun phrase is labeled, it is also annotated
+as to whether the governing verb is the closest verb group
+to the right or to the left. The algorithm has an accuracy
+of approximately 80% in assigning grammatical functions.
+</bodyText>
+<sectionHeader confidence="0.992713" genericHeader="acknowledgments">
+Acknowledgments
+</sectionHeader>
+<bodyText confidence="0.9999195">
+We would like to thank Marti Hearst for her contributions
+to this paper, Lauri Karttunen and Annie Zaenen for their
+work on lexicons, and Kris Halvorsen for supporting this
+project.
+</bodyText>
+<sectionHeader confidence="0.987988" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.99907234">
+[Aho et al., 1986] A. V. Aho, R. Sethi, and J. D. Ullman.
+Compilers: Principles, Techniques and Tools. Addison-
+Wesley, 1986.
+[Baum, 1972] L. E. Baum. An inequality and associ-
+ated maximization technique in statistical estimation for
+probabilistic functions of a Markov process. Inequalities,
+3:1-8, 1972.
+[Church, 1988] K. W. Church. A stochastic parts program
+and noun phrase parser for unrestricted text. In Pro-
+ceedings of the Second Conference on Applied Natural
+Language Processing (ACL), pages 136-143, 1988.
+[Cutting et al., 1991] D.R. Cutting, J. Pedersen, and P.-
+K. Halvorsen. An object-oriented architecture for text
+retrieval. In Conference Proceedings of RIA O&apos;91, Intelli-
+gent Text and Image Handling, Barcelona, Spain, pages
+285-298, April 1991.
+[DeRose, 1988] S. DeRose. Grammatical category disam-
+biguation by statistical optimization. Computational
+Linguistics, 14:31-39, 1988.
+[Derouault and Merialdo, 1986] A. M. Derouault and
+B. Merialdo. Natural language modeling for phoneme-
+to-text transcription. IEEE Transactions on Pattern
+Analysis and Machine Intelligence, PAMI-8:742-749,
+1986.
+[Francis and KuEera, 1982] W. N. Francis and F. Ktiera.
+Frequency Analysis of English Usage. Houghton Mifflin,
+1982.
+[Garside et al., 1987] R. Garside, G. Leech, and G. Samp-
+son. The Computational Analysis of English. Longman,
+1987.
+[Greene and Rubin, 1971] B. B. Greene and G. M. Rubin.
+Automatic grammatical tagging of English. Technical
+report, Department of Linguistics, Brown University,
+Providence, Rhode Island, 1971.
+[Hearst, 1991] M. A. Hearst. Noun homograph disam-
+biguation using local context in large text corpora. In
+The Proceedings of the 7th New OED Conference on Us-
+ing Corpora, pages 1-22, Oxford, 1991.
+[Jelinek and Mercer, 1980] F. Jelinek and R. L. Mercer.
+Interpolated estimation of markov source parameters
+from sparse data. In Proceedings of the Workshop Pat-
+tern Recognition in Practice, pages 381-397, Amster-
+dam, 1980. North-Holland.
+[Jelinek, 1985] F. Jelinek. Markov source modeling of text
+generation. In J. K. Skwirzinski, editor, Impact of
+Processing Techniques on Communication. Nijhoff, Dor-
+drecht, 1985.
+[Knuth, 1973] D. Knuth. The Art of Computer Program-
+ming, volume 3: Sorting and Searching. Addison-
+Wesley, 1973.
+</reference>
+<page confidence="0.997715">
+139
+140
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.391292">
+<title confidence="0.99734">A Practical Part-of-Speech Tagger</title>
+<author confidence="0.990162">Cutting Kupiec Pedersen Sibun</author>
+<affiliation confidence="0.996817">Xerox Palo Alto Research Center</affiliation>
+<address confidence="0.999866">3333 Coyote Hill Road, Palo Alto, CA 94304, USA</address>
+<abstract confidence="0.997139707920792">We present an implementation of a part-of-speech tagger based on a hidden Markov model. The methodology enables robust and accurate tagging with few resource requirements. Only a lexicon and some unlabeled training text are required. Accuracy exceeds 96%. We describe implementation strategies and optimizations which result in high-speed operation. Three applications for tagging are described: phrase recognition; word sense disambiguation; and grammatical function assignment. 1 Desiderata Many words are ambiguous in their part of speech. For example, &amp;quot;tag&amp;quot; can be a noun or a verb. However, when a word appears in the context of other words, the ambiguity is often reduced: in &amp;quot;a tag is a part-of-speech label,&amp;quot; the &amp;quot;tag&amp;quot; can only be a noun. A tagger is a system that uses context to assign parts of speech to words. Automatic text tagging is an important first step in discovering the linguistic structure of large text corpora. Part-of-speech information facilitates higher-level analysis, such as recognizing noun phrases and other patterns in text. For a tagger to function as a practical component in a language processing system, we believe that a tagger must be: corpora contain ungrammatical constructions, isolated phrases (such as titles), and nonlinguistic data (such as tables). Corpora are also likely to contain words that are unknown to the tagger. It is desirable that a tagger deal gracefully with these situations. a tagger is to be used to analyze arbitrarily large corpora, it must be efficient—performing in time linear in the number of words tagged. Any training required should also be fast, enabling rapid turnaround with new corpora and new text genres. A should attempt to assign the correct part-of-speech tag to every word encountered. A should be able to take advantage of linguistic insights. One should be able to correct errors by supplying appropriate priori &amp;quot;hints.&amp;quot; It should be possible to give different hints for different corpora. effort required to retarget a tagger to new corpora, new tagsets, and new languages should be minimal. 2 Methodology 2.1 Background Several different approaches have been used for building text taggers. Greene and Rubin used a rule-based approach in the TAGGIT program [Greene and Rubin, 1971], which was an aid in tagging the Brown corpus [Francis and KuEera, 1982]. TAGGIT disambiguated 77% of the corpus; the rest was done manually over a period of several years. More recently, Koskenniemi also used a rule-based approach implemented with finite-state machines [Koskenniemi, 1990]. Statistical methods have also been used (e.g., [DeRose, [Garside al., These provide the capability of resolving ambiguity on the basis of most likely interpretation. A form of Markov model has been widely used that assumes that a word depends probabilistically on just its part-of-speech category, which in turn depends solely on the categories of the preceding two words. Two types of training (i.e., parameter estimation) have been used with this model. The first makes use of a tagged training corpus. Derouault and Merialdo use a bootstrap method for training [Derouault and Merialdo, 1986]. At first, a relatively small amount of text is manually tagged and used to train a partially accurate model. The model is then used to tag more text, and the tags are manually corrected and then used to retrain the model. Church uses the tagged Brown corpus for training [Church, 1988]. These models involve probabilities for each word in the lexicon, so large tagged corpora are required for reliable estimation. The second method of training does not require a tagged training corpus. In this situation the Baum-Welch algorithm (also known as the forward-backward algorithm) can be used [Baum, 1972]. Under this regime the model is a Markov model as state transitions (i.e., part-of-speech categories) are assumed to be unobservable. Jelinek has used this method for training a text tagger [Jelinek, 1985]. Parameter smoothing can be conachieved using the method of interpolawhich weighted estimates are taken from secondand first-order models and a uniform probability distribution [Jelinek and Mercer, 1980]. Kupiec used word equivclasses (referred to here as classes) on parts of speech, to pool data from individual words [Kupiec, 1989b]. The most common words are still represented individually, as sufficient data exist for robust estimation. 133 However all other words are represented according to the set of possible categories they can assume. In this manner, the vocabulary of 50,000 words in the Brown corpus can be reduced to approximately 400 distinct ambiguity classes [Kupiec, 1992]. To further reduce the number of parameters, a first-order model can be employed (this assumes that a word&apos;s category depends only on the immediately preceding word&apos;s category). In [Kupiec, 1989a], networks are used to selectively augment the context in a basic firstorder model, rather than using uniformly second-order dependencies. 2.2 Our approach We next describe how our choice of techniques satisfies the listed in section 1. The use of an complete flexibility in the choice of training corpora. Text from any desired domain can be used, and a tagger can be tailored for use with a particular text database by training on a portion of that database. Lexicons containing alternative tag sets can be easily accommodated without any need for re-labeling the training corpus, affording further flexibility in the use of specialized tags. As the resources required are simply a lexicon and a suitably large sample of ordinary text, taggers can be built with minimal effort, even for other languages, such as French (e.g., [Kupiec, 1992]). The use of ambiguity classes and a first-order model reduces the number of parameters to be estimated without significant reduction in accuracy (discussed in section 5). This also enables a tagger to be reliably trained using only moderate amounts of text. We have produced reasonable results training on as few as 3,000 sentences. Fewer parameters also reduce the time required for training. Relatively few ambiguity classes are sufficient for wide coverage, so it is unlikely that adding new words to the lexicon requires retraining, as their ambiguity classes are already accommodated. Vocabulary independence is achieved by predicting categories for words not in the lexicon, using both context and suffix information. Probabilities corresponding to category sequences that never occurred in the training data are assigned small, non-zero values, ensuring that the model will accept any sequence of tokens, while still providing the most likely tagging. By using the fact that words are typically associated with only a few part-ofspeech categories, and carefully ordering the computation, the algorithms have linear complexity (section 3.3). 3 Hidden Markov Modeling The hidden Markov modeling component of our tagger is implemented as an independent module following the specgiven in [Levinson et with special attention to space and time efficiency issues. Only first-order modeling is addressed and will be presumed for the remainder of this discussion. 3.1 Formalism brief, an a doubly stochastic process that generates sequence of symbols ={Sl,S2, , 1 &lt;i&lt; where W is some finite set of possible symbols, by composing an underlying Markov process with a state-dependent symbol generator (i.e., a Markov process with noise).&apos; Th Markov process captures the notion of sequence depen and is described by a set of a matrix c probabilities A -= 1 &lt; a, the probability of moving from state i to state of initial probabilities H = {70 1 &lt; i &lt; is the probability of starting in state i. The symbol ger erator is a state-dependent measure on V described by of symbol probabilities 1 &lt; j &lt; &lt; &lt; M = IW I is the probability ( symbol given that the Markov process is i In part-of-speech tagging, we will model word order di pendency through an underlying Markov process that 01 erates in terms of lexical tags,&apos; yet we will only be ab to observe the sets of tags, or ambiguity classes, that ai possible for individual words. The ambiguity class of eac word is the set of its permitted parts of speech, only or of which is correct in context. Given the parameters .4, Markov modeling allows us to compute ti most probable sequence of state transitions, and hence a mostly likely sequence of lexical tags, corresponding to of ambiguity classes. In the following, identified with the number of possible .tags, and W wil the set of all ambiguity classes. Applying an HMM consists of two tasks: estimating ti parameters A, a training set; ar computing the most likely sequence of underlying sta transitions given new observations. Maximum likeliho( estimates (that is, estimates that maximize the probabili of the training set) can be found through application of z ternating expectation in a procedure known as the Baur Welch, or forward-backward, algorithm [Baum, 1972]. proceeds by recursively defining two sets of probabiliti( the forward probabilities eft+1.(i) = bi(St+i) &lt; t &lt; T — 1, ( = for all the backward prob bilities, i3(i) = — 1 &lt; t &lt; 1, ( 1.1 1 for all forward probabili the joint probability of the sequence up to tir t, S2, , the event that the Markov pr is in state i at time the backwa is the probability of seeing the sequen , ST} that the Markov process is state i at time t. It follows that the probability of t entire sequence is N N =</abstract>
+<intro confidence="0.526253">any tin the range 1 &lt;t &lt; —</intro>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>A V Aho</author>
+<author>R Sethi</author>
+<author>J D Ullman</author>
+</authors>
+<date>1986</date>
+<booktitle>Compilers: Principles, Techniques and Tools.</booktitle>
+<publisher>AddisonWesley,</publisher>
+<marker>[Aho et al., 1986]</marker>
+<rawString>A. V. Aho, R. Sethi, and J. D. Ullman. Compilers: Principles, Techniques and Tools. AddisonWesley, 1986.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>L E Baum</author>
+</authors>
+<title>An inequality and associated maximization technique in statistical estimation for probabilistic functions of a Markov process.</title>
+<date>1972</date>
+<journal>Inequalities,</journal>
+<pages>3--1</pages>
+<marker>[Baum, 1972]</marker>
+<rawString>L. E. Baum. An inequality and associated maximization technique in statistical estimation for probabilistic functions of a Markov process. Inequalities, 3:1-8, 1972.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>K W Church</author>
+</authors>
+<title>A stochastic parts program and noun phrase parser for unrestricted text.</title>
+<date>1988</date>
+<booktitle>In Proceedings of the Second Conference on Applied Natural Language Processing (ACL),</booktitle>
+<pages>136--143</pages>
+<marker>[Church, 1988]</marker>
+<rawString>K. W. Church. A stochastic parts program and noun phrase parser for unrestricted text. In Proceedings of the Second Conference on Applied Natural Language Processing (ACL), pages 136-143, 1988.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D R Cutting</author>
+<author>J Pedersen</author>
+<author>P-K Halvorsen</author>
+</authors>
+<title>An object-oriented architecture for text retrieval.</title>
+<date></date>
+<booktitle>In Conference Proceedings of RIA O&apos;91, Intelligent Text and Image Handling,</booktitle>
+<pages>285--298</pages>
+<location>Barcelona,</location>
+<marker>[Cutting et al., 1991]</marker>
+<rawString>D.R. Cutting, J. Pedersen, and P.-K. Halvorsen. An object-oriented architecture for text retrieval. In Conference Proceedings of RIA O&apos;91, Intelligent Text and Image Handling, Barcelona, Spain, pages 285-298, April 1991.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>S DeRose</author>
+</authors>
+<title>Grammatical category disambiguation by statistical optimization.</title>
+<date>1988</date>
+<journal>Computational Linguistics,</journal>
+<pages>14--31</pages>
+<marker>[DeRose, 1988]</marker>
+<rawString>S. DeRose. Grammatical category disambiguation by statistical optimization. Computational Linguistics, 14:31-39, 1988.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>A M Derouault</author>
+<author>B Merialdo</author>
+</authors>
+<title>Natural language modeling for phonemeto-text transcription.</title>
+<date>1986</date>
+<journal>IEEE Transactions on Pattern Analysis and Machine Intelligence,</journal>
+<pages>8--742</pages>
+<marker>[Derouault and Merialdo, 1986]</marker>
+<rawString>A. M. Derouault and B. Merialdo. Natural language modeling for phonemeto-text transcription. IEEE Transactions on Pattern Analysis and Machine Intelligence, PAMI-8:742-749, 1986.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>W N Francis</author>
+<author>F Ktiera</author>
+</authors>
+<title>Frequency Analysis of English Usage.</title>
+<date>1982</date>
+<location>Houghton Mifflin,</location>
+<marker>[Francis and KuEera, 1982]</marker>
+<rawString>W. N. Francis and F. Ktiera. Frequency Analysis of English Usage. Houghton Mifflin, 1982.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>R Garside</author>
+<author>G Leech</author>
+<author>G Sampson</author>
+</authors>
+<title>The Computational Analysis of English.</title>
+<date>1987</date>
+<publisher>Longman,</publisher>
+<marker>[Garside et al., 1987]</marker>
+<rawString>R. Garside, G. Leech, and G. Sampson. The Computational Analysis of English. Longman, 1987.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>B B Greene</author>
+<author>G M Rubin</author>
+</authors>
+<title>Automatic grammatical tagging of English.</title>
+<date>1971</date>
+<tech>Technical report,</tech>
+<institution>Department of Linguistics, Brown University,</institution>
+<location>Providence, Rhode Island,</location>
+<marker>[Greene and Rubin, 1971]</marker>
+<rawString>B. B. Greene and G. M. Rubin. Automatic grammatical tagging of English. Technical report, Department of Linguistics, Brown University, Providence, Rhode Island, 1971.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>M A Hearst</author>
+</authors>
+<title>Noun homograph disambiguation using local context in large text corpora.</title>
+<date>1991</date>
+<booktitle>In The Proceedings of the 7th New OED Conference on Using Corpora,</booktitle>
+<pages>1--22</pages>
+<location>Oxford,</location>
+<marker>[Hearst, 1991]</marker>
+<rawString>M. A. Hearst. Noun homograph disambiguation using local context in large text corpora. In The Proceedings of the 7th New OED Conference on Using Corpora, pages 1-22, Oxford, 1991.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>F Jelinek</author>
+<author>R L Mercer</author>
+</authors>
+<title>Interpolated estimation of markov source parameters from sparse data.</title>
+<date>1980</date>
+<booktitle>In Proceedings of the Workshop Pattern Recognition in Practice,</booktitle>
+<pages>381--397</pages>
+<publisher>North-Holland.</publisher>
+<location>Amsterdam,</location>
+<marker>[Jelinek and Mercer, 1980]</marker>
+<rawString>F. Jelinek and R. L. Mercer. Interpolated estimation of markov source parameters from sparse data. In Proceedings of the Workshop Pattern Recognition in Practice, pages 381-397, Amsterdam, 1980. North-Holland.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>F Jelinek</author>
+</authors>
+<title>Markov source modeling of text generation.</title>
+<date>1985</date>
+<booktitle>Impact of Processing Techniques on Communication.</booktitle>
+<editor>In J. K. Skwirzinski, editor,</editor>
+<location>Nijhoff, Dordrecht,</location>
+<marker>[Jelinek, 1985]</marker>
+<rawString>F. Jelinek. Markov source modeling of text generation. In J. K. Skwirzinski, editor, Impact of Processing Techniques on Communication. Nijhoff, Dordrecht, 1985.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D Knuth</author>
+</authors>
+<title>The Art of Computer Programming,</title>
+<date>1973</date>
+<volume>volume</volume>
+<publisher>AddisonWesley,</publisher>
+<marker>[Knuth, 1973]</marker>
+<rawString>D. Knuth. The Art of Computer Programming, volume 3: Sorting and Searching. AddisonWesley, 1973.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

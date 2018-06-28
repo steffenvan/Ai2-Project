@@ -1,0 +1,2069 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.000018">
+<title confidence="0.995501">
+Approximation Strategies for Multi-Structure Sentence Compression
+</title>
+<author confidence="0.994355">
+Kapil Thadani
+</author>
+<affiliation confidence="0.996482">
+Department of Computer Science
+Columbia University
+</affiliation>
+<address confidence="0.989504">
+New York, NY 10025, USA
+</address>
+<email confidence="0.999622">
+kapil@cs.columbia.edu
+</email>
+<sectionHeader confidence="0.993916" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.999912">
+Sentence compression has been shown to
+benefit from joint inference involving both
+n-gram and dependency-factored objec-
+tives but this typically requires expensive
+integer programming. We explore instead
+the use of Lagrangian relaxation to decou-
+ple the two subproblems and solve them
+separately. While dynamic programming
+is viable for bigram-based sentence com-
+pression, finding optimal compressed trees
+within graphs is NP-hard. We recover ap-
+proximate solutions to this problem us-
+ing LP relaxation and maximum spanning
+tree algorithms, yielding techniques that
+can be combined with the efficient bigram-
+based inference approach using Lagrange
+multipliers. Experiments show that these
+approximation strategies produce results
+comparable to a state-of-the-art integer
+linear programming formulation for the
+same joint inference task along with a sig-
+nificant improvement in runtime.
+</bodyText>
+<sectionHeader confidence="0.999132" genericHeader="keywords">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.999244808510638">
+Sentence compression is a text-to-text genera-
+tion task in which an input sentence must be
+transformed into a shorter output sentence which
+accurately reflects the meaning in the input
+and also remains grammatically well-formed.
+The compression task has received increasing
+attention in recent years, in part due to the
+availability of datasets such as the Ziff-Davis cor-
+pus (Knight and Marcu, 2000) and the Edinburgh
+compression corpora (Clarke and Lapata, 2006),
+from which the following example is drawn.
+Original: In 1967 Chapman, who had cultivated a con-
+ventional image with his ubiquitous tweed jacket and pipe,
+by his own later admission stunned a party attended by his
+friends and future Python colleagues by coming out as a
+homosexual.
+Compressed: In 1967 Chapman, who had cultivated a
+conventional image, stunned a party by coming out as a
+homosexual.
+Following an assumption often used in compres-
+sion systems, the compressed output in this corpus
+is constructed by dropping tokens from the input
+sentence without any paraphrasing or reordering.1
+A number of diverse approaches have been
+proposed for deletion-based sentence compres-
+sion, including techniques that assemble the out-
+put text under an n-gram factorization over the
+input text (McDonald, 2006; Clarke and Lapata,
+2008) or an arc factorization over input depen-
+dency parses (Filippova and Strube, 2008; Galanis
+and Androutsopoulos, 2010; Filippova and Altun,
+2013). Joint methods have also been proposed that
+invoke integer linear programming (ILP) formu-
+lations to simultaneously consider multiple struc-
+tural inference problems—both over n-grams and
+input dependencies (Martins and Smith, 2009) or
+n-grams and all possible dependencies (Thadani
+and McKeown, 2013). However, it is well-
+established that the utility of ILP for optimal infer-
+ence in structured problems is often outweighed
+by the worst-case performance of ILP solvers
+on large problems without unique integral solu-
+tions. Furthermore, approximate solutions can
+often be adequate for real-world generation sys-
+tems, particularly in the presence of linguistically-
+motivated constraints such as those described by
+Clarke and Lapata (2008), or domain-specific
+</bodyText>
+<footnote confidence="0.998998">
+1This is referred to as extractive compression by Cohn and
+Lapata (2008) &amp; Galanis and Androutsopoulos (2010) fol-
+lowing the terminology used in document summarization.
+</footnote>
+<page confidence="0.835344">
+1241
+</page>
+<note confidence="0.835544">
+Proceedings of the 52nd Annual Meeting of the Association for Computational Linguistics, pages 1241–1251,
+Baltimore, Maryland, USA, June 23-25 2014. c�2014 Association for Computational Linguistics
+</note>
+<bodyText confidence="0.99991435">
+pruning strategies such as the use of sentence tem-
+plates to constrain the output.
+In this work, we develop approximate inference
+strategies to the joint approach of Thadani and
+McKeown (2013) which trade the optimality guar-
+antees of exact ILP for faster inference by sep-
+arately solving the n-gram and dependency sub-
+problems and using Lagrange multipliers to en-
+force consistency between their solutions. How-
+ever, while the former problem can be solved
+efficiently using the dynamic programming ap-
+proach of McDonald (2006), there are no efficient
+algorithms to recover maximum weighted non-
+projective subtrees in a general directed graph.
+Maximum spanning tree algorithms, commonly
+used in non-projective dependency parsing (Mc-
+Donald et al., 2005), are not easily adaptable to
+this task since the maximum-weight subtree is not
+necessarily a part of the maximum spanning tree.
+We therefore consider methods to recover ap-
+proximate solutions for the subproblem of finding
+the maximum weighted subtree in a graph, com-
+mon among which is the use of a linear program-
+ming relaxation. This linear program (LP) ap-
+pears empirically tight for compression problems
+and our experiments indicate that simply using the
+non-integral solutions of this LP in Lagrangian re-
+laxation can empirically lead to reasonable com-
+pressions. In addition, we can recover approxi-
+mate solutions to this problem by using the Chu-
+Liu Edmonds algorithm for recovering maximum
+spanning trees (Chu and Liu, 1965; Edmonds,
+1967) over the relatively sparse subgraph defined
+by a solution to the relaxed LP. Our proposed ap-
+proximation strategies are evaluated using auto-
+mated metrics in order to address the question: un-
+der what conditions should a real-world sentence
+compression system implementation consider ex-
+act inference with an ILP or approximate infer-
+ence? The contributions of this work include:
+</bodyText>
+<listItem confidence="0.997695727272727">
+• An empirically-useful technique for approx-
+imating the maximum-weight subtree in a
+weighted graph using LP-relaxed inference.
+• Multiple approaches to generate good ap-
+proximate solutions for joint multi-structure
+compression, based on Lagrangian relaxation
+to enforce equality between the sequential
+and syntactic inference subproblems.
+• An analysis of the tradeoffs incurred by joint
+approaches with regard to runtime as well as
+performance under automated measures.
+</listItem>
+<sectionHeader confidence="0.560189" genericHeader="introduction">
+2 Multi-Structure Sentence Compression
+</sectionHeader>
+<bodyText confidence="0.999986902439024">
+Even though compression is typically formulated
+as a token deletion task, it is evident that drop-
+ping tokens independently from an input sentence
+will likely not result in fluent and meaningful com-
+pressive text. Tokens in well-formed sentences
+participate in a number of syntactic and seman-
+tic relationships with other tokens, so one might
+expect that accounting for heterogenous structural
+relationships between tokens will improve the co-
+herence of the output sentence. Furthermore,
+much recent work has focused on the challenge
+of joint sentence extraction and compression, also
+known as compressive summarization (Martins
+and Smith, 2009; Berg-Kirkpatrick et al., 2011;
+Almeida and Martins, 2013; Li et al., 2013; Qian
+and Liu, 2013), in which questions of efficiency
+are paramount due to the larger problems in-
+volved; however, these approaches largely restrict
+compression to pruning parse trees, thereby im-
+posing a dependency on parser performance. We
+focus in this work on a sentence-level compression
+system to approximate the ILP-based inference of
+Thadani and McKeown (2013) which does not re-
+strict compressions to follow input parses but per-
+mits the generation of novel dependency relations
+in output compressions.
+The rest of this section is organized as fol-
+lows: §2.1 provies an overview of the joint se-
+quential and syntactic objective for compression
+from Thadani and McKeown (2013) while §2.2
+discusses the use of Lagrange multipliers to en-
+force consistency between the different structures
+considered. Following this, §2.3 discusses a dy-
+namic program to find maximum weight bigram
+subsequences from the input sentence, while §2.4
+covers LP relaxation-based approaches for ap-
+proximating solutions to the problem of finding a
+maximum-weight subtree in a graph of potential
+output dependencies. Finally, §2.5 discusses the
+features and model training approach used in our
+experimental results which are presented in §3.
+</bodyText>
+<subsectionHeader confidence="0.998095">
+2.1 Joint objective
+</subsectionHeader>
+<bodyText confidence="0.999263428571429">
+We begin with some notation. For an input sen-
+tence 5 comprised of n tokens including dupli-
+cates, we denote the set of tokens in 5 by T °_
+{ti : 1 G i G n}. Let C represent a compres-
+sion of 5 and let xi E {0, 1} denote an indicator
+variable whose value corresponds to whether to-
+ken ti E T is present in the compressed sentence
+</bodyText>
+<page confidence="0.988146">
+1242
+</page>
+<bodyText confidence="0.955902444444444">
+C. In addition, we define bigram indicator vari-
+ables yij ∈ {0, 1} to represent whether a particular
+order-preserving bigram2 hti, tji from S is present
+as a contiguous bigram in C as well as dependency
+indicator variables zij ∈ {0, 1} corresponding to
+whether the dependency arc ti → tj is present in
+the dependency parse of C. The score for a given
+compression C can now be defined to factor over
+its tokens, n-grams and dependencies as follows.
+</bodyText>
+<equation confidence="0.99960325">
+�score(C) = xi · Btok(ti)
+ti∈T
++ � yij · Bbgr(hti, tji)
+ti∈T∪{START},
+tj∈T∪{END}
++ � zij · Bdep(ti → tj) (1)
+ti∈T∪{ROOT},
+tj∈T
+</equation>
+<bodyText confidence="0.999959777777778">
+where Btok, Bbgr and Bdep are feature-based scoring
+functions for tokens, bigrams and dependencies
+respectively. Specifically, each Bv(·) ≡ w&gt;v φv(·)
+where φv(·) is a feature map for a given vari-
+able type v ∈ {tok, bgr, dep} and wv is the cor-
+responding vector of learned parameters.
+The inference task involves recovering the high-
+est scoring compression C∗ under a particular set
+of model parameters w.
+</bodyText>
+<equation confidence="0.9666795">
+C∗ = arg max
+C score(C)
+= arg max x&gt;θtok + y&gt;θbgr + z&gt;θdep (2)
+x,y,z
+</equation>
+<bodyText confidence="0.999861625">
+where the incidence vector x °_ hxiiti∈T repre-
+sents an entire token configuration over T, with y
+and z defined analogously to represent configura-
+tions of bigrams and dependencies. θv °_ hBv(·)i
+denotes a corresponding vector of scores for each
+variable type v under the current model parame-
+ters. In order to recover meaningful compressions
+by optimizing (2), the inference step must ensure:
+</bodyText>
+<listItem confidence="0.990938714285714">
+1. The configurations x, y and z are consistent
+with each other, i.e., all configurations cover
+the same tokens.
+2. The structural configurations y and z are
+non-degenerate, i.e, the bigram configuration
+y represents an acyclic path while the depen-
+dency configuration z forms a tree.
+</listItem>
+<footnote confidence="0.9744965">
+2Although Thadani and McKeown (2013) is not restricted
+to bigrams or order-preserving n-grams, we limit our discus-
+sion to this scenario as it also fits the assumptions of McDon-
+ald (2006) and the datasets of Clarke and Lapata (2006).
+</footnote>
+<bodyText confidence="0.999940769230769">
+These requirements naturally rule out simple ap-
+proximate inference formulations such as search-
+based approaches for the joint objective.3 An
+ILP-based inference solution is demonstrated in
+Thadani and McKeown (2013) that makes use of
+linear constraints over the boolean variables xi, yij
+and zij to guarantee consistency, as well as aux-
+iliary real-valued variables and constraints repre-
+senting the flow of commodities (Magnanti and
+Wolsey, 1994) in order to establish structure in y
+and z. In the following section, we propose an al-
+ternative formulation that exploits the modularity
+of this joint objective.
+</bodyText>
+<subsectionHeader confidence="0.998937">
+2.2 Lagrangian relaxation
+</subsectionHeader>
+<bodyText confidence="0.976230567567568">
+Dual decomposition (Komodakis et al., 2007) and
+Lagrangian relaxation in general are often used
+for solving joint inference problems which are
+decomposable into individual subproblems linked
+by equality constraints (Koo et al., 2010; Rush
+et al., 2010; Rush and Collins, 2011; DeNero
+and Macherey, 2011; Martins et al., 2011; Das
+et al., 2012; Almeida and Martins, 2013). This
+approach permits sub-problems to be solved sepa-
+rately using problem-specific efficient algorithms,
+while consistency over the structures produced is
+enforced through Lagrange multipliers via itera-
+tive optimization. Exact solutions are guaranteed
+when the algorithm converges on a consistent pri-
+mal solution, although this convergence itself is
+not guaranteed and depends on the tightness of
+the underlying LP relaxation. The primary advan-
+tage of this technique is the ability to leverage the
+underlying structure of the problems in inference
+rather than relying on a generic ILP formulation
+while still often producing exact solutions.
+The multi-structure inference problem de-
+scribed in the previous section seems in many
+ways to be a natural fit to such an approach since
+output scores factor over different types of struc-
+ture that comprise the output compression. Even if
+ILP-based approaches perform reasonably at the
+scale of single-sentence compression problems,
+the exponential worst-case complexity of general-
+purpose ILPs will inevitably pose challenges when
+scaling up to (a) handle larger inputs, (b) use
+higher-order structural fragments, or (c) incorpo-
+rate additional models.
+3This work follows Thadani and McKeown (2013) in re-
+covering non-projective trees for inference. However, recov-
+ering projective trees is tractable when a total ordering of out-
+put tokens is assumed. This will be addressed in future work.
+</bodyText>
+<page confidence="0.927116">
+1243
+</page>
+<bodyText confidence="0.99999345">
+Consider once more the optimization problem
+characterized by (2) The two structural problems
+that need to be solved in this formulation are
+the extraction of a maximum-weight acyclic sub-
+sequence of bigrams y from the lattice of all
+order-preserving bigrams from S and the recov-
+ery of a maximum-weight directed subtree z. Let
+α(y) ∈ {0,1}n denote the incidence vector of
+tokens contained in the n-gram sequence y and
+β(z) ∈ {0,1}n denote the incidence vector of
+words contained in the dependency tree z. We can
+now rewrite the objective in (2) while enforcing
+the constraint that the words contained in the se-
+quence y are the same as the words contained in
+the tree z, i.e., α(y) = β(z), by introducing a
+vector of Lagrange multipliers λ ∈ Rn. In addi-
+tion, the token configuration x can be rewritten in
+the form of a weighted combination of α(y) and
+β(z) to ensure its consistency with y and z. This
+results in the following Lagrangian:
+</bodyText>
+<equation confidence="0.999452333333333">
+L(λ, y, z) = yTθbgr + zTθdep
++ θT tok (ψ · α(y) + (1 − ψ) · β(z))
++ λT (α(y) − β(z)) (3)
+</equation>
+<bodyText confidence="0.9999866">
+Finding the y and z that maximize this Lagrangian
+above yields a dual objective, and the dual prob-
+lem corresponding to the primal objective speci-
+fied in (2) is therefore the minimization of this ob-
+jective over the Lagrange multipliers λ.
+</bodyText>
+<equation confidence="0.9986398">
+L(λ, y, z)
+yTθbgr + (λ + ψ · θtok)T α(y)
+zTθdep − (λ + (ψ − 1) · θtok)T β(z)
+f(y, λ, ψ, θ)
+g(z, λ, ψ, θ) (4)
+</equation>
+<bodyText confidence="0.9784578">
+This can now be solved with the iterative subgra-
+dient algorithm illustrated in Algorithm 1. In each
+iteration i, the algorithm solves for y(i) and z(i)
+under λ(i), then generates λ(i+1) to penalize in-
+consistencies between α(y(i)) and β(z(i)). When
+α(y(i)) = β(z(i)), the resulting primal solution is
+exact, i.e., y(i) and z(i) represent the optimal struc-
+tures under (2). Otherwise, if the algorithm starts
+oscillating between a few primal solutions, the un-
+derlying LP must have a non-integral solution in
+which case approximation heuristics can be em-
+Algorithm 1 Subgradient-based joint inference
+Input: scores θ, ratio ψ, repetition limit lmax,
+iteration limit imax, learning rate schedule η
+Output: token configuration x
+</bodyText>
+<listItem confidence="0.992921785714286">
+1: λ(0) ← h0in
+2: M ← ∅, Mrepeats ← ∅
+3: for iteration i &lt; imax do
+4: yˆ ← arg maxy f(y, λ, ψ, θ)
+5: zˆ ← arg maxz g(z, λ, ψ, θ)
+6: if α(ˆy) = β(ˆz) then return α(ˆy)
+7: if α(ˆy) ∈ M then
+8: Mrepeats ← Mrepeats ∪ {α(ˆy)}
+9: if β(ˆz) ∈ M then
+10: Mrepeats ← Mrepeats ∪ {β(ˆz)}
+11: if |Mrepeats |≥ lmax then break
+12: M ← M ∪ {α(ˆy),β(ˆz)}
+13: λ(i+1) ← λ(i) − ηi (α(ˆy) − β(ˆz))
+return arg maxxEMrepeats score(x)
+</listItem>
+<bodyText confidence="0.9990582">
+ployed.4 The application of this Lagrangian relax-
+ation strategy is contingent upon the existence of
+algorithms to solve the maximization subproblems
+for f(y, λ, ψ, θ) and g(z, λ, ψ, θ). The following
+sections discuss our approach to these problems.
+</bodyText>
+<subsectionHeader confidence="0.99932">
+2.3 Bigram subsequences
+</subsectionHeader>
+<bodyText confidence="0.999959333333333">
+McDonald (2006) provides a Viterbi-like dynamic
+programming algorithm to recover the highest-
+scoring sequence of order-preserving bigrams
+from a lattice, either in unconstrained form or with
+a specific length constraint. The latter requires a
+dynamic programming table Q[i][r] which repre-
+sents the best score for a compression of length r
+ending at token i. The table can be populated us-
+ing the following recurrence:
+</bodyText>
+<equation confidence="0.9986915">
+Q[i][1] = score(S, START, i)
+Q[i][r] = maxQ[j][r − 1] + score(S,i, j)
+j&lt;i
+Q[i][R + 1] = Q[i][R] + score(S, i, END)
+</equation>
+<bodyText confidence="0.898895111111111">
+where R is the required number of output tokens
+and the scoring function is defined as
+score(S, i,j) θbgr(hti, tji) + λj + ψ · θtok(tj)
+so as to solve f(y, λ, ψ, θ) from (4). This ap-
+proach requires O(n2R) time in order to identify
+4Heuristic approaches (Komodakis et al., 2007; Rush et
+al., 2010), tightening (Rush and Collins, 2011) or branch and
+bound (Das et al., 2012) can still be used to retrieve optimal
+solutions, but we did not explore these strategies here.
+</bodyText>
+<equation confidence="0.639907083333333">
+min
+λ
+max
+y,z
+= min max
+λ y
++ max
+z
+= min max
+λ y
++ max
+z
+</equation>
+<page confidence="0.90437">
+1244
+</page>
+<figureCaption confidence="0.963682">
+Figure 1: An example of the difficulty of recover-
+</figureCaption>
+<bodyText confidence="0.756566">
+ing the maximum-weight subtree (B—*C, B—*D)
+from the maximum spanning tree (A—*C, C—*B,
+B—*D).
+the highest scoring sequence y and corresponding
+token configuration α(y).
+</bodyText>
+<subsectionHeader confidence="0.990353">
+2.4 Dependency subtrees
+</subsectionHeader>
+<bodyText confidence="0.999992842105263">
+The maximum-weight non-projective subtree
+problem over general graphs is not as easily
+solved. Although the maximum spanning tree for
+a given token configuration can be recovered ef-
+ficiently, Figure 1 illustrates that the maximum-
+scoring subtree is not necessarily found within
+it. The problem of recovering a maximum-weight
+subtree in a graph has been shown to be NP-hard
+even with uniform edge weights (Lau et al., 2006).
+In order to produce a solution to this subprob-
+lem, we use an LP relaxation of the relevant
+portion of the ILP from Thadani and McKeown
+(2013) by omitting integer constraints over the to-
+ken and dependency variables in x and z respec-
+tively. For simplicity, however, we describe the
+ILP version rather than the relaxed LP in order to
+motivate the constraints with their intended pur-
+pose rather than their effect in the relaxed prob-
+lem. The objective for this LP is given by
+</bodyText>
+<equation confidence="0.50631">
+xTθ/tok + zTθdep (5)
+</equation>
+<bodyText confidence="0.977368818181818">
+where the vector of token scores is redefined as
+θ/tok g (1 − 0) · θtok − λ (6)
+in order to solve g(z, λ, 0, θ) from (4).
+Linear constraints are introduced to produce de-
+pendency structures that are close to the optimal
+dependency trees. First, tokens in the solution
+must only be active if they have a single active in-
+coming dependency edge. In addition, to avoid
+producing multiple disconnected subtrees, only
+one dependency is permitted to attach to the ROOT
+pseudo-token.
+</bodyText>
+<equation confidence="0.892625166666667">
+Exj − zij = 0, btj E T (7)
+i
+E
+zij = 1, if ti = ROOT (8)
+j
+Production was closed down at Ford last night .
+</equation>
+<figureCaption confidence="0.9823375">
+Figure 2: An illustration of commodity values for
+a valid solution of the non-relaxed ILP.
+</figureCaption>
+<bodyText confidence="0.989023166666667">
+In order to avoid cycles in the dependency tree,
+we include additional variables to establish single-
+commodity flow (Magnanti and Wolsey, 1994) be-
+tween all pairs of tokens. These ryij variables carry
+non-negative real values which must be consumed
+by active tokens that they are incident to.
+</bodyText>
+<equation confidence="0.992541666666667">
+ryij &gt; 0, bti, tj E T (9)
+E ryij − E ryjk = xj, btj E T (10)
+i k
+</equation>
+<bodyText confidence="0.98878325">
+These constraints ensure that cyclic structures are
+not possible in the non-relaxed ILP. In addition,
+they serve to establish connectivity for the de-
+pendency structure z since commodity can only
+originate in one location—at the pseudo-token
+ROOT which has no incoming commodity vari-
+ables. However, in order to enforce these prop-
+erties on the output dependency structure, this
+acyclic, connected commodity structure must con-
+strain the activation of the z variables.
+ryij − Cmaxzij G 0, bti, tj E T (11)
+where Cmax is an arbitrary upper bound on the
+value of ryij variables. Figure 2 illustrates how
+these commodity flow variables constrain the out-
+put of the ILP to be a tree. However, the effect
+of these constraints is diminished when solving an
+LP relaxation of the above problem.
+In the LP relaxation, xi and zij are redefined as
+real-valued variables in [0, 1], potentially resulting
+in fractional values for dependency and token indi-
+cators. As a result, the commodity flow network is
+able to establish connectivity but cannot enforce a
+tree structure, for instance, directed acyclic struc-
+tures are possible and token indicators xi may be
+partially be assigned to the solution structure. This
+poses a challenge in implementing β(z) which is
+needed to recover a token configuration from the
+solution of this subproblem.
+We propose two alternative solutions to address
+this issue in the context of the joint inference strat-
+egy. The first is to simply use the relaxed token
+configuration identified by the LP in Algorithm 1,
+</bodyText>
+<figure confidence="0.997772142857143">
+-20
+B
+10 2
+1
+A
+3
+C D
+ROOT
+73,9 = 1
+5
+73,1 = 1
+2 1
+max
+X,Z
+</figure>
+<page confidence="0.963776">
+1245
+</page>
+<bodyText confidence="0.99498225">
+i.e., to set ,3(z&amp;quot;) = x˜ where x&amp;quot; and z&amp;quot; represent the
+real-valued counterparts of the incidence vectors x
+and z. The viability of this approximation strategy
+is due to the following:
+</bodyText>
+<listItem confidence="0.894316875">
+• The relaxed LP is empirically fairly tight,
+yielding integral solutions 89% of the time on
+the compression datasets described in §3.
+• The bigram subproblem is guaranteed to re-
+turn a well-formed integral solution which
+obeys the imposed compression rate, so we
+are assured of a source of valid—if non-
+optimal—solutions in line 13 of Algorithm 1.
+</listItem>
+<bodyText confidence="0.979593571428572">
+We also consider another strategy that attempts to
+approximate a valid integral solution to the depen-
+dency subproblem. In order to do this, we first
+include an additional constraint in the relaxed LP
+which restrict the number of tokens in the output
+to a specific number of tokens R that is given by
+an input compression rate.
+</bodyText>
+<equation confidence="0.973374">
+� xi=R (12)
+i
+</equation>
+<bodyText confidence="0.992774854545454">
+The addition of this constraint to the relaxed LP
+reduces the rate of integral solutions drastically—
+from 89% to approximately 33%—but it serves to
+ensure that the resulting token configuration x&amp;quot; has
+at least as many non-zero elements as R, i.e., there
+are at least as many tokens activated in the LP so-
+lution as are required in a valid solution.
+We then construct a subgraph G(&amp;quot;z) consisting
+of all dependency edges that were assigned non-
+zero values in the solution, assigning to each edge
+a score equal to the score of that edge in the LP as
+well as the score of its dependent word, i.e., each
+zij in G(&amp;quot;z) is assigned a score of θdep((ti, tj)) −
+aj + (1 − ψ) · θtok(tj). Since the commodity flow
+constraints in (9)–(11) ensure a connected &amp;quot;z, it is
+therefore possible to recover a maximum-weight
+spanning tree from G(&amp;quot;z) using the Chu-Liu Ed-
+monds algorithm (Chu and Liu, 1965; Edmonds,
+1967).5 Although the runtime of this algorithm
+is cubic in the size of the input graph, it is fairly
+speedy when applied on relatively sparse graphs
+such as the solutions to the LP described above.
+The resulting spanning tree is a useful integral
+approximation of z&amp;quot; but, as mentioned previously,
+may contain more nodes than R due to fractional
+values in &amp;quot;x; we therefore repeatedly prune leaves
+5A detailed description of the Chu-Liu Edmonds algo-
+rithm for MSTs is available in McDonald et al. (2005).
+with the lowest incoming edge weight in the cur-
+rent tree until exactly R nodes remain. The result-
+ing tree is assumed to be a reasonable approxima-
+tion of the optimal integral solution to this LP.
+The Chu-Liu Edmonds algorithm is also em-
+ployed for another purpose: when the underly-
+ing LP for the joint inference problem is not
+tight—a frequent occurrence in our compression
+experiments—Algorithm 1 will not converge on
+a single primal solution and will instead oscillate
+between solutions that are close to the dual opti-
+mum. We identify this phenomenon by counting
+repeated solutions and, if they exceed some thresh-
+old lmax with at least one repeated solution from
+either subproblem, we terminate the update proce-
+dure for Lagrange multipliers and instead attempt
+to identify a good solution from the repeating ones
+by scoring them under (2). It is straightforward to
+recover and score a bigram configuration y from a
+token configuration ,3(z). However, scoring so-
+lutions produced by the dynamic program from
+§2.3 also requires the score over a corresponding
+parse tree; this can be recovered by constructing
+a dependency subgraph containing across only the
+tokens that are active in α(y) and retrieving the
+maximum spanning tree for that subgraph using
+the Chu-Liu Edmonds algorithm.
+</bodyText>
+<subsectionHeader confidence="0.994226">
+2.5 Learning and Features
+</subsectionHeader>
+<bodyText confidence="0.999488">
+The features used in this work are largely based on
+the features from Thadani and McKeown (2013).
+</bodyText>
+<listItem confidence="0.97289285">
+• Otok contains features for part-of-speech
+(POS) tag sequences of length up to 3 around
+the token, features for the dependency label
+of the token conjoined with its POS, lexical
+features for verb stems and non-word sym-
+bols and morphological features that identify
+capitalized sequences, negations and words
+in parentheses.
+• Obgr contains features for POS patterns in a
+bigram, the labels of dependency edges in-
+cident to it, its likelihood under a Gigaword
+language model (LM) and an indicator for
+whether it is present in the input sentence.
+• Odep contains features for the probability of
+a dependency edge under a smoothed depen-
+dency grammar constructed from the Penn
+Treebank and various conjunctions of the fol-
+lowing features: (a) whether the edge appears
+as a dependency or ancestral relation in the
+input parse (b) the directionality of the depen-
+</listItem>
+<page confidence="0.989331">
+1246
+</page>
+<bodyText confidence="0.999975117647059">
+dency (c) the label of the edge (d) the POS
+tags of the tokens incident to the edge and
+(e) the labels of their surrounding chunks and
+whether the edge remains within the chunk.
+For the experiments in the following section, we
+trained models using a variant of the structured
+perceptron (Collins, 2002) which incorporates
+minibatches (Zhao and Huang, 2013) for easy par-
+allelization and faster convergence.6 Overfitting
+was avoided by averaging parameters and mon-
+itoring performance against a held-out develop-
+ment set during training. All models were trained
+using variants of the ILP-based inference approach
+of Thadani and McKeown (2013). We followed
+Martins et al. (2009) in using LP-relaxed inference
+during learning, assuming algorithmic separabil-
+ity (Kulesza and Pereira, 2007) for these problems.
+</bodyText>
+<sectionHeader confidence="0.999755" genericHeader="background">
+3 Experiments
+</sectionHeader>
+<bodyText confidence="0.999990827586207">
+We ran compression experiments over the
+newswire (NW) and broadcast news transcription
+(BN) corpora compiled by Clarke and Lapata
+(2008) which contain gold compressions pro-
+duced by human annotators using only word
+deletion. The datasets were filtered to eliminate
+instances with less than 2 and more than 110
+tokens for parser compatibility and divided into
+training/development/test sections following the
+splits from Clarke and Lapata (2008), yielding
+953/63/603 instances for the NW corpus and
+880/78/404 for the BN corpus. Gold dependency
+parses were approximated by running the Stanford
+dependency parser7 over reference compressions.
+Following evaluations in machine translation
+as well as previous work in sentence compres-
+sion (Unno et al., 2006; Clarke and Lapata, 2008;
+Martins and Smith, 2009; Napoles et al., 2011b;
+Thadani and McKeown, 2013), we evaluate sys-
+tem performance using F1 metrics over n-grams
+and dependency edges produced by parsing sys-
+tem output with RASP (Briscoe et al., 2006) and
+the Stanford parser. All ILPs and LPs were solved
+using Gurobi,8 a high-performance commercial-
+grade solver. Following a recent analysis of com-
+pression evaluations (Napoles et al., 2011b) which
+revealed a strong correlation between system com-
+pression rate and human judgments of compres-
+sion quality, we constrained all systems to produce
+</bodyText>
+<footnote confidence="0.999972333333333">
+6We used a minibatch size of 4 in all experiments.
+7http://nlp.stanford.edu/software/
+8http://www.gurobi.com
+</footnote>
+<bodyText confidence="0.9990755">
+compressed output at a specific rate—determined
+by the the gold compressions available for each
+instance—to ensure that the reported differences
+between the systems under study are meaningful.
+</bodyText>
+<subsectionHeader confidence="0.995998">
+3.1 Systems
+</subsectionHeader>
+<bodyText confidence="0.999246">
+We report results over the following systems
+grouped into three categories of models: tokens +
+n-grams, tokens + dependencies, and joint models.
+</bodyText>
+<listItem confidence="0.973584606060606">
+• 3-LM: A reimplementation of the unsuper-
+vised ILP of Clarke and Lapata (2008) which
+infers order-preserving trigram variables pa-
+rameterized with log-likelihood under an LM
+and a significance score for token variables
+inspired by Hori and Furui (2004), as well as
+various linguistically-motivated constraints
+to encourage fluency in output compressions.
+• DP: The bigram-based dynamic program of
+McDonald (2006) described in §2.3.9
+• LP→MST: An approximate inference ap-
+proach based on an LP relaxation of ILP-
+Dep. As discussed in §2.4, a maximum span-
+ning tree is recovered from the output of the
+LP and greedily pruned in order to generate
+a valid integral solution while observing the
+imposed compression rate.
+• ILP-Dep: A version of the joint ILP of
+Thadani and McKeown (2013) without n-
+gram variables and corresponding features.
+• DP+LP→MST: An approximate joint infer-
+ence approach based on Lagrangian relax-
+ation that uses DP for the maximum weight
+subsequence problem and LP→MST for the
+maximum weight subtree problem.
+• DP+LP: Another Lagrangian relaxation ap-
+proach that pairs DP with the non-integral
+solutions from an LP relaxation of the maxi-
+mum weight subtree problem (cf. §2.4).
+• ILP-Joint: The full ILP from Thadani and
+McKeown (2013), which provides an upper
+bound on the performance of the proposed
+approximation strategies.
+</listItem>
+<bodyText confidence="0.999886">
+The learning rate schedule for the Lagrangian re-
+laxation approaches was set as qZ °= T/(T + i),10
+while the hyperparameter 0 was tuned using the
+</bodyText>
+<footnote confidence="0.99854475">
+9For consistent comparisons with the other systems, our
+reimplementation does not include the k-best inference strat-
+egy presented in McDonald (2006) for learning with MIRA.
+10τ was set to 100 for aggressive subgradient updates.
+</footnote>
+<page confidence="0.94779">
+1247
+</page>
+<table confidence="0.999283">
+objective Inference n = 1 n-grams F1% 4 Syntactic relations F1% Inference
+technique 2 3 z Stanford RASP time (s)
+3-LM (CL08) 74.96 60.60 46.83 38.71 - 60.52 57.49 0.72
+n-grams DP (McD06) 78.80 66.04 52.67 42.39 - 63.28 57.89 0.01
+LP-*MST 79.61 64.32 50.36 40.97 66.57 66.82 59.70 0.07
+deps ILP-Dep 80.02 65.99 52.42 43.07 72.43 67.63 60.78 0.16
+DP + LP-*MST 79.50 66.75 53.48 44.33 64.63 67.69 60.94 0.24
+joint DP + LP 79.10 68.22 55.05 45.81 65.74 68.24 62.04 0.12
+ILP-Joint (TM13) 80.13 68.34 55.56 46.60 72.57 68.89 62.61 0.31
+</table>
+<tableCaption confidence="0.993188333333333">
+Table 1: Experimental results for the BN corpus, averaged over 3 gold compressions per instance. All
+systems were restricted to compress to the size of the median gold compression yielding an average
+compression rate of 77.26%.
+</tableCaption>
+<table confidence="0.999475888888889">
+objective Inference n = 1 n-grams F1% 4 Syntactic relations F1% Inference
+technique 2 3 z Stanford RASP time (s)
+3-LM (CL08) 66.66 51.59 39.33 30.55 - 50.76 49.57 1.22
+n-grams DP (McD06) 73.18 58.31 45.07 34.77 - 56.23 51.14 0.01
+LP-*MST 73.32 55.12 41.18 31.44 61.01 58.37 52.57 0.12
+deps ILP-Dep 73.76 57.09 43.47 33.44 65.45 60.06 54.31 0.28
+DP + LP-*MST 73.13 57.03 43.79 34.01 57.91 58.46 53.20 0.33
+joint DP + LP 72.06 59.83 47.39 37.72 58.13 58.97 53.78 0.21
+ILP-Joint (TM13) 74.00 59.90 47.22 37.01 65.65 61.29 56.24 0.60
+</table>
+<tableCaption confidence="0.984001">
+Table 2: Experimental results for the NW corpus with all systems compressing to the size of the gold
+</tableCaption>
+<bodyText confidence="0.774373333333333">
+compression, yielding an average compression rate of 70.24%. In both tables, bold entries show signifi-
+cant gains within a column under the paired t-test (p &lt; 0.05) and Wilcoxon’s signed rank test (p &lt; 0.01).
+development split of each corpus.11
+</bodyText>
+<subsectionHeader confidence="0.941977">
+3.2 Results
+</subsectionHeader>
+<bodyText confidence="0.971409511111111">
+Tables 1 and 2 summarize the results from our
+compression experiments on the BN and NW cor-
+pora respectively. Starting with the n-gram ap-
+proaches, the performance of 3-LM leads us to
+observe that the gains of supervised learning far
+outweigh the utility of higher-order n-gram factor-
+ization, which is also responsible for a significant
+increase in wall-clock time. In contrast, DP is an
+order of magnitude faster than all other approaches
+studied here although it is not competitive under
+parse-based measures such as RASP F1% which
+is known to correlate with human judgments of
+grammaticality (Clarke and Lapata, 2006).
+We were surprised by the strong performance
+of the dependency-based inference techniques,
+which yielded results that approached the joint
+model in both n-gram and parse-based measures.
+11We were surprised to observe that performance improved
+significantly when O was set closer to 1, thereby emphasiz-
+ing token features in the dependency subproblem. The final
+values chosen were OBN = 0.9 and ONW = 0.8.
+The exact ILP-Dep approach halves the run-
+time of ILP-Joint to produce compressions that
+have similar (although statistically distinguish-
+able) scores. Approximating dependency-based
+inference with LP-*MST yields similar perfor-
+mance for a further halving of runtime; however,
+the performance of this approach is notably worse.
+Turning to the joint approaches, the strong
+performance of ILP-Joint is expected; less so
+is the relatively high but yet practically reason-
+able runtime that it requires. We note, how-
+ever, that these ILPs are solved using a highly-
+optimized commercial-grade solver that can uti-
+lize all CPU cores12 while our approximation
+approaches are implemented as single-processed
+Python code without significant effort toward op-
+timization. Comparing the two approximation
+strategies shows a clear performance advantage
+for DP+LP over DP+LP-*MST: the latter ap-
+proach entails slower inference due to the over-
+head of running the Chu-Liu Edmonds algorithm
+at every dual update, and furthermore, the error in-
+troduced by approximating an integral solution re-
+1216 cores in our experimental environment.
+</bodyText>
+<page confidence="0.984883">
+1248
+</page>
+<bodyText confidence="0.999982157894737">
+sults in a significant decrease in dependency recall.
+In contrast, DP+LP directly optimizes the dual
+problem by using the relaxed dependency solution
+to update Lagrange multipliers and achieves the
+best performance on parse-based F1 outside of the
+slower ILP approaches. Convergence rates also
+vary for these two techniques: DP+LP has a lower
+rate of empirical convergence (15% on BN and 4%
+on NW) when compared to DP+LP→MST (19%
+on BN and 6% on NW).
+Figure 3 shows the effect of input sentence
+length on inference time and performance for ILP-
+Joint and DP+LP over the NW test corpus.13 The
+timing results reveal that the approximation strat-
+egy is consistently faster than the ILP solver. The
+variation in RASP F1% with input size indicates
+the viability of a hybrid approach which could bal-
+ance accuracy and speed by using ILP-Joint for
+smaller problems and DP+LP for larger ones.
+</bodyText>
+<sectionHeader confidence="0.999916" genericHeader="related work">
+4 Related Work
+</sectionHeader>
+<bodyText confidence="0.997716379310345">
+Sentence compression is one of the better-studied
+text-to-text generation problems and has been ob-
+served to play a significant role in human summa-
+rization (Jing, 2000; Jing and McKeown, 2000).
+Most approaches to sentence compression are su-
+pervised (Knight and Marcu, 2002; Riezler et
+al., 2003; Turner and Charniak, 2005; McDon-
+ald, 2006; Unno et al., 2006; Galley and McK-
+eown, 2007; Nomoto, 2007; Cohn and Lapata,
+2009; Galanis and Androutsopoulos, 2010; Gan-
+itkevitch et al., 2011; Napoles et al., 2011a; Fil-
+ippova and Altun, 2013) following the release of
+datasets such as the Ziff-Davis corpus (Knight and
+Marcu, 2000) and the Edinburgh compression cor-
+pora (Clarke and Lapata, 2006; Clarke and Lap-
+ata, 2008), although unsupervised approaches—
+largely based on ILPs—have also received con-
+sideration (Clarke and Lapata, 2007; Clarke and
+Lapata, 2008; Filippova and Strube, 2008). Com-
+pression has also been used as a tool for document
+summarization (Daum´e and Marcu, 2002; Zajic
+et al., 2007; Clarke and Lapata, 2007; Martins
+and Smith, 2009; Berg-Kirkpatrick et al., 2011;
+Woodsend and Lapata, 2012; Almeida and Mar-
+tins, 2013; Molina et al., 2013; Li et al., 2013;
+Qian and Liu, 2013), with recent work formulating
+the summarization task as joint sentence extrac-
+tion and compression and often employing ILP or
+Lagrangian relaxation. Monolingual compression
+</bodyText>
+<footnote confidence="0.672023">
+13Similar results were observed for the BN test corpus.
+</footnote>
+<figureCaption confidence="0.986084666666667">
+Figure 3: Effect of input size on (a) inference time,
+and (b) the corresponding difference in RASP
+F1% (ILP-Joint – DP+LP) on the NW corpus.
+</figureCaption>
+<bodyText confidence="0.999779666666667">
+also faces many obstacles common to decoding in
+machine translation, and a number of approaches
+which have been proposed to combine phrasal and
+syntactic models (Huang and Chiang, 2007; Rush
+and Collins, 2011) inter alia offer directions for
+future research into compression problems.
+</bodyText>
+<sectionHeader confidence="0.998835" genericHeader="conclusions">
+5 Conclusion
+</sectionHeader>
+<bodyText confidence="0.999988222222222">
+We have presented approximate inference strate-
+gies to jointly compress sentences under bigram
+and dependency-factored objectives by exploiting
+the modularity of the task and considering the two
+subproblems in isolation. Experiments show that
+one of these approximation strategies produces re-
+sults comparable to a state-of-the-art integer linear
+program for the same joint inference task with a
+60% reduction in average inference time.
+</bodyText>
+<sectionHeader confidence="0.997487" genericHeader="acknowledgments">
+Acknowledgments
+</sectionHeader>
+<bodyText confidence="0.9999015">
+The author is grateful to Alexander Rush for help-
+ful discussions and to the anonymous reviewers
+for their comments. This work was supported
+by the Intelligence Advanced Research Projects
+Activity (IARPA) via Department of Interior Na-
+tional Business Center (DoI/NBC) contract num-
+ber D11PC20153. The U.S. Government is autho-
+rized to reproduce and distribute reprints for Gov-
+ernmental purposes notwithstanding any copy-
+right annotation thereon.14
+</bodyText>
+<footnote confidence="0.89170275">
+14The views and conclusions contained herein are those of
+the authors and should not be interpreted as necessarily repre-
+senting the official policies or endorsements, either expressed
+or implied, of IARPA, DoI/NBC, or the U.S. Government.
+</footnote>
+<page confidence="0.995586">
+1249
+</page>
+<sectionHeader confidence="0.989686" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.999353990291262">
+Miguel Almeida and Andr´e F. T. Martins. 2013. Fast
+and robust compressive summarization with dual de-
+composition and multi-task learning. In Proceed-
+ings of ACL, pages 196–206, August.
+Taylor Berg-Kirkpatrick, Dan Gillick, and Dan Klein.
+2011. Jointly learning to extract and compress. In
+Proceedings of ACL-HLT, pages 481–490.
+Ted Briscoe, John Carroll, and Rebecca Watson. 2006.
+The second release of the RASP system. In Pro-
+ceedings of the ACL-COLING Interactive Presenta-
+tion Sessions.
+Yoeng-jin Chu and Tseng-hong Liu. 1965. On the
+shortest arborescence of a directed graph. Science
+Sinica, 14:1396–1400.
+James Clarke and Mirella Lapata. 2006. Models
+for sentence compression: a comparison across do-
+mains, training requirements and evaluation mea-
+sures. In Proceedings of ACL-COLING, pages 377–
+384.
+James Clarke and Mirella Lapata. 2007. Modelling
+compression with discourse constraints. In Proceed-
+ings of EMNLP-CoNLL, pages 1–11.
+James Clarke and Mirella Lapata. 2008. Global in-
+ference for sentence compression: an integer linear
+programming approach. Journal forArtificial Intel-
+ligence Research, 31:399–429, March.
+Trevor Cohn and Mirella Lapata. 2008. Sentence com-
+pression beyond word deletion. In Proceedings of
+COLING, pages 137–144.
+Trevor Cohn and Mirella Lapata. 2009. Sentence com-
+pression as tree transduction. Journal of Artificial
+Intelligence Research, 34(1):637–674, April.
+Michael Collins. 2002. Discriminative training meth-
+ods for hidden Markov models. In Proceedings of
+EMNLP, pages 1–8.
+Dipanjan Das, Andr´e F. T. Martins, and Noah A.
+Smith. 2012. An exact dual decomposition algo-
+rithm for shallow semantic parsing with constraints.
+In Proceedings of the First Joint Conference on Lexi-
+cal and Computational Semantics (*SEM), SemEval
+’12, pages 209–217.
+Hal Daum´e, III and Daniel Marcu. 2002. A noisy-
+channel model for document compression. In Pro-
+ceedings of ACL, pages 449–456.
+John DeNero and Klaus Macherey. 2011. Model-
+based aligner combination using dual decomposi-
+tion. In Proceedings of ACL-HLT, pages 420–429.
+Jack R. Edmonds. 1967. Optimum branchings. Jour-
+nal of Research of the National Bureau of Standards,
+71B:233–240.
+Katja Filippova and Yasemin Altun. 2013. Overcom-
+ing the lack of parallel data in sentence compression.
+In Proceedings of EMNLP, pages 1481–1491.
+Katja Filippova and Michael Strube. 2008. Depen-
+dency tree based sentence compression. In Proceed-
+ings of INLG, pages 25–32.
+Dimitrios Galanis and Ion Androutsopoulos. 2010. An
+extractive supervised two-stage method for sentence
+compression. In Proceedings of HLT-NAACL, pages
+885–893.
+Michel Galley and Kathleen McKeown. 2007. Lex-
+icalized Markov grammars for sentence compres-
+sion. In Proceedings of HLT-NAACL, pages 180–
+187, April.
+Juri Ganitkevitch, Chris Callison-Burch, Courtney
+Napoles, and Benjamin Van Durme. 2011. Learn-
+ing sentential paraphrases from bilingual parallel
+corpora for text-to-text generation. In Proceedings
+of EMNLP, pages 1168–1179.
+Chiori Hori and Sadaoki Furui. 2004. Speech summa-
+rization: an approach through word extraction and a
+method for evaluation. IEICE Transactions on In-
+formation and Systems, E87-D(1):15–25.
+Liang Huang and David Chiang. 2007. Forest rescor-
+ing: Faster decoding with integrated language mod-
+els. In Proceedings of ACL, pages 144–151, June.
+Hongyan Jing and Kathleen R. McKeown. 2000. Cut
+and paste based text summarization. In Proceedings
+of NAACL, pages 178–185.
+Hongyan Jing. 2000. Sentence reduction for auto-
+matic text summarization. In Proceedings of the
+Conference on Applied Natural Language Process-
+ing, pages 310–315.
+Kevin Knight and Daniel Marcu. 2000. Statistics-
+based summarization - step one: Sentence compres-
+sion. In Proceedings of AAAI, pages 703–710.
+Kevin Knight and Daniel Marcu. 2002. Summariza-
+tion beyond sentence extraction: a probabilistic ap-
+proach to sentence compression. Artificial Intelli-
+gence, 139(1):91–107, July.
+Nikos Komodakis, Nikos Paragios, and Georgios Tzir-
+itas. 2007. MRF optimization via dual decomposi-
+tion: Message-passing revisited. In Proceedings of
+ICCV, pages 1–8, Oct.
+Terry Koo, Alexander M. Rush, Michael Collins,
+Tommi Jaakkola, and David Sontag. 2010. Dual
+decomposition for parsing with non-projective head
+automata. In Proceedings of EMNLP, pages 1288–
+1298.
+Alex Kulesza and Fernando Pereira. 2007. Structured
+learning with approximate inference. In John C.
+Platt, Daphne Koller, Yoram Singer, and Sam T.
+Roweis, editors, NIPS. Curran Associates, Inc.
+</reference>
+<page confidence="0.717315">
+1250
+</page>
+<reference confidence="0.9998038125">
+Hoong Chuin Lau, Trung Hieu Ngo, and Bao Nguyen
+Nguyen. 2006. Finding a length-constrained
+maximum-sum or maximum-density subtree and
+its application to logistics. Discrete Optimization,
+3(4):385 – 391.
+Chen Li, Fei Liu, Fuliang Weng, and Yang Liu. 2013.
+Document summarization via guided sentence com-
+pression. In Proceedings of EMNLP, pages 490–
+500, Seattle, Washington, USA, October.
+Thomas L. Magnanti and Laurence A. Wolsey. 1994.
+Optimal trees. In Technical Report 290-94,
+Massechusetts Institute of Technology, Operations
+Research Center.
+Andr´e F. T. Martins and Noah A. Smith. 2009. Sum-
+marization with a joint model for sentence extraction
+and compression. In Proceedings of the Workshop
+on Integer Linear Programming for Natural Lan-
+gauge Processing, pages 1–9.
+Andr´e F. T. Martins, Noah A. Smith, and Eric P. Xing.
+2009. Concise integer linear programming formu-
+lations for dependency parsing. In Proceedings of
+ACL-IJCNLP, pages 342–350.
+Andr´e F. T. Martins, Noah A. Smith, Pedro M. Q.
+Aguiar, and M´ario A. T. Figueiredo. 2011. Dual
+decomposition with many overlapping components.
+In Proceedings of EMNLP, pages 238–249.
+Ryan McDonald, Fernando Pereira, Kiril Ribarov, and
+Jan Hajiˇc. 2005. Non-projective dependency pars-
+ing using spanning tree algorithms. In Proceedings
+of EMNLP-HLT, pages 523–530.
+Ryan McDonald. 2006. Discriminative sentence com-
+pression with soft syntactic evidence. In Proceed-
+ings of EACL, pages 297–304.
+Alejandro Molina, Juan-Manuel Torres-Moreno, Eric
+SanJuan, Iria da Cunha, and Gerardo Eugenio
+Sierra Martinez. 2013. Discursive sentence com-
+pression. In Computational Linguistics and Intelli-
+gent Text Processing, volume 7817, pages 394–407.
+Springer.
+Courtney Napoles, Chris Callison-Burch, Juri Ganitke-
+vitch, and Benjamin Van Durme. 2011a. Paraphras-
+tic sentence compression with a character-based
+metric: tightening without deletion. In Proceedings
+of the Workshop on Monolingual Text-To-Text Gen-
+eration, pages 84–90.
+Courtney Napoles, Benjamin Van Durme, and Chris
+Callison-Burch. 2011b. Evaluating sentence com-
+pression: pitfalls and suggested remedies. In Pro-
+ceedings of the Workshop on Monolingual Text-To-
+Text Generation, pages 91–97.
+Tadashi Nomoto. 2007. Discriminative sentence com-
+pression with conditional random fields. Infor-
+mation Processing and Management, 43(6):1571–
+1587, November.
+Xian Qian and Yang Liu. 2013. Fast joint compression
+and summarization via graph cuts. In Proceedings
+of EMNLP, pages 1492–1502, Seattle, Washington,
+USA, October.
+Stefan Riezler, Tracy H. King, Richard Crouch, and
+Annie Zaenen. 2003. Statistical sentence condensa-
+tion using ambiguity packing and stochastic disam-
+biguation methods for lexical-functional grammar.
+In Proceedings of HLT-NAACL, pages 118–125.
+Alexander M. Rush and Michael Collins. 2011. Ex-
+act decoding of syntactic translation models through
+Lagrangian relaxation. In Proceedings ofACL-HLT,
+pages 72–82.
+Alexander M. Rush, David Sontag, Michael Collins,
+and Tommi Jaakkola. 2010. On dual decomposition
+and linear programming relaxations for natural lan-
+guage processing. In Proceedings of EMNLP, pages
+1–11.
+Kapil Thadani and Kathleen McKeown. 2013. Sen-
+tence compression with joint structural inference. In
+Proceedings of CoNLL.
+Jenine Turner and Eugene Charniak. 2005. Super-
+vised and unsupervised learning for sentence com-
+pression. In Proceedings of ACL, pages 290–297.
+Yuya Unno, Takashi Ninomiya, Yusuke Miyao, and
+Jun’ichi Tsujii. 2006. Trimming CFG parse trees
+for sentence compression using machine learning
+approaches. In Proceedings ofACL-COLING, pages
+850–857.
+Kristian Woodsend and Mirella Lapata. 2012. Mul-
+tiple aspect summarization using integer linear pro-
+gramming. In Proceedings of EMNLP, pages 233–
+243.
+David Zajic, Bonnie J. Dorr, Jimmy Lin, and Richard
+Schwartz. 2007. Multi-candidate reduction: Sen-
+tence compression as a tool for document summa-
+rization tasks. Information Processing and Manage-
+ment, 43(6):1549–1570, Nov.
+Kai Zhao and Liang Huang. 2013. Minibatch and par-
+allelization for online large margin structured learn-
+ing. In Proceedings of HLT-NAACL, pages 370–
+379, Atlanta, Georgia, June.
+</reference>
+<page confidence="0.991337">
+1251
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.530822">
+<title confidence="0.990493">Approximation Strategies for Multi-Structure Sentence Compression</title>
+<author confidence="0.676564">Kapil</author>
+<affiliation confidence="0.999821">Department of Computer</affiliation>
+<address confidence="0.897028">Columbia New York, NY 10025,</address>
+<email confidence="0.999743">kapil@cs.columbia.edu</email>
+<abstract confidence="0.999297913043478">Sentence compression has been shown to benefit from joint inference involving both n-gram and dependency-factored objectives but this typically requires expensive integer programming. We explore instead the use of Lagrangian relaxation to decouple the two subproblems and solve them separately. While dynamic programming is viable for bigram-based sentence compression, finding optimal compressed trees within graphs is NP-hard. We recover approximate solutions to this problem using LP relaxation and maximum spanning tree algorithms, yielding techniques that can be combined with the efficient bigrambased inference approach using Lagrange multipliers. Experiments show that these approximation strategies produce results comparable to a state-of-the-art integer linear programming formulation for the same joint inference task along with a significant improvement in runtime.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>Miguel Almeida</author>
+<author>Andr´e F T Martins</author>
+</authors>
+<title>Fast and robust compressive summarization with dual decomposition and multi-task learning.</title>
+<date>2013</date>
+<booktitle>In Proceedings of ACL,</booktitle>
+<pages>196--206</pages>
+<contexts>
+<context position="6702" citStr="Almeida and Martins, 2013" startWordPosition="987" endWordPosition="990"> it is evident that dropping tokens independently from an input sentence will likely not result in fluent and meaningful compressive text. Tokens in well-formed sentences participate in a number of syntactic and semantic relationships with other tokens, so one might expect that accounting for heterogenous structural relationships between tokens will improve the coherence of the output sentence. Furthermore, much recent work has focused on the challenge of joint sentence extraction and compression, also known as compressive summarization (Martins and Smith, 2009; Berg-Kirkpatrick et al., 2011; Almeida and Martins, 2013; Li et al., 2013; Qian and Liu, 2013), in which questions of efficiency are paramount due to the larger problems involved; however, these approaches largely restrict compression to pruning parse trees, thereby imposing a dependency on parser performance. We focus in this work on a sentence-level compression system to approximate the ILP-based inference of Thadani and McKeown (2013) which does not restrict compressions to follow input parses but permits the generation of novel dependency relations in output compressions. The rest of this section is organized as follows: §2.1 provies an overvie</context>
+<context position="11244" citStr="Almeida and Martins, 2013" startWordPosition="1739" endWordPosition="1742">ts representing the flow of commodities (Magnanti and Wolsey, 1994) in order to establish structure in y and z. In the following section, we propose an alternative formulation that exploits the modularity of this joint objective. 2.2 Lagrangian relaxation Dual decomposition (Komodakis et al., 2007) and Lagrangian relaxation in general are often used for solving joint inference problems which are decomposable into individual subproblems linked by equality constraints (Koo et al., 2010; Rush et al., 2010; Rush and Collins, 2011; DeNero and Macherey, 2011; Martins et al., 2011; Das et al., 2012; Almeida and Martins, 2013). This approach permits sub-problems to be solved separately using problem-specific efficient algorithms, while consistency over the structures produced is enforced through Lagrange multipliers via iterative optimization. Exact solutions are guaranteed when the algorithm converges on a consistent primal solution, although this convergence itself is not guaranteed and depends on the tightness of the underlying LP relaxation. The primary advantage of this technique is the ability to leverage the underlying structure of the problems in inference rather than relying on a generic ILP formulation wh</context>
+<context position="34964" citStr="Almeida and Martins, 2013" startWordPosition="5687" endWordPosition="5691">1a; Filippova and Altun, 2013) following the release of datasets such as the Ziff-Davis corpus (Knight and Marcu, 2000) and the Edinburgh compression corpora (Clarke and Lapata, 2006; Clarke and Lapata, 2008), although unsupervised approaches— largely based on ILPs—have also received consideration (Clarke and Lapata, 2007; Clarke and Lapata, 2008; Filippova and Strube, 2008). Compression has also been used as a tool for document summarization (Daum´e and Marcu, 2002; Zajic et al., 2007; Clarke and Lapata, 2007; Martins and Smith, 2009; Berg-Kirkpatrick et al., 2011; Woodsend and Lapata, 2012; Almeida and Martins, 2013; Molina et al., 2013; Li et al., 2013; Qian and Liu, 2013), with recent work formulating the summarization task as joint sentence extraction and compression and often employing ILP or Lagrangian relaxation. Monolingual compression 13Similar results were observed for the BN test corpus. Figure 3: Effect of input size on (a) inference time, and (b) the corresponding difference in RASP F1% (ILP-Joint – DP+LP) on the NW corpus. also faces many obstacles common to decoding in machine translation, and a number of approaches which have been proposed to combine phrasal and syntactic models (Huang and</context>
+</contexts>
+<marker>Almeida, Martins, 2013</marker>
+<rawString>Miguel Almeida and Andr´e F. T. Martins. 2013. Fast and robust compressive summarization with dual decomposition and multi-task learning. In Proceedings of ACL, pages 196–206, August.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Taylor Berg-Kirkpatrick</author>
+<author>Dan Gillick</author>
+<author>Dan Klein</author>
+</authors>
+<title>Jointly learning to extract and compress.</title>
+<date>2011</date>
+<booktitle>In Proceedings of ACL-HLT,</booktitle>
+<pages>481--490</pages>
+<contexts>
+<context position="6675" citStr="Berg-Kirkpatrick et al., 2011" startWordPosition="983" endWordPosition="986">lated as a token deletion task, it is evident that dropping tokens independently from an input sentence will likely not result in fluent and meaningful compressive text. Tokens in well-formed sentences participate in a number of syntactic and semantic relationships with other tokens, so one might expect that accounting for heterogenous structural relationships between tokens will improve the coherence of the output sentence. Furthermore, much recent work has focused on the challenge of joint sentence extraction and compression, also known as compressive summarization (Martins and Smith, 2009; Berg-Kirkpatrick et al., 2011; Almeida and Martins, 2013; Li et al., 2013; Qian and Liu, 2013), in which questions of efficiency are paramount due to the larger problems involved; however, these approaches largely restrict compression to pruning parse trees, thereby imposing a dependency on parser performance. We focus in this work on a sentence-level compression system to approximate the ILP-based inference of Thadani and McKeown (2013) which does not restrict compressions to follow input parses but permits the generation of novel dependency relations in output compressions. The rest of this section is organized as follo</context>
+<context position="34910" citStr="Berg-Kirkpatrick et al., 2011" startWordPosition="5679" endWordPosition="5682">ulos, 2010; Ganitkevitch et al., 2011; Napoles et al., 2011a; Filippova and Altun, 2013) following the release of datasets such as the Ziff-Davis corpus (Knight and Marcu, 2000) and the Edinburgh compression corpora (Clarke and Lapata, 2006; Clarke and Lapata, 2008), although unsupervised approaches— largely based on ILPs—have also received consideration (Clarke and Lapata, 2007; Clarke and Lapata, 2008; Filippova and Strube, 2008). Compression has also been used as a tool for document summarization (Daum´e and Marcu, 2002; Zajic et al., 2007; Clarke and Lapata, 2007; Martins and Smith, 2009; Berg-Kirkpatrick et al., 2011; Woodsend and Lapata, 2012; Almeida and Martins, 2013; Molina et al., 2013; Li et al., 2013; Qian and Liu, 2013), with recent work formulating the summarization task as joint sentence extraction and compression and often employing ILP or Lagrangian relaxation. Monolingual compression 13Similar results were observed for the BN test corpus. Figure 3: Effect of input size on (a) inference time, and (b) the corresponding difference in RASP F1% (ILP-Joint – DP+LP) on the NW corpus. also faces many obstacles common to decoding in machine translation, and a number of approaches which have been propo</context>
+</contexts>
+<marker>Berg-Kirkpatrick, Gillick, Klein, 2011</marker>
+<rawString>Taylor Berg-Kirkpatrick, Dan Gillick, and Dan Klein. 2011. Jointly learning to extract and compress. In Proceedings of ACL-HLT, pages 481–490.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ted Briscoe</author>
+<author>John Carroll</author>
+<author>Rebecca Watson</author>
+</authors>
+<title>The second release of the RASP system.</title>
+<date>2006</date>
+<booktitle>In Proceedings of the ACL-COLING Interactive Presentation Sessions.</booktitle>
+<contexts>
+<context position="26644" citStr="Briscoe et al., 2006" startWordPosition="4361" endWordPosition="4364">t sections following the splits from Clarke and Lapata (2008), yielding 953/63/603 instances for the NW corpus and 880/78/404 for the BN corpus. Gold dependency parses were approximated by running the Stanford dependency parser7 over reference compressions. Following evaluations in machine translation as well as previous work in sentence compression (Unno et al., 2006; Clarke and Lapata, 2008; Martins and Smith, 2009; Napoles et al., 2011b; Thadani and McKeown, 2013), we evaluate system performance using F1 metrics over n-grams and dependency edges produced by parsing system output with RASP (Briscoe et al., 2006) and the Stanford parser. All ILPs and LPs were solved using Gurobi,8 a high-performance commercialgrade solver. Following a recent analysis of compression evaluations (Napoles et al., 2011b) which revealed a strong correlation between system compression rate and human judgments of compression quality, we constrained all systems to produce 6We used a minibatch size of 4 in all experiments. 7http://nlp.stanford.edu/software/ 8http://www.gurobi.com compressed output at a specific rate—determined by the the gold compressions available for each instance—to ensure that the reported differences betw</context>
+</contexts>
+<marker>Briscoe, Carroll, Watson, 2006</marker>
+<rawString>Ted Briscoe, John Carroll, and Rebecca Watson. 2006. The second release of the RASP system. In Proceedings of the ACL-COLING Interactive Presentation Sessions.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yoeng-jin Chu</author>
+<author>Tseng-hong Liu</author>
+</authors>
+<title>On the shortest arborescence of a directed graph. Science Sinica,</title>
+<date>1965</date>
+<pages>14--1396</pages>
+<contexts>
+<context position="5103" citStr="Chu and Liu, 1965" startWordPosition="754" endWordPosition="757">aximum spanning tree. We therefore consider methods to recover approximate solutions for the subproblem of finding the maximum weighted subtree in a graph, common among which is the use of a linear programming relaxation. This linear program (LP) appears empirically tight for compression problems and our experiments indicate that simply using the non-integral solutions of this LP in Lagrangian relaxation can empirically lead to reasonable compressions. In addition, we can recover approximate solutions to this problem by using the ChuLiu Edmonds algorithm for recovering maximum spanning trees (Chu and Liu, 1965; Edmonds, 1967) over the relatively sparse subgraph defined by a solution to the relaxed LP. Our proposed approximation strategies are evaluated using automated metrics in order to address the question: under what conditions should a real-world sentence compression system implementation consider exact inference with an ILP or approximate inference? The contributions of this work include: • An empirically-useful technique for approximating the maximum-weight subtree in a weighted graph using LP-relaxed inference. • Multiple approaches to generate good approximate solutions for joint multi-stru</context>
+<context position="22046" citStr="Chu and Liu, 1965" startWordPosition="3627" endWordPosition="3630">east as many tokens activated in the LP solution as are required in a valid solution. We then construct a subgraph G(&amp;quot;z) consisting of all dependency edges that were assigned nonzero values in the solution, assigning to each edge a score equal to the score of that edge in the LP as well as the score of its dependent word, i.e., each zij in G(&amp;quot;z) is assigned a score of θdep((ti, tj)) − aj + (1 − ψ) · θtok(tj). Since the commodity flow constraints in (9)–(11) ensure a connected &amp;quot;z, it is therefore possible to recover a maximum-weight spanning tree from G(&amp;quot;z) using the Chu-Liu Edmonds algorithm (Chu and Liu, 1965; Edmonds, 1967).5 Although the runtime of this algorithm is cubic in the size of the input graph, it is fairly speedy when applied on relatively sparse graphs such as the solutions to the LP described above. The resulting spanning tree is a useful integral approximation of z&amp;quot; but, as mentioned previously, may contain more nodes than R due to fractional values in &amp;quot;x; we therefore repeatedly prune leaves 5A detailed description of the Chu-Liu Edmonds algorithm for MSTs is available in McDonald et al. (2005). with the lowest incoming edge weight in the current tree until exactly R nodes remain. </context>
+</contexts>
+<marker>Chu, Liu, 1965</marker>
+<rawString>Yoeng-jin Chu and Tseng-hong Liu. 1965. On the shortest arborescence of a directed graph. Science Sinica, 14:1396–1400.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>James Clarke</author>
+<author>Mirella Lapata</author>
+</authors>
+<title>Models for sentence compression: a comparison across domains, training requirements and evaluation measures.</title>
+<date>2006</date>
+<booktitle>In Proceedings of ACL-COLING,</booktitle>
+<pages>377--384</pages>
+<contexts>
+<context position="1542" citStr="Clarke and Lapata, 2006" startWordPosition="213" endWordPosition="216">le to a state-of-the-art integer linear programming formulation for the same joint inference task along with a significant improvement in runtime. 1 Introduction Sentence compression is a text-to-text generation task in which an input sentence must be transformed into a shorter output sentence which accurately reflects the meaning in the input and also remains grammatically well-formed. The compression task has received increasing attention in recent years, in part due to the availability of datasets such as the Ziff-Davis corpus (Knight and Marcu, 2000) and the Edinburgh compression corpora (Clarke and Lapata, 2006), from which the following example is drawn. Original: In 1967 Chapman, who had cultivated a conventional image with his ubiquitous tweed jacket and pipe, by his own later admission stunned a party attended by his friends and future Python colleagues by coming out as a homosexual. Compressed: In 1967 Chapman, who had cultivated a conventional image, stunned a party by coming out as a homosexual. Following an assumption often used in compression systems, the compressed output in this corpus is constructed by dropping tokens from the input sentence without any paraphrasing or reordering.1 A numb</context>
+<context position="10239" citStr="Clarke and Lapata (2006)" startWordPosition="1586" endWordPosition="1589">l parameters. In order to recover meaningful compressions by optimizing (2), the inference step must ensure: 1. The configurations x, y and z are consistent with each other, i.e., all configurations cover the same tokens. 2. The structural configurations y and z are non-degenerate, i.e, the bigram configuration y represents an acyclic path while the dependency configuration z forms a tree. 2Although Thadani and McKeown (2013) is not restricted to bigrams or order-preserving n-grams, we limit our discussion to this scenario as it also fits the assumptions of McDonald (2006) and the datasets of Clarke and Lapata (2006). These requirements naturally rule out simple approximate inference formulations such as searchbased approaches for the joint objective.3 An ILP-based inference solution is demonstrated in Thadani and McKeown (2013) that makes use of linear constraints over the boolean variables xi, yij and zij to guarantee consistency, as well as auxiliary real-valued variables and constraints representing the flow of commodities (Magnanti and Wolsey, 1994) in order to establish structure in y and z. In the following section, we propose an alternative formulation that exploits the modularity of this joint ob</context>
+<context position="31424" citStr="Clarke and Lapata, 2006" startWordPosition="5131" endWordPosition="5134">sults Tables 1 and 2 summarize the results from our compression experiments on the BN and NW corpora respectively. Starting with the n-gram approaches, the performance of 3-LM leads us to observe that the gains of supervised learning far outweigh the utility of higher-order n-gram factorization, which is also responsible for a significant increase in wall-clock time. In contrast, DP is an order of magnitude faster than all other approaches studied here although it is not competitive under parse-based measures such as RASP F1% which is known to correlate with human judgments of grammaticality (Clarke and Lapata, 2006). We were surprised by the strong performance of the dependency-based inference techniques, which yielded results that approached the joint model in both n-gram and parse-based measures. 11We were surprised to observe that performance improved significantly when O was set closer to 1, thereby emphasizing token features in the dependency subproblem. The final values chosen were OBN = 0.9 and ONW = 0.8. The exact ILP-Dep approach halves the runtime of ILP-Joint to produce compressions that have similar (although statistically distinguishable) scores. Approximating dependency-based inference with</context>
+<context position="34521" citStr="Clarke and Lapata, 2006" startWordPosition="5619" endWordPosition="5622">xt generation problems and has been observed to play a significant role in human summarization (Jing, 2000; Jing and McKeown, 2000). Most approaches to sentence compression are supervised (Knight and Marcu, 2002; Riezler et al., 2003; Turner and Charniak, 2005; McDonald, 2006; Unno et al., 2006; Galley and McKeown, 2007; Nomoto, 2007; Cohn and Lapata, 2009; Galanis and Androutsopoulos, 2010; Ganitkevitch et al., 2011; Napoles et al., 2011a; Filippova and Altun, 2013) following the release of datasets such as the Ziff-Davis corpus (Knight and Marcu, 2000) and the Edinburgh compression corpora (Clarke and Lapata, 2006; Clarke and Lapata, 2008), although unsupervised approaches— largely based on ILPs—have also received consideration (Clarke and Lapata, 2007; Clarke and Lapata, 2008; Filippova and Strube, 2008). Compression has also been used as a tool for document summarization (Daum´e and Marcu, 2002; Zajic et al., 2007; Clarke and Lapata, 2007; Martins and Smith, 2009; Berg-Kirkpatrick et al., 2011; Woodsend and Lapata, 2012; Almeida and Martins, 2013; Molina et al., 2013; Li et al., 2013; Qian and Liu, 2013), with recent work formulating the summarization task as joint sentence extraction and compression</context>
+</contexts>
+<marker>Clarke, Lapata, 2006</marker>
+<rawString>James Clarke and Mirella Lapata. 2006. Models for sentence compression: a comparison across domains, training requirements and evaluation measures. In Proceedings of ACL-COLING, pages 377– 384.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>James Clarke</author>
+<author>Mirella Lapata</author>
+</authors>
+<title>Modelling compression with discourse constraints.</title>
+<date>2007</date>
+<booktitle>In Proceedings of EMNLP-CoNLL,</booktitle>
+<pages>1--11</pages>
+<contexts>
+<context position="34662" citStr="Clarke and Lapata, 2007" startWordPosition="5639" endWordPosition="5642">roaches to sentence compression are supervised (Knight and Marcu, 2002; Riezler et al., 2003; Turner and Charniak, 2005; McDonald, 2006; Unno et al., 2006; Galley and McKeown, 2007; Nomoto, 2007; Cohn and Lapata, 2009; Galanis and Androutsopoulos, 2010; Ganitkevitch et al., 2011; Napoles et al., 2011a; Filippova and Altun, 2013) following the release of datasets such as the Ziff-Davis corpus (Knight and Marcu, 2000) and the Edinburgh compression corpora (Clarke and Lapata, 2006; Clarke and Lapata, 2008), although unsupervised approaches— largely based on ILPs—have also received consideration (Clarke and Lapata, 2007; Clarke and Lapata, 2008; Filippova and Strube, 2008). Compression has also been used as a tool for document summarization (Daum´e and Marcu, 2002; Zajic et al., 2007; Clarke and Lapata, 2007; Martins and Smith, 2009; Berg-Kirkpatrick et al., 2011; Woodsend and Lapata, 2012; Almeida and Martins, 2013; Molina et al., 2013; Li et al., 2013; Qian and Liu, 2013), with recent work formulating the summarization task as joint sentence extraction and compression and often employing ILP or Lagrangian relaxation. Monolingual compression 13Similar results were observed for the BN test corpus. Figure 3: </context>
+</contexts>
+<marker>Clarke, Lapata, 2007</marker>
+<rawString>James Clarke and Mirella Lapata. 2007. Modelling compression with discourse constraints. In Proceedings of EMNLP-CoNLL, pages 1–11.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>James Clarke</author>
+<author>Mirella Lapata</author>
+</authors>
+<title>Global inference for sentence compression: an integer linear programming approach.</title>
+<date>2008</date>
+<journal>Journal forArtificial Intelligence Research,</journal>
+<pages>31--399</pages>
+<contexts>
+<context position="2369" citStr="Clarke and Lapata, 2008" startWordPosition="343" endWordPosition="346">ded by his friends and future Python colleagues by coming out as a homosexual. Compressed: In 1967 Chapman, who had cultivated a conventional image, stunned a party by coming out as a homosexual. Following an assumption often used in compression systems, the compressed output in this corpus is constructed by dropping tokens from the input sentence without any paraphrasing or reordering.1 A number of diverse approaches have been proposed for deletion-based sentence compression, including techniques that assemble the output text under an n-gram factorization over the input text (McDonald, 2006; Clarke and Lapata, 2008) or an arc factorization over input dependency parses (Filippova and Strube, 2008; Galanis and Androutsopoulos, 2010; Filippova and Altun, 2013). Joint methods have also been proposed that invoke integer linear programming (ILP) formulations to simultaneously consider multiple structural inference problems—both over n-grams and input dependencies (Martins and Smith, 2009) or n-grams and all possible dependencies (Thadani and McKeown, 2013). However, it is wellestablished that the utility of ILP for optimal inference in structured problems is often outweighed by the worst-case performance of IL</context>
+<context position="25777" citStr="Clarke and Lapata (2008)" startWordPosition="4230" endWordPosition="4233">ches (Zhao and Huang, 2013) for easy parallelization and faster convergence.6 Overfitting was avoided by averaging parameters and monitoring performance against a held-out development set during training. All models were trained using variants of the ILP-based inference approach of Thadani and McKeown (2013). We followed Martins et al. (2009) in using LP-relaxed inference during learning, assuming algorithmic separability (Kulesza and Pereira, 2007) for these problems. 3 Experiments We ran compression experiments over the newswire (NW) and broadcast news transcription (BN) corpora compiled by Clarke and Lapata (2008) which contain gold compressions produced by human annotators using only word deletion. The datasets were filtered to eliminate instances with less than 2 and more than 110 tokens for parser compatibility and divided into training/development/test sections following the splits from Clarke and Lapata (2008), yielding 953/63/603 instances for the NW corpus and 880/78/404 for the BN corpus. Gold dependency parses were approximated by running the Stanford dependency parser7 over reference compressions. Following evaluations in machine translation as well as previous work in sentence compression (U</context>
+<context position="27523" citStr="Clarke and Lapata (2008)" startWordPosition="4490" endWordPosition="4493">rate and human judgments of compression quality, we constrained all systems to produce 6We used a minibatch size of 4 in all experiments. 7http://nlp.stanford.edu/software/ 8http://www.gurobi.com compressed output at a specific rate—determined by the the gold compressions available for each instance—to ensure that the reported differences between the systems under study are meaningful. 3.1 Systems We report results over the following systems grouped into three categories of models: tokens + n-grams, tokens + dependencies, and joint models. • 3-LM: A reimplementation of the unsupervised ILP of Clarke and Lapata (2008) which infers order-preserving trigram variables parameterized with log-likelihood under an LM and a significance score for token variables inspired by Hori and Furui (2004), as well as various linguistically-motivated constraints to encourage fluency in output compressions. • DP: The bigram-based dynamic program of McDonald (2006) described in §2.3.9 • LP→MST: An approximate inference approach based on an LP relaxation of ILPDep. As discussed in §2.4, a maximum spanning tree is recovered from the output of the LP and greedily pruned in order to generate a valid integral solution while observi</context>
+<context position="34547" citStr="Clarke and Lapata, 2008" startWordPosition="5623" endWordPosition="5627">d has been observed to play a significant role in human summarization (Jing, 2000; Jing and McKeown, 2000). Most approaches to sentence compression are supervised (Knight and Marcu, 2002; Riezler et al., 2003; Turner and Charniak, 2005; McDonald, 2006; Unno et al., 2006; Galley and McKeown, 2007; Nomoto, 2007; Cohn and Lapata, 2009; Galanis and Androutsopoulos, 2010; Ganitkevitch et al., 2011; Napoles et al., 2011a; Filippova and Altun, 2013) following the release of datasets such as the Ziff-Davis corpus (Knight and Marcu, 2000) and the Edinburgh compression corpora (Clarke and Lapata, 2006; Clarke and Lapata, 2008), although unsupervised approaches— largely based on ILPs—have also received consideration (Clarke and Lapata, 2007; Clarke and Lapata, 2008; Filippova and Strube, 2008). Compression has also been used as a tool for document summarization (Daum´e and Marcu, 2002; Zajic et al., 2007; Clarke and Lapata, 2007; Martins and Smith, 2009; Berg-Kirkpatrick et al., 2011; Woodsend and Lapata, 2012; Almeida and Martins, 2013; Molina et al., 2013; Li et al., 2013; Qian and Liu, 2013), with recent work formulating the summarization task as joint sentence extraction and compression and often employing ILP o</context>
+</contexts>
+<marker>Clarke, Lapata, 2008</marker>
+<rawString>James Clarke and Mirella Lapata. 2008. Global inference for sentence compression: an integer linear programming approach. Journal forArtificial Intelligence Research, 31:399–429, March.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Trevor Cohn</author>
+<author>Mirella Lapata</author>
+</authors>
+<title>Sentence compression beyond word deletion.</title>
+<date>2008</date>
+<booktitle>In Proceedings of COLING,</booktitle>
+<pages>137--144</pages>
+<contexts>
+<context position="3336" citStr="Cohn and Lapata (2008)" startWordPosition="483" endWordPosition="486">ies (Martins and Smith, 2009) or n-grams and all possible dependencies (Thadani and McKeown, 2013). However, it is wellestablished that the utility of ILP for optimal inference in structured problems is often outweighed by the worst-case performance of ILP solvers on large problems without unique integral solutions. Furthermore, approximate solutions can often be adequate for real-world generation systems, particularly in the presence of linguisticallymotivated constraints such as those described by Clarke and Lapata (2008), or domain-specific 1This is referred to as extractive compression by Cohn and Lapata (2008) &amp; Galanis and Androutsopoulos (2010) following the terminology used in document summarization. 1241 Proceedings of the 52nd Annual Meeting of the Association for Computational Linguistics, pages 1241–1251, Baltimore, Maryland, USA, June 23-25 2014. c�2014 Association for Computational Linguistics pruning strategies such as the use of sentence templates to constrain the output. In this work, we develop approximate inference strategies to the joint approach of Thadani and McKeown (2013) which trade the optimality guarantees of exact ILP for faster inference by separately solving the n-gram and </context>
+</contexts>
+<marker>Cohn, Lapata, 2008</marker>
+<rawString>Trevor Cohn and Mirella Lapata. 2008. Sentence compression beyond word deletion. In Proceedings of COLING, pages 137–144.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Trevor Cohn</author>
+<author>Mirella Lapata</author>
+</authors>
+<title>Sentence compression as tree transduction.</title>
+<date>2009</date>
+<journal>Journal of Artificial Intelligence Research,</journal>
+<volume>34</volume>
+<issue>1</issue>
+<contexts>
+<context position="34256" citStr="Cohn and Lapata, 2009" startWordPosition="5577" endWordPosition="5580">ariation in RASP F1% with input size indicates the viability of a hybrid approach which could balance accuracy and speed by using ILP-Joint for smaller problems and DP+LP for larger ones. 4 Related Work Sentence compression is one of the better-studied text-to-text generation problems and has been observed to play a significant role in human summarization (Jing, 2000; Jing and McKeown, 2000). Most approaches to sentence compression are supervised (Knight and Marcu, 2002; Riezler et al., 2003; Turner and Charniak, 2005; McDonald, 2006; Unno et al., 2006; Galley and McKeown, 2007; Nomoto, 2007; Cohn and Lapata, 2009; Galanis and Androutsopoulos, 2010; Ganitkevitch et al., 2011; Napoles et al., 2011a; Filippova and Altun, 2013) following the release of datasets such as the Ziff-Davis corpus (Knight and Marcu, 2000) and the Edinburgh compression corpora (Clarke and Lapata, 2006; Clarke and Lapata, 2008), although unsupervised approaches— largely based on ILPs—have also received consideration (Clarke and Lapata, 2007; Clarke and Lapata, 2008; Filippova and Strube, 2008). Compression has also been used as a tool for document summarization (Daum´e and Marcu, 2002; Zajic et al., 2007; Clarke and Lapata, 2007; </context>
+</contexts>
+<marker>Cohn, Lapata, 2009</marker>
+<rawString>Trevor Cohn and Mirella Lapata. 2009. Sentence compression as tree transduction. Journal of Artificial Intelligence Research, 34(1):637–674, April.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Michael Collins</author>
+</authors>
+<title>Discriminative training methods for hidden Markov models.</title>
+<date>2002</date>
+<booktitle>In Proceedings of EMNLP,</booktitle>
+<pages>1--8</pages>
+<contexts>
+<context position="25126" citStr="Collins, 2002" startWordPosition="4139" endWordPosition="4140">dep contains features for the probability of a dependency edge under a smoothed dependency grammar constructed from the Penn Treebank and various conjunctions of the following features: (a) whether the edge appears as a dependency or ancestral relation in the input parse (b) the directionality of the depen1246 dency (c) the label of the edge (d) the POS tags of the tokens incident to the edge and (e) the labels of their surrounding chunks and whether the edge remains within the chunk. For the experiments in the following section, we trained models using a variant of the structured perceptron (Collins, 2002) which incorporates minibatches (Zhao and Huang, 2013) for easy parallelization and faster convergence.6 Overfitting was avoided by averaging parameters and monitoring performance against a held-out development set during training. All models were trained using variants of the ILP-based inference approach of Thadani and McKeown (2013). We followed Martins et al. (2009) in using LP-relaxed inference during learning, assuming algorithmic separability (Kulesza and Pereira, 2007) for these problems. 3 Experiments We ran compression experiments over the newswire (NW) and broadcast news transcriptio</context>
+</contexts>
+<marker>Collins, 2002</marker>
+<rawString>Michael Collins. 2002. Discriminative training methods for hidden Markov models. In Proceedings of EMNLP, pages 1–8.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Dipanjan Das</author>
+<author>Andr´e F T Martins</author>
+<author>Noah A Smith</author>
+</authors>
+<title>An exact dual decomposition algorithm for shallow semantic parsing with constraints.</title>
+<date>2012</date>
+<booktitle>In Proceedings of the First Joint Conference on Lexical and Computational Semantics (*SEM), SemEval ’12,</booktitle>
+<pages>209--217</pages>
+<contexts>
+<context position="11216" citStr="Das et al., 2012" startWordPosition="1735" endWordPosition="1738">bles and constraints representing the flow of commodities (Magnanti and Wolsey, 1994) in order to establish structure in y and z. In the following section, we propose an alternative formulation that exploits the modularity of this joint objective. 2.2 Lagrangian relaxation Dual decomposition (Komodakis et al., 2007) and Lagrangian relaxation in general are often used for solving joint inference problems which are decomposable into individual subproblems linked by equality constraints (Koo et al., 2010; Rush et al., 2010; Rush and Collins, 2011; DeNero and Macherey, 2011; Martins et al., 2011; Das et al., 2012; Almeida and Martins, 2013). This approach permits sub-problems to be solved separately using problem-specific efficient algorithms, while consistency over the structures produced is enforced through Lagrange multipliers via iterative optimization. Exact solutions are guaranteed when the algorithm converges on a consistent primal solution, although this convergence itself is not guaranteed and depends on the tightness of the underlying LP relaxation. The primary advantage of this technique is the ability to leverage the underlying structure of the problems in inference rather than relying on </context>
+<context position="16360" citStr="Das et al., 2012" startWordPosition="2619" endWordPosition="2622">esents the best score for a compression of length r ending at token i. The table can be populated using the following recurrence: Q[i][1] = score(S, START, i) Q[i][r] = maxQ[j][r − 1] + score(S,i, j) j&lt;i Q[i][R + 1] = Q[i][R] + score(S, i, END) where R is the required number of output tokens and the scoring function is defined as score(S, i,j) θbgr(hti, tji) + λj + ψ · θtok(tj) so as to solve f(y, λ, ψ, θ) from (4). This approach requires O(n2R) time in order to identify 4Heuristic approaches (Komodakis et al., 2007; Rush et al., 2010), tightening (Rush and Collins, 2011) or branch and bound (Das et al., 2012) can still be used to retrieve optimal solutions, but we did not explore these strategies here. min λ max y,z = min max λ y + max z = min max λ y + max z 1244 Figure 1: An example of the difficulty of recovering the maximum-weight subtree (B—*C, B—*D) from the maximum spanning tree (A—*C, C—*B, B—*D). the highest scoring sequence y and corresponding token configuration α(y). 2.4 Dependency subtrees The maximum-weight non-projective subtree problem over general graphs is not as easily solved. Although the maximum spanning tree for a given token configuration can be recovered efficiently, Figure</context>
+</contexts>
+<marker>Das, Martins, Smith, 2012</marker>
+<rawString>Dipanjan Das, Andr´e F. T. Martins, and Noah A. Smith. 2012. An exact dual decomposition algorithm for shallow semantic parsing with constraints. In Proceedings of the First Joint Conference on Lexical and Computational Semantics (*SEM), SemEval ’12, pages 209–217.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Hal Daum´e</author>
+<author>Daniel Marcu</author>
+</authors>
+<title>A noisychannel model for document compression.</title>
+<date>2002</date>
+<booktitle>In Proceedings of ACL,</booktitle>
+<pages>449--456</pages>
+<marker>Daum´e, Marcu, 2002</marker>
+<rawString>Hal Daum´e, III and Daniel Marcu. 2002. A noisychannel model for document compression. In Proceedings of ACL, pages 449–456.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>John DeNero</author>
+<author>Klaus Macherey</author>
+</authors>
+<title>Modelbased aligner combination using dual decomposition.</title>
+<date>2011</date>
+<booktitle>In Proceedings of ACL-HLT,</booktitle>
+<pages>420--429</pages>
+<contexts>
+<context position="11176" citStr="DeNero and Macherey, 2011" startWordPosition="1727" endWordPosition="1730">nsistency, as well as auxiliary real-valued variables and constraints representing the flow of commodities (Magnanti and Wolsey, 1994) in order to establish structure in y and z. In the following section, we propose an alternative formulation that exploits the modularity of this joint objective. 2.2 Lagrangian relaxation Dual decomposition (Komodakis et al., 2007) and Lagrangian relaxation in general are often used for solving joint inference problems which are decomposable into individual subproblems linked by equality constraints (Koo et al., 2010; Rush et al., 2010; Rush and Collins, 2011; DeNero and Macherey, 2011; Martins et al., 2011; Das et al., 2012; Almeida and Martins, 2013). This approach permits sub-problems to be solved separately using problem-specific efficient algorithms, while consistency over the structures produced is enforced through Lagrange multipliers via iterative optimization. Exact solutions are guaranteed when the algorithm converges on a consistent primal solution, although this convergence itself is not guaranteed and depends on the tightness of the underlying LP relaxation. The primary advantage of this technique is the ability to leverage the underlying structure of the probl</context>
+</contexts>
+<marker>DeNero, Macherey, 2011</marker>
+<rawString>John DeNero and Klaus Macherey. 2011. Modelbased aligner combination using dual decomposition. In Proceedings of ACL-HLT, pages 420–429.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jack R Edmonds</author>
+</authors>
+<title>Optimum branchings.</title>
+<date>1967</date>
+<journal>Journal of Research of the National Bureau of Standards,</journal>
+<pages>71--233</pages>
+<contexts>
+<context position="5119" citStr="Edmonds, 1967" startWordPosition="758" endWordPosition="759">e. We therefore consider methods to recover approximate solutions for the subproblem of finding the maximum weighted subtree in a graph, common among which is the use of a linear programming relaxation. This linear program (LP) appears empirically tight for compression problems and our experiments indicate that simply using the non-integral solutions of this LP in Lagrangian relaxation can empirically lead to reasonable compressions. In addition, we can recover approximate solutions to this problem by using the ChuLiu Edmonds algorithm for recovering maximum spanning trees (Chu and Liu, 1965; Edmonds, 1967) over the relatively sparse subgraph defined by a solution to the relaxed LP. Our proposed approximation strategies are evaluated using automated metrics in order to address the question: under what conditions should a real-world sentence compression system implementation consider exact inference with an ILP or approximate inference? The contributions of this work include: • An empirically-useful technique for approximating the maximum-weight subtree in a weighted graph using LP-relaxed inference. • Multiple approaches to generate good approximate solutions for joint multi-structure compressio</context>
+<context position="22062" citStr="Edmonds, 1967" startWordPosition="3631" endWordPosition="3632"> activated in the LP solution as are required in a valid solution. We then construct a subgraph G(&amp;quot;z) consisting of all dependency edges that were assigned nonzero values in the solution, assigning to each edge a score equal to the score of that edge in the LP as well as the score of its dependent word, i.e., each zij in G(&amp;quot;z) is assigned a score of θdep((ti, tj)) − aj + (1 − ψ) · θtok(tj). Since the commodity flow constraints in (9)–(11) ensure a connected &amp;quot;z, it is therefore possible to recover a maximum-weight spanning tree from G(&amp;quot;z) using the Chu-Liu Edmonds algorithm (Chu and Liu, 1965; Edmonds, 1967).5 Although the runtime of this algorithm is cubic in the size of the input graph, it is fairly speedy when applied on relatively sparse graphs such as the solutions to the LP described above. The resulting spanning tree is a useful integral approximation of z&amp;quot; but, as mentioned previously, may contain more nodes than R due to fractional values in &amp;quot;x; we therefore repeatedly prune leaves 5A detailed description of the Chu-Liu Edmonds algorithm for MSTs is available in McDonald et al. (2005). with the lowest incoming edge weight in the current tree until exactly R nodes remain. The resulting tr</context>
+</contexts>
+<marker>Edmonds, 1967</marker>
+<rawString>Jack R. Edmonds. 1967. Optimum branchings. Journal of Research of the National Bureau of Standards, 71B:233–240.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Katja Filippova</author>
+<author>Yasemin Altun</author>
+</authors>
+<title>Overcoming the lack of parallel data in sentence compression.</title>
+<date>2013</date>
+<booktitle>In Proceedings of EMNLP,</booktitle>
+<pages>1481--1491</pages>
+<contexts>
+<context position="2513" citStr="Filippova and Altun, 2013" startWordPosition="364" endWordPosition="367">image, stunned a party by coming out as a homosexual. Following an assumption often used in compression systems, the compressed output in this corpus is constructed by dropping tokens from the input sentence without any paraphrasing or reordering.1 A number of diverse approaches have been proposed for deletion-based sentence compression, including techniques that assemble the output text under an n-gram factorization over the input text (McDonald, 2006; Clarke and Lapata, 2008) or an arc factorization over input dependency parses (Filippova and Strube, 2008; Galanis and Androutsopoulos, 2010; Filippova and Altun, 2013). Joint methods have also been proposed that invoke integer linear programming (ILP) formulations to simultaneously consider multiple structural inference problems—both over n-grams and input dependencies (Martins and Smith, 2009) or n-grams and all possible dependencies (Thadani and McKeown, 2013). However, it is wellestablished that the utility of ILP for optimal inference in structured problems is often outweighed by the worst-case performance of ILP solvers on large problems without unique integral solutions. Furthermore, approximate solutions can often be adequate for real-world generatio</context>
+<context position="34369" citStr="Filippova and Altun, 2013" startWordPosition="5594" endWordPosition="5598">cy and speed by using ILP-Joint for smaller problems and DP+LP for larger ones. 4 Related Work Sentence compression is one of the better-studied text-to-text generation problems and has been observed to play a significant role in human summarization (Jing, 2000; Jing and McKeown, 2000). Most approaches to sentence compression are supervised (Knight and Marcu, 2002; Riezler et al., 2003; Turner and Charniak, 2005; McDonald, 2006; Unno et al., 2006; Galley and McKeown, 2007; Nomoto, 2007; Cohn and Lapata, 2009; Galanis and Androutsopoulos, 2010; Ganitkevitch et al., 2011; Napoles et al., 2011a; Filippova and Altun, 2013) following the release of datasets such as the Ziff-Davis corpus (Knight and Marcu, 2000) and the Edinburgh compression corpora (Clarke and Lapata, 2006; Clarke and Lapata, 2008), although unsupervised approaches— largely based on ILPs—have also received consideration (Clarke and Lapata, 2007; Clarke and Lapata, 2008; Filippova and Strube, 2008). Compression has also been used as a tool for document summarization (Daum´e and Marcu, 2002; Zajic et al., 2007; Clarke and Lapata, 2007; Martins and Smith, 2009; Berg-Kirkpatrick et al., 2011; Woodsend and Lapata, 2012; Almeida and Martins, 2013; Mol</context>
+</contexts>
+<marker>Filippova, Altun, 2013</marker>
+<rawString>Katja Filippova and Yasemin Altun. 2013. Overcoming the lack of parallel data in sentence compression. In Proceedings of EMNLP, pages 1481–1491.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Katja Filippova</author>
+<author>Michael Strube</author>
+</authors>
+<title>Dependency tree based sentence compression.</title>
+<date>2008</date>
+<booktitle>In Proceedings of INLG,</booktitle>
+<pages>25--32</pages>
+<contexts>
+<context position="2450" citStr="Filippova and Strube, 2008" startWordPosition="356" endWordPosition="359">Compressed: In 1967 Chapman, who had cultivated a conventional image, stunned a party by coming out as a homosexual. Following an assumption often used in compression systems, the compressed output in this corpus is constructed by dropping tokens from the input sentence without any paraphrasing or reordering.1 A number of diverse approaches have been proposed for deletion-based sentence compression, including techniques that assemble the output text under an n-gram factorization over the input text (McDonald, 2006; Clarke and Lapata, 2008) or an arc factorization over input dependency parses (Filippova and Strube, 2008; Galanis and Androutsopoulos, 2010; Filippova and Altun, 2013). Joint methods have also been proposed that invoke integer linear programming (ILP) formulations to simultaneously consider multiple structural inference problems—both over n-grams and input dependencies (Martins and Smith, 2009) or n-grams and all possible dependencies (Thadani and McKeown, 2013). However, it is wellestablished that the utility of ILP for optimal inference in structured problems is often outweighed by the worst-case performance of ILP solvers on large problems without unique integral solutions. Furthermore, appro</context>
+<context position="34716" citStr="Filippova and Strube, 2008" startWordPosition="5647" endWordPosition="5650">ight and Marcu, 2002; Riezler et al., 2003; Turner and Charniak, 2005; McDonald, 2006; Unno et al., 2006; Galley and McKeown, 2007; Nomoto, 2007; Cohn and Lapata, 2009; Galanis and Androutsopoulos, 2010; Ganitkevitch et al., 2011; Napoles et al., 2011a; Filippova and Altun, 2013) following the release of datasets such as the Ziff-Davis corpus (Knight and Marcu, 2000) and the Edinburgh compression corpora (Clarke and Lapata, 2006; Clarke and Lapata, 2008), although unsupervised approaches— largely based on ILPs—have also received consideration (Clarke and Lapata, 2007; Clarke and Lapata, 2008; Filippova and Strube, 2008). Compression has also been used as a tool for document summarization (Daum´e and Marcu, 2002; Zajic et al., 2007; Clarke and Lapata, 2007; Martins and Smith, 2009; Berg-Kirkpatrick et al., 2011; Woodsend and Lapata, 2012; Almeida and Martins, 2013; Molina et al., 2013; Li et al., 2013; Qian and Liu, 2013), with recent work formulating the summarization task as joint sentence extraction and compression and often employing ILP or Lagrangian relaxation. Monolingual compression 13Similar results were observed for the BN test corpus. Figure 3: Effect of input size on (a) inference time, and (b) th</context>
+</contexts>
+<marker>Filippova, Strube, 2008</marker>
+<rawString>Katja Filippova and Michael Strube. 2008. Dependency tree based sentence compression. In Proceedings of INLG, pages 25–32.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Dimitrios Galanis</author>
+<author>Ion Androutsopoulos</author>
+</authors>
+<title>An extractive supervised two-stage method for sentence compression.</title>
+<date>2010</date>
+<booktitle>In Proceedings of HLT-NAACL,</booktitle>
+<pages>885--893</pages>
+<contexts>
+<context position="2485" citStr="Galanis and Androutsopoulos, 2010" startWordPosition="360" endWordPosition="363"> who had cultivated a conventional image, stunned a party by coming out as a homosexual. Following an assumption often used in compression systems, the compressed output in this corpus is constructed by dropping tokens from the input sentence without any paraphrasing or reordering.1 A number of diverse approaches have been proposed for deletion-based sentence compression, including techniques that assemble the output text under an n-gram factorization over the input text (McDonald, 2006; Clarke and Lapata, 2008) or an arc factorization over input dependency parses (Filippova and Strube, 2008; Galanis and Androutsopoulos, 2010; Filippova and Altun, 2013). Joint methods have also been proposed that invoke integer linear programming (ILP) formulations to simultaneously consider multiple structural inference problems—both over n-grams and input dependencies (Martins and Smith, 2009) or n-grams and all possible dependencies (Thadani and McKeown, 2013). However, it is wellestablished that the utility of ILP for optimal inference in structured problems is often outweighed by the worst-case performance of ILP solvers on large problems without unique integral solutions. Furthermore, approximate solutions can often be adequ</context>
+<context position="34291" citStr="Galanis and Androutsopoulos, 2010" startWordPosition="5581" endWordPosition="5584">th input size indicates the viability of a hybrid approach which could balance accuracy and speed by using ILP-Joint for smaller problems and DP+LP for larger ones. 4 Related Work Sentence compression is one of the better-studied text-to-text generation problems and has been observed to play a significant role in human summarization (Jing, 2000; Jing and McKeown, 2000). Most approaches to sentence compression are supervised (Knight and Marcu, 2002; Riezler et al., 2003; Turner and Charniak, 2005; McDonald, 2006; Unno et al., 2006; Galley and McKeown, 2007; Nomoto, 2007; Cohn and Lapata, 2009; Galanis and Androutsopoulos, 2010; Ganitkevitch et al., 2011; Napoles et al., 2011a; Filippova and Altun, 2013) following the release of datasets such as the Ziff-Davis corpus (Knight and Marcu, 2000) and the Edinburgh compression corpora (Clarke and Lapata, 2006; Clarke and Lapata, 2008), although unsupervised approaches— largely based on ILPs—have also received consideration (Clarke and Lapata, 2007; Clarke and Lapata, 2008; Filippova and Strube, 2008). Compression has also been used as a tool for document summarization (Daum´e and Marcu, 2002; Zajic et al., 2007; Clarke and Lapata, 2007; Martins and Smith, 2009; Berg-Kirkp</context>
+</contexts>
+<marker>Galanis, Androutsopoulos, 2010</marker>
+<rawString>Dimitrios Galanis and Ion Androutsopoulos. 2010. An extractive supervised two-stage method for sentence compression. In Proceedings of HLT-NAACL, pages 885–893.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Michel Galley</author>
+<author>Kathleen McKeown</author>
+</authors>
+<title>Lexicalized Markov grammars for sentence compression.</title>
+<date>2007</date>
+<booktitle>In Proceedings of HLT-NAACL,</booktitle>
+<pages>180--187</pages>
+<contexts>
+<context position="34219" citStr="Galley and McKeown, 2007" startWordPosition="5570" endWordPosition="5574">tently faster than the ILP solver. The variation in RASP F1% with input size indicates the viability of a hybrid approach which could balance accuracy and speed by using ILP-Joint for smaller problems and DP+LP for larger ones. 4 Related Work Sentence compression is one of the better-studied text-to-text generation problems and has been observed to play a significant role in human summarization (Jing, 2000; Jing and McKeown, 2000). Most approaches to sentence compression are supervised (Knight and Marcu, 2002; Riezler et al., 2003; Turner and Charniak, 2005; McDonald, 2006; Unno et al., 2006; Galley and McKeown, 2007; Nomoto, 2007; Cohn and Lapata, 2009; Galanis and Androutsopoulos, 2010; Ganitkevitch et al., 2011; Napoles et al., 2011a; Filippova and Altun, 2013) following the release of datasets such as the Ziff-Davis corpus (Knight and Marcu, 2000) and the Edinburgh compression corpora (Clarke and Lapata, 2006; Clarke and Lapata, 2008), although unsupervised approaches— largely based on ILPs—have also received consideration (Clarke and Lapata, 2007; Clarke and Lapata, 2008; Filippova and Strube, 2008). Compression has also been used as a tool for document summarization (Daum´e and Marcu, 2002; Zajic et</context>
+</contexts>
+<marker>Galley, McKeown, 2007</marker>
+<rawString>Michel Galley and Kathleen McKeown. 2007. Lexicalized Markov grammars for sentence compression. In Proceedings of HLT-NAACL, pages 180– 187, April.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Juri Ganitkevitch</author>
+<author>Chris Callison-Burch</author>
+<author>Courtney Napoles</author>
+<author>Benjamin Van Durme</author>
+</authors>
+<title>Learning sentential paraphrases from bilingual parallel corpora for text-to-text generation.</title>
+<date>2011</date>
+<booktitle>In Proceedings of EMNLP,</booktitle>
+<pages>1168--1179</pages>
+<marker>Ganitkevitch, Callison-Burch, Napoles, Van Durme, 2011</marker>
+<rawString>Juri Ganitkevitch, Chris Callison-Burch, Courtney Napoles, and Benjamin Van Durme. 2011. Learning sentential paraphrases from bilingual parallel corpora for text-to-text generation. In Proceedings of EMNLP, pages 1168–1179.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Chiori Hori</author>
+<author>Sadaoki Furui</author>
+</authors>
+<title>Speech summarization: an approach through word extraction and a method for evaluation.</title>
+<date>2004</date>
+<journal>IEICE Transactions on Information and Systems,</journal>
+<pages>87--1</pages>
+<contexts>
+<context position="27696" citStr="Hori and Furui (2004)" startWordPosition="4515" endWordPosition="4518">tp://www.gurobi.com compressed output at a specific rate—determined by the the gold compressions available for each instance—to ensure that the reported differences between the systems under study are meaningful. 3.1 Systems We report results over the following systems grouped into three categories of models: tokens + n-grams, tokens + dependencies, and joint models. • 3-LM: A reimplementation of the unsupervised ILP of Clarke and Lapata (2008) which infers order-preserving trigram variables parameterized with log-likelihood under an LM and a significance score for token variables inspired by Hori and Furui (2004), as well as various linguistically-motivated constraints to encourage fluency in output compressions. • DP: The bigram-based dynamic program of McDonald (2006) described in §2.3.9 • LP→MST: An approximate inference approach based on an LP relaxation of ILPDep. As discussed in §2.4, a maximum spanning tree is recovered from the output of the LP and greedily pruned in order to generate a valid integral solution while observing the imposed compression rate. • ILP-Dep: A version of the joint ILP of Thadani and McKeown (2013) without ngram variables and corresponding features. • DP+LP→MST: An appr</context>
+</contexts>
+<marker>Hori, Furui, 2004</marker>
+<rawString>Chiori Hori and Sadaoki Furui. 2004. Speech summarization: an approach through word extraction and a method for evaluation. IEICE Transactions on Information and Systems, E87-D(1):15–25.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Liang Huang</author>
+<author>David Chiang</author>
+</authors>
+<title>Forest rescoring: Faster decoding with integrated language models.</title>
+<date>2007</date>
+<booktitle>In Proceedings of ACL,</booktitle>
+<pages>144--151</pages>
+<contexts>
+<context position="35577" citStr="Huang and Chiang, 2007" startWordPosition="5786" endWordPosition="5789">ins, 2013; Molina et al., 2013; Li et al., 2013; Qian and Liu, 2013), with recent work formulating the summarization task as joint sentence extraction and compression and often employing ILP or Lagrangian relaxation. Monolingual compression 13Similar results were observed for the BN test corpus. Figure 3: Effect of input size on (a) inference time, and (b) the corresponding difference in RASP F1% (ILP-Joint – DP+LP) on the NW corpus. also faces many obstacles common to decoding in machine translation, and a number of approaches which have been proposed to combine phrasal and syntactic models (Huang and Chiang, 2007; Rush and Collins, 2011) inter alia offer directions for future research into compression problems. 5 Conclusion We have presented approximate inference strategies to jointly compress sentences under bigram and dependency-factored objectives by exploiting the modularity of the task and considering the two subproblems in isolation. Experiments show that one of these approximation strategies produces results comparable to a state-of-the-art integer linear program for the same joint inference task with a 60% reduction in average inference time. Acknowledgments The author is grateful to Alexander</context>
+</contexts>
+<marker>Huang, Chiang, 2007</marker>
+<rawString>Liang Huang and David Chiang. 2007. Forest rescoring: Faster decoding with integrated language models. In Proceedings of ACL, pages 144–151, June.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Hongyan Jing</author>
+<author>Kathleen R McKeown</author>
+</authors>
+<title>Cut and paste based text summarization.</title>
+<date>2000</date>
+<booktitle>In Proceedings of NAACL,</booktitle>
+<pages>178--185</pages>
+<contexts>
+<context position="34029" citStr="Jing and McKeown, 2000" startWordPosition="5539" endWordPosition="5542">s the effect of input sentence length on inference time and performance for ILPJoint and DP+LP over the NW test corpus.13 The timing results reveal that the approximation strategy is consistently faster than the ILP solver. The variation in RASP F1% with input size indicates the viability of a hybrid approach which could balance accuracy and speed by using ILP-Joint for smaller problems and DP+LP for larger ones. 4 Related Work Sentence compression is one of the better-studied text-to-text generation problems and has been observed to play a significant role in human summarization (Jing, 2000; Jing and McKeown, 2000). Most approaches to sentence compression are supervised (Knight and Marcu, 2002; Riezler et al., 2003; Turner and Charniak, 2005; McDonald, 2006; Unno et al., 2006; Galley and McKeown, 2007; Nomoto, 2007; Cohn and Lapata, 2009; Galanis and Androutsopoulos, 2010; Ganitkevitch et al., 2011; Napoles et al., 2011a; Filippova and Altun, 2013) following the release of datasets such as the Ziff-Davis corpus (Knight and Marcu, 2000) and the Edinburgh compression corpora (Clarke and Lapata, 2006; Clarke and Lapata, 2008), although unsupervised approaches— largely based on ILPs—have also received consi</context>
+</contexts>
+<marker>Jing, McKeown, 2000</marker>
+<rawString>Hongyan Jing and Kathleen R. McKeown. 2000. Cut and paste based text summarization. In Proceedings of NAACL, pages 178–185.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Hongyan Jing</author>
+</authors>
+<title>Sentence reduction for automatic text summarization.</title>
+<date>2000</date>
+<booktitle>In Proceedings of the Conference on Applied Natural Language Processing,</booktitle>
+<pages>310--315</pages>
+<contexts>
+<context position="34004" citStr="Jing, 2000" startWordPosition="5537" endWordPosition="5538">igure 3 shows the effect of input sentence length on inference time and performance for ILPJoint and DP+LP over the NW test corpus.13 The timing results reveal that the approximation strategy is consistently faster than the ILP solver. The variation in RASP F1% with input size indicates the viability of a hybrid approach which could balance accuracy and speed by using ILP-Joint for smaller problems and DP+LP for larger ones. 4 Related Work Sentence compression is one of the better-studied text-to-text generation problems and has been observed to play a significant role in human summarization (Jing, 2000; Jing and McKeown, 2000). Most approaches to sentence compression are supervised (Knight and Marcu, 2002; Riezler et al., 2003; Turner and Charniak, 2005; McDonald, 2006; Unno et al., 2006; Galley and McKeown, 2007; Nomoto, 2007; Cohn and Lapata, 2009; Galanis and Androutsopoulos, 2010; Ganitkevitch et al., 2011; Napoles et al., 2011a; Filippova and Altun, 2013) following the release of datasets such as the Ziff-Davis corpus (Knight and Marcu, 2000) and the Edinburgh compression corpora (Clarke and Lapata, 2006; Clarke and Lapata, 2008), although unsupervised approaches— largely based on ILPs</context>
+</contexts>
+<marker>Jing, 2000</marker>
+<rawString>Hongyan Jing. 2000. Sentence reduction for automatic text summarization. In Proceedings of the Conference on Applied Natural Language Processing, pages 310–315.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Kevin Knight</author>
+<author>Daniel Marcu</author>
+</authors>
+<title>Statisticsbased summarization - step one: Sentence compression.</title>
+<date>2000</date>
+<booktitle>In Proceedings of AAAI,</booktitle>
+<pages>703--710</pages>
+<contexts>
+<context position="1478" citStr="Knight and Marcu, 2000" startWordPosition="204" endWordPosition="207">ow that these approximation strategies produce results comparable to a state-of-the-art integer linear programming formulation for the same joint inference task along with a significant improvement in runtime. 1 Introduction Sentence compression is a text-to-text generation task in which an input sentence must be transformed into a shorter output sentence which accurately reflects the meaning in the input and also remains grammatically well-formed. The compression task has received increasing attention in recent years, in part due to the availability of datasets such as the Ziff-Davis corpus (Knight and Marcu, 2000) and the Edinburgh compression corpora (Clarke and Lapata, 2006), from which the following example is drawn. Original: In 1967 Chapman, who had cultivated a conventional image with his ubiquitous tweed jacket and pipe, by his own later admission stunned a party attended by his friends and future Python colleagues by coming out as a homosexual. Compressed: In 1967 Chapman, who had cultivated a conventional image, stunned a party by coming out as a homosexual. Following an assumption often used in compression systems, the compressed output in this corpus is constructed by dropping tokens from th</context>
+<context position="34458" citStr="Knight and Marcu, 2000" startWordPosition="5609" endWordPosition="5612">rk Sentence compression is one of the better-studied text-to-text generation problems and has been observed to play a significant role in human summarization (Jing, 2000; Jing and McKeown, 2000). Most approaches to sentence compression are supervised (Knight and Marcu, 2002; Riezler et al., 2003; Turner and Charniak, 2005; McDonald, 2006; Unno et al., 2006; Galley and McKeown, 2007; Nomoto, 2007; Cohn and Lapata, 2009; Galanis and Androutsopoulos, 2010; Ganitkevitch et al., 2011; Napoles et al., 2011a; Filippova and Altun, 2013) following the release of datasets such as the Ziff-Davis corpus (Knight and Marcu, 2000) and the Edinburgh compression corpora (Clarke and Lapata, 2006; Clarke and Lapata, 2008), although unsupervised approaches— largely based on ILPs—have also received consideration (Clarke and Lapata, 2007; Clarke and Lapata, 2008; Filippova and Strube, 2008). Compression has also been used as a tool for document summarization (Daum´e and Marcu, 2002; Zajic et al., 2007; Clarke and Lapata, 2007; Martins and Smith, 2009; Berg-Kirkpatrick et al., 2011; Woodsend and Lapata, 2012; Almeida and Martins, 2013; Molina et al., 2013; Li et al., 2013; Qian and Liu, 2013), with recent work formulating the </context>
+</contexts>
+<marker>Knight, Marcu, 2000</marker>
+<rawString>Kevin Knight and Daniel Marcu. 2000. Statisticsbased summarization - step one: Sentence compression. In Proceedings of AAAI, pages 703–710.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Kevin Knight</author>
+<author>Daniel Marcu</author>
+</authors>
+<title>Summarization beyond sentence extraction: a probabilistic approach to sentence compression.</title>
+<date>2002</date>
+<journal>Artificial Intelligence,</journal>
+<volume>139</volume>
+<issue>1</issue>
+<contexts>
+<context position="34109" citStr="Knight and Marcu, 2002" startWordPosition="5551" endWordPosition="5554">int and DP+LP over the NW test corpus.13 The timing results reveal that the approximation strategy is consistently faster than the ILP solver. The variation in RASP F1% with input size indicates the viability of a hybrid approach which could balance accuracy and speed by using ILP-Joint for smaller problems and DP+LP for larger ones. 4 Related Work Sentence compression is one of the better-studied text-to-text generation problems and has been observed to play a significant role in human summarization (Jing, 2000; Jing and McKeown, 2000). Most approaches to sentence compression are supervised (Knight and Marcu, 2002; Riezler et al., 2003; Turner and Charniak, 2005; McDonald, 2006; Unno et al., 2006; Galley and McKeown, 2007; Nomoto, 2007; Cohn and Lapata, 2009; Galanis and Androutsopoulos, 2010; Ganitkevitch et al., 2011; Napoles et al., 2011a; Filippova and Altun, 2013) following the release of datasets such as the Ziff-Davis corpus (Knight and Marcu, 2000) and the Edinburgh compression corpora (Clarke and Lapata, 2006; Clarke and Lapata, 2008), although unsupervised approaches— largely based on ILPs—have also received consideration (Clarke and Lapata, 2007; Clarke and Lapata, 2008; Filippova and Strube</context>
+</contexts>
+<marker>Knight, Marcu, 2002</marker>
+<rawString>Kevin Knight and Daniel Marcu. 2002. Summarization beyond sentence extraction: a probabilistic approach to sentence compression. Artificial Intelligence, 139(1):91–107, July.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Nikos Komodakis</author>
+</authors>
+<title>Nikos Paragios, and Georgios Tziritas.</title>
+<date>2007</date>
+<booktitle>In Proceedings of ICCV,</booktitle>
+<pages>1--8</pages>
+<marker>Komodakis, 2007</marker>
+<rawString>Nikos Komodakis, Nikos Paragios, and Georgios Tziritas. 2007. MRF optimization via dual decomposition: Message-passing revisited. In Proceedings of ICCV, pages 1–8, Oct.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Terry Koo</author>
+<author>Alexander M Rush</author>
+<author>Michael Collins</author>
+<author>Tommi Jaakkola</author>
+<author>David Sontag</author>
+</authors>
+<title>Dual decomposition for parsing with non-projective head automata.</title>
+<date>2010</date>
+<booktitle>In Proceedings of EMNLP,</booktitle>
+<pages>1288--1298</pages>
+<contexts>
+<context position="11106" citStr="Koo et al., 2010" startWordPosition="1715" endWordPosition="1718">ts over the boolean variables xi, yij and zij to guarantee consistency, as well as auxiliary real-valued variables and constraints representing the flow of commodities (Magnanti and Wolsey, 1994) in order to establish structure in y and z. In the following section, we propose an alternative formulation that exploits the modularity of this joint objective. 2.2 Lagrangian relaxation Dual decomposition (Komodakis et al., 2007) and Lagrangian relaxation in general are often used for solving joint inference problems which are decomposable into individual subproblems linked by equality constraints (Koo et al., 2010; Rush et al., 2010; Rush and Collins, 2011; DeNero and Macherey, 2011; Martins et al., 2011; Das et al., 2012; Almeida and Martins, 2013). This approach permits sub-problems to be solved separately using problem-specific efficient algorithms, while consistency over the structures produced is enforced through Lagrange multipliers via iterative optimization. Exact solutions are guaranteed when the algorithm converges on a consistent primal solution, although this convergence itself is not guaranteed and depends on the tightness of the underlying LP relaxation. The primary advantage of this tech</context>
+</contexts>
+<marker>Koo, Rush, Collins, Jaakkola, Sontag, 2010</marker>
+<rawString>Terry Koo, Alexander M. Rush, Michael Collins, Tommi Jaakkola, and David Sontag. 2010. Dual decomposition for parsing with non-projective head automata. In Proceedings of EMNLP, pages 1288– 1298.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Alex Kulesza</author>
+<author>Fernando Pereira</author>
+</authors>
+<title>Structured learning with approximate inference. In</title>
+<date>2007</date>
+<editor>John C. Platt, Daphne Koller, Yoram Singer, and Sam T. Roweis, editors, NIPS. Curran Associates,</editor>
+<publisher>Inc.</publisher>
+<contexts>
+<context position="25606" citStr="Kulesza and Pereira, 2007" startWordPosition="4205" endWordPosition="4208">ins within the chunk. For the experiments in the following section, we trained models using a variant of the structured perceptron (Collins, 2002) which incorporates minibatches (Zhao and Huang, 2013) for easy parallelization and faster convergence.6 Overfitting was avoided by averaging parameters and monitoring performance against a held-out development set during training. All models were trained using variants of the ILP-based inference approach of Thadani and McKeown (2013). We followed Martins et al. (2009) in using LP-relaxed inference during learning, assuming algorithmic separability (Kulesza and Pereira, 2007) for these problems. 3 Experiments We ran compression experiments over the newswire (NW) and broadcast news transcription (BN) corpora compiled by Clarke and Lapata (2008) which contain gold compressions produced by human annotators using only word deletion. The datasets were filtered to eliminate instances with less than 2 and more than 110 tokens for parser compatibility and divided into training/development/test sections following the splits from Clarke and Lapata (2008), yielding 953/63/603 instances for the NW corpus and 880/78/404 for the BN corpus. Gold dependency parses were approximat</context>
+</contexts>
+<marker>Kulesza, Pereira, 2007</marker>
+<rawString>Alex Kulesza and Fernando Pereira. 2007. Structured learning with approximate inference. In John C. Platt, Daphne Koller, Yoram Singer, and Sam T. Roweis, editors, NIPS. Curran Associates, Inc.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Hoong Chuin Lau</author>
+<author>Trung Hieu Ngo</author>
+<author>Bao Nguyen Nguyen</author>
+</authors>
+<title>Finding a length-constrained maximum-sum or maximum-density subtree and its application to logistics.</title>
+<date>2006</date>
+<journal>Discrete Optimization,</journal>
+<volume>3</volume>
+<issue>4</issue>
+<pages>391</pages>
+<contexts>
+<context position="17183" citStr="Lau et al., 2006" startWordPosition="2759" endWordPosition="2762">ering the maximum-weight subtree (B—*C, B—*D) from the maximum spanning tree (A—*C, C—*B, B—*D). the highest scoring sequence y and corresponding token configuration α(y). 2.4 Dependency subtrees The maximum-weight non-projective subtree problem over general graphs is not as easily solved. Although the maximum spanning tree for a given token configuration can be recovered efficiently, Figure 1 illustrates that the maximumscoring subtree is not necessarily found within it. The problem of recovering a maximum-weight subtree in a graph has been shown to be NP-hard even with uniform edge weights (Lau et al., 2006). In order to produce a solution to this subproblem, we use an LP relaxation of the relevant portion of the ILP from Thadani and McKeown (2013) by omitting integer constraints over the token and dependency variables in x and z respectively. For simplicity, however, we describe the ILP version rather than the relaxed LP in order to motivate the constraints with their intended purpose rather than their effect in the relaxed problem. The objective for this LP is given by xTθ/tok + zTθdep (5) where the vector of token scores is redefined as θ/tok g (1 − 0) · θtok − λ (6) in order to solve g(z, λ, </context>
+</contexts>
+<marker>Lau, Ngo, Nguyen, 2006</marker>
+<rawString>Hoong Chuin Lau, Trung Hieu Ngo, and Bao Nguyen Nguyen. 2006. Finding a length-constrained maximum-sum or maximum-density subtree and its application to logistics. Discrete Optimization, 3(4):385 – 391.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Chen Li</author>
+<author>Fei Liu</author>
+<author>Fuliang Weng</author>
+<author>Yang Liu</author>
+</authors>
+<title>Document summarization via guided sentence compression.</title>
+<date>2013</date>
+<booktitle>In Proceedings of EMNLP,</booktitle>
+<pages>490--500</pages>
+<location>Seattle, Washington, USA,</location>
+<contexts>
+<context position="6719" citStr="Li et al., 2013" startWordPosition="991" endWordPosition="994">g tokens independently from an input sentence will likely not result in fluent and meaningful compressive text. Tokens in well-formed sentences participate in a number of syntactic and semantic relationships with other tokens, so one might expect that accounting for heterogenous structural relationships between tokens will improve the coherence of the output sentence. Furthermore, much recent work has focused on the challenge of joint sentence extraction and compression, also known as compressive summarization (Martins and Smith, 2009; Berg-Kirkpatrick et al., 2011; Almeida and Martins, 2013; Li et al., 2013; Qian and Liu, 2013), in which questions of efficiency are paramount due to the larger problems involved; however, these approaches largely restrict compression to pruning parse trees, thereby imposing a dependency on parser performance. We focus in this work on a sentence-level compression system to approximate the ILP-based inference of Thadani and McKeown (2013) which does not restrict compressions to follow input parses but permits the generation of novel dependency relations in output compressions. The rest of this section is organized as follows: §2.1 provies an overview of the joint se</context>
+<context position="35002" citStr="Li et al., 2013" startWordPosition="5696" endWordPosition="5699">ease of datasets such as the Ziff-Davis corpus (Knight and Marcu, 2000) and the Edinburgh compression corpora (Clarke and Lapata, 2006; Clarke and Lapata, 2008), although unsupervised approaches— largely based on ILPs—have also received consideration (Clarke and Lapata, 2007; Clarke and Lapata, 2008; Filippova and Strube, 2008). Compression has also been used as a tool for document summarization (Daum´e and Marcu, 2002; Zajic et al., 2007; Clarke and Lapata, 2007; Martins and Smith, 2009; Berg-Kirkpatrick et al., 2011; Woodsend and Lapata, 2012; Almeida and Martins, 2013; Molina et al., 2013; Li et al., 2013; Qian and Liu, 2013), with recent work formulating the summarization task as joint sentence extraction and compression and often employing ILP or Lagrangian relaxation. Monolingual compression 13Similar results were observed for the BN test corpus. Figure 3: Effect of input size on (a) inference time, and (b) the corresponding difference in RASP F1% (ILP-Joint – DP+LP) on the NW corpus. also faces many obstacles common to decoding in machine translation, and a number of approaches which have been proposed to combine phrasal and syntactic models (Huang and Chiang, 2007; Rush and Collins, 2011)</context>
+</contexts>
+<marker>Li, Liu, Weng, Liu, 2013</marker>
+<rawString>Chen Li, Fei Liu, Fuliang Weng, and Yang Liu. 2013. Document summarization via guided sentence compression. In Proceedings of EMNLP, pages 490– 500, Seattle, Washington, USA, October.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Thomas L Magnanti</author>
+<author>Laurence A Wolsey</author>
+</authors>
+<title>Optimal trees. In</title>
+<date>1994</date>
+<tech>Technical Report 290-94,</tech>
+<institution>Massechusetts Institute of Technology, Operations Research Center.</institution>
+<contexts>
+<context position="10685" citStr="Magnanti and Wolsey, 1994" startWordPosition="1652" endWordPosition="1655">ted to bigrams or order-preserving n-grams, we limit our discussion to this scenario as it also fits the assumptions of McDonald (2006) and the datasets of Clarke and Lapata (2006). These requirements naturally rule out simple approximate inference formulations such as searchbased approaches for the joint objective.3 An ILP-based inference solution is demonstrated in Thadani and McKeown (2013) that makes use of linear constraints over the boolean variables xi, yij and zij to guarantee consistency, as well as auxiliary real-valued variables and constraints representing the flow of commodities (Magnanti and Wolsey, 1994) in order to establish structure in y and z. In the following section, we propose an alternative formulation that exploits the modularity of this joint objective. 2.2 Lagrangian relaxation Dual decomposition (Komodakis et al., 2007) and Lagrangian relaxation in general are often used for solving joint inference problems which are decomposable into individual subproblems linked by equality constraints (Koo et al., 2010; Rush et al., 2010; Rush and Collins, 2011; DeNero and Macherey, 2011; Martins et al., 2011; Das et al., 2012; Almeida and Martins, 2013). This approach permits sub-problems to b</context>
+<context position="18492" citStr="Magnanti and Wolsey, 1994" startWordPosition="2998" endWordPosition="3001">that are close to the optimal dependency trees. First, tokens in the solution must only be active if they have a single active incoming dependency edge. In addition, to avoid producing multiple disconnected subtrees, only one dependency is permitted to attach to the ROOT pseudo-token. Exj − zij = 0, btj E T (7) i E zij = 1, if ti = ROOT (8) j Production was closed down at Ford last night . Figure 2: An illustration of commodity values for a valid solution of the non-relaxed ILP. In order to avoid cycles in the dependency tree, we include additional variables to establish singlecommodity flow (Magnanti and Wolsey, 1994) between all pairs of tokens. These ryij variables carry non-negative real values which must be consumed by active tokens that they are incident to. ryij &gt; 0, bti, tj E T (9) E ryij − E ryjk = xj, btj E T (10) i k These constraints ensure that cyclic structures are not possible in the non-relaxed ILP. In addition, they serve to establish connectivity for the dependency structure z since commodity can only originate in one location—at the pseudo-token ROOT which has no incoming commodity variables. However, in order to enforce these properties on the output dependency structure, this acyclic, c</context>
+</contexts>
+<marker>Magnanti, Wolsey, 1994</marker>
+<rawString>Thomas L. Magnanti and Laurence A. Wolsey. 1994. Optimal trees. In Technical Report 290-94, Massechusetts Institute of Technology, Operations Research Center.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Andr´e F T Martins</author>
+<author>Noah A Smith</author>
+</authors>
+<title>Summarization with a joint model for sentence extraction and compression.</title>
+<date>2009</date>
+<booktitle>In Proceedings of the Workshop on Integer Linear Programming for Natural Langauge Processing,</booktitle>
+<pages>1--9</pages>
+<contexts>
+<context position="2743" citStr="Martins and Smith, 2009" startWordPosition="395" endWordPosition="398"> or reordering.1 A number of diverse approaches have been proposed for deletion-based sentence compression, including techniques that assemble the output text under an n-gram factorization over the input text (McDonald, 2006; Clarke and Lapata, 2008) or an arc factorization over input dependency parses (Filippova and Strube, 2008; Galanis and Androutsopoulos, 2010; Filippova and Altun, 2013). Joint methods have also been proposed that invoke integer linear programming (ILP) formulations to simultaneously consider multiple structural inference problems—both over n-grams and input dependencies (Martins and Smith, 2009) or n-grams and all possible dependencies (Thadani and McKeown, 2013). However, it is wellestablished that the utility of ILP for optimal inference in structured problems is often outweighed by the worst-case performance of ILP solvers on large problems without unique integral solutions. Furthermore, approximate solutions can often be adequate for real-world generation systems, particularly in the presence of linguisticallymotivated constraints such as those described by Clarke and Lapata (2008), or domain-specific 1This is referred to as extractive compression by Cohn and Lapata (2008) &amp; Gala</context>
+<context position="6644" citStr="Martins and Smith, 2009" startWordPosition="979" endWordPosition="982">ession is typically formulated as a token deletion task, it is evident that dropping tokens independently from an input sentence will likely not result in fluent and meaningful compressive text. Tokens in well-formed sentences participate in a number of syntactic and semantic relationships with other tokens, so one might expect that accounting for heterogenous structural relationships between tokens will improve the coherence of the output sentence. Furthermore, much recent work has focused on the challenge of joint sentence extraction and compression, also known as compressive summarization (Martins and Smith, 2009; Berg-Kirkpatrick et al., 2011; Almeida and Martins, 2013; Li et al., 2013; Qian and Liu, 2013), in which questions of efficiency are paramount due to the larger problems involved; however, these approaches largely restrict compression to pruning parse trees, thereby imposing a dependency on parser performance. We focus in this work on a sentence-level compression system to approximate the ILP-based inference of Thadani and McKeown (2013) which does not restrict compressions to follow input parses but permits the generation of novel dependency relations in output compressions. The rest of thi</context>
+<context position="26443" citStr="Martins and Smith, 2009" startWordPosition="4328" endWordPosition="4331">y human annotators using only word deletion. The datasets were filtered to eliminate instances with less than 2 and more than 110 tokens for parser compatibility and divided into training/development/test sections following the splits from Clarke and Lapata (2008), yielding 953/63/603 instances for the NW corpus and 880/78/404 for the BN corpus. Gold dependency parses were approximated by running the Stanford dependency parser7 over reference compressions. Following evaluations in machine translation as well as previous work in sentence compression (Unno et al., 2006; Clarke and Lapata, 2008; Martins and Smith, 2009; Napoles et al., 2011b; Thadani and McKeown, 2013), we evaluate system performance using F1 metrics over n-grams and dependency edges produced by parsing system output with RASP (Briscoe et al., 2006) and the Stanford parser. All ILPs and LPs were solved using Gurobi,8 a high-performance commercialgrade solver. Following a recent analysis of compression evaluations (Napoles et al., 2011b) which revealed a strong correlation between system compression rate and human judgments of compression quality, we constrained all systems to produce 6We used a minibatch size of 4 in all experiments. 7http:</context>
+<context position="34879" citStr="Martins and Smith, 2009" startWordPosition="5675" endWordPosition="5678">; Galanis and Androutsopoulos, 2010; Ganitkevitch et al., 2011; Napoles et al., 2011a; Filippova and Altun, 2013) following the release of datasets such as the Ziff-Davis corpus (Knight and Marcu, 2000) and the Edinburgh compression corpora (Clarke and Lapata, 2006; Clarke and Lapata, 2008), although unsupervised approaches— largely based on ILPs—have also received consideration (Clarke and Lapata, 2007; Clarke and Lapata, 2008; Filippova and Strube, 2008). Compression has also been used as a tool for document summarization (Daum´e and Marcu, 2002; Zajic et al., 2007; Clarke and Lapata, 2007; Martins and Smith, 2009; Berg-Kirkpatrick et al., 2011; Woodsend and Lapata, 2012; Almeida and Martins, 2013; Molina et al., 2013; Li et al., 2013; Qian and Liu, 2013), with recent work formulating the summarization task as joint sentence extraction and compression and often employing ILP or Lagrangian relaxation. Monolingual compression 13Similar results were observed for the BN test corpus. Figure 3: Effect of input size on (a) inference time, and (b) the corresponding difference in RASP F1% (ILP-Joint – DP+LP) on the NW corpus. also faces many obstacles common to decoding in machine translation, and a number of a</context>
+</contexts>
+<marker>Martins, Smith, 2009</marker>
+<rawString>Andr´e F. T. Martins and Noah A. Smith. 2009. Summarization with a joint model for sentence extraction and compression. In Proceedings of the Workshop on Integer Linear Programming for Natural Langauge Processing, pages 1–9.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Andr´e F T Martins</author>
+<author>Noah A Smith</author>
+<author>Eric P Xing</author>
+</authors>
+<title>Concise integer linear programming formulations for dependency parsing.</title>
+<date>2009</date>
+<booktitle>In Proceedings of ACL-IJCNLP,</booktitle>
+<pages>342--350</pages>
+<contexts>
+<context position="25497" citStr="Martins et al. (2009)" startWordPosition="4191" endWordPosition="4194">the tokens incident to the edge and (e) the labels of their surrounding chunks and whether the edge remains within the chunk. For the experiments in the following section, we trained models using a variant of the structured perceptron (Collins, 2002) which incorporates minibatches (Zhao and Huang, 2013) for easy parallelization and faster convergence.6 Overfitting was avoided by averaging parameters and monitoring performance against a held-out development set during training. All models were trained using variants of the ILP-based inference approach of Thadani and McKeown (2013). We followed Martins et al. (2009) in using LP-relaxed inference during learning, assuming algorithmic separability (Kulesza and Pereira, 2007) for these problems. 3 Experiments We ran compression experiments over the newswire (NW) and broadcast news transcription (BN) corpora compiled by Clarke and Lapata (2008) which contain gold compressions produced by human annotators using only word deletion. The datasets were filtered to eliminate instances with less than 2 and more than 110 tokens for parser compatibility and divided into training/development/test sections following the splits from Clarke and Lapata (2008), yielding 95</context>
+</contexts>
+<marker>Martins, Smith, Xing, 2009</marker>
+<rawString>Andr´e F. T. Martins, Noah A. Smith, and Eric P. Xing. 2009. Concise integer linear programming formulations for dependency parsing. In Proceedings of ACL-IJCNLP, pages 342–350.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Andr´e F T Martins</author>
+<author>Noah A Smith</author>
+<author>Pedro M Q Aguiar</author>
+<author>M´ario A T Figueiredo</author>
+</authors>
+<title>Dual decomposition with many overlapping components.</title>
+<date>2011</date>
+<booktitle>In Proceedings of EMNLP,</booktitle>
+<pages>238--249</pages>
+<contexts>
+<context position="11198" citStr="Martins et al., 2011" startWordPosition="1731" endWordPosition="1734">iary real-valued variables and constraints representing the flow of commodities (Magnanti and Wolsey, 1994) in order to establish structure in y and z. In the following section, we propose an alternative formulation that exploits the modularity of this joint objective. 2.2 Lagrangian relaxation Dual decomposition (Komodakis et al., 2007) and Lagrangian relaxation in general are often used for solving joint inference problems which are decomposable into individual subproblems linked by equality constraints (Koo et al., 2010; Rush et al., 2010; Rush and Collins, 2011; DeNero and Macherey, 2011; Martins et al., 2011; Das et al., 2012; Almeida and Martins, 2013). This approach permits sub-problems to be solved separately using problem-specific efficient algorithms, while consistency over the structures produced is enforced through Lagrange multipliers via iterative optimization. Exact solutions are guaranteed when the algorithm converges on a consistent primal solution, although this convergence itself is not guaranteed and depends on the tightness of the underlying LP relaxation. The primary advantage of this technique is the ability to leverage the underlying structure of the problems in inference rathe</context>
+</contexts>
+<marker>Martins, Smith, Aguiar, Figueiredo, 2011</marker>
+<rawString>Andr´e F. T. Martins, Noah A. Smith, Pedro M. Q. Aguiar, and M´ario A. T. Figueiredo. 2011. Dual decomposition with many overlapping components. In Proceedings of EMNLP, pages 238–249.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ryan McDonald</author>
+<author>Fernando Pereira</author>
+<author>Kiril Ribarov</author>
+<author>Jan Hajiˇc</author>
+</authors>
+<title>Non-projective dependency parsing using spanning tree algorithms.</title>
+<date>2005</date>
+<booktitle>In Proceedings of EMNLP-HLT,</booktitle>
+<pages>523--530</pages>
+<marker>McDonald, Pereira, Ribarov, Hajiˇc, 2005</marker>
+<rawString>Ryan McDonald, Fernando Pereira, Kiril Ribarov, and Jan Hajiˇc. 2005. Non-projective dependency parsing using spanning tree algorithms. In Proceedings of EMNLP-HLT, pages 523–530.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ryan McDonald</author>
+</authors>
+<title>Discriminative sentence compression with soft syntactic evidence.</title>
+<date>2006</date>
+<booktitle>In Proceedings of EACL,</booktitle>
+<pages>297--304</pages>
+<contexts>
+<context position="2343" citStr="McDonald, 2006" startWordPosition="341" endWordPosition="342">ed a party attended by his friends and future Python colleagues by coming out as a homosexual. Compressed: In 1967 Chapman, who had cultivated a conventional image, stunned a party by coming out as a homosexual. Following an assumption often used in compression systems, the compressed output in this corpus is constructed by dropping tokens from the input sentence without any paraphrasing or reordering.1 A number of diverse approaches have been proposed for deletion-based sentence compression, including techniques that assemble the output text under an n-gram factorization over the input text (McDonald, 2006; Clarke and Lapata, 2008) or an arc factorization over input dependency parses (Filippova and Strube, 2008; Galanis and Androutsopoulos, 2010; Filippova and Altun, 2013). Joint methods have also been proposed that invoke integer linear programming (ILP) formulations to simultaneously consider multiple structural inference problems—both over n-grams and input dependencies (Martins and Smith, 2009) or n-grams and all possible dependencies (Thadani and McKeown, 2013). However, it is wellestablished that the utility of ILP for optimal inference in structured problems is often outweighed by the wo</context>
+<context position="4155" citStr="McDonald (2006)" startWordPosition="607" endWordPosition="608">1, Baltimore, Maryland, USA, June 23-25 2014. c�2014 Association for Computational Linguistics pruning strategies such as the use of sentence templates to constrain the output. In this work, we develop approximate inference strategies to the joint approach of Thadani and McKeown (2013) which trade the optimality guarantees of exact ILP for faster inference by separately solving the n-gram and dependency subproblems and using Lagrange multipliers to enforce consistency between their solutions. However, while the former problem can be solved efficiently using the dynamic programming approach of McDonald (2006), there are no efficient algorithms to recover maximum weighted nonprojective subtrees in a general directed graph. Maximum spanning tree algorithms, commonly used in non-projective dependency parsing (McDonald et al., 2005), are not easily adaptable to this task since the maximum-weight subtree is not necessarily a part of the maximum spanning tree. We therefore consider methods to recover approximate solutions for the subproblem of finding the maximum weighted subtree in a graph, common among which is the use of a linear programming relaxation. This linear program (LP) appears empirically ti</context>
+<context position="10194" citStr="McDonald (2006)" startWordPosition="1579" endWordPosition="1581">riable type v under the current model parameters. In order to recover meaningful compressions by optimizing (2), the inference step must ensure: 1. The configurations x, y and z are consistent with each other, i.e., all configurations cover the same tokens. 2. The structural configurations y and z are non-degenerate, i.e, the bigram configuration y represents an acyclic path while the dependency configuration z forms a tree. 2Although Thadani and McKeown (2013) is not restricted to bigrams or order-preserving n-grams, we limit our discussion to this scenario as it also fits the assumptions of McDonald (2006) and the datasets of Clarke and Lapata (2006). These requirements naturally rule out simple approximate inference formulations such as searchbased approaches for the joint objective.3 An ILP-based inference solution is demonstrated in Thadani and McKeown (2013) that makes use of linear constraints over the boolean variables xi, yij and zij to guarantee consistency, as well as auxiliary real-valued variables and constraints representing the flow of commodities (Magnanti and Wolsey, 1994) in order to establish structure in y and z. In the following section, we propose an alternative formulation </context>
+<context position="15472" citStr="McDonald (2006)" startWordPosition="2467" endWordPosition="2468">f(y, λ, ψ, θ) 5: zˆ ← arg maxz g(z, λ, ψ, θ) 6: if α(ˆy) = β(ˆz) then return α(ˆy) 7: if α(ˆy) ∈ M then 8: Mrepeats ← Mrepeats ∪ {α(ˆy)} 9: if β(ˆz) ∈ M then 10: Mrepeats ← Mrepeats ∪ {β(ˆz)} 11: if |Mrepeats |≥ lmax then break 12: M ← M ∪ {α(ˆy),β(ˆz)} 13: λ(i+1) ← λ(i) − ηi (α(ˆy) − β(ˆz)) return arg maxxEMrepeats score(x) ployed.4 The application of this Lagrangian relaxation strategy is contingent upon the existence of algorithms to solve the maximization subproblems for f(y, λ, ψ, θ) and g(z, λ, ψ, θ). The following sections discuss our approach to these problems. 2.3 Bigram subsequences McDonald (2006) provides a Viterbi-like dynamic programming algorithm to recover the highestscoring sequence of order-preserving bigrams from a lattice, either in unconstrained form or with a specific length constraint. The latter requires a dynamic programming table Q[i][r] which represents the best score for a compression of length r ending at token i. The table can be populated using the following recurrence: Q[i][1] = score(S, START, i) Q[i][r] = maxQ[j][r − 1] + score(S,i, j) j&lt;i Q[i][R + 1] = Q[i][R] + score(S, i, END) where R is the required number of output tokens and the scoring function is defined </context>
+<context position="27856" citStr="McDonald (2006)" startWordPosition="4538" endWordPosition="4539">etween the systems under study are meaningful. 3.1 Systems We report results over the following systems grouped into three categories of models: tokens + n-grams, tokens + dependencies, and joint models. • 3-LM: A reimplementation of the unsupervised ILP of Clarke and Lapata (2008) which infers order-preserving trigram variables parameterized with log-likelihood under an LM and a significance score for token variables inspired by Hori and Furui (2004), as well as various linguistically-motivated constraints to encourage fluency in output compressions. • DP: The bigram-based dynamic program of McDonald (2006) described in §2.3.9 • LP→MST: An approximate inference approach based on an LP relaxation of ILPDep. As discussed in §2.4, a maximum spanning tree is recovered from the output of the LP and greedily pruned in order to generate a valid integral solution while observing the imposed compression rate. • ILP-Dep: A version of the joint ILP of Thadani and McKeown (2013) without ngram variables and corresponding features. • DP+LP→MST: An approximate joint inference approach based on Lagrangian relaxation that uses DP for the maximum weight subsequence problem and LP→MST for the maximum weight subtre</context>
+<context position="29076" citStr="McDonald (2006)" startWordPosition="4737" endWordPosition="4738">blem. • DP+LP: Another Lagrangian relaxation approach that pairs DP with the non-integral solutions from an LP relaxation of the maximum weight subtree problem (cf. §2.4). • ILP-Joint: The full ILP from Thadani and McKeown (2013), which provides an upper bound on the performance of the proposed approximation strategies. The learning rate schedule for the Lagrangian relaxation approaches was set as qZ °= T/(T + i),10 while the hyperparameter 0 was tuned using the 9For consistent comparisons with the other systems, our reimplementation does not include the k-best inference strategy presented in McDonald (2006) for learning with MIRA. 10τ was set to 100 for aggressive subgradient updates. 1247 objective Inference n = 1 n-grams F1% 4 Syntactic relations F1% Inference technique 2 3 z Stanford RASP time (s) 3-LM (CL08) 74.96 60.60 46.83 38.71 - 60.52 57.49 0.72 n-grams DP (McD06) 78.80 66.04 52.67 42.39 - 63.28 57.89 0.01 LP-*MST 79.61 64.32 50.36 40.97 66.57 66.82 59.70 0.07 deps ILP-Dep 80.02 65.99 52.42 43.07 72.43 67.63 60.78 0.16 DP + LP-*MST 79.50 66.75 53.48 44.33 64.63 67.69 60.94 0.24 joint DP + LP 79.10 68.22 55.05 45.81 65.74 68.24 62.04 0.12 ILP-Joint (TM13) 80.13 68.34 55.56 46.60 72.57 68</context>
+<context position="34174" citStr="McDonald, 2006" startWordPosition="5563" endWordPosition="5565">he approximation strategy is consistently faster than the ILP solver. The variation in RASP F1% with input size indicates the viability of a hybrid approach which could balance accuracy and speed by using ILP-Joint for smaller problems and DP+LP for larger ones. 4 Related Work Sentence compression is one of the better-studied text-to-text generation problems and has been observed to play a significant role in human summarization (Jing, 2000; Jing and McKeown, 2000). Most approaches to sentence compression are supervised (Knight and Marcu, 2002; Riezler et al., 2003; Turner and Charniak, 2005; McDonald, 2006; Unno et al., 2006; Galley and McKeown, 2007; Nomoto, 2007; Cohn and Lapata, 2009; Galanis and Androutsopoulos, 2010; Ganitkevitch et al., 2011; Napoles et al., 2011a; Filippova and Altun, 2013) following the release of datasets such as the Ziff-Davis corpus (Knight and Marcu, 2000) and the Edinburgh compression corpora (Clarke and Lapata, 2006; Clarke and Lapata, 2008), although unsupervised approaches— largely based on ILPs—have also received consideration (Clarke and Lapata, 2007; Clarke and Lapata, 2008; Filippova and Strube, 2008). Compression has also been used as a tool for document su</context>
+</contexts>
+<marker>McDonald, 2006</marker>
+<rawString>Ryan McDonald. 2006. Discriminative sentence compression with soft syntactic evidence. In Proceedings of EACL, pages 297–304.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Alejandro Molina</author>
+</authors>
+<title>Juan-Manuel Torres-Moreno, Eric SanJuan, Iria da Cunha, and Gerardo Eugenio Sierra Martinez.</title>
+<date>2013</date>
+<booktitle>In Computational Linguistics and Intelligent Text Processing,</booktitle>
+<volume>7817</volume>
+<pages>394--407</pages>
+<publisher>Springer.</publisher>
+<marker>Molina, 2013</marker>
+<rawString>Alejandro Molina, Juan-Manuel Torres-Moreno, Eric SanJuan, Iria da Cunha, and Gerardo Eugenio Sierra Martinez. 2013. Discursive sentence compression. In Computational Linguistics and Intelligent Text Processing, volume 7817, pages 394–407. Springer.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Courtney Napoles</author>
+<author>Chris Callison-Burch</author>
+<author>Juri Ganitkevitch</author>
+<author>Benjamin Van Durme</author>
+</authors>
+<title>Paraphrastic sentence compression with a character-based metric: tightening without deletion.</title>
+<date>2011</date>
+<booktitle>In Proceedings of the Workshop on Monolingual Text-To-Text Generation,</booktitle>
+<pages>84--90</pages>
+<marker>Napoles, Callison-Burch, Ganitkevitch, Van Durme, 2011</marker>
+<rawString>Courtney Napoles, Chris Callison-Burch, Juri Ganitkevitch, and Benjamin Van Durme. 2011a. Paraphrastic sentence compression with a character-based metric: tightening without deletion. In Proceedings of the Workshop on Monolingual Text-To-Text Generation, pages 84–90.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Courtney Napoles</author>
+<author>Benjamin Van Durme</author>
+<author>Chris Callison-Burch</author>
+</authors>
+<title>Evaluating sentence compression: pitfalls and suggested remedies.</title>
+<date>2011</date>
+<booktitle>In Proceedings of the Workshop on Monolingual Text-ToText Generation,</booktitle>
+<pages>91--97</pages>
+<marker>Napoles, Van Durme, Callison-Burch, 2011</marker>
+<rawString>Courtney Napoles, Benjamin Van Durme, and Chris Callison-Burch. 2011b. Evaluating sentence compression: pitfalls and suggested remedies. In Proceedings of the Workshop on Monolingual Text-ToText Generation, pages 91–97.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Tadashi Nomoto</author>
+</authors>
+<title>Discriminative sentence compression with conditional random fields.</title>
+<date>2007</date>
+<booktitle>Information Processing and Management,</booktitle>
+<volume>43</volume>
+<issue>6</issue>
+<pages>1587</pages>
+<contexts>
+<context position="34233" citStr="Nomoto, 2007" startWordPosition="5575" endWordPosition="5576"> solver. The variation in RASP F1% with input size indicates the viability of a hybrid approach which could balance accuracy and speed by using ILP-Joint for smaller problems and DP+LP for larger ones. 4 Related Work Sentence compression is one of the better-studied text-to-text generation problems and has been observed to play a significant role in human summarization (Jing, 2000; Jing and McKeown, 2000). Most approaches to sentence compression are supervised (Knight and Marcu, 2002; Riezler et al., 2003; Turner and Charniak, 2005; McDonald, 2006; Unno et al., 2006; Galley and McKeown, 2007; Nomoto, 2007; Cohn and Lapata, 2009; Galanis and Androutsopoulos, 2010; Ganitkevitch et al., 2011; Napoles et al., 2011a; Filippova and Altun, 2013) following the release of datasets such as the Ziff-Davis corpus (Knight and Marcu, 2000) and the Edinburgh compression corpora (Clarke and Lapata, 2006; Clarke and Lapata, 2008), although unsupervised approaches— largely based on ILPs—have also received consideration (Clarke and Lapata, 2007; Clarke and Lapata, 2008; Filippova and Strube, 2008). Compression has also been used as a tool for document summarization (Daum´e and Marcu, 2002; Zajic et al., 2007; Cl</context>
+</contexts>
+<marker>Nomoto, 2007</marker>
+<rawString>Tadashi Nomoto. 2007. Discriminative sentence compression with conditional random fields. Information Processing and Management, 43(6):1571– 1587, November.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Xian Qian</author>
+<author>Yang Liu</author>
+</authors>
+<title>Fast joint compression and summarization via graph cuts.</title>
+<date>2013</date>
+<booktitle>In Proceedings of EMNLP,</booktitle>
+<pages>1492--1502</pages>
+<location>Seattle, Washington, USA,</location>
+<contexts>
+<context position="6740" citStr="Qian and Liu, 2013" startWordPosition="995" endWordPosition="998">ently from an input sentence will likely not result in fluent and meaningful compressive text. Tokens in well-formed sentences participate in a number of syntactic and semantic relationships with other tokens, so one might expect that accounting for heterogenous structural relationships between tokens will improve the coherence of the output sentence. Furthermore, much recent work has focused on the challenge of joint sentence extraction and compression, also known as compressive summarization (Martins and Smith, 2009; Berg-Kirkpatrick et al., 2011; Almeida and Martins, 2013; Li et al., 2013; Qian and Liu, 2013), in which questions of efficiency are paramount due to the larger problems involved; however, these approaches largely restrict compression to pruning parse trees, thereby imposing a dependency on parser performance. We focus in this work on a sentence-level compression system to approximate the ILP-based inference of Thadani and McKeown (2013) which does not restrict compressions to follow input parses but permits the generation of novel dependency relations in output compressions. The rest of this section is organized as follows: §2.1 provies an overview of the joint sequential and syntacti</context>
+<context position="35023" citStr="Qian and Liu, 2013" startWordPosition="5700" endWordPosition="5703">such as the Ziff-Davis corpus (Knight and Marcu, 2000) and the Edinburgh compression corpora (Clarke and Lapata, 2006; Clarke and Lapata, 2008), although unsupervised approaches— largely based on ILPs—have also received consideration (Clarke and Lapata, 2007; Clarke and Lapata, 2008; Filippova and Strube, 2008). Compression has also been used as a tool for document summarization (Daum´e and Marcu, 2002; Zajic et al., 2007; Clarke and Lapata, 2007; Martins and Smith, 2009; Berg-Kirkpatrick et al., 2011; Woodsend and Lapata, 2012; Almeida and Martins, 2013; Molina et al., 2013; Li et al., 2013; Qian and Liu, 2013), with recent work formulating the summarization task as joint sentence extraction and compression and often employing ILP or Lagrangian relaxation. Monolingual compression 13Similar results were observed for the BN test corpus. Figure 3: Effect of input size on (a) inference time, and (b) the corresponding difference in RASP F1% (ILP-Joint – DP+LP) on the NW corpus. also faces many obstacles common to decoding in machine translation, and a number of approaches which have been proposed to combine phrasal and syntactic models (Huang and Chiang, 2007; Rush and Collins, 2011) inter alia offer dir</context>
+</contexts>
+<marker>Qian, Liu, 2013</marker>
+<rawString>Xian Qian and Yang Liu. 2013. Fast joint compression and summarization via graph cuts. In Proceedings of EMNLP, pages 1492–1502, Seattle, Washington, USA, October.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Stefan Riezler</author>
+<author>Tracy H King</author>
+<author>Richard Crouch</author>
+<author>Annie Zaenen</author>
+</authors>
+<title>Statistical sentence condensation using ambiguity packing and stochastic disambiguation methods for lexical-functional grammar.</title>
+<date>2003</date>
+<booktitle>In Proceedings of HLT-NAACL,</booktitle>
+<pages>118--125</pages>
+<contexts>
+<context position="34131" citStr="Riezler et al., 2003" startWordPosition="5555" endWordPosition="5558">W test corpus.13 The timing results reveal that the approximation strategy is consistently faster than the ILP solver. The variation in RASP F1% with input size indicates the viability of a hybrid approach which could balance accuracy and speed by using ILP-Joint for smaller problems and DP+LP for larger ones. 4 Related Work Sentence compression is one of the better-studied text-to-text generation problems and has been observed to play a significant role in human summarization (Jing, 2000; Jing and McKeown, 2000). Most approaches to sentence compression are supervised (Knight and Marcu, 2002; Riezler et al., 2003; Turner and Charniak, 2005; McDonald, 2006; Unno et al., 2006; Galley and McKeown, 2007; Nomoto, 2007; Cohn and Lapata, 2009; Galanis and Androutsopoulos, 2010; Ganitkevitch et al., 2011; Napoles et al., 2011a; Filippova and Altun, 2013) following the release of datasets such as the Ziff-Davis corpus (Knight and Marcu, 2000) and the Edinburgh compression corpora (Clarke and Lapata, 2006; Clarke and Lapata, 2008), although unsupervised approaches— largely based on ILPs—have also received consideration (Clarke and Lapata, 2007; Clarke and Lapata, 2008; Filippova and Strube, 2008). Compression h</context>
+</contexts>
+<marker>Riezler, King, Crouch, Zaenen, 2003</marker>
+<rawString>Stefan Riezler, Tracy H. King, Richard Crouch, and Annie Zaenen. 2003. Statistical sentence condensation using ambiguity packing and stochastic disambiguation methods for lexical-functional grammar. In Proceedings of HLT-NAACL, pages 118–125.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Alexander M Rush</author>
+<author>Michael Collins</author>
+</authors>
+<title>Exact decoding of syntactic translation models through Lagrangian relaxation.</title>
+<date>2011</date>
+<booktitle>In Proceedings ofACL-HLT,</booktitle>
+<pages>72--82</pages>
+<contexts>
+<context position="11149" citStr="Rush and Collins, 2011" startWordPosition="1723" endWordPosition="1726"> and zij to guarantee consistency, as well as auxiliary real-valued variables and constraints representing the flow of commodities (Magnanti and Wolsey, 1994) in order to establish structure in y and z. In the following section, we propose an alternative formulation that exploits the modularity of this joint objective. 2.2 Lagrangian relaxation Dual decomposition (Komodakis et al., 2007) and Lagrangian relaxation in general are often used for solving joint inference problems which are decomposable into individual subproblems linked by equality constraints (Koo et al., 2010; Rush et al., 2010; Rush and Collins, 2011; DeNero and Macherey, 2011; Martins et al., 2011; Das et al., 2012; Almeida and Martins, 2013). This approach permits sub-problems to be solved separately using problem-specific efficient algorithms, while consistency over the structures produced is enforced through Lagrange multipliers via iterative optimization. Exact solutions are guaranteed when the algorithm converges on a consistent primal solution, although this convergence itself is not guaranteed and depends on the tightness of the underlying LP relaxation. The primary advantage of this technique is the ability to leverage the underl</context>
+<context position="16321" citStr="Rush and Collins, 2011" startWordPosition="2611" endWordPosition="2614"> dynamic programming table Q[i][r] which represents the best score for a compression of length r ending at token i. The table can be populated using the following recurrence: Q[i][1] = score(S, START, i) Q[i][r] = maxQ[j][r − 1] + score(S,i, j) j&lt;i Q[i][R + 1] = Q[i][R] + score(S, i, END) where R is the required number of output tokens and the scoring function is defined as score(S, i,j) θbgr(hti, tji) + λj + ψ · θtok(tj) so as to solve f(y, λ, ψ, θ) from (4). This approach requires O(n2R) time in order to identify 4Heuristic approaches (Komodakis et al., 2007; Rush et al., 2010), tightening (Rush and Collins, 2011) or branch and bound (Das et al., 2012) can still be used to retrieve optimal solutions, but we did not explore these strategies here. min λ max y,z = min max λ y + max z = min max λ y + max z 1244 Figure 1: An example of the difficulty of recovering the maximum-weight subtree (B—*C, B—*D) from the maximum spanning tree (A—*C, C—*B, B—*D). the highest scoring sequence y and corresponding token configuration α(y). 2.4 Dependency subtrees The maximum-weight non-projective subtree problem over general graphs is not as easily solved. Although the maximum spanning tree for a given token configurati</context>
+<context position="35602" citStr="Rush and Collins, 2011" startWordPosition="5790" endWordPosition="5793">, 2013; Li et al., 2013; Qian and Liu, 2013), with recent work formulating the summarization task as joint sentence extraction and compression and often employing ILP or Lagrangian relaxation. Monolingual compression 13Similar results were observed for the BN test corpus. Figure 3: Effect of input size on (a) inference time, and (b) the corresponding difference in RASP F1% (ILP-Joint – DP+LP) on the NW corpus. also faces many obstacles common to decoding in machine translation, and a number of approaches which have been proposed to combine phrasal and syntactic models (Huang and Chiang, 2007; Rush and Collins, 2011) inter alia offer directions for future research into compression problems. 5 Conclusion We have presented approximate inference strategies to jointly compress sentences under bigram and dependency-factored objectives by exploiting the modularity of the task and considering the two subproblems in isolation. Experiments show that one of these approximation strategies produces results comparable to a state-of-the-art integer linear program for the same joint inference task with a 60% reduction in average inference time. Acknowledgments The author is grateful to Alexander Rush for helpful discuss</context>
+</contexts>
+<marker>Rush, Collins, 2011</marker>
+<rawString>Alexander M. Rush and Michael Collins. 2011. Exact decoding of syntactic translation models through Lagrangian relaxation. In Proceedings ofACL-HLT, pages 72–82.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Alexander M Rush</author>
+<author>David Sontag</author>
+<author>Michael Collins</author>
+<author>Tommi Jaakkola</author>
+</authors>
+<title>On dual decomposition and linear programming relaxations for natural language processing.</title>
+<date>2010</date>
+<booktitle>In Proceedings of EMNLP,</booktitle>
+<pages>1--11</pages>
+<contexts>
+<context position="11125" citStr="Rush et al., 2010" startWordPosition="1719" endWordPosition="1722">n variables xi, yij and zij to guarantee consistency, as well as auxiliary real-valued variables and constraints representing the flow of commodities (Magnanti and Wolsey, 1994) in order to establish structure in y and z. In the following section, we propose an alternative formulation that exploits the modularity of this joint objective. 2.2 Lagrangian relaxation Dual decomposition (Komodakis et al., 2007) and Lagrangian relaxation in general are often used for solving joint inference problems which are decomposable into individual subproblems linked by equality constraints (Koo et al., 2010; Rush et al., 2010; Rush and Collins, 2011; DeNero and Macherey, 2011; Martins et al., 2011; Das et al., 2012; Almeida and Martins, 2013). This approach permits sub-problems to be solved separately using problem-specific efficient algorithms, while consistency over the structures produced is enforced through Lagrange multipliers via iterative optimization. Exact solutions are guaranteed when the algorithm converges on a consistent primal solution, although this convergence itself is not guaranteed and depends on the tightness of the underlying LP relaxation. The primary advantage of this technique is the abilit</context>
+<context position="16284" citStr="Rush et al., 2010" startWordPosition="2606" endWordPosition="2609">onstraint. The latter requires a dynamic programming table Q[i][r] which represents the best score for a compression of length r ending at token i. The table can be populated using the following recurrence: Q[i][1] = score(S, START, i) Q[i][r] = maxQ[j][r − 1] + score(S,i, j) j&lt;i Q[i][R + 1] = Q[i][R] + score(S, i, END) where R is the required number of output tokens and the scoring function is defined as score(S, i,j) θbgr(hti, tji) + λj + ψ · θtok(tj) so as to solve f(y, λ, ψ, θ) from (4). This approach requires O(n2R) time in order to identify 4Heuristic approaches (Komodakis et al., 2007; Rush et al., 2010), tightening (Rush and Collins, 2011) or branch and bound (Das et al., 2012) can still be used to retrieve optimal solutions, but we did not explore these strategies here. min λ max y,z = min max λ y + max z = min max λ y + max z 1244 Figure 1: An example of the difficulty of recovering the maximum-weight subtree (B—*C, B—*D) from the maximum spanning tree (A—*C, C—*B, B—*D). the highest scoring sequence y and corresponding token configuration α(y). 2.4 Dependency subtrees The maximum-weight non-projective subtree problem over general graphs is not as easily solved. Although the maximum spanni</context>
+</contexts>
+<marker>Rush, Sontag, Collins, Jaakkola, 2010</marker>
+<rawString>Alexander M. Rush, David Sontag, Michael Collins, and Tommi Jaakkola. 2010. On dual decomposition and linear programming relaxations for natural language processing. In Proceedings of EMNLP, pages 1–11.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Kapil Thadani</author>
+<author>Kathleen McKeown</author>
+</authors>
+<title>Sentence compression with joint structural inference.</title>
+<date>2013</date>
+<booktitle>In Proceedings of CoNLL.</booktitle>
+<contexts>
+<context position="2812" citStr="Thadani and McKeown, 2013" startWordPosition="405" endWordPosition="408">for deletion-based sentence compression, including techniques that assemble the output text under an n-gram factorization over the input text (McDonald, 2006; Clarke and Lapata, 2008) or an arc factorization over input dependency parses (Filippova and Strube, 2008; Galanis and Androutsopoulos, 2010; Filippova and Altun, 2013). Joint methods have also been proposed that invoke integer linear programming (ILP) formulations to simultaneously consider multiple structural inference problems—both over n-grams and input dependencies (Martins and Smith, 2009) or n-grams and all possible dependencies (Thadani and McKeown, 2013). However, it is wellestablished that the utility of ILP for optimal inference in structured problems is often outweighed by the worst-case performance of ILP solvers on large problems without unique integral solutions. Furthermore, approximate solutions can often be adequate for real-world generation systems, particularly in the presence of linguisticallymotivated constraints such as those described by Clarke and Lapata (2008), or domain-specific 1This is referred to as extractive compression by Cohn and Lapata (2008) &amp; Galanis and Androutsopoulos (2010) following the terminology used in docu</context>
+<context position="7087" citStr="Thadani and McKeown (2013)" startWordPosition="1047" endWordPosition="1050">put sentence. Furthermore, much recent work has focused on the challenge of joint sentence extraction and compression, also known as compressive summarization (Martins and Smith, 2009; Berg-Kirkpatrick et al., 2011; Almeida and Martins, 2013; Li et al., 2013; Qian and Liu, 2013), in which questions of efficiency are paramount due to the larger problems involved; however, these approaches largely restrict compression to pruning parse trees, thereby imposing a dependency on parser performance. We focus in this work on a sentence-level compression system to approximate the ILP-based inference of Thadani and McKeown (2013) which does not restrict compressions to follow input parses but permits the generation of novel dependency relations in output compressions. The rest of this section is organized as follows: §2.1 provies an overview of the joint sequential and syntactic objective for compression from Thadani and McKeown (2013) while §2.2 discusses the use of Lagrange multipliers to enforce consistency between the different structures considered. Following this, §2.3 discusses a dynamic program to find maximum weight bigram subsequences from the input sentence, while §2.4 covers LP relaxation-based approaches </context>
+<context position="10044" citStr="Thadani and McKeown (2013)" startWordPosition="1552" endWordPosition="1555">r T, with y and z defined analogously to represent configurations of bigrams and dependencies. θv °_ hBv(·)i denotes a corresponding vector of scores for each variable type v under the current model parameters. In order to recover meaningful compressions by optimizing (2), the inference step must ensure: 1. The configurations x, y and z are consistent with each other, i.e., all configurations cover the same tokens. 2. The structural configurations y and z are non-degenerate, i.e, the bigram configuration y represents an acyclic path while the dependency configuration z forms a tree. 2Although Thadani and McKeown (2013) is not restricted to bigrams or order-preserving n-grams, we limit our discussion to this scenario as it also fits the assumptions of McDonald (2006) and the datasets of Clarke and Lapata (2006). These requirements naturally rule out simple approximate inference formulations such as searchbased approaches for the joint objective.3 An ILP-based inference solution is demonstrated in Thadani and McKeown (2013) that makes use of linear constraints over the boolean variables xi, yij and zij to guarantee consistency, as well as auxiliary real-valued variables and constraints representing the flow o</context>
+<context position="12483" citStr="Thadani and McKeown (2013)" startWordPosition="1921" endWordPosition="1924">en producing exact solutions. The multi-structure inference problem described in the previous section seems in many ways to be a natural fit to such an approach since output scores factor over different types of structure that comprise the output compression. Even if ILP-based approaches perform reasonably at the scale of single-sentence compression problems, the exponential worst-case complexity of generalpurpose ILPs will inevitably pose challenges when scaling up to (a) handle larger inputs, (b) use higher-order structural fragments, or (c) incorporate additional models. 3This work follows Thadani and McKeown (2013) in recovering non-projective trees for inference. However, recovering projective trees is tractable when a total ordering of output tokens is assumed. This will be addressed in future work. 1243 Consider once more the optimization problem characterized by (2) The two structural problems that need to be solved in this formulation are the extraction of a maximum-weight acyclic subsequence of bigrams y from the lattice of all order-preserving bigrams from S and the recovery of a maximum-weight directed subtree z. Let α(y) ∈ {0,1}n denote the incidence vector of tokens contained in the n-gram seq</context>
+<context position="17326" citStr="Thadani and McKeown (2013)" startWordPosition="2786" endWordPosition="2789">rresponding token configuration α(y). 2.4 Dependency subtrees The maximum-weight non-projective subtree problem over general graphs is not as easily solved. Although the maximum spanning tree for a given token configuration can be recovered efficiently, Figure 1 illustrates that the maximumscoring subtree is not necessarily found within it. The problem of recovering a maximum-weight subtree in a graph has been shown to be NP-hard even with uniform edge weights (Lau et al., 2006). In order to produce a solution to this subproblem, we use an LP relaxation of the relevant portion of the ILP from Thadani and McKeown (2013) by omitting integer constraints over the token and dependency variables in x and z respectively. For simplicity, however, we describe the ILP version rather than the relaxed LP in order to motivate the constraints with their intended purpose rather than their effect in the relaxed problem. The objective for this LP is given by xTθ/tok + zTθdep (5) where the vector of token scores is redefined as θ/tok g (1 − 0) · θtok − λ (6) in order to solve g(z, λ, 0, θ) from (4). Linear constraints are introduced to produce dependency structures that are close to the optimal dependency trees. First, token</context>
+<context position="23963" citStr="Thadani and McKeown (2013)" startWordPosition="3943" endWordPosition="3946">d solution from the repeating ones by scoring them under (2). It is straightforward to recover and score a bigram configuration y from a token configuration ,3(z). However, scoring solutions produced by the dynamic program from §2.3 also requires the score over a corresponding parse tree; this can be recovered by constructing a dependency subgraph containing across only the tokens that are active in α(y) and retrieving the maximum spanning tree for that subgraph using the Chu-Liu Edmonds algorithm. 2.5 Learning and Features The features used in this work are largely based on the features from Thadani and McKeown (2013). • Otok contains features for part-of-speech (POS) tag sequences of length up to 3 around the token, features for the dependency label of the token conjoined with its POS, lexical features for verb stems and non-word symbols and morphological features that identify capitalized sequences, negations and words in parentheses. • Obgr contains features for POS patterns in a bigram, the labels of dependency edges incident to it, its likelihood under a Gigaword language model (LM) and an indicator for whether it is present in the input sentence. • Odep contains features for the probability of a depe</context>
+<context position="25462" citStr="Thadani and McKeown (2013)" startWordPosition="4185" endWordPosition="4188">e label of the edge (d) the POS tags of the tokens incident to the edge and (e) the labels of their surrounding chunks and whether the edge remains within the chunk. For the experiments in the following section, we trained models using a variant of the structured perceptron (Collins, 2002) which incorporates minibatches (Zhao and Huang, 2013) for easy parallelization and faster convergence.6 Overfitting was avoided by averaging parameters and monitoring performance against a held-out development set during training. All models were trained using variants of the ILP-based inference approach of Thadani and McKeown (2013). We followed Martins et al. (2009) in using LP-relaxed inference during learning, assuming algorithmic separability (Kulesza and Pereira, 2007) for these problems. 3 Experiments We ran compression experiments over the newswire (NW) and broadcast news transcription (BN) corpora compiled by Clarke and Lapata (2008) which contain gold compressions produced by human annotators using only word deletion. The datasets were filtered to eliminate instances with less than 2 and more than 110 tokens for parser compatibility and divided into training/development/test sections following the splits from Cl</context>
+<context position="28223" citStr="Thadani and McKeown (2013)" startWordPosition="4601" endWordPosition="4604">kelihood under an LM and a significance score for token variables inspired by Hori and Furui (2004), as well as various linguistically-motivated constraints to encourage fluency in output compressions. • DP: The bigram-based dynamic program of McDonald (2006) described in §2.3.9 • LP→MST: An approximate inference approach based on an LP relaxation of ILPDep. As discussed in §2.4, a maximum spanning tree is recovered from the output of the LP and greedily pruned in order to generate a valid integral solution while observing the imposed compression rate. • ILP-Dep: A version of the joint ILP of Thadani and McKeown (2013) without ngram variables and corresponding features. • DP+LP→MST: An approximate joint inference approach based on Lagrangian relaxation that uses DP for the maximum weight subsequence problem and LP→MST for the maximum weight subtree problem. • DP+LP: Another Lagrangian relaxation approach that pairs DP with the non-integral solutions from an LP relaxation of the maximum weight subtree problem (cf. §2.4). • ILP-Joint: The full ILP from Thadani and McKeown (2013), which provides an upper bound on the performance of the proposed approximation strategies. The learning rate schedule for the Lagra</context>
+</contexts>
+<marker>Thadani, McKeown, 2013</marker>
+<rawString>Kapil Thadani and Kathleen McKeown. 2013. Sentence compression with joint structural inference. In Proceedings of CoNLL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jenine Turner</author>
+<author>Eugene Charniak</author>
+</authors>
+<title>Supervised and unsupervised learning for sentence compression.</title>
+<date>2005</date>
+<booktitle>In Proceedings of ACL,</booktitle>
+<pages>290--297</pages>
+<contexts>
+<context position="34158" citStr="Turner and Charniak, 2005" startWordPosition="5559" endWordPosition="5562">iming results reveal that the approximation strategy is consistently faster than the ILP solver. The variation in RASP F1% with input size indicates the viability of a hybrid approach which could balance accuracy and speed by using ILP-Joint for smaller problems and DP+LP for larger ones. 4 Related Work Sentence compression is one of the better-studied text-to-text generation problems and has been observed to play a significant role in human summarization (Jing, 2000; Jing and McKeown, 2000). Most approaches to sentence compression are supervised (Knight and Marcu, 2002; Riezler et al., 2003; Turner and Charniak, 2005; McDonald, 2006; Unno et al., 2006; Galley and McKeown, 2007; Nomoto, 2007; Cohn and Lapata, 2009; Galanis and Androutsopoulos, 2010; Ganitkevitch et al., 2011; Napoles et al., 2011a; Filippova and Altun, 2013) following the release of datasets such as the Ziff-Davis corpus (Knight and Marcu, 2000) and the Edinburgh compression corpora (Clarke and Lapata, 2006; Clarke and Lapata, 2008), although unsupervised approaches— largely based on ILPs—have also received consideration (Clarke and Lapata, 2007; Clarke and Lapata, 2008; Filippova and Strube, 2008). Compression has also been used as a tool</context>
+</contexts>
+<marker>Turner, Charniak, 2005</marker>
+<rawString>Jenine Turner and Eugene Charniak. 2005. Supervised and unsupervised learning for sentence compression. In Proceedings of ACL, pages 290–297.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yuya Unno</author>
+<author>Takashi Ninomiya</author>
+<author>Yusuke Miyao</author>
+<author>Jun’ichi Tsujii</author>
+</authors>
+<title>Trimming CFG parse trees for sentence compression using machine learning approaches.</title>
+<date>2006</date>
+<booktitle>In Proceedings ofACL-COLING,</booktitle>
+<pages>850--857</pages>
+<contexts>
+<context position="26393" citStr="Unno et al., 2006" startWordPosition="4320" endWordPosition="4323">) which contain gold compressions produced by human annotators using only word deletion. The datasets were filtered to eliminate instances with less than 2 and more than 110 tokens for parser compatibility and divided into training/development/test sections following the splits from Clarke and Lapata (2008), yielding 953/63/603 instances for the NW corpus and 880/78/404 for the BN corpus. Gold dependency parses were approximated by running the Stanford dependency parser7 over reference compressions. Following evaluations in machine translation as well as previous work in sentence compression (Unno et al., 2006; Clarke and Lapata, 2008; Martins and Smith, 2009; Napoles et al., 2011b; Thadani and McKeown, 2013), we evaluate system performance using F1 metrics over n-grams and dependency edges produced by parsing system output with RASP (Briscoe et al., 2006) and the Stanford parser. All ILPs and LPs were solved using Gurobi,8 a high-performance commercialgrade solver. Following a recent analysis of compression evaluations (Napoles et al., 2011b) which revealed a strong correlation between system compression rate and human judgments of compression quality, we constrained all systems to produce 6We use</context>
+<context position="34193" citStr="Unno et al., 2006" startWordPosition="5566" endWordPosition="5569"> strategy is consistently faster than the ILP solver. The variation in RASP F1% with input size indicates the viability of a hybrid approach which could balance accuracy and speed by using ILP-Joint for smaller problems and DP+LP for larger ones. 4 Related Work Sentence compression is one of the better-studied text-to-text generation problems and has been observed to play a significant role in human summarization (Jing, 2000; Jing and McKeown, 2000). Most approaches to sentence compression are supervised (Knight and Marcu, 2002; Riezler et al., 2003; Turner and Charniak, 2005; McDonald, 2006; Unno et al., 2006; Galley and McKeown, 2007; Nomoto, 2007; Cohn and Lapata, 2009; Galanis and Androutsopoulos, 2010; Ganitkevitch et al., 2011; Napoles et al., 2011a; Filippova and Altun, 2013) following the release of datasets such as the Ziff-Davis corpus (Knight and Marcu, 2000) and the Edinburgh compression corpora (Clarke and Lapata, 2006; Clarke and Lapata, 2008), although unsupervised approaches— largely based on ILPs—have also received consideration (Clarke and Lapata, 2007; Clarke and Lapata, 2008; Filippova and Strube, 2008). Compression has also been used as a tool for document summarization (Daum´e</context>
+</contexts>
+<marker>Unno, Ninomiya, Miyao, Tsujii, 2006</marker>
+<rawString>Yuya Unno, Takashi Ninomiya, Yusuke Miyao, and Jun’ichi Tsujii. 2006. Trimming CFG parse trees for sentence compression using machine learning approaches. In Proceedings ofACL-COLING, pages 850–857.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Kristian Woodsend</author>
+<author>Mirella Lapata</author>
+</authors>
+<title>Multiple aspect summarization using integer linear programming.</title>
+<date>2012</date>
+<booktitle>In Proceedings of EMNLP,</booktitle>
+<pages>233--243</pages>
+<contexts>
+<context position="34937" citStr="Woodsend and Lapata, 2012" startWordPosition="5683" endWordPosition="5686">, 2011; Napoles et al., 2011a; Filippova and Altun, 2013) following the release of datasets such as the Ziff-Davis corpus (Knight and Marcu, 2000) and the Edinburgh compression corpora (Clarke and Lapata, 2006; Clarke and Lapata, 2008), although unsupervised approaches— largely based on ILPs—have also received consideration (Clarke and Lapata, 2007; Clarke and Lapata, 2008; Filippova and Strube, 2008). Compression has also been used as a tool for document summarization (Daum´e and Marcu, 2002; Zajic et al., 2007; Clarke and Lapata, 2007; Martins and Smith, 2009; Berg-Kirkpatrick et al., 2011; Woodsend and Lapata, 2012; Almeida and Martins, 2013; Molina et al., 2013; Li et al., 2013; Qian and Liu, 2013), with recent work formulating the summarization task as joint sentence extraction and compression and often employing ILP or Lagrangian relaxation. Monolingual compression 13Similar results were observed for the BN test corpus. Figure 3: Effect of input size on (a) inference time, and (b) the corresponding difference in RASP F1% (ILP-Joint – DP+LP) on the NW corpus. also faces many obstacles common to decoding in machine translation, and a number of approaches which have been proposed to combine phrasal and </context>
+</contexts>
+<marker>Woodsend, Lapata, 2012</marker>
+<rawString>Kristian Woodsend and Mirella Lapata. 2012. Multiple aspect summarization using integer linear programming. In Proceedings of EMNLP, pages 233– 243.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>David Zajic</author>
+<author>Bonnie J Dorr</author>
+<author>Jimmy Lin</author>
+<author>Richard Schwartz</author>
+</authors>
+<title>Multi-candidate reduction: Sentence compression as a tool for document summarization tasks.</title>
+<date>2007</date>
+<journal>Information Processing and Management,</journal>
+<volume>43</volume>
+<issue>6</issue>
+<contexts>
+<context position="34829" citStr="Zajic et al., 2007" startWordPosition="5667" endWordPosition="5670">wn, 2007; Nomoto, 2007; Cohn and Lapata, 2009; Galanis and Androutsopoulos, 2010; Ganitkevitch et al., 2011; Napoles et al., 2011a; Filippova and Altun, 2013) following the release of datasets such as the Ziff-Davis corpus (Knight and Marcu, 2000) and the Edinburgh compression corpora (Clarke and Lapata, 2006; Clarke and Lapata, 2008), although unsupervised approaches— largely based on ILPs—have also received consideration (Clarke and Lapata, 2007; Clarke and Lapata, 2008; Filippova and Strube, 2008). Compression has also been used as a tool for document summarization (Daum´e and Marcu, 2002; Zajic et al., 2007; Clarke and Lapata, 2007; Martins and Smith, 2009; Berg-Kirkpatrick et al., 2011; Woodsend and Lapata, 2012; Almeida and Martins, 2013; Molina et al., 2013; Li et al., 2013; Qian and Liu, 2013), with recent work formulating the summarization task as joint sentence extraction and compression and often employing ILP or Lagrangian relaxation. Monolingual compression 13Similar results were observed for the BN test corpus. Figure 3: Effect of input size on (a) inference time, and (b) the corresponding difference in RASP F1% (ILP-Joint – DP+LP) on the NW corpus. also faces many obstacles common to </context>
+</contexts>
+<marker>Zajic, Dorr, Lin, Schwartz, 2007</marker>
+<rawString>David Zajic, Bonnie J. Dorr, Jimmy Lin, and Richard Schwartz. 2007. Multi-candidate reduction: Sentence compression as a tool for document summarization tasks. Information Processing and Management, 43(6):1549–1570, Nov.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Kai Zhao</author>
+<author>Liang Huang</author>
+</authors>
+<title>Minibatch and parallelization for online large margin structured learning.</title>
+<date>2013</date>
+<booktitle>In Proceedings of HLT-NAACL,</booktitle>
+<pages>370--379</pages>
+<location>Atlanta, Georgia,</location>
+<contexts>
+<context position="25180" citStr="Zhao and Huang, 2013" startWordPosition="4144" endWordPosition="4147">dependency edge under a smoothed dependency grammar constructed from the Penn Treebank and various conjunctions of the following features: (a) whether the edge appears as a dependency or ancestral relation in the input parse (b) the directionality of the depen1246 dency (c) the label of the edge (d) the POS tags of the tokens incident to the edge and (e) the labels of their surrounding chunks and whether the edge remains within the chunk. For the experiments in the following section, we trained models using a variant of the structured perceptron (Collins, 2002) which incorporates minibatches (Zhao and Huang, 2013) for easy parallelization and faster convergence.6 Overfitting was avoided by averaging parameters and monitoring performance against a held-out development set during training. All models were trained using variants of the ILP-based inference approach of Thadani and McKeown (2013). We followed Martins et al. (2009) in using LP-relaxed inference during learning, assuming algorithmic separability (Kulesza and Pereira, 2007) for these problems. 3 Experiments We ran compression experiments over the newswire (NW) and broadcast news transcription (BN) corpora compiled by Clarke and Lapata (2008) wh</context>
+</contexts>
+<marker>Zhao, Huang, 2013</marker>
+<rawString>Kai Zhao and Liang Huang. 2013. Minibatch and parallelization for online large margin structured learning. In Proceedings of HLT-NAACL, pages 370– 379, Atlanta, Georgia, June.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

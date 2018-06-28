@@ -1,0 +1,1273 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.001106">
+<title confidence="0.9981815">
+Akamon: An Open Source Toolkit
+for Tree/Forest-Based Statistical Machine Translation∗
+</title>
+<author confidence="0.996146">
+Xianchao Wu†, Takuya Matsuzaki∗, Jun’ichi Tsujii‡† Baidu Inc.
+</author>
+<affiliation confidence="0.89715">
+∗National Institute of Informatics
+‡ Microsoft Research Asia
+</affiliation>
+<email confidence="0.99556">
+wuxianchao@gmail.com,takuya-matsuzaki@nii.ac.jp,jtsujii@microsoft.com
+</email>
+<sectionHeader confidence="0.995605" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.990791866666667">
+We describe Akamon, an open source toolkit
+for tree and forest-based statistical machine
+translation (Liu et al., 2006; Mi et al., 2008;
+Mi and Huang, 2008). Akamon implements
+all of the algorithms required for tree/forest-
+to-string decoding using tree-to-string trans-
+lation rules: multiple-thread forest-based de-
+coding, n-gram language model integration,
+beam- and cube-pruning, k-best hypotheses
+extraction, and minimum error rate training.
+In terms of tree-to-string translation rule ex-
+traction, the toolkit implements the tradi-
+tional maximum likelihood algorithm using
+PCFG trees (Galley et al., 2004) and HPSG
+trees/forests (Wu et al., 2010).
+</bodyText>
+<sectionHeader confidence="0.998909" genericHeader="introduction">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.991629208333334">
+Syntax-based statistical machine translation (SMT)
+systems have achieved promising improvements in
+recent years. Depending on the type of input, the
+systems are divided into two categories: string-
+based systems whose input is a string to be simul-
+taneously parsed and translated by a synchronous
+grammar (Wu, 1997; Chiang, 2005; Galley et al.,
+2006; Shen et al., 2008), and tree/forest-based sys-
+tems whose input is already a parse tree or a packed
+forest to be directly converted into a target tree or
+string (Ding and Palmer, 2005; Quirk et al., 2005;
+Liu et al., 2006; Huang et al., 2006; Mi et al., 2008;
+Mi and Huang, 2008; Zhang et al., 2009; Wu et al.,
+2010; Wu et al., 2011a).
+*Work done when all the authors were in The University of
+Tokyo.
+Depending on whether or not parsers are explic-
+itly used for obtaining linguistically annotated data
+during training, the systems are also divided into two
+categories: formally syntax-based systems that do
+not use additional parsers (Wu, 1997; Chiang, 2005;
+Xiong et al., 2006), and linguistically syntax-based
+systems that use PCFG parsers (Liu et al., 2006;
+Huang et al., 2006; Galley et al., 2006; Mi et al.,
+2008; Mi and Huang, 2008; Zhang et al., 2009),
+HPSG parsers (Wu et al., 2010; Wu et al., 2011a), or
+dependency parsers (Ding and Palmer, 2005; Quirk
+et al., 2005; Shen et al., 2008). A classification) of
+syntax-based SMT systems is shown in Table 1.
+Translation rules can be extracted from aligned
+string-string (Chiang, 2005), tree-tree (Ding and
+Palmer, 2005) and tree/forest-string (Galley et al.,
+2004; Mi and Huang, 2008; Wu et al., 2011a)
+data structures. Leveraging structural and linguis-
+tic information from parse trees/forests, the latter
+two structures are believed to be better than their
+string-string counterparts in handling non-local re-
+ordering, and have achieved promising translation
+results. Moreover, the tree/forest-string structure is
+more widely used than the tree-tree structure, pre-
+sumably because using two parsers on the source
+and target languages is subject to more problems
+than making use of a parser on one language, such
+as the shortage of high precision/recall parsers for
+languages other than English, compound parse error
+rates, and inconsistency of errors. In Table 1, note
+that tree-to-string rules are generic and applicable
+to many syntax-based models such as tree/forest-to-
+</bodyText>
+<footnote confidence="0.8705615">
+&apos;This classification is inspired by and extends the Table 1 in
+(Mi and Huang, 2008).
+</footnote>
+<page confidence="0.882388">
+127
+</page>
+<note confidence="0.8239235">
+Proceedings of the 50th Annual Meeting of the Association for Computational Linguistics, pages 127–132,
+Jeju, Republic of Korea, 8-14 July 2012. c�2012 Association for Computational Linguistics
+</note>
+<table confidence="0.84347">
+Source-to-target Examples (partial) Decoding Rules Parser
+tree-to-tree (Ding and Palmer, 2005) ↓ dep.-to-dep. DG
+forest-to-tree (Liu et al., 2009a) ↓ ↑↓ tree-to-tree PCFG
+tree-to-string (Liu et al., 2006) ↑ tree-to-string PCFG
+(Quirk et al., 2005) ↑ dep.-to-string DG
+forest-to-string (Mi et al., 2008) ↓ ↑↓ tree-to-string PCFG
+(Wu et al., 2011a) ↓ ↑↓ tree-to-string HPSG
+string-to-tree (Galley et al., 2006) CKY tree-to-string PCFG
+(Shen et al., 2008) CKY string-to-dep. DG
+string-to-string (Chiang, 2005) CKY string-to-string none
+(Xiong et al., 2006) CKY string-to-string none
+</table>
+<tableCaption confidence="0.98041025">
+Table 1: A classification of syntax-based SMT systems. Tree/forest-based and string-based systems are split by a line.
+All the systems listed here are linguistically syntax-based except the last two (Chiang, 2005) and (Xiong et al., 2006),
+which are formally syntax-based. DG stands for dependency (abbreviated as dep.) grammar. ↓ and ↑ denote top-down
+and bottom-up traversals of a source tree/forest.
+</tableCaption>
+<bodyText confidence="0.998414625">
+string models and string-to-tree model.
+However, few tree/forest-to-string systems have
+been made open source and this makes it diffi-
+cult and time-consuming to testify and follow exist-
+ing proposals involved in recently published papers.
+The Akamon system2, written in Java and follow-
+ing the tree/forest-to-string research direction, im-
+plements all of the algorithms for both tree-to-string
+translation rule extraction (Galley et al., 2004; Mi
+and Huang, 2008; Wu et al., 2010; Wu et al., 2011a)
+and tree/forest-based decoding (Liu et al., 2006; Mi
+et al., 2008). We hope this system will help re-
+lated researchers to catch up with the achievements
+of tree/forest-based translations in the past several
+years without re-implementing the systems or gen-
+eral algorithms from scratch.
+</bodyText>
+<sectionHeader confidence="0.922967" genericHeader="method">
+2 Akamon Toolkit Features
+</sectionHeader>
+<bodyText confidence="0.999453166666667">
+Limited by the successful parsing rate and coverage
+of linguistic phrases, Akamon currently achieves
+comparable translation accuracies compared with
+the most frequently used SMT baseline system,
+Moses (Koehn et al., 2007). Table 2 shows the auto-
+matic translation accuracies (case-sensitive) of Aka-
+mon and Moses. Besides BLEU and NIST score, we
+further list RIBES score3, , i.e., the software imple-
+mentation of Normalized Kendall’s -r as proposed by
+(Isozaki et al., 2010a) to automatically evaluate the
+translation between distant language pairs based on
+rank correlation coefficients and significantly penal-
+</bodyText>
+<footnote confidence="0.674097">
+3Code available at http://www.kecl.ntt.co.jp/icl/lirg/ribes
+</footnote>
+<bodyText confidence="0.904499161290322">
+izes word order mistakes.
+In this table, Akamon-Forest differs from
+Akamon-Comb by using different configurations:
+Akamon-Forest used only 2/3 of the total training
+data (limited by the experiment environments and
+time). Akamon-Comb represents the system com-
+bination result by combining Akamon-Forest and
+other phrase-based SMT systems, which made use
+of pre-ordering methods of head finalization as de-
+scribed in (Isozaki et al., 2010b) and used the total 3
+million training data. The detail of the pre-ordering
+approach and the combination method can be found
+in (Sudoh et al., 2011) and (Duh et al., 2011).
+Also, Moses (hierarchical) stands for the hi-
+erarchical phrase-based SMT system and Moses
+(phrase) stands for the flat phrase-based SMT sys-
+tem. For intuitive comparison (note that the result
+achieved by Google is only for reference and not a
+comparison, since it uses a different and unknown
+training data) and following (Goto et al., 2011), the
+scores achieved by using the Google online transla-
+tion system4 are also listed in this table.
+Here is a brief description of Akamon’s main fea-
+tures:
+• multiple-thread forest-based decoding: Aka-
+mon first loads the development (with source
+and reference sentences) or test (with source
+sentences only) file into memory and then per-
+form parameter tuning or decoding in a paral-
+lel way. The forest-based decoding algorithm
+is alike that described in (Mi et al., 2008),
+</bodyText>
+<footnote confidence="0.994907">
+4http://translate.google.com/
+2Code available at https://sites.google.com/site/xianchaowu2012
+</footnote>
+<page confidence="0.93742">
+128
+</page>
+<table confidence="0.999813571428572">
+Systems BLEU NIST RIBES
+Google online 0.2546 6.830 0.6991
+Moses (hierarchical) 0.3166 7.795 0.7200
+Moses (phrase) 0.3190 7.881 0.7068
+Moses (phrase)* 0.2773 6.905 0.6619
+Akamon-Forest* 0.2799 7.258 0.6861
+Akamon-Comb 0.3948 8.713 0.7813
+</table>
+<tableCaption confidence="0.9270618">
+Table 2: Translation accuracies of Akamon and the base-
+line systems on the NTCIR-9 English-to-Japanese trans-
+lation task (Wu et al., 2011b). * stands for only using
+2 million parallel sentences of the total 3 million data.
+Here, HPSG forests were used in Akamon.
+</tableCaption>
+<bodyText confidence="0.999849">
+i.e., first construct a translation forest by ap-
+plying the tree-to-string translation rules to the
+original parsing forest of the source sentence,
+and then collect k-best hypotheses for the root
+node(s) of the translation forest using Algo-
+rithm 2 or Algorithm 3 as described in (Huang
+and Chiang, 2005). Later, the k-best hypothe-
+ses are used both for parameter tuning on addi-
+tional development set(s) and for final optimal
+translation result extracting.
+</bodyText>
+<listItem confidence="0.9044349">
+• language models: Akamon can make use of
+one or many n-gram language models trained
+by using SRILM5 (Stolcke, 2002) or the Berke-
+ley language model toolkit, berkeleylm-1.0b36
+(Pauls and Klein, 2011). The weights of multi-
+ple language models are tuned under minimum
+error rate training (MERT) (Och, 2003).
+• pruning: traditional beam-pruning and cube-
+pruning (Chiang, 2007) techniques are incor-
+porated in Akamon to make decoding feasi-
+ble for large-scale rule sets. Before decoding,
+we also perform the marginal probability-based
+inside-outside algorithm based pruning (Mi et
+al., 2008) on the original parsing forest to con-
+trol the decoding time.
+• MERT: Akamon has its own MERT module
+which optimizes weights of the features so as
+to maximize some automatic evaluation metric,
+such as BLEU (Papineni et al., 2002), on a de-
+velopment set.
+</listItem>
+<footnote confidence="0.999866">
+5http://www.speech.sri.com/projects/srilm/
+6http://code.google.com/p/berkeleylm/
+</footnote>
+<figureCaption confidence="0.936727">
+Figure 1: Training and tuning process of the Akamon sys-
+tem. Here, e = source English language, f = target foreign
+language.
+</figureCaption>
+<listItem confidence="0.9747941">
+• translation rule extraction: as former men-
+tioned, we extract tree-to-string translation
+rules for Akamon. In particular, we imple-
+mented the GHKM algorithm as proposed by
+Galley et al. (2004) from word-aligned tree-
+string pairs. In addition, we also implemented
+the algorithms proposed by Mi and Huang
+(2008) and Wu et al. (2010) for extracting rules
+from word-aligned PCFG/HPSG forest-string
+pairs.
+</listItem>
+<sectionHeader confidence="0.904301" genericHeader="method">
+3 Training and Decoding Frameworks
+</sectionHeader>
+<bodyText confidence="0.9981884">
+Figure 1 shows the training and tuning progress of
+the Akamon system. Given original bilingual par-
+allel corpora, we first tokenize and lowercase the
+source and target sentences (e.g., word segmentation
+of Chinese and Japanese, punctuation segmentation
+of English).
+The pre-processed monolingual sentences will be
+used by SRILM (Stolcke, 2002) or BerkeleyLM
+(Pauls and Klein, 2011) to train a n-gram language
+model. In addition, we filter out too long sentences
+</bodyText>
+<figure confidence="0.996959121212121">
+tokenize word segment
+corpus
+pre&amp;processing
+e.tok
+£scg
+���������
+���������
+e.tsk.lw f.seg.lw
+de&apos;
+SRILM
+e.clean £cican
+clean
+de&apos;.e
+tokenize
+do&apos;.f
+ward
+segmer tation
+e.tok
+&amp;quot;n(u
+GIZA++
+lowercase
+lowercase
+£sog
+e.forests
+ager t
+��������
+£seg.lw
+&amp;quot;n(u
+rule extraction
+���������
+%&amp;gram LM
+Rule set
+Akamon ecoder !M&amp;quot;R#$
+</figure>
+<page confidence="0.986193">
+129
+</page>
+<bodyText confidence="0.999925">
+here, i.e., only relatively short sentence pairs will be
+used to train word alignments. Then, we can use
+GIZA++ (Och and Ney, 2003) and symmetric strate-
+gies, such as grow-diag-final (Koehn et al., 2007),
+on the tokenized parallel corpus to obtain a word-
+aligned parallel corpus.
+The source sentence and its packed forest, the tar-
+get sentence, and the word alignment are used for
+tree-to-string translation rule extraction. Since a 1-
+best tree is a special case of a packed forest, we will
+focus on using the term ‘forest’ in the continuing
+discussion. Then, taking the target language model,
+the rule set, and the preprocessed development set
+as inputs, we perform MERT on the decoder to tune
+the weights of the features.
+The Akamon forest-to-string system includes the
+decoding algorithm and the rule extraction algorithm
+described in (Mi et al., 2008; Mi and Huang, 2008).
+</bodyText>
+<sectionHeader confidence="0.99311" genericHeader="method">
+4 Using Deep Syntactic Structures
+</sectionHeader>
+<bodyText confidence="0.99187456">
+In Akamon, we support the usage of deep syn-
+tactic structures for obtaining fine-grained transla-
+tion rules as described in our former work (Wu et
+al., 2010)7. Similarly, Enju8, a state-of-the-art and
+freely available HPSG parser for English, can be
+used to generate packed parse forests for source
+sentences9. Deep syntactic structures are included
+in the HPSG trees/forests, which includes a fine-
+grained description of the syntactic property and a
+semantic representation of the sentence. We extract
+fine-grained rules from aligned HPSG forest-string
+pairs and use them in the forest-to-string decoder.
+The detailed algorithms can be found in (Wu et al.,
+2010; Wu et al., 2011a). Note that, in Akamon, we
+also provide the codes for generating HPSG forests
+from Enju.
+Head-driven phrase structure grammar (HPSG) is
+a lexicalist grammar framework. In HPSG, linguis-
+tic entities such as words and phrases are represented
+by a data structure called a sign. A sign gives a
+7However, Akamon still support PCFG tree/forest based
+translation. A special case is to yield PCFG style trees/forests
+by ignoring the rich features included in the nodes of HPSG
+trees/forests and only keep the POS tag and the phrasal cate-
+gories.
+</bodyText>
+<footnote confidence="0.986234333333333">
+8http://www-tsujii.is.s.u-tokyo.ac.jp/enju/index.html
+9Until the date this paper was submitted, Enju supports gen-
+erating English and Chinese forests.
+</footnote>
+<table confidence="0.886017">
+Feature Description
+CAT phrasal category
+XCAT fine-grained phrasal category
+SCHEMA name of the schema applied in the node
+HEAD pointer to the head daughter
+SEM HEAD pointer to the semantic head daughter
+CAT syntactic category
+POS Penn Treebank-style part-of-speech tag
+BASE base form
+</table>
+<tableCaption confidence="0.928492">
+TENSE tense of a verb (past, present, untensed)
+ASPECT aspect of a verb (none, perfect,
+progressive, perfect-progressive)
+VOICE voice of a verb (passive, active)
+AUX auxiliary verb or not (minus, modal,
+have, be, do, to, copular)
+LEXENTRY lexical entry, with supertags embedded
+PRED type of a predicate
+ARG⟨x⟩ pointer to semantic arguments, x = LA
+Table 3: Syntactic/semantic features extracted from
+HPSG signs that are included in the output of Enju. Fea-
+tures in phrasal nodes (top) and lexical nodes (bottom)
+are listed separately.
+</tableCaption>
+<bodyText confidence="0.999874074074074">
+factored representation of the syntactic features of
+a word/phrase, as well as a representation of their
+semantic content. Phrases and words represented by
+signs are composed into larger phrases by applica-
+tions of schemata. The semantic representation of
+the new phrase is calculated at the same time. As
+such, an HPSG parse tree/forest can be considered
+as a tree/forest of signs (c.f. the HPSG forest in Fig-
+ure 2 in (Wu et al., 2010)).
+An HPSG parse tree/forest has two attractive
+properties as a representation of a source sentence
+in syntax-based SMT. First, we can carefully control
+the condition of the application of a translation rule
+by exploiting the fine-grained syntactic description
+in the source parse tree/forest, as well as those in the
+translation rules. Second, we can identify sub-trees
+in a parse tree/forest that correspond to basic units
+of the semantics, namely sub-trees covering a pred-
+icate and its arguments, by using the semantic rep-
+resentation given in the signs. Extraction of trans-
+lation rules based on such semantically-connected
+sub-trees is expected to give a compact and effective
+set of translation rules.
+A sign in the HPSG tree/forest is represented by a
+typed feature structure (TFS) (Carpenter, 1992). A
+TFS is a directed-acyclic graph (DAG) wherein the
+edges are labeled with feature names and the nodes
+</bodyText>
+<page confidence="0.996343">
+130
+</page>
+<figureCaption confidence="0.939980666666667">
+Figure 2: Predicate argument structures for the sentences
+of “John killed Mary” and “She ignored the fact that I
+wanted to dispute”.
+</figureCaption>
+<bodyText confidence="0.999837205882353">
+(feature values) are typed. In the original HPSG for-
+malism, the types are defined in a hierarchy and the
+DAG can have arbitrary shape (e.g., it can be of any
+depth). We however use a simplified form of TFS,
+for simplicity of the algorithms. In the simplified
+form, a TFS is converted to a (flat) set of pairs of
+feature names and their values. Table 3 lists the fea-
+tures used in our system, which are a subset of those
+in the original output from Enju.
+In the Enju English HPSG grammar (Miyao et
+al., 2003) used in our system, the semantic content
+of a sentence/phrase is represented by a predicate-
+argument structure (PAS). Figure 2 shows the PAS
+of a simple sentence, “John killed Mary”, and a more
+complex PAS for another sentence, “She ignored the
+fact that I wanted to dispute”, which is adopted from
+(Miyao et al., 2003). In an HPSG tree/forest, each
+leaf node generally introduces a predicate, which
+is represented by the pair of LEXENTRY (lexical
+entry) feature and PRED (predicate type) feature.
+The arguments of a predicate are designated by the
+pointers from the ARG⟨x⟩ features in a leaf node
+to non-terminal nodes. Consequently, Akamon in-
+cludes the algorithm for extracting compact com-
+posed rules from these PASs which further lead to
+a significant fast tree-to-string decoder. This is be-
+cause it is not necessary to exhaustively generate the
+subtrees for all the tree nodes for rule matching any
+more. Limited by space, we suggest the readers to
+refer to our former work (Wu et al., 2010; Wu et al.,
+2011a) for the experimental results, including the
+training and decoding time using standard English-
+to-Japanese corpora, by using deep syntactic struc-
+tures.
+</bodyText>
+<sectionHeader confidence="0.580754" genericHeader="method">
+5 Content of the Demonstration
+</sectionHeader>
+<bodyText confidence="0.9254575">
+In the demonstration, we would like to provide a
+brief tutorial on:
+</bodyText>
+<listItem confidence="0.992057666666667">
+• describing the format of the packed forest for a
+source sentence,
+• the training script on translation rule extraction,
+• the MERT script on feature weight tuning on a
+development set, and,
+• the decoding script on a test set.
+</listItem>
+<bodyText confidence="0.864058333333333">
+Based on Akamon, there are a lot of interesting
+directions left to be updated in a relatively fast way
+in the near future, such as:
+</bodyText>
+<listItem confidence="0.999000727272727">
+• integrate target dependency structures, espe-
+cially target dependency language models, as
+proposed by Mi and Liu (2010),
+• better pruning strategies for the input packed
+forest before decoding,
+• derivation-based combination of using other
+types of translation rules in one decoder, as pro-
+posed by Liu et al. (2009b), and
+• taking other evaluation metrics as the opti-
+mal objective for MERT, such as NIST score,
+RIBES score (Isozaki et al., 2010a).
+</listItem>
+<sectionHeader confidence="0.98325" genericHeader="acknowledgments">
+Acknowledgments
+</sectionHeader>
+<bodyText confidence="0.999424333333333">
+We thank Yusuke Miyao and Naoaki Okazaki for
+their invaluable help and the anonymous reviewers
+for their comments and suggestions.
+</bodyText>
+<sectionHeader confidence="0.992532" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.998374388888889">
+Bob Carpenter. 1992. The Logic of Typed Feature Struc-
+tures. Cambridge University Press.
+David Chiang. 2005. A hierarchical phrase-based model
+for statistical machine translation. In Proceedings of
+ACL, pages 263–270, Ann Arbor, MI.
+David Chiang. 2007. Hierarchical phrase-based transla-
+tion. Computational Lingustics, 33(2):201–228.
+Yuan Ding and Martha Palmer. 2005. Machine trans-
+lation using probabilistic synchronous dependency in-
+sertion grammers. In Proceedings ofACL, pages 541–
+548, Ann Arbor.
+Kevin Duh, Katsuhito Sudoh, Xianchao Wu, Hajime
+Tsukada, and Masaaki Nagata. 2011. Generalized
+minimum bayes risk system combination. In Proceed-
+ings of IJCNLP, pages 1356–1360, November.
+Michel Galley, Mark Hopkins, Kevin Knight, and Daniel
+Marcu. 2004. What’s in a translation rule? In Pro-
+ceedings of HLT-NAACL.
+</reference>
+<figure confidence="0.998294764705882">
+ARG1
+kill
+ARG2
+ARG1
+ignore
+Mary
+ARG1
+want
+ARG2
+I
+ARG1
+dispute
+She
+fact
+John
+ARG2
+ARG2
+</figure>
+<page confidence="0.969826">
+131
+</page>
+<reference confidence="0.999620711538462">
+Michel Galley, Jonathan Graehl, Kevin Knight, Daniel
+Marcu, Steve DeNeefe, Wei Wang, and Ignacio
+Thayer. 2006. Scalable inference and training of
+context-rich syntactic translation models. In Proceed-
+ings of COLING-ACL, pages 961–968, Sydney.
+Isao Goto, Bin Lu, Ka Po Chow, Eiichiro Sumita, and
+Benjamin K. Tsou. 2011. Overview of the patent ma-
+chine translation task at the ntcir-9 workshop. In Pro-
+ceedings of NTCIR-9, pages 559–578.
+Liang Huang and David Chiang. 2005. Better k-best
+parsing. In Proceedings of IWPT.
+Liang Huang, Kevin Knight, and Aravind Joshi. 2006.
+Statistical syntax-directed translation with extended
+domain of locality. In Proceedings of 7th AMTA.
+Hideki Isozaki, Tsutomu Hirao, Kevin Duh, Katsuhito
+Sudoh, and Hajime Tsukada. 2010a. Automatic eval-
+uation of translation quality for distant language pairs.
+In Proc.of EMNLP, pages 944–952.
+Hideki Isozaki, Katsuhito Sudoh, Hajime Tsukada, and
+Kevin Duh. 2010b. Head finalization: A simple re-
+ordering rule for sov languages. In Proceedings of
+WMT-MetricsMATR, pages 244–251, July.
+Philipp Koehn, Hieu Hoang, Alexandra Birch, Chris
+Callison-Burch, Marcello Federico, Nicola Bertoldi,
+Brooke Cowan, Wade Shen, Christine Moran, Richard
+Zens, Chris Dyer, Ondˇrej Bojar, Alexandra Con-
+stantin, and Evan Herbst. 2007. Moses: Open source
+toolkit for statistical machine translation. In Proceed-
+ings of the ACL 2007 Demo and Poster Sessions, pages
+177–180.
+Yang Liu, Qun Liu, and Shouxun Lin. 2006. Tree-
+to-string alignment templates for statistical machine
+transaltion. In Proceedings of COLING-ACL, pages
+609–616, Sydney, Australia.
+Yang Liu, Yajuan L¨u, and Qun Liu. 2009a. Improving
+tree-to-tree translation with packed forests. In Pro-
+ceedings of ACL-IJCNLP, pages 558–566, August.
+Yang Liu, Haitao Mi, Yang Feng, and Qun Liu. 2009b.
+Joint decoding with multiple translation models. In
+Proceedings ofACL-IJCNLP, pages 576–584, August.
+Haitao Mi and Liang Huang. 2008. Forest-based transla-
+tion rule extraction. In Proceedings of EMNLP, pages
+206–214, October.
+Haitao Mi and Qun Liu. 2010. Constituency to depen-
+dency translation with forests. In Proceedings ofACL,
+pages 1433–1442, July.
+Haitao Mi, Liang Huang, and Qun Liu. 2008. Forest-
+based translation. In Proceedings of ACL-08:HLT,
+pages 192–199, Columbus, Ohio.
+Yusuke Miyao, Takashi Ninomiya, and Jun’ichi Tsujii.
+2003. Probabilistic modeling of argument structures
+including non-local dependencies. In Proceedings of
+RANLP, pages 285–291, Borovets.
+Franz Josef Och and Hermann Ney. 2003. A system-
+atic comparison of various statistical alignment mod-
+els. Computational Linguistics, 29(1):19–51.
+Franz Josef Och. 2003. Minimum error rate training in
+statistical machine translation. In Proceedings ofACL,
+pages 160–167.
+Kishore Papineni, Salim Roukos, Todd Ward, and Wei-
+Jing Zhu. 2002. Bleu: a method for automatic evalu-
+ation of machine translation. In Proceedings of ACL,
+pages 311–318.
+Adam Pauls and Dan Klein. 2011. Faster and smaller n-
+gram language models. In Proceedings of ACL-HLT,
+pages 258–267, June.
+Chris Quirk, Arul Menezes, and Colin Cherry. 2005. De-
+pendency treelet translation: Syntactically informed
+phrasal smt. In Proceedings of ACL, pages 271–279.
+Libin Shen, Jinxi Xu, and Ralph Weischedel. 2008. A
+new string-to-dependency machine translation algo-
+rithm with a target dependency language model. In
+Proceedings ofACL-08:HLT, pages 577–585.
+Andreas Stolcke. 2002. Srilm-an extensible language
+modeling toolkit. In Proceedings of International
+Conference on Spoken Language Processing, pages
+901–904.
+Katsuhito Sudoh, Kevin Duh, Hajime Tsukada, Masaaki
+Nagata, Xianchao Wu, Takuya Matsuzaki, and
+Jun’ichi Tsujii. 2011. Ntt-ut statistical machine trans-
+lation in ntcir-9 patentmt. In Proceedings of NTCIR-9
+Workshop Meeting, pages 585–592, December.
+Xianchao Wu, Takuya Matsuzaki, and Jun’ichi Tsujii.
+2010. Fine-grained tree-to-string translation rule ex-
+traction. In Proceedings of ACL, pages 325–334, July.
+Xianchao Wu, Takuya Matsuzaki, and Jun’ichi Tsujii.
+2011a. Effective use of function words for rule gen-
+eralization in forest-based translation. In Proceedings
+of ACL-HLT, pages 22–31, June.
+Xianchao Wu, Takuya Matsuzaki, and Jun’ichi Tsujii.
+2011b. Smt systems in the university of tokyo for
+ntcir-9 patentmt. In Proceedings of NTCIR-9 Work-
+shop Meeting, pages 666–672, December.
+Dekai Wu. 1997. Stochastic inversion transduction
+grammars and bilingual parsing of parallel corpora.
+Computational Linguistics, 23(3):377–403.
+Deyi Xiong, Qun Liu, and Shouxun Lin. 2006. Maxi-
+mum entropy based phrase reordering model for statis-
+tical machine translation. In Proceedings of COLING-
+ACL, pages 521–528, July.
+Hui Zhang, Min Zhang, Haizhou Li, Aiti Aw, and
+Chew Lim Tan. 2009. Forest-based tree sequence
+to string translation model. In Proceedings of ACL-
+IJCNLP, pages 172–180, Suntec, Singapore, August.
+</reference>
+<page confidence="0.99773">
+132
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.470717">
+<title confidence="0.988445">Akamon: An Open Source Tree/Forest-Based Statistical Machine</title>
+<author confidence="0.998099">Takuya Jun’ichi</author>
+<affiliation confidence="0.992663">Institute of Research Asia</affiliation>
+<email confidence="0.999768">wuxianchao@gmail.com,takuya-matsuzaki@nii.ac.jp,jtsujii@microsoft.com</email>
+<abstract confidence="0.990088933333333">describe an open source toolkit for tree and forest-based statistical machine translation (Liu et al., 2006; Mi et al., 2008; Mi and Huang, 2008). Akamon implements all of the algorithms required for tree/forestto-string decoding using tree-to-string transrules: delanguage model integration, and cube-pruning, hypotheses extraction, and minimum error rate training. In terms of tree-to-string translation rule extraction, the toolkit implements the traditional maximum likelihood algorithm using PCFG trees (Galley et al., 2004) and HPSG</abstract>
+<note confidence="0.628308">trees/forests (Wu et al., 2010).</note>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>Bob Carpenter</author>
+</authors>
+<title>The Logic of Typed Feature Structures.</title>
+<date>1992</date>
+<publisher>Cambridge University Press.</publisher>
+<contexts>
+<context position="15110" citStr="Carpenter, 1992" startWordPosition="2307" endWordPosition="2308"> a translation rule by exploiting the fine-grained syntactic description in the source parse tree/forest, as well as those in the translation rules. Second, we can identify sub-trees in a parse tree/forest that correspond to basic units of the semantics, namely sub-trees covering a predicate and its arguments, by using the semantic representation given in the signs. Extraction of translation rules based on such semantically-connected sub-trees is expected to give a compact and effective set of translation rules. A sign in the HPSG tree/forest is represented by a typed feature structure (TFS) (Carpenter, 1992). A TFS is a directed-acyclic graph (DAG) wherein the edges are labeled with feature names and the nodes 130 Figure 2: Predicate argument structures for the sentences of “John killed Mary” and “She ignored the fact that I wanted to dispute”. (feature values) are typed. In the original HPSG formalism, the types are defined in a hierarchy and the DAG can have arbitrary shape (e.g., it can be of any depth). We however use a simplified form of TFS, for simplicity of the algorithms. In the simplified form, a TFS is converted to a (flat) set of pairs of feature names and their values. Table 3 lists </context>
+</contexts>
+<marker>Carpenter, 1992</marker>
+<rawString>Bob Carpenter. 1992. The Logic of Typed Feature Structures. Cambridge University Press.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>David Chiang</author>
+</authors>
+<title>A hierarchical phrase-based model for statistical machine translation.</title>
+<date>2005</date>
+<booktitle>In Proceedings of ACL,</booktitle>
+<pages>263--270</pages>
+<location>Ann Arbor, MI.</location>
+<contexts>
+<context position="1275" citStr="Chiang, 2005" startWordPosition="169" endWordPosition="170">ng, k-best hypotheses extraction, and minimum error rate training. In terms of tree-to-string translation rule extraction, the toolkit implements the traditional maximum likelihood algorithm using PCFG trees (Galley et al., 2004) and HPSG trees/forests (Wu et al., 2010). 1 Introduction Syntax-based statistical machine translation (SMT) systems have achieved promising improvements in recent years. Depending on the type of input, the systems are divided into two categories: stringbased systems whose input is a string to be simultaneously parsed and translated by a synchronous grammar (Wu, 1997; Chiang, 2005; Galley et al., 2006; Shen et al., 2008), and tree/forest-based systems whose input is already a parse tree or a packed forest to be directly converted into a target tree or string (Ding and Palmer, 2005; Quirk et al., 2005; Liu et al., 2006; Huang et al., 2006; Mi et al., 2008; Mi and Huang, 2008; Zhang et al., 2009; Wu et al., 2010; Wu et al., 2011a). *Work done when all the authors were in The University of Tokyo. Depending on whether or not parsers are explicitly used for obtaining linguistically annotated data during training, the systems are also divided into two categories: formally sy</context>
+<context position="4110" citStr="Chiang, 2005" startWordPosition="616" endWordPosition="617">, pages 127–132, Jeju, Republic of Korea, 8-14 July 2012. c�2012 Association for Computational Linguistics Source-to-target Examples (partial) Decoding Rules Parser tree-to-tree (Ding and Palmer, 2005) ↓ dep.-to-dep. DG forest-to-tree (Liu et al., 2009a) ↓ ↑↓ tree-to-tree PCFG tree-to-string (Liu et al., 2006) ↑ tree-to-string PCFG (Quirk et al., 2005) ↑ dep.-to-string DG forest-to-string (Mi et al., 2008) ↓ ↑↓ tree-to-string PCFG (Wu et al., 2011a) ↓ ↑↓ tree-to-string HPSG string-to-tree (Galley et al., 2006) CKY tree-to-string PCFG (Shen et al., 2008) CKY string-to-dep. DG string-to-string (Chiang, 2005) CKY string-to-string none (Xiong et al., 2006) CKY string-to-string none Table 1: A classification of syntax-based SMT systems. Tree/forest-based and string-based systems are split by a line. All the systems listed here are linguistically syntax-based except the last two (Chiang, 2005) and (Xiong et al., 2006), which are formally syntax-based. DG stands for dependency (abbreviated as dep.) grammar. ↓ and ↑ denote top-down and bottom-up traversals of a source tree/forest. string models and string-to-tree model. However, few tree/forest-to-string systems have been made open source and this make</context>
+<context position="8376" citStr="Chiang, 2005" startWordPosition="1259" endWordPosition="1260">2799 7.258 0.6861 Akamon-Comb 0.3948 8.713 0.7813 Table 2: Translation accuracies of Akamon and the baseline systems on the NTCIR-9 English-to-Japanese translation task (Wu et al., 2011b). * stands for only using 2 million parallel sentences of the total 3 million data. Here, HPSG forests were used in Akamon. i.e., first construct a translation forest by applying the tree-to-string translation rules to the original parsing forest of the source sentence, and then collect k-best hypotheses for the root node(s) of the translation forest using Algorithm 2 or Algorithm 3 as described in (Huang and Chiang, 2005). Later, the k-best hypotheses are used both for parameter tuning on additional development set(s) and for final optimal translation result extracting. • language models: Akamon can make use of one or many n-gram language models trained by using SRILM5 (Stolcke, 2002) or the Berkeley language model toolkit, berkeleylm-1.0b36 (Pauls and Klein, 2011). The weights of multiple language models are tuned under minimum error rate training (MERT) (Och, 2003). • pruning: traditional beam-pruning and cubepruning (Chiang, 2007) techniques are incorporated in Akamon to make decoding feasible for large-sca</context>
+</contexts>
+<marker>Chiang, 2005</marker>
+<rawString>David Chiang. 2005. A hierarchical phrase-based model for statistical machine translation. In Proceedings of ACL, pages 263–270, Ann Arbor, MI.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>David Chiang</author>
+</authors>
+<title>Hierarchical phrase-based translation.</title>
+<date>2007</date>
+<journal>Computational Lingustics,</journal>
+<volume>33</volume>
+<issue>2</issue>
+<contexts>
+<context position="8898" citStr="Chiang, 2007" startWordPosition="1340" endWordPosition="1341">ranslation forest using Algorithm 2 or Algorithm 3 as described in (Huang and Chiang, 2005). Later, the k-best hypotheses are used both for parameter tuning on additional development set(s) and for final optimal translation result extracting. • language models: Akamon can make use of one or many n-gram language models trained by using SRILM5 (Stolcke, 2002) or the Berkeley language model toolkit, berkeleylm-1.0b36 (Pauls and Klein, 2011). The weights of multiple language models are tuned under minimum error rate training (MERT) (Och, 2003). • pruning: traditional beam-pruning and cubepruning (Chiang, 2007) techniques are incorporated in Akamon to make decoding feasible for large-scale rule sets. Before decoding, we also perform the marginal probability-based inside-outside algorithm based pruning (Mi et al., 2008) on the original parsing forest to control the decoding time. • MERT: Akamon has its own MERT module which optimizes weights of the features so as to maximize some automatic evaluation metric, such as BLEU (Papineni et al., 2002), on a development set. 5http://www.speech.sri.com/projects/srilm/ 6http://code.google.com/p/berkeleylm/ Figure 1: Training and tuning process of the Akamon sy</context>
+</contexts>
+<marker>Chiang, 2007</marker>
+<rawString>David Chiang. 2007. Hierarchical phrase-based translation. Computational Lingustics, 33(2):201–228.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yuan Ding</author>
+<author>Martha Palmer</author>
+</authors>
+<title>Machine translation using probabilistic synchronous dependency insertion grammers.</title>
+<date>2005</date>
+<booktitle>In Proceedings ofACL,</booktitle>
+<pages>541--548</pages>
+<location>Ann Arbor.</location>
+<contexts>
+<context position="1479" citStr="Ding and Palmer, 2005" startWordPosition="204" endWordPosition="207">g PCFG trees (Galley et al., 2004) and HPSG trees/forests (Wu et al., 2010). 1 Introduction Syntax-based statistical machine translation (SMT) systems have achieved promising improvements in recent years. Depending on the type of input, the systems are divided into two categories: stringbased systems whose input is a string to be simultaneously parsed and translated by a synchronous grammar (Wu, 1997; Chiang, 2005; Galley et al., 2006; Shen et al., 2008), and tree/forest-based systems whose input is already a parse tree or a packed forest to be directly converted into a target tree or string (Ding and Palmer, 2005; Quirk et al., 2005; Liu et al., 2006; Huang et al., 2006; Mi et al., 2008; Mi and Huang, 2008; Zhang et al., 2009; Wu et al., 2010; Wu et al., 2011a). *Work done when all the authors were in The University of Tokyo. Depending on whether or not parsers are explicitly used for obtaining linguistically annotated data during training, the systems are also divided into two categories: formally syntax-based systems that do not use additional parsers (Wu, 1997; Chiang, 2005; Xiong et al., 2006), and linguistically syntax-based systems that use PCFG parsers (Liu et al., 2006; Huang et al., 2006; Gal</context>
+<context position="3698" citStr="Ding and Palmer, 2005" startWordPosition="552" endWordPosition="555"> of high precision/recall parsers for languages other than English, compound parse error rates, and inconsistency of errors. In Table 1, note that tree-to-string rules are generic and applicable to many syntax-based models such as tree/forest-to&apos;This classification is inspired by and extends the Table 1 in (Mi and Huang, 2008). 127 Proceedings of the 50th Annual Meeting of the Association for Computational Linguistics, pages 127–132, Jeju, Republic of Korea, 8-14 July 2012. c�2012 Association for Computational Linguistics Source-to-target Examples (partial) Decoding Rules Parser tree-to-tree (Ding and Palmer, 2005) ↓ dep.-to-dep. DG forest-to-tree (Liu et al., 2009a) ↓ ↑↓ tree-to-tree PCFG tree-to-string (Liu et al., 2006) ↑ tree-to-string PCFG (Quirk et al., 2005) ↑ dep.-to-string DG forest-to-string (Mi et al., 2008) ↓ ↑↓ tree-to-string PCFG (Wu et al., 2011a) ↓ ↑↓ tree-to-string HPSG string-to-tree (Galley et al., 2006) CKY tree-to-string PCFG (Shen et al., 2008) CKY string-to-dep. DG string-to-string (Chiang, 2005) CKY string-to-string none (Xiong et al., 2006) CKY string-to-string none Table 1: A classification of syntax-based SMT systems. Tree/forest-based and string-based systems are split by a l</context>
+</contexts>
+<marker>Ding, Palmer, 2005</marker>
+<rawString>Yuan Ding and Martha Palmer. 2005. Machine translation using probabilistic synchronous dependency insertion grammers. In Proceedings ofACL, pages 541– 548, Ann Arbor.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Kevin Duh</author>
+<author>Katsuhito Sudoh</author>
+<author>Xianchao Wu</author>
+<author>Hajime Tsukada</author>
+<author>Masaaki Nagata</author>
+</authors>
+<title>Generalized minimum bayes risk system combination.</title>
+<date>2011</date>
+<booktitle>In Proceedings of IJCNLP,</booktitle>
+<pages>1356--1360</pages>
+<contexts>
+<context position="6667" citStr="Duh et al., 2011" startWordPosition="994" endWordPosition="997">irg/ribes izes word order mistakes. In this table, Akamon-Forest differs from Akamon-Comb by using different configurations: Akamon-Forest used only 2/3 of the total training data (limited by the experiment environments and time). Akamon-Comb represents the system combination result by combining Akamon-Forest and other phrase-based SMT systems, which made use of pre-ordering methods of head finalization as described in (Isozaki et al., 2010b) and used the total 3 million training data. The detail of the pre-ordering approach and the combination method can be found in (Sudoh et al., 2011) and (Duh et al., 2011). Also, Moses (hierarchical) stands for the hierarchical phrase-based SMT system and Moses (phrase) stands for the flat phrase-based SMT system. For intuitive comparison (note that the result achieved by Google is only for reference and not a comparison, since it uses a different and unknown training data) and following (Goto et al., 2011), the scores achieved by using the Google online translation system4 are also listed in this table. Here is a brief description of Akamon’s main features: • multiple-thread forest-based decoding: Akamon first loads the development (with source and reference s</context>
+</contexts>
+<marker>Duh, Sudoh, Wu, Tsukada, Nagata, 2011</marker>
+<rawString>Kevin Duh, Katsuhito Sudoh, Xianchao Wu, Hajime Tsukada, and Masaaki Nagata. 2011. Generalized minimum bayes risk system combination. In Proceedings of IJCNLP, pages 1356–1360, November.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Michel Galley</author>
+<author>Mark Hopkins</author>
+<author>Kevin Knight</author>
+<author>Daniel Marcu</author>
+</authors>
+<title>What’s in a translation rule?</title>
+<date>2004</date>
+<booktitle>In Proceedings of HLT-NAACL.</booktitle>
+<contexts>
+<context position="892" citStr="Galley et al., 2004" startWordPosition="109" endWordPosition="112">ft.com Abstract We describe Akamon, an open source toolkit for tree and forest-based statistical machine translation (Liu et al., 2006; Mi et al., 2008; Mi and Huang, 2008). Akamon implements all of the algorithms required for tree/forestto-string decoding using tree-to-string translation rules: multiple-thread forest-based decoding, n-gram language model integration, beam- and cube-pruning, k-best hypotheses extraction, and minimum error rate training. In terms of tree-to-string translation rule extraction, the toolkit implements the traditional maximum likelihood algorithm using PCFG trees (Galley et al., 2004) and HPSG trees/forests (Wu et al., 2010). 1 Introduction Syntax-based statistical machine translation (SMT) systems have achieved promising improvements in recent years. Depending on the type of input, the systems are divided into two categories: stringbased systems whose input is a string to be simultaneously parsed and translated by a synchronous grammar (Wu, 1997; Chiang, 2005; Galley et al., 2006; Shen et al., 2008), and tree/forest-based systems whose input is already a parse tree or a packed forest to be directly converted into a target tree or string (Ding and Palmer, 2005; Quirk et al</context>
+<context position="2513" citStr="Galley et al., 2004" startWordPosition="379" endWordPosition="382">that do not use additional parsers (Wu, 1997; Chiang, 2005; Xiong et al., 2006), and linguistically syntax-based systems that use PCFG parsers (Liu et al., 2006; Huang et al., 2006; Galley et al., 2006; Mi et al., 2008; Mi and Huang, 2008; Zhang et al., 2009), HPSG parsers (Wu et al., 2010; Wu et al., 2011a), or dependency parsers (Ding and Palmer, 2005; Quirk et al., 2005; Shen et al., 2008). A classification) of syntax-based SMT systems is shown in Table 1. Translation rules can be extracted from aligned string-string (Chiang, 2005), tree-tree (Ding and Palmer, 2005) and tree/forest-string (Galley et al., 2004; Mi and Huang, 2008; Wu et al., 2011a) data structures. Leveraging structural and linguistic information from parse trees/forests, the latter two structures are believed to be better than their string-string counterparts in handling non-local reordering, and have achieved promising translation results. Moreover, the tree/forest-string structure is more widely used than the tree-tree structure, presumably because using two parsers on the source and target languages is subject to more problems than making use of a parser on one language, such as the shortage of high precision/recall parsers for</context>
+<context position="5025" citStr="Galley et al., 2004" startWordPosition="747" endWordPosition="750">ng et al., 2006), which are formally syntax-based. DG stands for dependency (abbreviated as dep.) grammar. ↓ and ↑ denote top-down and bottom-up traversals of a source tree/forest. string models and string-to-tree model. However, few tree/forest-to-string systems have been made open source and this makes it difficult and time-consuming to testify and follow existing proposals involved in recently published papers. The Akamon system2, written in Java and following the tree/forest-to-string research direction, implements all of the algorithms for both tree-to-string translation rule extraction (Galley et al., 2004; Mi and Huang, 2008; Wu et al., 2010; Wu et al., 2011a) and tree/forest-based decoding (Liu et al., 2006; Mi et al., 2008). We hope this system will help related researchers to catch up with the achievements of tree/forest-based translations in the past several years without re-implementing the systems or general algorithms from scratch. 2 Akamon Toolkit Features Limited by the successful parsing rate and coverage of linguistic phrases, Akamon currently achieves comparable translation accuracies compared with the most frequently used SMT baseline system, Moses (Koehn et al., 2007). Table 2 sh</context>
+<context position="9760" citStr="Galley et al. (2004)" startWordPosition="1468" endWordPosition="1471">t to control the decoding time. • MERT: Akamon has its own MERT module which optimizes weights of the features so as to maximize some automatic evaluation metric, such as BLEU (Papineni et al., 2002), on a development set. 5http://www.speech.sri.com/projects/srilm/ 6http://code.google.com/p/berkeleylm/ Figure 1: Training and tuning process of the Akamon system. Here, e = source English language, f = target foreign language. • translation rule extraction: as former mentioned, we extract tree-to-string translation rules for Akamon. In particular, we implemented the GHKM algorithm as proposed by Galley et al. (2004) from word-aligned treestring pairs. In addition, we also implemented the algorithms proposed by Mi and Huang (2008) and Wu et al. (2010) for extracting rules from word-aligned PCFG/HPSG forest-string pairs. 3 Training and Decoding Frameworks Figure 1 shows the training and tuning progress of the Akamon system. Given original bilingual parallel corpora, we first tokenize and lowercase the source and target sentences (e.g., word segmentation of Chinese and Japanese, punctuation segmentation of English). The pre-processed monolingual sentences will be used by SRILM (Stolcke, 2002) or BerkeleyLM </context>
+</contexts>
+<marker>Galley, Hopkins, Knight, Marcu, 2004</marker>
+<rawString>Michel Galley, Mark Hopkins, Kevin Knight, and Daniel Marcu. 2004. What’s in a translation rule? In Proceedings of HLT-NAACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Michel Galley</author>
+<author>Jonathan Graehl</author>
+<author>Kevin Knight</author>
+<author>Daniel Marcu</author>
+<author>Steve DeNeefe</author>
+<author>Wei Wang</author>
+<author>Ignacio Thayer</author>
+</authors>
+<title>Scalable inference and training of context-rich syntactic translation models.</title>
+<date>2006</date>
+<booktitle>In Proceedings of COLING-ACL,</booktitle>
+<pages>961--968</pages>
+<location>Sydney.</location>
+<contexts>
+<context position="1296" citStr="Galley et al., 2006" startWordPosition="171" endWordPosition="174">otheses extraction, and minimum error rate training. In terms of tree-to-string translation rule extraction, the toolkit implements the traditional maximum likelihood algorithm using PCFG trees (Galley et al., 2004) and HPSG trees/forests (Wu et al., 2010). 1 Introduction Syntax-based statistical machine translation (SMT) systems have achieved promising improvements in recent years. Depending on the type of input, the systems are divided into two categories: stringbased systems whose input is a string to be simultaneously parsed and translated by a synchronous grammar (Wu, 1997; Chiang, 2005; Galley et al., 2006; Shen et al., 2008), and tree/forest-based systems whose input is already a parse tree or a packed forest to be directly converted into a target tree or string (Ding and Palmer, 2005; Quirk et al., 2005; Liu et al., 2006; Huang et al., 2006; Mi et al., 2008; Mi and Huang, 2008; Zhang et al., 2009; Wu et al., 2010; Wu et al., 2011a). *Work done when all the authors were in The University of Tokyo. Depending on whether or not parsers are explicitly used for obtaining linguistically annotated data during training, the systems are also divided into two categories: formally syntax-based systems th</context>
+<context position="4012" citStr="Galley et al., 2006" startWordPosition="601" endWordPosition="604">Huang, 2008). 127 Proceedings of the 50th Annual Meeting of the Association for Computational Linguistics, pages 127–132, Jeju, Republic of Korea, 8-14 July 2012. c�2012 Association for Computational Linguistics Source-to-target Examples (partial) Decoding Rules Parser tree-to-tree (Ding and Palmer, 2005) ↓ dep.-to-dep. DG forest-to-tree (Liu et al., 2009a) ↓ ↑↓ tree-to-tree PCFG tree-to-string (Liu et al., 2006) ↑ tree-to-string PCFG (Quirk et al., 2005) ↑ dep.-to-string DG forest-to-string (Mi et al., 2008) ↓ ↑↓ tree-to-string PCFG (Wu et al., 2011a) ↓ ↑↓ tree-to-string HPSG string-to-tree (Galley et al., 2006) CKY tree-to-string PCFG (Shen et al., 2008) CKY string-to-dep. DG string-to-string (Chiang, 2005) CKY string-to-string none (Xiong et al., 2006) CKY string-to-string none Table 1: A classification of syntax-based SMT systems. Tree/forest-based and string-based systems are split by a line. All the systems listed here are linguistically syntax-based except the last two (Chiang, 2005) and (Xiong et al., 2006), which are formally syntax-based. DG stands for dependency (abbreviated as dep.) grammar. ↓ and ↑ denote top-down and bottom-up traversals of a source tree/forest. string models and string-</context>
+</contexts>
+<marker>Galley, Graehl, Knight, Marcu, DeNeefe, Wang, Thayer, 2006</marker>
+<rawString>Michel Galley, Jonathan Graehl, Kevin Knight, Daniel Marcu, Steve DeNeefe, Wei Wang, and Ignacio Thayer. 2006. Scalable inference and training of context-rich syntactic translation models. In Proceedings of COLING-ACL, pages 961–968, Sydney.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Isao Goto</author>
+<author>Bin Lu</author>
+<author>Ka Po Chow</author>
+<author>Eiichiro Sumita</author>
+<author>Benjamin K Tsou</author>
+</authors>
+<title>Overview of the patent machine translation task at the ntcir-9 workshop.</title>
+<date>2011</date>
+<booktitle>In Proceedings of NTCIR-9,</booktitle>
+<pages>559--578</pages>
+<contexts>
+<context position="7008" citStr="Goto et al., 2011" startWordPosition="1049" endWordPosition="1052">stems, which made use of pre-ordering methods of head finalization as described in (Isozaki et al., 2010b) and used the total 3 million training data. The detail of the pre-ordering approach and the combination method can be found in (Sudoh et al., 2011) and (Duh et al., 2011). Also, Moses (hierarchical) stands for the hierarchical phrase-based SMT system and Moses (phrase) stands for the flat phrase-based SMT system. For intuitive comparison (note that the result achieved by Google is only for reference and not a comparison, since it uses a different and unknown training data) and following (Goto et al., 2011), the scores achieved by using the Google online translation system4 are also listed in this table. Here is a brief description of Akamon’s main features: • multiple-thread forest-based decoding: Akamon first loads the development (with source and reference sentences) or test (with source sentences only) file into memory and then perform parameter tuning or decoding in a parallel way. The forest-based decoding algorithm is alike that described in (Mi et al., 2008), 4http://translate.google.com/ 2Code available at https://sites.google.com/site/xianchaowu2012 128 Systems BLEU NIST RIBES Google o</context>
+</contexts>
+<marker>Goto, Lu, Chow, Sumita, Tsou, 2011</marker>
+<rawString>Isao Goto, Bin Lu, Ka Po Chow, Eiichiro Sumita, and Benjamin K. Tsou. 2011. Overview of the patent machine translation task at the ntcir-9 workshop. In Proceedings of NTCIR-9, pages 559–578.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Liang Huang</author>
+<author>David Chiang</author>
+</authors>
+<title>Better k-best parsing.</title>
+<date>2005</date>
+<booktitle>In Proceedings of IWPT.</booktitle>
+<contexts>
+<context position="8376" citStr="Huang and Chiang, 2005" startWordPosition="1257" endWordPosition="1260">Forest* 0.2799 7.258 0.6861 Akamon-Comb 0.3948 8.713 0.7813 Table 2: Translation accuracies of Akamon and the baseline systems on the NTCIR-9 English-to-Japanese translation task (Wu et al., 2011b). * stands for only using 2 million parallel sentences of the total 3 million data. Here, HPSG forests were used in Akamon. i.e., first construct a translation forest by applying the tree-to-string translation rules to the original parsing forest of the source sentence, and then collect k-best hypotheses for the root node(s) of the translation forest using Algorithm 2 or Algorithm 3 as described in (Huang and Chiang, 2005). Later, the k-best hypotheses are used both for parameter tuning on additional development set(s) and for final optimal translation result extracting. • language models: Akamon can make use of one or many n-gram language models trained by using SRILM5 (Stolcke, 2002) or the Berkeley language model toolkit, berkeleylm-1.0b36 (Pauls and Klein, 2011). The weights of multiple language models are tuned under minimum error rate training (MERT) (Och, 2003). • pruning: traditional beam-pruning and cubepruning (Chiang, 2007) techniques are incorporated in Akamon to make decoding feasible for large-sca</context>
+</contexts>
+<marker>Huang, Chiang, 2005</marker>
+<rawString>Liang Huang and David Chiang. 2005. Better k-best parsing. In Proceedings of IWPT.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Liang Huang</author>
+<author>Kevin Knight</author>
+<author>Aravind Joshi</author>
+</authors>
+<title>Statistical syntax-directed translation with extended domain of locality.</title>
+<date>2006</date>
+<booktitle>In Proceedings of 7th AMTA.</booktitle>
+<contexts>
+<context position="1537" citStr="Huang et al., 2006" startWordPosition="216" endWordPosition="219"> et al., 2010). 1 Introduction Syntax-based statistical machine translation (SMT) systems have achieved promising improvements in recent years. Depending on the type of input, the systems are divided into two categories: stringbased systems whose input is a string to be simultaneously parsed and translated by a synchronous grammar (Wu, 1997; Chiang, 2005; Galley et al., 2006; Shen et al., 2008), and tree/forest-based systems whose input is already a parse tree or a packed forest to be directly converted into a target tree or string (Ding and Palmer, 2005; Quirk et al., 2005; Liu et al., 2006; Huang et al., 2006; Mi et al., 2008; Mi and Huang, 2008; Zhang et al., 2009; Wu et al., 2010; Wu et al., 2011a). *Work done when all the authors were in The University of Tokyo. Depending on whether or not parsers are explicitly used for obtaining linguistically annotated data during training, the systems are also divided into two categories: formally syntax-based systems that do not use additional parsers (Wu, 1997; Chiang, 2005; Xiong et al., 2006), and linguistically syntax-based systems that use PCFG parsers (Liu et al., 2006; Huang et al., 2006; Galley et al., 2006; Mi et al., 2008; Mi and Huang, 2008; Zha</context>
+</contexts>
+<marker>Huang, Knight, Joshi, 2006</marker>
+<rawString>Liang Huang, Kevin Knight, and Aravind Joshi. 2006. Statistical syntax-directed translation with extended domain of locality. In Proceedings of 7th AMTA.</rawString>
+</citation>
+<citation valid="false">
+<authors>
+<author>Hideki Isozaki</author>
+<author>Tsutomu Hirao</author>
+<author>Kevin Duh</author>
+</authors>
+<title>Katsuhito Sudoh, and Hajime Tsukada. 2010a. Automatic evaluation of translation quality for distant language pairs.</title>
+<booktitle>In Proc.of EMNLP,</booktitle>
+<pages>944--952</pages>
+<marker>Isozaki, Hirao, Duh, </marker>
+<rawString>Hideki Isozaki, Tsutomu Hirao, Kevin Duh, Katsuhito Sudoh, and Hajime Tsukada. 2010a. Automatic evaluation of translation quality for distant language pairs. In Proc.of EMNLP, pages 944–952.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Hideki Isozaki</author>
+<author>Katsuhito Sudoh</author>
+<author>Hajime Tsukada</author>
+<author>Kevin Duh</author>
+</authors>
+<title>Head finalization: A simple reordering rule for sov languages.</title>
+<date>2010</date>
+<booktitle>In Proceedings of WMT-MetricsMATR,</booktitle>
+<pages>244--251</pages>
+<contexts>
+<context position="5862" citStr="Isozaki et al., 2010" startWordPosition="879" endWordPosition="882">forest-based translations in the past several years without re-implementing the systems or general algorithms from scratch. 2 Akamon Toolkit Features Limited by the successful parsing rate and coverage of linguistic phrases, Akamon currently achieves comparable translation accuracies compared with the most frequently used SMT baseline system, Moses (Koehn et al., 2007). Table 2 shows the automatic translation accuracies (case-sensitive) of Akamon and Moses. Besides BLEU and NIST score, we further list RIBES score3, , i.e., the software implementation of Normalized Kendall’s -r as proposed by (Isozaki et al., 2010a) to automatically evaluate the translation between distant language pairs based on rank correlation coefficients and significantly penal3Code available at http://www.kecl.ntt.co.jp/icl/lirg/ribes izes word order mistakes. In this table, Akamon-Forest differs from Akamon-Comb by using different configurations: Akamon-Forest used only 2/3 of the total training data (limited by the experiment environments and time). Akamon-Comb represents the system combination result by combining Akamon-Forest and other phrase-based SMT systems, which made use of pre-ordering methods of head finalization as de</context>
+</contexts>
+<marker>Isozaki, Sudoh, Tsukada, Duh, 2010</marker>
+<rawString>Hideki Isozaki, Katsuhito Sudoh, Hajime Tsukada, and Kevin Duh. 2010b. Head finalization: A simple reordering rule for sov languages. In Proceedings of WMT-MetricsMATR, pages 244–251, July.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Philipp Koehn</author>
+<author>Hieu Hoang</author>
+<author>Alexandra Birch</author>
+<author>Chris Callison-Burch</author>
+<author>Marcello Federico</author>
+<author>Nicola Bertoldi</author>
+<author>Brooke Cowan</author>
+<author>Wade Shen</author>
+</authors>
+<title>Moses: Open source toolkit for statistical machine translation.</title>
+<date>2007</date>
+<booktitle>In Proceedings of the ACL</booktitle>
+<pages>177--180</pages>
+<location>Christine Moran, Richard Zens, Chris Dyer, Ondˇrej Bojar, Alexandra</location>
+<contexts>
+<context position="5613" citStr="Koehn et al., 2007" startWordPosition="838" endWordPosition="841">extraction (Galley et al., 2004; Mi and Huang, 2008; Wu et al., 2010; Wu et al., 2011a) and tree/forest-based decoding (Liu et al., 2006; Mi et al., 2008). We hope this system will help related researchers to catch up with the achievements of tree/forest-based translations in the past several years without re-implementing the systems or general algorithms from scratch. 2 Akamon Toolkit Features Limited by the successful parsing rate and coverage of linguistic phrases, Akamon currently achieves comparable translation accuracies compared with the most frequently used SMT baseline system, Moses (Koehn et al., 2007). Table 2 shows the automatic translation accuracies (case-sensitive) of Akamon and Moses. Besides BLEU and NIST score, we further list RIBES score3, , i.e., the software implementation of Normalized Kendall’s -r as proposed by (Isozaki et al., 2010a) to automatically evaluate the translation between distant language pairs based on rank correlation coefficients and significantly penal3Code available at http://www.kecl.ntt.co.jp/icl/lirg/ribes izes word order mistakes. In this table, Akamon-Forest differs from Akamon-Comb by using different configurations: Akamon-Forest used only 2/3 of the tot</context>
+<context position="10982" citStr="Koehn et al., 2007" startWordPosition="1653" endWordPosition="1656">uls and Klein, 2011) to train a n-gram language model. In addition, we filter out too long sentences tokenize word segment corpus pre&amp;processing e.tok £scg ��������� ��������� e.tsk.lw f.seg.lw de&apos; SRILM e.clean £cican clean de&apos;.e tokenize do&apos;.f ward segmer tation e.tok &amp;quot;n(u GIZA++ lowercase lowercase £sog e.forests ager t �������� £seg.lw &amp;quot;n(u rule extraction ��������� %&amp;gram LM Rule set Akamon ecoder !M&amp;quot;R#$ 129 here, i.e., only relatively short sentence pairs will be used to train word alignments. Then, we can use GIZA++ (Och and Ney, 2003) and symmetric strategies, such as grow-diag-final (Koehn et al., 2007), on the tokenized parallel corpus to obtain a wordaligned parallel corpus. The source sentence and its packed forest, the target sentence, and the word alignment are used for tree-to-string translation rule extraction. Since a 1- best tree is a special case of a packed forest, we will focus on using the term ‘forest’ in the continuing discussion. Then, taking the target language model, the rule set, and the preprocessed development set as inputs, we perform MERT on the decoder to tune the weights of the features. The Akamon forest-to-string system includes the decoding algorithm and the rule </context>
+</contexts>
+<marker>Koehn, Hoang, Birch, Callison-Burch, Federico, Bertoldi, Cowan, Shen, 2007</marker>
+<rawString>Philipp Koehn, Hieu Hoang, Alexandra Birch, Chris Callison-Burch, Marcello Federico, Nicola Bertoldi, Brooke Cowan, Wade Shen, Christine Moran, Richard Zens, Chris Dyer, Ondˇrej Bojar, Alexandra Constantin, and Evan Herbst. 2007. Moses: Open source toolkit for statistical machine translation. In Proceedings of the ACL 2007 Demo and Poster Sessions, pages 177–180.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yang Liu</author>
+<author>Qun Liu</author>
+<author>Shouxun Lin</author>
+</authors>
+<title>Treeto-string alignment templates for statistical machine transaltion.</title>
+<date>2006</date>
+<booktitle>In Proceedings of COLING-ACL,</booktitle>
+<pages>609--616</pages>
+<location>Sydney, Australia.</location>
+<contexts>
+<context position="1517" citStr="Liu et al., 2006" startWordPosition="212" endWordPosition="215"> trees/forests (Wu et al., 2010). 1 Introduction Syntax-based statistical machine translation (SMT) systems have achieved promising improvements in recent years. Depending on the type of input, the systems are divided into two categories: stringbased systems whose input is a string to be simultaneously parsed and translated by a synchronous grammar (Wu, 1997; Chiang, 2005; Galley et al., 2006; Shen et al., 2008), and tree/forest-based systems whose input is already a parse tree or a packed forest to be directly converted into a target tree or string (Ding and Palmer, 2005; Quirk et al., 2005; Liu et al., 2006; Huang et al., 2006; Mi et al., 2008; Mi and Huang, 2008; Zhang et al., 2009; Wu et al., 2010; Wu et al., 2011a). *Work done when all the authors were in The University of Tokyo. Depending on whether or not parsers are explicitly used for obtaining linguistically annotated data during training, the systems are also divided into two categories: formally syntax-based systems that do not use additional parsers (Wu, 1997; Chiang, 2005; Xiong et al., 2006), and linguistically syntax-based systems that use PCFG parsers (Liu et al., 2006; Huang et al., 2006; Galley et al., 2006; Mi et al., 2008; Mi </context>
+<context position="3808" citStr="Liu et al., 2006" startWordPosition="569" endWordPosition="572">f errors. In Table 1, note that tree-to-string rules are generic and applicable to many syntax-based models such as tree/forest-to&apos;This classification is inspired by and extends the Table 1 in (Mi and Huang, 2008). 127 Proceedings of the 50th Annual Meeting of the Association for Computational Linguistics, pages 127–132, Jeju, Republic of Korea, 8-14 July 2012. c�2012 Association for Computational Linguistics Source-to-target Examples (partial) Decoding Rules Parser tree-to-tree (Ding and Palmer, 2005) ↓ dep.-to-dep. DG forest-to-tree (Liu et al., 2009a) ↓ ↑↓ tree-to-tree PCFG tree-to-string (Liu et al., 2006) ↑ tree-to-string PCFG (Quirk et al., 2005) ↑ dep.-to-string DG forest-to-string (Mi et al., 2008) ↓ ↑↓ tree-to-string PCFG (Wu et al., 2011a) ↓ ↑↓ tree-to-string HPSG string-to-tree (Galley et al., 2006) CKY tree-to-string PCFG (Shen et al., 2008) CKY string-to-dep. DG string-to-string (Chiang, 2005) CKY string-to-string none (Xiong et al., 2006) CKY string-to-string none Table 1: A classification of syntax-based SMT systems. Tree/forest-based and string-based systems are split by a line. All the systems listed here are linguistically syntax-based except the last two (Chiang, 2005) and (Xiong</context>
+<context position="5130" citStr="Liu et al., 2006" startWordPosition="766" endWordPosition="769"> and ↑ denote top-down and bottom-up traversals of a source tree/forest. string models and string-to-tree model. However, few tree/forest-to-string systems have been made open source and this makes it difficult and time-consuming to testify and follow existing proposals involved in recently published papers. The Akamon system2, written in Java and following the tree/forest-to-string research direction, implements all of the algorithms for both tree-to-string translation rule extraction (Galley et al., 2004; Mi and Huang, 2008; Wu et al., 2010; Wu et al., 2011a) and tree/forest-based decoding (Liu et al., 2006; Mi et al., 2008). We hope this system will help related researchers to catch up with the achievements of tree/forest-based translations in the past several years without re-implementing the systems or general algorithms from scratch. 2 Akamon Toolkit Features Limited by the successful parsing rate and coverage of linguistic phrases, Akamon currently achieves comparable translation accuracies compared with the most frequently used SMT baseline system, Moses (Koehn et al., 2007). Table 2 shows the automatic translation accuracies (case-sensitive) of Akamon and Moses. Besides BLEU and NIST scor</context>
+</contexts>
+<marker>Liu, Liu, Lin, 2006</marker>
+<rawString>Yang Liu, Qun Liu, and Shouxun Lin. 2006. Treeto-string alignment templates for statistical machine transaltion. In Proceedings of COLING-ACL, pages 609–616, Sydney, Australia.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yang Liu</author>
+<author>Yajuan L¨u</author>
+<author>Qun Liu</author>
+</authors>
+<title>Improving tree-to-tree translation with packed forests.</title>
+<date>2009</date>
+<booktitle>In Proceedings of ACL-IJCNLP,</booktitle>
+<pages>558--566</pages>
+<marker>Liu, L¨u, Liu, 2009</marker>
+<rawString>Yang Liu, Yajuan L¨u, and Qun Liu. 2009a. Improving tree-to-tree translation with packed forests. In Proceedings of ACL-IJCNLP, pages 558–566, August.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yang Liu</author>
+<author>Haitao Mi</author>
+<author>Yang Feng</author>
+<author>Qun Liu</author>
+</authors>
+<title>Joint decoding with multiple translation models.</title>
+<date>2009</date>
+<booktitle>In Proceedings ofACL-IJCNLP,</booktitle>
+<pages>576--584</pages>
+<contexts>
+<context position="3749" citStr="Liu et al., 2009" startWordPosition="560" endWordPosition="563">n English, compound parse error rates, and inconsistency of errors. In Table 1, note that tree-to-string rules are generic and applicable to many syntax-based models such as tree/forest-to&apos;This classification is inspired by and extends the Table 1 in (Mi and Huang, 2008). 127 Proceedings of the 50th Annual Meeting of the Association for Computational Linguistics, pages 127–132, Jeju, Republic of Korea, 8-14 July 2012. c�2012 Association for Computational Linguistics Source-to-target Examples (partial) Decoding Rules Parser tree-to-tree (Ding and Palmer, 2005) ↓ dep.-to-dep. DG forest-to-tree (Liu et al., 2009a) ↓ ↑↓ tree-to-tree PCFG tree-to-string (Liu et al., 2006) ↑ tree-to-string PCFG (Quirk et al., 2005) ↑ dep.-to-string DG forest-to-string (Mi et al., 2008) ↓ ↑↓ tree-to-string PCFG (Wu et al., 2011a) ↓ ↑↓ tree-to-string HPSG string-to-tree (Galley et al., 2006) CKY tree-to-string PCFG (Shen et al., 2008) CKY string-to-dep. DG string-to-string (Chiang, 2005) CKY string-to-string none (Xiong et al., 2006) CKY string-to-string none Table 1: A classification of syntax-based SMT systems. Tree/forest-based and string-based systems are split by a line. All the systems listed here are linguistically</context>
+</contexts>
+<marker>Liu, Mi, Feng, Liu, 2009</marker>
+<rawString>Yang Liu, Haitao Mi, Yang Feng, and Qun Liu. 2009b. Joint decoding with multiple translation models. In Proceedings ofACL-IJCNLP, pages 576–584, August.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Haitao Mi</author>
+<author>Liang Huang</author>
+</authors>
+<title>Forest-based translation rule extraction.</title>
+<date>2008</date>
+<booktitle>In Proceedings of EMNLP,</booktitle>
+<pages>206--214</pages>
+<contexts>
+<context position="1574" citStr="Mi and Huang, 2008" startWordPosition="224" endWordPosition="227">-based statistical machine translation (SMT) systems have achieved promising improvements in recent years. Depending on the type of input, the systems are divided into two categories: stringbased systems whose input is a string to be simultaneously parsed and translated by a synchronous grammar (Wu, 1997; Chiang, 2005; Galley et al., 2006; Shen et al., 2008), and tree/forest-based systems whose input is already a parse tree or a packed forest to be directly converted into a target tree or string (Ding and Palmer, 2005; Quirk et al., 2005; Liu et al., 2006; Huang et al., 2006; Mi et al., 2008; Mi and Huang, 2008; Zhang et al., 2009; Wu et al., 2010; Wu et al., 2011a). *Work done when all the authors were in The University of Tokyo. Depending on whether or not parsers are explicitly used for obtaining linguistically annotated data during training, the systems are also divided into two categories: formally syntax-based systems that do not use additional parsers (Wu, 1997; Chiang, 2005; Xiong et al., 2006), and linguistically syntax-based systems that use PCFG parsers (Liu et al., 2006; Huang et al., 2006; Galley et al., 2006; Mi et al., 2008; Mi and Huang, 2008; Zhang et al., 2009), HPSG parsers (Wu et</context>
+<context position="3404" citStr="Mi and Huang, 2008" startWordPosition="514" endWordPosition="517">d promising translation results. Moreover, the tree/forest-string structure is more widely used than the tree-tree structure, presumably because using two parsers on the source and target languages is subject to more problems than making use of a parser on one language, such as the shortage of high precision/recall parsers for languages other than English, compound parse error rates, and inconsistency of errors. In Table 1, note that tree-to-string rules are generic and applicable to many syntax-based models such as tree/forest-to&apos;This classification is inspired by and extends the Table 1 in (Mi and Huang, 2008). 127 Proceedings of the 50th Annual Meeting of the Association for Computational Linguistics, pages 127–132, Jeju, Republic of Korea, 8-14 July 2012. c�2012 Association for Computational Linguistics Source-to-target Examples (partial) Decoding Rules Parser tree-to-tree (Ding and Palmer, 2005) ↓ dep.-to-dep. DG forest-to-tree (Liu et al., 2009a) ↓ ↑↓ tree-to-tree PCFG tree-to-string (Liu et al., 2006) ↑ tree-to-string PCFG (Quirk et al., 2005) ↑ dep.-to-string DG forest-to-string (Mi et al., 2008) ↓ ↑↓ tree-to-string PCFG (Wu et al., 2011a) ↓ ↑↓ tree-to-string HPSG string-to-tree (Galley et al</context>
+<context position="5045" citStr="Mi and Huang, 2008" startWordPosition="751" endWordPosition="754">ch are formally syntax-based. DG stands for dependency (abbreviated as dep.) grammar. ↓ and ↑ denote top-down and bottom-up traversals of a source tree/forest. string models and string-to-tree model. However, few tree/forest-to-string systems have been made open source and this makes it difficult and time-consuming to testify and follow existing proposals involved in recently published papers. The Akamon system2, written in Java and following the tree/forest-to-string research direction, implements all of the algorithms for both tree-to-string translation rule extraction (Galley et al., 2004; Mi and Huang, 2008; Wu et al., 2010; Wu et al., 2011a) and tree/forest-based decoding (Liu et al., 2006; Mi et al., 2008). We hope this system will help related researchers to catch up with the achievements of tree/forest-based translations in the past several years without re-implementing the systems or general algorithms from scratch. 2 Akamon Toolkit Features Limited by the successful parsing rate and coverage of linguistic phrases, Akamon currently achieves comparable translation accuracies compared with the most frequently used SMT baseline system, Moses (Koehn et al., 2007). Table 2 shows the automatic tr</context>
+<context position="9876" citStr="Mi and Huang (2008)" startWordPosition="1486" endWordPosition="1489">to maximize some automatic evaluation metric, such as BLEU (Papineni et al., 2002), on a development set. 5http://www.speech.sri.com/projects/srilm/ 6http://code.google.com/p/berkeleylm/ Figure 1: Training and tuning process of the Akamon system. Here, e = source English language, f = target foreign language. • translation rule extraction: as former mentioned, we extract tree-to-string translation rules for Akamon. In particular, we implemented the GHKM algorithm as proposed by Galley et al. (2004) from word-aligned treestring pairs. In addition, we also implemented the algorithms proposed by Mi and Huang (2008) and Wu et al. (2010) for extracting rules from word-aligned PCFG/HPSG forest-string pairs. 3 Training and Decoding Frameworks Figure 1 shows the training and tuning progress of the Akamon system. Given original bilingual parallel corpora, we first tokenize and lowercase the source and target sentences (e.g., word segmentation of Chinese and Japanese, punctuation segmentation of English). The pre-processed monolingual sentences will be used by SRILM (Stolcke, 2002) or BerkeleyLM (Pauls and Klein, 2011) to train a n-gram language model. In addition, we filter out too long sentences tokenize wor</context>
+<context position="11653" citStr="Mi and Huang, 2008" startWordPosition="1764" endWordPosition="1767">ligned parallel corpus. The source sentence and its packed forest, the target sentence, and the word alignment are used for tree-to-string translation rule extraction. Since a 1- best tree is a special case of a packed forest, we will focus on using the term ‘forest’ in the continuing discussion. Then, taking the target language model, the rule set, and the preprocessed development set as inputs, we perform MERT on the decoder to tune the weights of the features. The Akamon forest-to-string system includes the decoding algorithm and the rule extraction algorithm described in (Mi et al., 2008; Mi and Huang, 2008). 4 Using Deep Syntactic Structures In Akamon, we support the usage of deep syntactic structures for obtaining fine-grained translation rules as described in our former work (Wu et al., 2010)7. Similarly, Enju8, a state-of-the-art and freely available HPSG parser for English, can be used to generate packed parse forests for source sentences9. Deep syntactic structures are included in the HPSG trees/forests, which includes a finegrained description of the syntactic property and a semantic representation of the sentence. We extract fine-grained rules from aligned HPSG forest-string pairs and use</context>
+</contexts>
+<marker>Mi, Huang, 2008</marker>
+<rawString>Haitao Mi and Liang Huang. 2008. Forest-based translation rule extraction. In Proceedings of EMNLP, pages 206–214, October.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Haitao Mi</author>
+<author>Qun Liu</author>
+</authors>
+<title>Constituency to dependency translation with forests.</title>
+<date>2010</date>
+<booktitle>In Proceedings ofACL,</booktitle>
+<pages>1433--1442</pages>
+<marker>Mi, Liu, 2010</marker>
+<rawString>Haitao Mi and Qun Liu. 2010. Constituency to dependency translation with forests. In Proceedings ofACL, pages 1433–1442, July.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Haitao Mi</author>
+<author>Liang Huang</author>
+<author>Qun Liu</author>
+</authors>
+<title>Forestbased translation.</title>
+<date>2008</date>
+<booktitle>In Proceedings of ACL-08:HLT,</booktitle>
+<pages>192--199</pages>
+<location>Columbus, Ohio.</location>
+<contexts>
+<context position="1554" citStr="Mi et al., 2008" startWordPosition="220" endWordPosition="223">troduction Syntax-based statistical machine translation (SMT) systems have achieved promising improvements in recent years. Depending on the type of input, the systems are divided into two categories: stringbased systems whose input is a string to be simultaneously parsed and translated by a synchronous grammar (Wu, 1997; Chiang, 2005; Galley et al., 2006; Shen et al., 2008), and tree/forest-based systems whose input is already a parse tree or a packed forest to be directly converted into a target tree or string (Ding and Palmer, 2005; Quirk et al., 2005; Liu et al., 2006; Huang et al., 2006; Mi et al., 2008; Mi and Huang, 2008; Zhang et al., 2009; Wu et al., 2010; Wu et al., 2011a). *Work done when all the authors were in The University of Tokyo. Depending on whether or not parsers are explicitly used for obtaining linguistically annotated data during training, the systems are also divided into two categories: formally syntax-based systems that do not use additional parsers (Wu, 1997; Chiang, 2005; Xiong et al., 2006), and linguistically syntax-based systems that use PCFG parsers (Liu et al., 2006; Huang et al., 2006; Galley et al., 2006; Mi et al., 2008; Mi and Huang, 2008; Zhang et al., 2009),</context>
+<context position="3906" citStr="Mi et al., 2008" startWordPosition="584" endWordPosition="587">d models such as tree/forest-to&apos;This classification is inspired by and extends the Table 1 in (Mi and Huang, 2008). 127 Proceedings of the 50th Annual Meeting of the Association for Computational Linguistics, pages 127–132, Jeju, Republic of Korea, 8-14 July 2012. c�2012 Association for Computational Linguistics Source-to-target Examples (partial) Decoding Rules Parser tree-to-tree (Ding and Palmer, 2005) ↓ dep.-to-dep. DG forest-to-tree (Liu et al., 2009a) ↓ ↑↓ tree-to-tree PCFG tree-to-string (Liu et al., 2006) ↑ tree-to-string PCFG (Quirk et al., 2005) ↑ dep.-to-string DG forest-to-string (Mi et al., 2008) ↓ ↑↓ tree-to-string PCFG (Wu et al., 2011a) ↓ ↑↓ tree-to-string HPSG string-to-tree (Galley et al., 2006) CKY tree-to-string PCFG (Shen et al., 2008) CKY string-to-dep. DG string-to-string (Chiang, 2005) CKY string-to-string none (Xiong et al., 2006) CKY string-to-string none Table 1: A classification of syntax-based SMT systems. Tree/forest-based and string-based systems are split by a line. All the systems listed here are linguistically syntax-based except the last two (Chiang, 2005) and (Xiong et al., 2006), which are formally syntax-based. DG stands for dependency (abbreviated as dep.) gr</context>
+<context position="5148" citStr="Mi et al., 2008" startWordPosition="770" endWordPosition="773">down and bottom-up traversals of a source tree/forest. string models and string-to-tree model. However, few tree/forest-to-string systems have been made open source and this makes it difficult and time-consuming to testify and follow existing proposals involved in recently published papers. The Akamon system2, written in Java and following the tree/forest-to-string research direction, implements all of the algorithms for both tree-to-string translation rule extraction (Galley et al., 2004; Mi and Huang, 2008; Wu et al., 2010; Wu et al., 2011a) and tree/forest-based decoding (Liu et al., 2006; Mi et al., 2008). We hope this system will help related researchers to catch up with the achievements of tree/forest-based translations in the past several years without re-implementing the systems or general algorithms from scratch. 2 Akamon Toolkit Features Limited by the successful parsing rate and coverage of linguistic phrases, Akamon currently achieves comparable translation accuracies compared with the most frequently used SMT baseline system, Moses (Koehn et al., 2007). Table 2 shows the automatic translation accuracies (case-sensitive) of Akamon and Moses. Besides BLEU and NIST score, we further list</context>
+<context position="7476" citStr="Mi et al., 2008" startWordPosition="1126" endWordPosition="1129">chieved by Google is only for reference and not a comparison, since it uses a different and unknown training data) and following (Goto et al., 2011), the scores achieved by using the Google online translation system4 are also listed in this table. Here is a brief description of Akamon’s main features: • multiple-thread forest-based decoding: Akamon first loads the development (with source and reference sentences) or test (with source sentences only) file into memory and then perform parameter tuning or decoding in a parallel way. The forest-based decoding algorithm is alike that described in (Mi et al., 2008), 4http://translate.google.com/ 2Code available at https://sites.google.com/site/xianchaowu2012 128 Systems BLEU NIST RIBES Google online 0.2546 6.830 0.6991 Moses (hierarchical) 0.3166 7.795 0.7200 Moses (phrase) 0.3190 7.881 0.7068 Moses (phrase)* 0.2773 6.905 0.6619 Akamon-Forest* 0.2799 7.258 0.6861 Akamon-Comb 0.3948 8.713 0.7813 Table 2: Translation accuracies of Akamon and the baseline systems on the NTCIR-9 English-to-Japanese translation task (Wu et al., 2011b). * stands for only using 2 million parallel sentences of the total 3 million data. Here, HPSG forests were used in Akamon. i.</context>
+<context position="9110" citStr="Mi et al., 2008" startWordPosition="1369" endWordPosition="1372">al translation result extracting. • language models: Akamon can make use of one or many n-gram language models trained by using SRILM5 (Stolcke, 2002) or the Berkeley language model toolkit, berkeleylm-1.0b36 (Pauls and Klein, 2011). The weights of multiple language models are tuned under minimum error rate training (MERT) (Och, 2003). • pruning: traditional beam-pruning and cubepruning (Chiang, 2007) techniques are incorporated in Akamon to make decoding feasible for large-scale rule sets. Before decoding, we also perform the marginal probability-based inside-outside algorithm based pruning (Mi et al., 2008) on the original parsing forest to control the decoding time. • MERT: Akamon has its own MERT module which optimizes weights of the features so as to maximize some automatic evaluation metric, such as BLEU (Papineni et al., 2002), on a development set. 5http://www.speech.sri.com/projects/srilm/ 6http://code.google.com/p/berkeleylm/ Figure 1: Training and tuning process of the Akamon system. Here, e = source English language, f = target foreign language. • translation rule extraction: as former mentioned, we extract tree-to-string translation rules for Akamon. In particular, we implemented the </context>
+<context position="11632" citStr="Mi et al., 2008" startWordPosition="1760" endWordPosition="1763">to obtain a wordaligned parallel corpus. The source sentence and its packed forest, the target sentence, and the word alignment are used for tree-to-string translation rule extraction. Since a 1- best tree is a special case of a packed forest, we will focus on using the term ‘forest’ in the continuing discussion. Then, taking the target language model, the rule set, and the preprocessed development set as inputs, we perform MERT on the decoder to tune the weights of the features. The Akamon forest-to-string system includes the decoding algorithm and the rule extraction algorithm described in (Mi et al., 2008; Mi and Huang, 2008). 4 Using Deep Syntactic Structures In Akamon, we support the usage of deep syntactic structures for obtaining fine-grained translation rules as described in our former work (Wu et al., 2010)7. Similarly, Enju8, a state-of-the-art and freely available HPSG parser for English, can be used to generate packed parse forests for source sentences9. Deep syntactic structures are included in the HPSG trees/forests, which includes a finegrained description of the syntactic property and a semantic representation of the sentence. We extract fine-grained rules from aligned HPSG forest</context>
+</contexts>
+<marker>Mi, Huang, Liu, 2008</marker>
+<rawString>Haitao Mi, Liang Huang, and Qun Liu. 2008. Forestbased translation. In Proceedings of ACL-08:HLT, pages 192–199, Columbus, Ohio.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yusuke Miyao</author>
+<author>Takashi Ninomiya</author>
+<author>Jun’ichi Tsujii</author>
+</authors>
+<title>Probabilistic modeling of argument structures including non-local dependencies.</title>
+<date>2003</date>
+<booktitle>In Proceedings of RANLP,</booktitle>
+<pages>285--291</pages>
+<location>Borovets.</location>
+<contexts>
+<context position="15858" citStr="Miyao et al., 2003" startWordPosition="2442" endWordPosition="2445">argument structures for the sentences of “John killed Mary” and “She ignored the fact that I wanted to dispute”. (feature values) are typed. In the original HPSG formalism, the types are defined in a hierarchy and the DAG can have arbitrary shape (e.g., it can be of any depth). We however use a simplified form of TFS, for simplicity of the algorithms. In the simplified form, a TFS is converted to a (flat) set of pairs of feature names and their values. Table 3 lists the features used in our system, which are a subset of those in the original output from Enju. In the Enju English HPSG grammar (Miyao et al., 2003) used in our system, the semantic content of a sentence/phrase is represented by a predicateargument structure (PAS). Figure 2 shows the PAS of a simple sentence, “John killed Mary”, and a more complex PAS for another sentence, “She ignored the fact that I wanted to dispute”, which is adopted from (Miyao et al., 2003). In an HPSG tree/forest, each leaf node generally introduces a predicate, which is represented by the pair of LEXENTRY (lexical entry) feature and PRED (predicate type) feature. The arguments of a predicate are designated by the pointers from the ARG⟨x⟩ features in a leaf node to</context>
+</contexts>
+<marker>Miyao, Ninomiya, Tsujii, 2003</marker>
+<rawString>Yusuke Miyao, Takashi Ninomiya, and Jun’ichi Tsujii. 2003. Probabilistic modeling of argument structures including non-local dependencies. In Proceedings of RANLP, pages 285–291, Borovets.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Franz Josef Och</author>
+<author>Hermann Ney</author>
+</authors>
+<title>A systematic comparison of various statistical alignment models.</title>
+<date>2003</date>
+<journal>Computational Linguistics,</journal>
+<volume>29</volume>
+<issue>1</issue>
+<contexts>
+<context position="10911" citStr="Och and Ney, 2003" startWordPosition="1642" endWordPosition="1645">gual sentences will be used by SRILM (Stolcke, 2002) or BerkeleyLM (Pauls and Klein, 2011) to train a n-gram language model. In addition, we filter out too long sentences tokenize word segment corpus pre&amp;processing e.tok £scg ��������� ��������� e.tsk.lw f.seg.lw de&apos; SRILM e.clean £cican clean de&apos;.e tokenize do&apos;.f ward segmer tation e.tok &amp;quot;n(u GIZA++ lowercase lowercase £sog e.forests ager t �������� £seg.lw &amp;quot;n(u rule extraction ��������� %&amp;gram LM Rule set Akamon ecoder !M&amp;quot;R#$ 129 here, i.e., only relatively short sentence pairs will be used to train word alignments. Then, we can use GIZA++ (Och and Ney, 2003) and symmetric strategies, such as grow-diag-final (Koehn et al., 2007), on the tokenized parallel corpus to obtain a wordaligned parallel corpus. The source sentence and its packed forest, the target sentence, and the word alignment are used for tree-to-string translation rule extraction. Since a 1- best tree is a special case of a packed forest, we will focus on using the term ‘forest’ in the continuing discussion. Then, taking the target language model, the rule set, and the preprocessed development set as inputs, we perform MERT on the decoder to tune the weights of the features. The Akamo</context>
+</contexts>
+<marker>Och, Ney, 2003</marker>
+<rawString>Franz Josef Och and Hermann Ney. 2003. A systematic comparison of various statistical alignment models. Computational Linguistics, 29(1):19–51.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Franz Josef Och</author>
+</authors>
+<title>Minimum error rate training in statistical machine translation.</title>
+<date>2003</date>
+<booktitle>In Proceedings ofACL,</booktitle>
+<pages>160--167</pages>
+<contexts>
+<context position="8830" citStr="Och, 2003" startWordPosition="1331" endWordPosition="1332"> and then collect k-best hypotheses for the root node(s) of the translation forest using Algorithm 2 or Algorithm 3 as described in (Huang and Chiang, 2005). Later, the k-best hypotheses are used both for parameter tuning on additional development set(s) and for final optimal translation result extracting. • language models: Akamon can make use of one or many n-gram language models trained by using SRILM5 (Stolcke, 2002) or the Berkeley language model toolkit, berkeleylm-1.0b36 (Pauls and Klein, 2011). The weights of multiple language models are tuned under minimum error rate training (MERT) (Och, 2003). • pruning: traditional beam-pruning and cubepruning (Chiang, 2007) techniques are incorporated in Akamon to make decoding feasible for large-scale rule sets. Before decoding, we also perform the marginal probability-based inside-outside algorithm based pruning (Mi et al., 2008) on the original parsing forest to control the decoding time. • MERT: Akamon has its own MERT module which optimizes weights of the features so as to maximize some automatic evaluation metric, such as BLEU (Papineni et al., 2002), on a development set. 5http://www.speech.sri.com/projects/srilm/ 6http://code.google.com/</context>
+</contexts>
+<marker>Och, 2003</marker>
+<rawString>Franz Josef Och. 2003. Minimum error rate training in statistical machine translation. In Proceedings ofACL, pages 160–167.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Kishore Papineni</author>
+<author>Salim Roukos</author>
+<author>Todd Ward</author>
+<author>WeiJing Zhu</author>
+</authors>
+<title>Bleu: a method for automatic evaluation of machine translation.</title>
+<date>2002</date>
+<booktitle>In Proceedings of ACL,</booktitle>
+<pages>311--318</pages>
+<contexts>
+<context position="9339" citStr="Papineni et al., 2002" startWordPosition="1409" endWordPosition="1412">in, 2011). The weights of multiple language models are tuned under minimum error rate training (MERT) (Och, 2003). • pruning: traditional beam-pruning and cubepruning (Chiang, 2007) techniques are incorporated in Akamon to make decoding feasible for large-scale rule sets. Before decoding, we also perform the marginal probability-based inside-outside algorithm based pruning (Mi et al., 2008) on the original parsing forest to control the decoding time. • MERT: Akamon has its own MERT module which optimizes weights of the features so as to maximize some automatic evaluation metric, such as BLEU (Papineni et al., 2002), on a development set. 5http://www.speech.sri.com/projects/srilm/ 6http://code.google.com/p/berkeleylm/ Figure 1: Training and tuning process of the Akamon system. Here, e = source English language, f = target foreign language. • translation rule extraction: as former mentioned, we extract tree-to-string translation rules for Akamon. In particular, we implemented the GHKM algorithm as proposed by Galley et al. (2004) from word-aligned treestring pairs. In addition, we also implemented the algorithms proposed by Mi and Huang (2008) and Wu et al. (2010) for extracting rules from word-aligned PC</context>
+</contexts>
+<marker>Papineni, Roukos, Ward, Zhu, 2002</marker>
+<rawString>Kishore Papineni, Salim Roukos, Todd Ward, and WeiJing Zhu. 2002. Bleu: a method for automatic evaluation of machine translation. In Proceedings of ACL, pages 311–318.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Adam Pauls</author>
+<author>Dan Klein</author>
+</authors>
+<title>Faster and smaller ngram language models.</title>
+<date>2011</date>
+<booktitle>In Proceedings of ACL-HLT,</booktitle>
+<pages>258--267</pages>
+<contexts>
+<context position="8726" citStr="Pauls and Klein, 2011" startWordPosition="1312" endWordPosition="1315">ation forest by applying the tree-to-string translation rules to the original parsing forest of the source sentence, and then collect k-best hypotheses for the root node(s) of the translation forest using Algorithm 2 or Algorithm 3 as described in (Huang and Chiang, 2005). Later, the k-best hypotheses are used both for parameter tuning on additional development set(s) and for final optimal translation result extracting. • language models: Akamon can make use of one or many n-gram language models trained by using SRILM5 (Stolcke, 2002) or the Berkeley language model toolkit, berkeleylm-1.0b36 (Pauls and Klein, 2011). The weights of multiple language models are tuned under minimum error rate training (MERT) (Och, 2003). • pruning: traditional beam-pruning and cubepruning (Chiang, 2007) techniques are incorporated in Akamon to make decoding feasible for large-scale rule sets. Before decoding, we also perform the marginal probability-based inside-outside algorithm based pruning (Mi et al., 2008) on the original parsing forest to control the decoding time. • MERT: Akamon has its own MERT module which optimizes weights of the features so as to maximize some automatic evaluation metric, such as BLEU (Papineni </context>
+<context position="10383" citStr="Pauls and Klein, 2011" startWordPosition="1560" endWordPosition="1563">from word-aligned treestring pairs. In addition, we also implemented the algorithms proposed by Mi and Huang (2008) and Wu et al. (2010) for extracting rules from word-aligned PCFG/HPSG forest-string pairs. 3 Training and Decoding Frameworks Figure 1 shows the training and tuning progress of the Akamon system. Given original bilingual parallel corpora, we first tokenize and lowercase the source and target sentences (e.g., word segmentation of Chinese and Japanese, punctuation segmentation of English). The pre-processed monolingual sentences will be used by SRILM (Stolcke, 2002) or BerkeleyLM (Pauls and Klein, 2011) to train a n-gram language model. In addition, we filter out too long sentences tokenize word segment corpus pre&amp;processing e.tok £scg ��������� ��������� e.tsk.lw f.seg.lw de&apos; SRILM e.clean £cican clean de&apos;.e tokenize do&apos;.f ward segmer tation e.tok &amp;quot;n(u GIZA++ lowercase lowercase £sog e.forests ager t �������� £seg.lw &amp;quot;n(u rule extraction ��������� %&amp;gram LM Rule set Akamon ecoder !M&amp;quot;R#$ 129 here, i.e., only relatively short sentence pairs will be used to train word alignments. Then, we can use GIZA++ (Och and Ney, 2003) and symmetric strategies, such as grow-diag-final (Koehn et al., 2007),</context>
+</contexts>
+<marker>Pauls, Klein, 2011</marker>
+<rawString>Adam Pauls and Dan Klein. 2011. Faster and smaller ngram language models. In Proceedings of ACL-HLT, pages 258–267, June.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Chris Quirk</author>
+<author>Arul Menezes</author>
+<author>Colin Cherry</author>
+</authors>
+<title>Dependency treelet translation: Syntactically informed phrasal smt.</title>
+<date>2005</date>
+<booktitle>In Proceedings of ACL,</booktitle>
+<pages>271--279</pages>
+<contexts>
+<context position="1499" citStr="Quirk et al., 2005" startWordPosition="208" endWordPosition="211"> al., 2004) and HPSG trees/forests (Wu et al., 2010). 1 Introduction Syntax-based statistical machine translation (SMT) systems have achieved promising improvements in recent years. Depending on the type of input, the systems are divided into two categories: stringbased systems whose input is a string to be simultaneously parsed and translated by a synchronous grammar (Wu, 1997; Chiang, 2005; Galley et al., 2006; Shen et al., 2008), and tree/forest-based systems whose input is already a parse tree or a packed forest to be directly converted into a target tree or string (Ding and Palmer, 2005; Quirk et al., 2005; Liu et al., 2006; Huang et al., 2006; Mi et al., 2008; Mi and Huang, 2008; Zhang et al., 2009; Wu et al., 2010; Wu et al., 2011a). *Work done when all the authors were in The University of Tokyo. Depending on whether or not parsers are explicitly used for obtaining linguistically annotated data during training, the systems are also divided into two categories: formally syntax-based systems that do not use additional parsers (Wu, 1997; Chiang, 2005; Xiong et al., 2006), and linguistically syntax-based systems that use PCFG parsers (Liu et al., 2006; Huang et al., 2006; Galley et al., 2006; Mi</context>
+<context position="3851" citStr="Quirk et al., 2005" startWordPosition="576" endWordPosition="579">tring rules are generic and applicable to many syntax-based models such as tree/forest-to&apos;This classification is inspired by and extends the Table 1 in (Mi and Huang, 2008). 127 Proceedings of the 50th Annual Meeting of the Association for Computational Linguistics, pages 127–132, Jeju, Republic of Korea, 8-14 July 2012. c�2012 Association for Computational Linguistics Source-to-target Examples (partial) Decoding Rules Parser tree-to-tree (Ding and Palmer, 2005) ↓ dep.-to-dep. DG forest-to-tree (Liu et al., 2009a) ↓ ↑↓ tree-to-tree PCFG tree-to-string (Liu et al., 2006) ↑ tree-to-string PCFG (Quirk et al., 2005) ↑ dep.-to-string DG forest-to-string (Mi et al., 2008) ↓ ↑↓ tree-to-string PCFG (Wu et al., 2011a) ↓ ↑↓ tree-to-string HPSG string-to-tree (Galley et al., 2006) CKY tree-to-string PCFG (Shen et al., 2008) CKY string-to-dep. DG string-to-string (Chiang, 2005) CKY string-to-string none (Xiong et al., 2006) CKY string-to-string none Table 1: A classification of syntax-based SMT systems. Tree/forest-based and string-based systems are split by a line. All the systems listed here are linguistically syntax-based except the last two (Chiang, 2005) and (Xiong et al., 2006), which are formally syntax-b</context>
+</contexts>
+<marker>Quirk, Menezes, Cherry, 2005</marker>
+<rawString>Chris Quirk, Arul Menezes, and Colin Cherry. 2005. Dependency treelet translation: Syntactically informed phrasal smt. In Proceedings of ACL, pages 271–279.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Libin Shen</author>
+<author>Jinxi Xu</author>
+<author>Ralph Weischedel</author>
+</authors>
+<title>A new string-to-dependency machine translation algorithm with a target dependency language model.</title>
+<date>2008</date>
+<booktitle>In Proceedings ofACL-08:HLT,</booktitle>
+<pages>577--585</pages>
+<contexts>
+<context position="1316" citStr="Shen et al., 2008" startWordPosition="175" endWordPosition="178">nd minimum error rate training. In terms of tree-to-string translation rule extraction, the toolkit implements the traditional maximum likelihood algorithm using PCFG trees (Galley et al., 2004) and HPSG trees/forests (Wu et al., 2010). 1 Introduction Syntax-based statistical machine translation (SMT) systems have achieved promising improvements in recent years. Depending on the type of input, the systems are divided into two categories: stringbased systems whose input is a string to be simultaneously parsed and translated by a synchronous grammar (Wu, 1997; Chiang, 2005; Galley et al., 2006; Shen et al., 2008), and tree/forest-based systems whose input is already a parse tree or a packed forest to be directly converted into a target tree or string (Ding and Palmer, 2005; Quirk et al., 2005; Liu et al., 2006; Huang et al., 2006; Mi et al., 2008; Mi and Huang, 2008; Zhang et al., 2009; Wu et al., 2010; Wu et al., 2011a). *Work done when all the authors were in The University of Tokyo. Depending on whether or not parsers are explicitly used for obtaining linguistically annotated data during training, the systems are also divided into two categories: formally syntax-based systems that do not use additi</context>
+<context position="4056" citStr="Shen et al., 2008" startWordPosition="608" endWordPosition="611">al Meeting of the Association for Computational Linguistics, pages 127–132, Jeju, Republic of Korea, 8-14 July 2012. c�2012 Association for Computational Linguistics Source-to-target Examples (partial) Decoding Rules Parser tree-to-tree (Ding and Palmer, 2005) ↓ dep.-to-dep. DG forest-to-tree (Liu et al., 2009a) ↓ ↑↓ tree-to-tree PCFG tree-to-string (Liu et al., 2006) ↑ tree-to-string PCFG (Quirk et al., 2005) ↑ dep.-to-string DG forest-to-string (Mi et al., 2008) ↓ ↑↓ tree-to-string PCFG (Wu et al., 2011a) ↓ ↑↓ tree-to-string HPSG string-to-tree (Galley et al., 2006) CKY tree-to-string PCFG (Shen et al., 2008) CKY string-to-dep. DG string-to-string (Chiang, 2005) CKY string-to-string none (Xiong et al., 2006) CKY string-to-string none Table 1: A classification of syntax-based SMT systems. Tree/forest-based and string-based systems are split by a line. All the systems listed here are linguistically syntax-based except the last two (Chiang, 2005) and (Xiong et al., 2006), which are formally syntax-based. DG stands for dependency (abbreviated as dep.) grammar. ↓ and ↑ denote top-down and bottom-up traversals of a source tree/forest. string models and string-to-tree model. However, few tree/forest-to-s</context>
+</contexts>
+<marker>Shen, Xu, Weischedel, 2008</marker>
+<rawString>Libin Shen, Jinxi Xu, and Ralph Weischedel. 2008. A new string-to-dependency machine translation algorithm with a target dependency language model. In Proceedings ofACL-08:HLT, pages 577–585.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Andreas Stolcke</author>
+</authors>
+<title>Srilm-an extensible language modeling toolkit.</title>
+<date>2002</date>
+<booktitle>In Proceedings of International Conference on Spoken Language Processing,</booktitle>
+<pages>901--904</pages>
+<contexts>
+<context position="8644" citStr="Stolcke, 2002" startWordPosition="1302" endWordPosition="1303">ta. Here, HPSG forests were used in Akamon. i.e., first construct a translation forest by applying the tree-to-string translation rules to the original parsing forest of the source sentence, and then collect k-best hypotheses for the root node(s) of the translation forest using Algorithm 2 or Algorithm 3 as described in (Huang and Chiang, 2005). Later, the k-best hypotheses are used both for parameter tuning on additional development set(s) and for final optimal translation result extracting. • language models: Akamon can make use of one or many n-gram language models trained by using SRILM5 (Stolcke, 2002) or the Berkeley language model toolkit, berkeleylm-1.0b36 (Pauls and Klein, 2011). The weights of multiple language models are tuned under minimum error rate training (MERT) (Och, 2003). • pruning: traditional beam-pruning and cubepruning (Chiang, 2007) techniques are incorporated in Akamon to make decoding feasible for large-scale rule sets. Before decoding, we also perform the marginal probability-based inside-outside algorithm based pruning (Mi et al., 2008) on the original parsing forest to control the decoding time. • MERT: Akamon has its own MERT module which optimizes weights of the fe</context>
+<context position="10345" citStr="Stolcke, 2002" startWordPosition="1556" endWordPosition="1557">posed by Galley et al. (2004) from word-aligned treestring pairs. In addition, we also implemented the algorithms proposed by Mi and Huang (2008) and Wu et al. (2010) for extracting rules from word-aligned PCFG/HPSG forest-string pairs. 3 Training and Decoding Frameworks Figure 1 shows the training and tuning progress of the Akamon system. Given original bilingual parallel corpora, we first tokenize and lowercase the source and target sentences (e.g., word segmentation of Chinese and Japanese, punctuation segmentation of English). The pre-processed monolingual sentences will be used by SRILM (Stolcke, 2002) or BerkeleyLM (Pauls and Klein, 2011) to train a n-gram language model. In addition, we filter out too long sentences tokenize word segment corpus pre&amp;processing e.tok £scg ��������� ��������� e.tsk.lw f.seg.lw de&apos; SRILM e.clean £cican clean de&apos;.e tokenize do&apos;.f ward segmer tation e.tok &amp;quot;n(u GIZA++ lowercase lowercase £sog e.forests ager t �������� £seg.lw &amp;quot;n(u rule extraction ��������� %&amp;gram LM Rule set Akamon ecoder !M&amp;quot;R#$ 129 here, i.e., only relatively short sentence pairs will be used to train word alignments. Then, we can use GIZA++ (Och and Ney, 2003) and symmetric strategies, such as</context>
+</contexts>
+<marker>Stolcke, 2002</marker>
+<rawString>Andreas Stolcke. 2002. Srilm-an extensible language modeling toolkit. In Proceedings of International Conference on Spoken Language Processing, pages 901–904.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Katsuhito Sudoh</author>
+<author>Kevin Duh</author>
+<author>Hajime Tsukada</author>
+<author>Masaaki Nagata</author>
+<author>Xianchao Wu</author>
+<author>Takuya Matsuzaki</author>
+<author>Jun’ichi Tsujii</author>
+</authors>
+<title>Ntt-ut statistical machine translation in ntcir-9 patentmt.</title>
+<date>2011</date>
+<booktitle>In Proceedings of NTCIR-9 Workshop Meeting,</booktitle>
+<pages>585--592</pages>
+<contexts>
+<context position="6644" citStr="Sudoh et al., 2011" startWordPosition="989" endWordPosition="992">/www.kecl.ntt.co.jp/icl/lirg/ribes izes word order mistakes. In this table, Akamon-Forest differs from Akamon-Comb by using different configurations: Akamon-Forest used only 2/3 of the total training data (limited by the experiment environments and time). Akamon-Comb represents the system combination result by combining Akamon-Forest and other phrase-based SMT systems, which made use of pre-ordering methods of head finalization as described in (Isozaki et al., 2010b) and used the total 3 million training data. The detail of the pre-ordering approach and the combination method can be found in (Sudoh et al., 2011) and (Duh et al., 2011). Also, Moses (hierarchical) stands for the hierarchical phrase-based SMT system and Moses (phrase) stands for the flat phrase-based SMT system. For intuitive comparison (note that the result achieved by Google is only for reference and not a comparison, since it uses a different and unknown training data) and following (Goto et al., 2011), the scores achieved by using the Google online translation system4 are also listed in this table. Here is a brief description of Akamon’s main features: • multiple-thread forest-based decoding: Akamon first loads the development (with</context>
+</contexts>
+<marker>Sudoh, Duh, Tsukada, Nagata, Wu, Matsuzaki, Tsujii, 2011</marker>
+<rawString>Katsuhito Sudoh, Kevin Duh, Hajime Tsukada, Masaaki Nagata, Xianchao Wu, Takuya Matsuzaki, and Jun’ichi Tsujii. 2011. Ntt-ut statistical machine translation in ntcir-9 patentmt. In Proceedings of NTCIR-9 Workshop Meeting, pages 585–592, December.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Xianchao Wu</author>
+<author>Takuya Matsuzaki</author>
+<author>Jun’ichi Tsujii</author>
+</authors>
+<title>Fine-grained tree-to-string translation rule extraction.</title>
+<date>2010</date>
+<booktitle>In Proceedings of ACL,</booktitle>
+<pages>325--334</pages>
+<contexts>
+<context position="933" citStr="Wu et al., 2010" startWordPosition="116" endWordPosition="119">ource toolkit for tree and forest-based statistical machine translation (Liu et al., 2006; Mi et al., 2008; Mi and Huang, 2008). Akamon implements all of the algorithms required for tree/forestto-string decoding using tree-to-string translation rules: multiple-thread forest-based decoding, n-gram language model integration, beam- and cube-pruning, k-best hypotheses extraction, and minimum error rate training. In terms of tree-to-string translation rule extraction, the toolkit implements the traditional maximum likelihood algorithm using PCFG trees (Galley et al., 2004) and HPSG trees/forests (Wu et al., 2010). 1 Introduction Syntax-based statistical machine translation (SMT) systems have achieved promising improvements in recent years. Depending on the type of input, the systems are divided into two categories: stringbased systems whose input is a string to be simultaneously parsed and translated by a synchronous grammar (Wu, 1997; Chiang, 2005; Galley et al., 2006; Shen et al., 2008), and tree/forest-based systems whose input is already a parse tree or a packed forest to be directly converted into a target tree or string (Ding and Palmer, 2005; Quirk et al., 2005; Liu et al., 2006; Huang et al., </context>
+<context position="2184" citStr="Wu et al., 2010" startWordPosition="328" endWordPosition="331"> 2008; Zhang et al., 2009; Wu et al., 2010; Wu et al., 2011a). *Work done when all the authors were in The University of Tokyo. Depending on whether or not parsers are explicitly used for obtaining linguistically annotated data during training, the systems are also divided into two categories: formally syntax-based systems that do not use additional parsers (Wu, 1997; Chiang, 2005; Xiong et al., 2006), and linguistically syntax-based systems that use PCFG parsers (Liu et al., 2006; Huang et al., 2006; Galley et al., 2006; Mi et al., 2008; Mi and Huang, 2008; Zhang et al., 2009), HPSG parsers (Wu et al., 2010; Wu et al., 2011a), or dependency parsers (Ding and Palmer, 2005; Quirk et al., 2005; Shen et al., 2008). A classification) of syntax-based SMT systems is shown in Table 1. Translation rules can be extracted from aligned string-string (Chiang, 2005), tree-tree (Ding and Palmer, 2005) and tree/forest-string (Galley et al., 2004; Mi and Huang, 2008; Wu et al., 2011a) data structures. Leveraging structural and linguistic information from parse trees/forests, the latter two structures are believed to be better than their string-string counterparts in handling non-local reordering, and have achiev</context>
+<context position="5062" citStr="Wu et al., 2010" startWordPosition="755" endWordPosition="758">ax-based. DG stands for dependency (abbreviated as dep.) grammar. ↓ and ↑ denote top-down and bottom-up traversals of a source tree/forest. string models and string-to-tree model. However, few tree/forest-to-string systems have been made open source and this makes it difficult and time-consuming to testify and follow existing proposals involved in recently published papers. The Akamon system2, written in Java and following the tree/forest-to-string research direction, implements all of the algorithms for both tree-to-string translation rule extraction (Galley et al., 2004; Mi and Huang, 2008; Wu et al., 2010; Wu et al., 2011a) and tree/forest-based decoding (Liu et al., 2006; Mi et al., 2008). We hope this system will help related researchers to catch up with the achievements of tree/forest-based translations in the past several years without re-implementing the systems or general algorithms from scratch. 2 Akamon Toolkit Features Limited by the successful parsing rate and coverage of linguistic phrases, Akamon currently achieves comparable translation accuracies compared with the most frequently used SMT baseline system, Moses (Koehn et al., 2007). Table 2 shows the automatic translation accurac</context>
+<context position="9897" citStr="Wu et al. (2010)" startWordPosition="1491" endWordPosition="1494">ic evaluation metric, such as BLEU (Papineni et al., 2002), on a development set. 5http://www.speech.sri.com/projects/srilm/ 6http://code.google.com/p/berkeleylm/ Figure 1: Training and tuning process of the Akamon system. Here, e = source English language, f = target foreign language. • translation rule extraction: as former mentioned, we extract tree-to-string translation rules for Akamon. In particular, we implemented the GHKM algorithm as proposed by Galley et al. (2004) from word-aligned treestring pairs. In addition, we also implemented the algorithms proposed by Mi and Huang (2008) and Wu et al. (2010) for extracting rules from word-aligned PCFG/HPSG forest-string pairs. 3 Training and Decoding Frameworks Figure 1 shows the training and tuning progress of the Akamon system. Given original bilingual parallel corpora, we first tokenize and lowercase the source and target sentences (e.g., word segmentation of Chinese and Japanese, punctuation segmentation of English). The pre-processed monolingual sentences will be used by SRILM (Stolcke, 2002) or BerkeleyLM (Pauls and Klein, 2011) to train a n-gram language model. In addition, we filter out too long sentences tokenize word segment corpus pre&amp;</context>
+<context position="11844" citStr="Wu et al., 2010" startWordPosition="1796" endWordPosition="1799">special case of a packed forest, we will focus on using the term ‘forest’ in the continuing discussion. Then, taking the target language model, the rule set, and the preprocessed development set as inputs, we perform MERT on the decoder to tune the weights of the features. The Akamon forest-to-string system includes the decoding algorithm and the rule extraction algorithm described in (Mi et al., 2008; Mi and Huang, 2008). 4 Using Deep Syntactic Structures In Akamon, we support the usage of deep syntactic structures for obtaining fine-grained translation rules as described in our former work (Wu et al., 2010)7. Similarly, Enju8, a state-of-the-art and freely available HPSG parser for English, can be used to generate packed parse forests for source sentences9. Deep syntactic structures are included in the HPSG trees/forests, which includes a finegrained description of the syntactic property and a semantic representation of the sentence. We extract fine-grained rules from aligned HPSG forest-string pairs and use them in the forest-to-string decoder. The detailed algorithms can be found in (Wu et al., 2010; Wu et al., 2011a). Note that, in Akamon, we also provide the codes for generating HPSG forests</context>
+<context position="14306" citStr="Wu et al., 2010" startWordPosition="2180" endWordPosition="2183"> 3: Syntactic/semantic features extracted from HPSG signs that are included in the output of Enju. Features in phrasal nodes (top) and lexical nodes (bottom) are listed separately. factored representation of the syntactic features of a word/phrase, as well as a representation of their semantic content. Phrases and words represented by signs are composed into larger phrases by applications of schemata. The semantic representation of the new phrase is calculated at the same time. As such, an HPSG parse tree/forest can be considered as a tree/forest of signs (c.f. the HPSG forest in Figure 2 in (Wu et al., 2010)). An HPSG parse tree/forest has two attractive properties as a representation of a source sentence in syntax-based SMT. First, we can carefully control the condition of the application of a translation rule by exploiting the fine-grained syntactic description in the source parse tree/forest, as well as those in the translation rules. Second, we can identify sub-trees in a parse tree/forest that correspond to basic units of the semantics, namely sub-trees covering a predicate and its arguments, by using the semantic representation given in the signs. Extraction of translation rules based on su</context>
+<context position="16852" citStr="Wu et al., 2010" startWordPosition="2609" endWordPosition="2612">s a predicate, which is represented by the pair of LEXENTRY (lexical entry) feature and PRED (predicate type) feature. The arguments of a predicate are designated by the pointers from the ARG⟨x⟩ features in a leaf node to non-terminal nodes. Consequently, Akamon includes the algorithm for extracting compact composed rules from these PASs which further lead to a significant fast tree-to-string decoder. This is because it is not necessary to exhaustively generate the subtrees for all the tree nodes for rule matching any more. Limited by space, we suggest the readers to refer to our former work (Wu et al., 2010; Wu et al., 2011a) for the experimental results, including the training and decoding time using standard Englishto-Japanese corpora, by using deep syntactic structures. 5 Content of the Demonstration In the demonstration, we would like to provide a brief tutorial on: • describing the format of the packed forest for a source sentence, • the training script on translation rule extraction, • the MERT script on feature weight tuning on a development set, and, • the decoding script on a test set. Based on Akamon, there are a lot of interesting directions left to be updated in a relatively fast way</context>
+</contexts>
+<marker>Wu, Matsuzaki, Tsujii, 2010</marker>
+<rawString>Xianchao Wu, Takuya Matsuzaki, and Jun’ichi Tsujii. 2010. Fine-grained tree-to-string translation rule extraction. In Proceedings of ACL, pages 325–334, July.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Xianchao Wu</author>
+<author>Takuya Matsuzaki</author>
+<author>Jun’ichi Tsujii</author>
+</authors>
+<title>Effective use of function words for rule generalization in forest-based translation.</title>
+<date>2011</date>
+<booktitle>In Proceedings of ACL-HLT,</booktitle>
+<pages>22--31</pages>
+<contexts>
+<context position="1628" citStr="Wu et al., 2011" startWordPosition="236" endWordPosition="239"> achieved promising improvements in recent years. Depending on the type of input, the systems are divided into two categories: stringbased systems whose input is a string to be simultaneously parsed and translated by a synchronous grammar (Wu, 1997; Chiang, 2005; Galley et al., 2006; Shen et al., 2008), and tree/forest-based systems whose input is already a parse tree or a packed forest to be directly converted into a target tree or string (Ding and Palmer, 2005; Quirk et al., 2005; Liu et al., 2006; Huang et al., 2006; Mi et al., 2008; Mi and Huang, 2008; Zhang et al., 2009; Wu et al., 2010; Wu et al., 2011a). *Work done when all the authors were in The University of Tokyo. Depending on whether or not parsers are explicitly used for obtaining linguistically annotated data during training, the systems are also divided into two categories: formally syntax-based systems that do not use additional parsers (Wu, 1997; Chiang, 2005; Xiong et al., 2006), and linguistically syntax-based systems that use PCFG parsers (Liu et al., 2006; Huang et al., 2006; Galley et al., 2006; Mi et al., 2008; Mi and Huang, 2008; Zhang et al., 2009), HPSG parsers (Wu et al., 2010; Wu et al., 2011a), or dependency parsers (</context>
+<context position="3948" citStr="Wu et al., 2011" startWordPosition="592" endWordPosition="595">fication is inspired by and extends the Table 1 in (Mi and Huang, 2008). 127 Proceedings of the 50th Annual Meeting of the Association for Computational Linguistics, pages 127–132, Jeju, Republic of Korea, 8-14 July 2012. c�2012 Association for Computational Linguistics Source-to-target Examples (partial) Decoding Rules Parser tree-to-tree (Ding and Palmer, 2005) ↓ dep.-to-dep. DG forest-to-tree (Liu et al., 2009a) ↓ ↑↓ tree-to-tree PCFG tree-to-string (Liu et al., 2006) ↑ tree-to-string PCFG (Quirk et al., 2005) ↑ dep.-to-string DG forest-to-string (Mi et al., 2008) ↓ ↑↓ tree-to-string PCFG (Wu et al., 2011a) ↓ ↑↓ tree-to-string HPSG string-to-tree (Galley et al., 2006) CKY tree-to-string PCFG (Shen et al., 2008) CKY string-to-dep. DG string-to-string (Chiang, 2005) CKY string-to-string none (Xiong et al., 2006) CKY string-to-string none Table 1: A classification of syntax-based SMT systems. Tree/forest-based and string-based systems are split by a line. All the systems listed here are linguistically syntax-based except the last two (Chiang, 2005) and (Xiong et al., 2006), which are formally syntax-based. DG stands for dependency (abbreviated as dep.) grammar. ↓ and ↑ denote top-down and bottom-</context>
+<context position="7948" citStr="Wu et al., 2011" startWordPosition="1186" endWordPosition="1189">d then perform parameter tuning or decoding in a parallel way. The forest-based decoding algorithm is alike that described in (Mi et al., 2008), 4http://translate.google.com/ 2Code available at https://sites.google.com/site/xianchaowu2012 128 Systems BLEU NIST RIBES Google online 0.2546 6.830 0.6991 Moses (hierarchical) 0.3166 7.795 0.7200 Moses (phrase) 0.3190 7.881 0.7068 Moses (phrase)* 0.2773 6.905 0.6619 Akamon-Forest* 0.2799 7.258 0.6861 Akamon-Comb 0.3948 8.713 0.7813 Table 2: Translation accuracies of Akamon and the baseline systems on the NTCIR-9 English-to-Japanese translation task (Wu et al., 2011b). * stands for only using 2 million parallel sentences of the total 3 million data. Here, HPSG forests were used in Akamon. i.e., first construct a translation forest by applying the tree-to-string translation rules to the original parsing forest of the source sentence, and then collect k-best hypotheses for the root node(s) of the translation forest using Algorithm 2 or Algorithm 3 as described in (Huang and Chiang, 2005). Later, the k-best hypotheses are used both for parameter tuning on additional development set(s) and for final optimal translation result extracting. • language models: A</context>
+<context position="12365" citStr="Wu et al., 2011" startWordPosition="1875" endWordPosition="1878">for obtaining fine-grained translation rules as described in our former work (Wu et al., 2010)7. Similarly, Enju8, a state-of-the-art and freely available HPSG parser for English, can be used to generate packed parse forests for source sentences9. Deep syntactic structures are included in the HPSG trees/forests, which includes a finegrained description of the syntactic property and a semantic representation of the sentence. We extract fine-grained rules from aligned HPSG forest-string pairs and use them in the forest-to-string decoder. The detailed algorithms can be found in (Wu et al., 2010; Wu et al., 2011a). Note that, in Akamon, we also provide the codes for generating HPSG forests from Enju. Head-driven phrase structure grammar (HPSG) is a lexicalist grammar framework. In HPSG, linguistic entities such as words and phrases are represented by a data structure called a sign. A sign gives a 7However, Akamon still support PCFG tree/forest based translation. A special case is to yield PCFG style trees/forests by ignoring the rich features included in the nodes of HPSG trees/forests and only keep the POS tag and the phrasal categories. 8http://www-tsujii.is.s.u-tokyo.ac.jp/enju/index.html 9Until t</context>
+<context position="16869" citStr="Wu et al., 2011" startWordPosition="2613" endWordPosition="2616">ich is represented by the pair of LEXENTRY (lexical entry) feature and PRED (predicate type) feature. The arguments of a predicate are designated by the pointers from the ARG⟨x⟩ features in a leaf node to non-terminal nodes. Consequently, Akamon includes the algorithm for extracting compact composed rules from these PASs which further lead to a significant fast tree-to-string decoder. This is because it is not necessary to exhaustively generate the subtrees for all the tree nodes for rule matching any more. Limited by space, we suggest the readers to refer to our former work (Wu et al., 2010; Wu et al., 2011a) for the experimental results, including the training and decoding time using standard Englishto-Japanese corpora, by using deep syntactic structures. 5 Content of the Demonstration In the demonstration, we would like to provide a brief tutorial on: • describing the format of the packed forest for a source sentence, • the training script on translation rule extraction, • the MERT script on feature weight tuning on a development set, and, • the decoding script on a test set. Based on Akamon, there are a lot of interesting directions left to be updated in a relatively fast way in the near futu</context>
+</contexts>
+<marker>Wu, Matsuzaki, Tsujii, 2011</marker>
+<rawString>Xianchao Wu, Takuya Matsuzaki, and Jun’ichi Tsujii. 2011a. Effective use of function words for rule generalization in forest-based translation. In Proceedings of ACL-HLT, pages 22–31, June.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Xianchao Wu</author>
+<author>Takuya Matsuzaki</author>
+<author>Jun’ichi Tsujii</author>
+</authors>
+<title>Smt systems in the university of tokyo for ntcir-9 patentmt.</title>
+<date>2011</date>
+<booktitle>In Proceedings of NTCIR-9 Workshop Meeting,</booktitle>
+<pages>666--672</pages>
+<contexts>
+<context position="1628" citStr="Wu et al., 2011" startWordPosition="236" endWordPosition="239"> achieved promising improvements in recent years. Depending on the type of input, the systems are divided into two categories: stringbased systems whose input is a string to be simultaneously parsed and translated by a synchronous grammar (Wu, 1997; Chiang, 2005; Galley et al., 2006; Shen et al., 2008), and tree/forest-based systems whose input is already a parse tree or a packed forest to be directly converted into a target tree or string (Ding and Palmer, 2005; Quirk et al., 2005; Liu et al., 2006; Huang et al., 2006; Mi et al., 2008; Mi and Huang, 2008; Zhang et al., 2009; Wu et al., 2010; Wu et al., 2011a). *Work done when all the authors were in The University of Tokyo. Depending on whether or not parsers are explicitly used for obtaining linguistically annotated data during training, the systems are also divided into two categories: formally syntax-based systems that do not use additional parsers (Wu, 1997; Chiang, 2005; Xiong et al., 2006), and linguistically syntax-based systems that use PCFG parsers (Liu et al., 2006; Huang et al., 2006; Galley et al., 2006; Mi et al., 2008; Mi and Huang, 2008; Zhang et al., 2009), HPSG parsers (Wu et al., 2010; Wu et al., 2011a), or dependency parsers (</context>
+<context position="3948" citStr="Wu et al., 2011" startWordPosition="592" endWordPosition="595">fication is inspired by and extends the Table 1 in (Mi and Huang, 2008). 127 Proceedings of the 50th Annual Meeting of the Association for Computational Linguistics, pages 127–132, Jeju, Republic of Korea, 8-14 July 2012. c�2012 Association for Computational Linguistics Source-to-target Examples (partial) Decoding Rules Parser tree-to-tree (Ding and Palmer, 2005) ↓ dep.-to-dep. DG forest-to-tree (Liu et al., 2009a) ↓ ↑↓ tree-to-tree PCFG tree-to-string (Liu et al., 2006) ↑ tree-to-string PCFG (Quirk et al., 2005) ↑ dep.-to-string DG forest-to-string (Mi et al., 2008) ↓ ↑↓ tree-to-string PCFG (Wu et al., 2011a) ↓ ↑↓ tree-to-string HPSG string-to-tree (Galley et al., 2006) CKY tree-to-string PCFG (Shen et al., 2008) CKY string-to-dep. DG string-to-string (Chiang, 2005) CKY string-to-string none (Xiong et al., 2006) CKY string-to-string none Table 1: A classification of syntax-based SMT systems. Tree/forest-based and string-based systems are split by a line. All the systems listed here are linguistically syntax-based except the last two (Chiang, 2005) and (Xiong et al., 2006), which are formally syntax-based. DG stands for dependency (abbreviated as dep.) grammar. ↓ and ↑ denote top-down and bottom-</context>
+<context position="7948" citStr="Wu et al., 2011" startWordPosition="1186" endWordPosition="1189">d then perform parameter tuning or decoding in a parallel way. The forest-based decoding algorithm is alike that described in (Mi et al., 2008), 4http://translate.google.com/ 2Code available at https://sites.google.com/site/xianchaowu2012 128 Systems BLEU NIST RIBES Google online 0.2546 6.830 0.6991 Moses (hierarchical) 0.3166 7.795 0.7200 Moses (phrase) 0.3190 7.881 0.7068 Moses (phrase)* 0.2773 6.905 0.6619 Akamon-Forest* 0.2799 7.258 0.6861 Akamon-Comb 0.3948 8.713 0.7813 Table 2: Translation accuracies of Akamon and the baseline systems on the NTCIR-9 English-to-Japanese translation task (Wu et al., 2011b). * stands for only using 2 million parallel sentences of the total 3 million data. Here, HPSG forests were used in Akamon. i.e., first construct a translation forest by applying the tree-to-string translation rules to the original parsing forest of the source sentence, and then collect k-best hypotheses for the root node(s) of the translation forest using Algorithm 2 or Algorithm 3 as described in (Huang and Chiang, 2005). Later, the k-best hypotheses are used both for parameter tuning on additional development set(s) and for final optimal translation result extracting. • language models: A</context>
+<context position="12365" citStr="Wu et al., 2011" startWordPosition="1875" endWordPosition="1878">for obtaining fine-grained translation rules as described in our former work (Wu et al., 2010)7. Similarly, Enju8, a state-of-the-art and freely available HPSG parser for English, can be used to generate packed parse forests for source sentences9. Deep syntactic structures are included in the HPSG trees/forests, which includes a finegrained description of the syntactic property and a semantic representation of the sentence. We extract fine-grained rules from aligned HPSG forest-string pairs and use them in the forest-to-string decoder. The detailed algorithms can be found in (Wu et al., 2010; Wu et al., 2011a). Note that, in Akamon, we also provide the codes for generating HPSG forests from Enju. Head-driven phrase structure grammar (HPSG) is a lexicalist grammar framework. In HPSG, linguistic entities such as words and phrases are represented by a data structure called a sign. A sign gives a 7However, Akamon still support PCFG tree/forest based translation. A special case is to yield PCFG style trees/forests by ignoring the rich features included in the nodes of HPSG trees/forests and only keep the POS tag and the phrasal categories. 8http://www-tsujii.is.s.u-tokyo.ac.jp/enju/index.html 9Until t</context>
+<context position="16869" citStr="Wu et al., 2011" startWordPosition="2613" endWordPosition="2616">ich is represented by the pair of LEXENTRY (lexical entry) feature and PRED (predicate type) feature. The arguments of a predicate are designated by the pointers from the ARG⟨x⟩ features in a leaf node to non-terminal nodes. Consequently, Akamon includes the algorithm for extracting compact composed rules from these PASs which further lead to a significant fast tree-to-string decoder. This is because it is not necessary to exhaustively generate the subtrees for all the tree nodes for rule matching any more. Limited by space, we suggest the readers to refer to our former work (Wu et al., 2010; Wu et al., 2011a) for the experimental results, including the training and decoding time using standard Englishto-Japanese corpora, by using deep syntactic structures. 5 Content of the Demonstration In the demonstration, we would like to provide a brief tutorial on: • describing the format of the packed forest for a source sentence, • the training script on translation rule extraction, • the MERT script on feature weight tuning on a development set, and, • the decoding script on a test set. Based on Akamon, there are a lot of interesting directions left to be updated in a relatively fast way in the near futu</context>
+</contexts>
+<marker>Wu, Matsuzaki, Tsujii, 2011</marker>
+<rawString>Xianchao Wu, Takuya Matsuzaki, and Jun’ichi Tsujii. 2011b. Smt systems in the university of tokyo for ntcir-9 patentmt. In Proceedings of NTCIR-9 Workshop Meeting, pages 666–672, December.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Dekai Wu</author>
+</authors>
+<title>Stochastic inversion transduction grammars and bilingual parsing of parallel corpora.</title>
+<date>1997</date>
+<journal>Computational Linguistics,</journal>
+<volume>23</volume>
+<issue>3</issue>
+<contexts>
+<context position="1261" citStr="Wu, 1997" startWordPosition="167" endWordPosition="168">cube-pruning, k-best hypotheses extraction, and minimum error rate training. In terms of tree-to-string translation rule extraction, the toolkit implements the traditional maximum likelihood algorithm using PCFG trees (Galley et al., 2004) and HPSG trees/forests (Wu et al., 2010). 1 Introduction Syntax-based statistical machine translation (SMT) systems have achieved promising improvements in recent years. Depending on the type of input, the systems are divided into two categories: stringbased systems whose input is a string to be simultaneously parsed and translated by a synchronous grammar (Wu, 1997; Chiang, 2005; Galley et al., 2006; Shen et al., 2008), and tree/forest-based systems whose input is already a parse tree or a packed forest to be directly converted into a target tree or string (Ding and Palmer, 2005; Quirk et al., 2005; Liu et al., 2006; Huang et al., 2006; Mi et al., 2008; Mi and Huang, 2008; Zhang et al., 2009; Wu et al., 2010; Wu et al., 2011a). *Work done when all the authors were in The University of Tokyo. Depending on whether or not parsers are explicitly used for obtaining linguistically annotated data during training, the systems are also divided into two categorie</context>
+</contexts>
+<marker>Wu, 1997</marker>
+<rawString>Dekai Wu. 1997. Stochastic inversion transduction grammars and bilingual parsing of parallel corpora. Computational Linguistics, 23(3):377–403.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Deyi Xiong</author>
+<author>Qun Liu</author>
+<author>Shouxun Lin</author>
+</authors>
+<title>Maximum entropy based phrase reordering model for statistical machine translation.</title>
+<date>2006</date>
+<booktitle>In Proceedings of COLINGACL,</booktitle>
+<pages>521--528</pages>
+<contexts>
+<context position="1973" citStr="Xiong et al., 2006" startWordPosition="290" endWordPosition="293">input is already a parse tree or a packed forest to be directly converted into a target tree or string (Ding and Palmer, 2005; Quirk et al., 2005; Liu et al., 2006; Huang et al., 2006; Mi et al., 2008; Mi and Huang, 2008; Zhang et al., 2009; Wu et al., 2010; Wu et al., 2011a). *Work done when all the authors were in The University of Tokyo. Depending on whether or not parsers are explicitly used for obtaining linguistically annotated data during training, the systems are also divided into two categories: formally syntax-based systems that do not use additional parsers (Wu, 1997; Chiang, 2005; Xiong et al., 2006), and linguistically syntax-based systems that use PCFG parsers (Liu et al., 2006; Huang et al., 2006; Galley et al., 2006; Mi et al., 2008; Mi and Huang, 2008; Zhang et al., 2009), HPSG parsers (Wu et al., 2010; Wu et al., 2011a), or dependency parsers (Ding and Palmer, 2005; Quirk et al., 2005; Shen et al., 2008). A classification) of syntax-based SMT systems is shown in Table 1. Translation rules can be extracted from aligned string-string (Chiang, 2005), tree-tree (Ding and Palmer, 2005) and tree/forest-string (Galley et al., 2004; Mi and Huang, 2008; Wu et al., 2011a) data structures. Lev</context>
+<context position="4157" citStr="Xiong et al., 2006" startWordPosition="621" endWordPosition="624"> 8-14 July 2012. c�2012 Association for Computational Linguistics Source-to-target Examples (partial) Decoding Rules Parser tree-to-tree (Ding and Palmer, 2005) ↓ dep.-to-dep. DG forest-to-tree (Liu et al., 2009a) ↓ ↑↓ tree-to-tree PCFG tree-to-string (Liu et al., 2006) ↑ tree-to-string PCFG (Quirk et al., 2005) ↑ dep.-to-string DG forest-to-string (Mi et al., 2008) ↓ ↑↓ tree-to-string PCFG (Wu et al., 2011a) ↓ ↑↓ tree-to-string HPSG string-to-tree (Galley et al., 2006) CKY tree-to-string PCFG (Shen et al., 2008) CKY string-to-dep. DG string-to-string (Chiang, 2005) CKY string-to-string none (Xiong et al., 2006) CKY string-to-string none Table 1: A classification of syntax-based SMT systems. Tree/forest-based and string-based systems are split by a line. All the systems listed here are linguistically syntax-based except the last two (Chiang, 2005) and (Xiong et al., 2006), which are formally syntax-based. DG stands for dependency (abbreviated as dep.) grammar. ↓ and ↑ denote top-down and bottom-up traversals of a source tree/forest. string models and string-to-tree model. However, few tree/forest-to-string systems have been made open source and this makes it difficult and time-consuming to testify an</context>
+</contexts>
+<marker>Xiong, Liu, Lin, 2006</marker>
+<rawString>Deyi Xiong, Qun Liu, and Shouxun Lin. 2006. Maximum entropy based phrase reordering model for statistical machine translation. In Proceedings of COLINGACL, pages 521–528, July.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Hui Zhang</author>
+<author>Min Zhang</author>
+<author>Haizhou Li</author>
+<author>Aiti Aw</author>
+<author>Chew Lim Tan</author>
+</authors>
+<title>Forest-based tree sequence to string translation model.</title>
+<date>2009</date>
+<booktitle>In Proceedings of ACLIJCNLP,</booktitle>
+<pages>172--180</pages>
+<location>Suntec, Singapore,</location>
+<contexts>
+<context position="1594" citStr="Zhang et al., 2009" startWordPosition="228" endWordPosition="231">achine translation (SMT) systems have achieved promising improvements in recent years. Depending on the type of input, the systems are divided into two categories: stringbased systems whose input is a string to be simultaneously parsed and translated by a synchronous grammar (Wu, 1997; Chiang, 2005; Galley et al., 2006; Shen et al., 2008), and tree/forest-based systems whose input is already a parse tree or a packed forest to be directly converted into a target tree or string (Ding and Palmer, 2005; Quirk et al., 2005; Liu et al., 2006; Huang et al., 2006; Mi et al., 2008; Mi and Huang, 2008; Zhang et al., 2009; Wu et al., 2010; Wu et al., 2011a). *Work done when all the authors were in The University of Tokyo. Depending on whether or not parsers are explicitly used for obtaining linguistically annotated data during training, the systems are also divided into two categories: formally syntax-based systems that do not use additional parsers (Wu, 1997; Chiang, 2005; Xiong et al., 2006), and linguistically syntax-based systems that use PCFG parsers (Liu et al., 2006; Huang et al., 2006; Galley et al., 2006; Mi et al., 2008; Mi and Huang, 2008; Zhang et al., 2009), HPSG parsers (Wu et al., 2010; Wu et al</context>
+</contexts>
+<marker>Zhang, Zhang, Li, Aw, Tan, 2009</marker>
+<rawString>Hui Zhang, Min Zhang, Haizhou Li, Aiti Aw, and Chew Lim Tan. 2009. Forest-based tree sequence to string translation model. In Proceedings of ACLIJCNLP, pages 172–180, Suntec, Singapore, August.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

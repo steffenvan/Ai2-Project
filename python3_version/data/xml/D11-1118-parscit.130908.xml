@@ -1,0 +1,1810 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.000186">
+<title confidence="0.996868">
+Unsupervised Dependency Parsing without Gold Part-of-Speech Tags
+</title>
+<author confidence="0.942057">
+Valentin I. Spitkovskyf* Hiyan Alshawi*
+</author>
+<email confidence="0.973612">
+valentin@cs.stanford.edu hiyan@google.com
+</email>
+<author confidence="0.848364">
+Angel X. Changf* Daniel Jurafsky$f
+</author>
+<email confidence="0.930694">
+angelx@cs.stanford.edu jurafsky@stanford.edu
+</email>
+<affiliation confidence="0.973851">
+fComputer Science Department *Google Research $Department of Linguistics
+Stanford University Google Inc. Stanford University
+</affiliation>
+<address confidence="0.670474">
+Stanford, CA, 94305 Mountain View, CA, 94043 Stanford, CA, 94305
+</address>
+<sectionHeader confidence="0.943037" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.999961391304348">
+We show that categories induced by unsuper-
+vised word clustering can surpass the perfor-
+mance of gold part-of-speech tags in depen-
+dency grammar induction. Unlike classic clus-
+tering algorithms, our method allows a word
+to have different tags in different contexts.
+In an ablative analysis, we first demonstrate
+that this context-dependence is crucial to the
+superior performance of gold tags — requir-
+ing a word to always have the same part-of-
+speech significantly degrades the performance
+of manual tags in grammar induction, elim-
+inating the advantage that human annotation
+has over unsupervised tags. We then introduce
+a sequence modeling technique that combines
+the output of a word clustering algorithm with
+context-colored noise, to allow words to be
+tagged differently in different contexts. With
+these new induced tags as input, our state-of-
+the-art dependency grammar inducer achieves
+59.1% directed accuracy on Section 23 (all
+sentences) of the Wall Street Journal (WSJ)
+corpus — 0.7% higher than using gold tags.
+</bodyText>
+<sectionHeader confidence="0.999133" genericHeader="keywords">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.999980891304348">
+Unsupervised learning — machine learning without
+manually-labeled training examples — is an active
+area of scientific research. In natural language pro-
+cessing, unsupervised techniques have been success-
+fully applied to tasks such as word alignment for ma-
+chine translation. And since the advent of the web,
+algorithms that induce structure from unlabeled data
+have continued to steadily gain importance. In this
+paper we focus on unsupervised part-of-speech tag-
+ging and dependency parsing — two related prob-
+lems of syntax discovery. Our methods are applica-
+ble to vast quantities of unlabeled monolingual text.
+Not all research on these problems has been fully
+unsupervised. For example, to the best of our knowl-
+edge, every new state-of-the-art dependency gram-
+mar inducer since Klein and Manning (2004) relied
+on gold part-of-speech tags. For some time, multi-
+point performance degradations caused by switching
+to automatically induced word categories have been
+interpreted as indications that “good enough” parts-
+of-speech induction methods exist, justifying the fo-
+cus on grammar induction with supervised part-of-
+speech tags (Bod, 2006), pace (Cramer, 2007). One
+of several drawbacks of this practice is that it weak-
+ens any conclusions that could be drawn about how
+computers (and possibly humans) learn in the ab-
+sence of explicit feedback (McDonald et al., 2011).
+In turn, not all unsupervised taggers actually in-
+duce word categories: Many systems — known as
+part-of-speech disambiguators (Merialdo, 1994) —
+rely on external dictionaries of possible tags. Our
+work builds on two older part-of-speech inducers
+— word clustering algorithms of Clark (2000) and
+Brown et al. (1992) — that were recently shown to
+be more robust than other well-known fully unsuper-
+vised techniques (Christodoulopoulos et al., 2010).
+We investigate which properties of gold part-of-
+speech tags are useful in grammar induction and
+parsing, and how these properties could be intro-
+duced into induced tags. We also explore the number
+of word classes that is good for grammar induction:
+in particular, whether categorization is needed at all.
+By removing the “unrealistic simplification” of us-
+ing gold tags (Petrov et al., 2011, §3.2, Footnote 4),
+we will go on to demonstrate why grammar induc-
+tion from plain text is no longer “still too difficult.”
+</bodyText>
+<page confidence="0.92349">
+1281
+</page>
+<note confidence="0.88581725">
+Proceedings of the 2011 Conference on Empirical Methods in Natural Language Processing, pages 1281–1290,
+Edinburgh, Scotland, UK, July 27–31, 2011. c�2011 Association for Computational Linguistics
+NNS VBD IN NN ♦
+Payrolls fell in September .
+</note>
+<equation confidence="0.992716384615385">
+0
+� �� �
+P = (1 − PSTOP(0, L, T)) X PATTACH(0, L, VBD)
+X (1 − PSTOP(VBD, L, T)) X PATTACH(VBD, L, NNS)
+X (1 − PSTOP(VBD, R, T)) X PATTACH(VBD, R, IN)
+X (1 − PSTOP(IN, R, T)) X PATTACH(IN, R, NN)
+X PSTOP(VBD, L, F) X PSTOP(VBD, R, F)
+X PSTOP(NNS, L, T) X PSTOP(NNS, R, T)
+X PSTOP(IN, L, T) X PSTOP(IN, R, F)
+X PSTOP(NN, L, T) X PSTOP(NN, R, T)
+X PSTOP(0, L, F)
+� �� �
+1 1
+</equation>
+<figureCaption confidence="0.921339">
+Figure 1: A dependency structure for a short WSJ sen-
+tence and its probability, factored by the DMV, using gold
+tags, after summing out PORDaR (Spitkovsky et al., 2009).
+</figureCaption>
+<sectionHeader confidence="0.995522" genericHeader="introduction">
+2 Methodology
+</sectionHeader>
+<bodyText confidence="0.99988225">
+In all experiments, we model the English grammar
+via Klein and Manning’s (2004) Dependency Model
+with Valence (DMV), induced from subsets of not-
+too-long sentences of the Wall Street Journal (WSJ).
+</bodyText>
+<subsectionHeader confidence="0.624116">
+2.1 The Model
+</subsectionHeader>
+<bodyText confidence="0.9999205">
+The original DMV is a single-state head automata
+model (Alshawi, 1996) over lexical word classes
+{cw} — gold part-of-speech tags. Its generative story
+for a sub-tree rooted at a head (of class ch) rests on
+three types of independent decisions: (i) initial di-
+rection dir E {L, R} in which to attach children, via
+probability PORDaR(ch); (ii) whether to seal dir, stop-
+ping with probability PSTOP(ch, dir, adj), conditioned
+on adj E {T, F} (true iff considering dir’s first, i.e., ad-
+jacent, child); and (iii) attachments (of class ca), ac-
+cording to PATTACH(ch, dir, ca). This recursive process
+produces only projective trees. A root token Q gen-
+erates the head of the sentence as its left (and only)
+child (see Figure 1 for a simple, concrete example).
+</bodyText>
+<subsectionHeader confidence="0.999626">
+2.2 Learning Algorithms
+</subsectionHeader>
+<bodyText confidence="0.999793">
+The DMV lends itself to unsupervised learning via
+inside-outside re-estimation (Baker, 1979). Klein
+and Manning (2004) initialized their system using an
+“ad-hoc harmonic” completion, followed by training
+using 40 steps of EM (Klein, 2005). We reproduce
+this set-up, iterating without actually verifying con-
+vergence, in most of our experiments (#1–4, §3–4).
+Experiments #5–6 (§5) employ our new state-of-
+the-art grammar inducer (Spitkovsky et al., 2011),
+which uses constrained Viterbi EM (details in §5).
+</bodyText>
+<subsectionHeader confidence="0.999684">
+2.3 Training Data
+</subsectionHeader>
+<bodyText confidence="0.999982294117647">
+The DMV is usually trained on a customized sub-
+set of Penn English Treebank’s Wall Street Jour-
+nal portion (Marcus et al., 1993). Following Klein
+and Manning (2004), we begin with reference con-
+stituent parses, prune out all empty sub-trees and
+remove punctuation and terminals (tagged # and $)
+that are not pronounced where they appear. We then
+train only on the remaining sentence yields consist-
+ing of no more than fifteen tokens (WSJ15), in most
+of our experiments (#1–4, §3–4); by contrast, Klein
+and Manning’s (2004) original system was trained
+using less data: sentences up to length ten (WSJ10).1
+Our final experiments (#5–6, §5) employ a simple
+scaffolding strategy (Spitkovsky et al., 2010a) that
+follows up initial training at WSJ15 (“less is more”)
+with an additional training run (“leapfrog”) that in-
+corporates most sentences of the data set, at WSJ45.
+</bodyText>
+<subsectionHeader confidence="0.796519">
+2.4 Evaluation Methods
+</subsectionHeader>
+<bodyText confidence="0.969536208333333">
+Evaluation is against the training set, as is standard
+practice in unsupervised learning, in part because
+Klein and Manning (2004, §3) did not smooth the
+DMV (Klein, 2005, §6.2). For most of our experi-
+ments (#1–4, §3–4), this entails starting with the ref-
+erence trees from WSJ15 (as modified in §2.3), au-
+tomatically converting their labeled constituents into
+unlabeled dependencies using deterministic “head-
+percolation” rules (Collins, 1999), and then com-
+puting (directed) dependency accuracy scores of the
+corresponding induced trees. We report overall per-
+centages of correctly guessed arcs, including the
+arcs from sentence root symbols, as is standard prac-
+tice (Paskin, 2001; Klein and Manning, 2004).
+For a meaningful comparison with previous work,
+we also test some of the models from our earlier ex-
+periments (#1,3) — and both models from final ex-
+periments (#5,6) — against Section 23 of WSJ∞, af-
+ter applying Laplace (a.k.a. “add one”) smoothing.
+1WSJ15 contains 15,922 sentences up to length fifteen (a to-
+tal of 163,715 tokens, not counting punctuation) — versus 7,422
+sentences of at most ten words (only 52,248 tokens) comprising
+WSJ10 — and is a better trade-off between the quantity and
+complexity of training data in WSJ (Spitkovsky et al., 2009).
+</bodyText>
+<equation confidence="0.992207">
+X PSTOP(0, R, T)
+� �� �
+.
+</equation>
+<page confidence="0.975349">
+1282
+</page>
+<table confidence="0.99876025">
+token mfc mfp ua
+it {PRP} {PRP} {PRP}
+gains {NNS} {VBZ, NNS} {VBZ, NNS}
+the {DT} {JJ, DT} {VBP, NNP, NN, JJ, DT, CD}
+</table>
+<tableCaption confidence="0.966314">
+Table 2: Example most frequent class, most frequent pair
+and union all reassignments for tokens it, the and gains.
+</tableCaption>
+<figure confidence="0.994121864864865">
+Viable
+Groups
+36
+34
+160
+328
+Accuracy
+1. manual tags Unsupervised
+50.7
+47.2
+40.4
+44.3
+2. tagless lexicalized models
+full 25.8
+partial 29.3
+none 30.7
+Sky
+78.0
+74.5
+76.4
+78.4
+97.3
+60.5
+24.5
+gold
+mfc
+mfp
+ua
+49,180
+176
+1
+3. tags from a flat (Clark, 2000) clustering
+47.8 83.8 197
+4. prefixes of a hierarchical (Brown et al., 1992) clustering
+first 7 bits 46.4 73.9 96
+8 bits 48.0 77.8 165
+9 bits 46.8 82.3 262
+</figure>
+<tableCaption confidence="0.917211666666667">
+Table 1: Directed accuracies for the “less is more” DMV,
+trained on WSJ15 (after 40 steps of EM) and evaluated
+also against WSJ15, using various lexical categories in
+place of gold part-of-speech tags. For each tag-set, we
+include its effective number of (non-empty) categories in
+WSJ15 and the oracle skylines (supervised performance).
+</tableCaption>
+<sectionHeader confidence="0.922713" genericHeader="method">
+3 Motivation and Ablative Analyses
+</sectionHeader>
+<bodyText confidence="0.999979090909091">
+The concepts of polysemy and synonymy are of fun-
+damental importance in linguistics. For words that
+can take on multiple parts of speech, knowing the
+gold tag can reduce ambiguity, improving parsing by
+limiting the search space. Furthermore, pooling the
+statistics of words that play similar syntactic roles,
+as signaled by shared gold part-of-speech tags, can
+simplify the learning task, improving generalization
+by reducing sparsity. We begin with two sets of ex-
+periments that explore the impact that each of these
+factors has on grammar induction with the DMV.
+</bodyText>
+<subsectionHeader confidence="0.999099">
+3.1 Experiment #1: Human-Annotated Tags
+</subsectionHeader>
+<bodyText confidence="0.999929">
+Our first set of experiments attempts to isolate the
+effect that replacing gold part-of-speech tags with
+deterministic one class per word mappings has on
+performance, quantifying the cost of switching to a
+monosemous clustering (see Table 1: manual; and
+Table 4). Grammar induction with gold tags scores
+50.7%, while the oracle skyline (an ideal, supervised
+instance of the DMV) could attain 78.0% accuracy.
+It may be worth noting that only 6,620 (13.5%) of
+49,180 unique tokens in WSJ appear with multiple
+part-of-speech tags. Most words, like it, are always
+tagged the same way (5,768 times PRP). Some words,
+like gains, usually serve as one part of speech (227
+times NNS, as in the gains) but are occasionally used
+differently (5 times VBZ, as in he gains). Only 1,322
+tokens (2.7%) appear with three or more different
+gold tags. However, this minority includes the most
+frequent word — the (50,959 times DT, 7 times JJ,
+6 times NNP and once as each of CD, NN and VBP).2
+We experimented with three natural reassign-
+ments of part-of-speech categories (see Table 2).
+The first, most frequent class (mfc), simply maps
+each token to its most common gold tag in the entire
+WSJ (with ties resolved lexicographically). This ap-
+proach discards two gold tags (types PDT and RBR are
+not most common for any of the tokens in WSJ15)
+and costs about three-and-a-half points of accuracy,
+in both supervised and unsupervised regimes.
+Another reassignment, union all (ua), maps each
+token to the set of all of its observed gold tags, again
+in the entire WSJ. This inflates the number of group-
+ings by nearly a factor of ten (effectively lexicaliz-
+ing the most ambiguous words),3 yet improves the
+oracle skyline by half-a-point over actual gold tags;
+however, learning is harder with this tag-set, losing
+more than six points in unsupervised training.
+Our last reassignment, most frequent pair (mfp),
+allows up to two of the most common tags into
+a token’s label set (with ties, once again, resolved
+lexicographically). This intermediate approach per-
+forms strictly worse than union all, in both regimes.
+</bodyText>
+<subsectionHeader confidence="0.999414">
+3.2 Experiment #2: Lexicalization Baselines
+</subsectionHeader>
+<bodyText confidence="0.999981">
+Our next set of experiments assesses the benefits of
+categorization, turning to lexicalized baselines that
+avoid grouping words altogether. All three models
+discussed below estimated the DMV without using
+the gold tags in any way (see Table 1: lexicalized).
+</bodyText>
+<footnote confidence="0.962649333333333">
+2Some of these are annotation errors in the treebank (Banko
+and Moore, 2004, Figure 2): such (mis)taggings can severely
+degrade the accuracy of part-of-speech disambiguators, without
+additional supervision (Banko and Moore, 2004, §5, Table 1).
+3Kupiec (1992) found that the 50,000-word vocabulary of
+the Brown corpus similarly reduces to ∼400 ambiguity classes.
+</footnote>
+<page confidence="0.975814">
+1283
+</page>
+<bodyText confidence="0.9999325">
+First, not surprisingly, a fully-lexicalized model
+over nearly 50,000 unique words is able to essen-
+tially memorize the training set, supervised. (With-
+out smoothing, it is possible to deterministically at-
+tach most rare words in a dependency tree correctly,
+etc.) Of course, local search is unlikely to find good
+instantiations for so many parameters, causing unsu-
+pervised accuracy for this model to drop in half.
+For our next experiment, we tried an intermediate,
+partially-lexicalized approach. We mapped frequent
+words — those seen at least 100 times in the training
+corpus (Headden et al., 2009) — to their own indi-
+vidual categories, lumping the rest into a single “un-
+known” cluster, for a total of under 200 groups. This
+model is significantly worse for supervised learn-
+ing, compared even with the monosemous clusters
+derived from gold tags; yet it is only slightly more
+learnable than the broken fully-lexicalized variant.
+Finally, for completeness, we trained a model that
+maps every token to the same one “unknown” cat-
+egory. As expected, such a trivial “clustering” is
+ineffective in supervised training; however, it out-
+performs both lexicalized variants unsupervised,4
+strongly suggesting that lexicalization alone may be
+insufficient for the DMV and hinting that some de-
+gree of categorization is essential to its learnability.
+</bodyText>
+<figureCaption confidence="0.8444652">
+Cluster #173 Cluster #188
+open 1. get
+free 2. make
+further 3. take
+higher 4. find
+lower 5. give
+similar 6. keep
+leading 7. pay
+present 8. buy
+growing 9. win
+increased 10. sell
+... ...
+37. cool 42. improve
+... ...
+1,688. up-wind 2,105. zero-out
+</figureCaption>
+<tableCaption confidence="0.6466894">
+Table 3: Representative members for two of the flat word
+groupings: cluster #173 (left) contains adjectives, espe-
+cially ones that take comparative (or other) complements;
+cluster #188 comprises bare-stem verbs (infinitive stems).
+(Of course, many of the words have other syntactic uses.)
+</tableCaption>
+<footnote confidence="0.666008">
+4Note that it also beats supervised training. That isn’t a bug:
+Spitkovsky et al. (2010b, §7.2) explain this paradox in the DMV.
+</footnote>
+<note confidence="0.361372">
+4 Grammars over Induced Word Clusters
+</note>
+<bodyText confidence="0.9999938">
+We have demonstrated the need for grouping simi-
+lar words, estimated a bound on performance losses
+due to monosemous clusterings and are now ready
+to experiment with induced part-of-speech tags. We
+use two sets of established, publicly-available hard
+clustering assignments, each computed from a much
+larger data set than WSJ (approximately a million
+words). The first is a flat mapping (200 clusters)
+constructed by training Clark’s (2000) distributional
+similarity model over several hundred million words
+from the British National and the English Gigaword
+corpora.5 The second is a hierarchical clustering —
+binary strings up to eighteen bits long — constructed
+by running Brown et al.’s (1992) algorithm over 43
+million words from the BLLIP corpus, minus WSJ.6
+</bodyText>
+<subsectionHeader confidence="0.962886">
+4.1 Experiment #3: A Flat Word Clustering
+</subsectionHeader>
+<bodyText confidence="0.999942166666667">
+Our main purely unsupervised results are with a flat
+clustering (Clark, 2000) that groups words having
+similar context distributions, according to Kullback-
+Leibler divergence. (A word’s context is an ordered
+pair: its left- and right-adjacent neighboring words.)
+To avoid overfitting, we employed an implemen-
+tation from previous literature (Finkel and Manning,
+2009). The number of clusters (200) and the suf-
+ficient amount of training data (several hundred-
+million words) were tuned to a task (NER) that is
+not directly related to dependency parsing. (Table 3
+shows representative entries for two of the clusters.)
+We added one more category (#0) for unknown
+words. Now every token in WSJ could again be re-
+placed by a coarse identifier (one of at most 201,
+instead of just 36), in both supervised and unsuper-
+vised training. (Our training code did not change.)
+The resulting supervised model, though not as
+good as the fully-lexicalized DMV, was more than
+five points more accurate than with gold part-of-
+speech tags (see Table 1: flat). Unsupervised accu-
+racy was lower than with gold tags (see also Table 4)
+but higher than with all three derived hard assign-
+ments. This suggests that polysemy (i.e., ability to
+</bodyText>
+<footnote confidence="0.9962172">
+5http://nlp.stanford.edu/software/
+stanford-postagger-2008-09-28.tar.gz:
+models/egw.bnc.200
+6http://people.csail.mit.edu/maestro/papers/
+bllip-clusters.gz
+</footnote>
+<page confidence="0.978233">
+1284
+</page>
+<figure confidence="0.996030571428572">
+40
+60
+20
+80
+%
+none
+none
+k = 1 2 3 4 5 6 7 8 9 10 11 12 – 18 bits
+gold ua
+mfc mfp
+gold
+mfc
+partial
+partial
+mfp
+flat
+flat
+ua
+full
+full
+1 4 16 64 256 1,024 (# of clusters) 49,180
+</figure>
+<figureCaption confidence="0.998735">
+Figure 2: Parsing performance (accuracy on WSJ15) as a “function” of the number of syntactic categories, for all prefix
+</figureCaption>
+<bodyText confidence="0.9579845">
+lengths — k E 11, ... ,18} — of a hierarchical (Brown et al., 1992) clustering, connected by solid lines (dependency
+grammar induction in blue; supervised oracle skylines in red, above). Tagless lexicalized models (full, partial and
+none) connected by dashed lines. Models based on gold part-of-speech tags, and derived monosemous clusters (mfc,
+mfp and ua), shown as vertices of gold polygons. Models based on a flat (Clark, 2000) clustering indicated by squares.
+tag a word differently in context) may be the primary
+advantage of manually constructed categorizations.
+</bodyText>
+<subsectionHeader confidence="0.951192">
+4.2 Experiment #4: A Hierarchical Clustering
+</subsectionHeader>
+<bodyText confidence="0.999983">
+The purpose of this batch of experiments is to show
+that Clark’s (2000) algorithm isn’t unique in its suit-
+ability for grammar induction. We found that Brown
+et al.’s (1992) older information-theoretic approach,
+which does not explicitly address the problems of
+rare and ambiguous words (Clark, 2000) and was de-
+signed to induce large numbers of plausible syntac-
+tic and semantic clusters, can perform just as well.
+Once again, the sufficient amount of data (43 mil-
+lion words) was tuned in earlier work (Koo, 2010).
+His task of interest was, in fact, dependency parsing.
+But since this algorithm is hierarchical (i.e., there
+isn’t a parameter for the number of categories), we
+doubt that there was a strong enough risk of overfit-
+ting to question the clustering’s unsupervised nature.
+As there isn’t a set number of categories, we used
+binary prefixes of length k from each word’s address
+in the computed hierarchy as cluster labels. Results
+for 7 &lt; k &lt; 9 bits (approximately 100–250 non-
+empty clusters, close to the 200 we used before) are
+similar to those of flat clusters (see Table 1: hierar-
+chical). Outside of this range, however, performance
+can be substantially worse (see Figure 2), consistent
+with earlier findings: Headden et al. (2008) demon-
+strated that (constituent) grammar induction, using
+the singular-value decomposition (SVD-based) tag-
+ger of Sch¨utze (1995), also works best with 100–200
+clusters. Important future research directions may
+include learning to automatically select a good num-
+ber of word categories (in the case of flat clusterings)
+and ways of using multiple clustering assignments,
+perhaps of different granularities/resolutions, in tan-
+dem (e.g., in the case of a hierarchical clustering).
+</bodyText>
+<subsectionHeader confidence="0.994525">
+4.3 Further Evaluation
+</subsectionHeader>
+<bodyText confidence="0.999829888888889">
+It is important to enable easy comparison with pre-
+vious and future work. Since WSJ15 is not a stan-
+dard test set, we evaluated two key experiments —
+“less is more” with gold part-of-speech tags (#1, Ta-
+ble 1: gold) and with Clark’s (2000) clusters (#3, Ta-
+ble 1: flat) — on all sentences (not just length fifteen
+and shorter), in Section 23 of WSJ (see Table 4).
+This required smoothing both final models (§2.4).
+We showed that two classic unsupervised word
+</bodyText>
+<page confidence="0.989639">
+1285
+</page>
+<note confidence="0.708084">
+System Description Accuracy
+#1 (§3.1) “less is more” (Spitkovsky et al., 2009) 44.0
+#3 (§4.1) “less is more” with monosemous induced tags 41.4 (-2.6)
+</note>
+<tableCaption confidence="0.996491">
+Table 4: Directed accuracies on Section 23 of WSJ (all sentences) for two experiments with the base system.
+</tableCaption>
+<bodyText confidence="0.999115666666667">
+clusterings — one flat and one hierarchical — can
+be better for dependency grammar induction than
+monosemous syntactic categories derived from gold
+part-of-speech tags. And we confirmed that the un-
+supervised tags are worse than the actual gold tags,
+in a simple dependency grammar induction system.
+</bodyText>
+<sectionHeader confidence="0.979598" genericHeader="method">
+5 State-of-the-Art without Gold Tags
+</sectionHeader>
+<bodyText confidence="0.999977242424242">
+Until now, we have deliberately kept our experimen-
+tal methods simple and nearly identical to Klein and
+Manning’s (2004), for clarity. Next, we will explore
+how our main findings generalize beyond this toy
+setting. A preliminary test will simply quantify the
+effect of replacing gold part-of-speech tags with the
+monosemous flat clustering (as in experiment #3,
+§4.1) on a modern grammar inducer. And our last
+experiment will gauge the impact of using a polyse-
+mous (but still unsupervised) clustering instead, ob-
+tained by executing standard sequence labeling tech-
+niques to introduce context-sensitivity into the origi-
+nal (independent) assignment or words to categories.
+These final experiments are with our latest state-
+of-the-art system (Spitkovsky et al., 2011) — a par-
+tially lexicalized extension of the DMV that uses
+constrained Viterbi EM to train on nearly all of the
+data available in WSJ, at WSJ45 (48,418 sentences;
+986,830 non-punctuation tokens). The key contribu-
+tion that differentiates this model from its predeces-
+sors is that it incorporates punctuation into grammar
+induction (by turning it into parsing constraints, in-
+stead of ignoring punctuation marks altogether). In
+training, the model makes a simplifying assumption
+— that sentences can be split at punctuation and that
+the resulting fragments of text could be parsed inde-
+pendently of one another (these parsed fragments are
+then reassembled into full sentence trees, by pars-
+ing the sequence of their own head words). Fur-
+thermore, the model continues to take punctuation
+marks into account in inference (using weaker, more
+accurate constraints, than in training). This system
+scores 58.4% on Section 23 of WSJ∞ (see Table 5).
+</bodyText>
+<subsectionHeader confidence="0.97469">
+5.1 Experiment #5: A Monosemous Clustering
+</subsectionHeader>
+<bodyText confidence="0.999984904761905">
+As in experiment #3 (§4.1), we modified the base
+system in exactly one way: we swapped out gold
+part-of-speech tags and replaced them with a flat dis-
+tributional similarity clustering. In contrast to sim-
+pler models, which suffer multi-point drops in ac-
+curacy from switching to unsupervised tags (e.g.,
+2.6%), our new system’s performance degrades only
+slightly, by 0.2% (see Tables 4 and 5). This result
+improves over substantial performance degradations
+previously observed for unsupervised dependency
+parsing with induced word categories (Klein and
+Manning, 2004; Headden et al., 2008, inter alia).7
+One risk that arises from using gold tags is that
+newer systems could be finding cleverer ways to ex-
+ploit manual labels (i.e., developing an over-reliance
+on gold tags) instead of actually learning to acquire
+language. Part-of-speech tags are known to contain
+significant amounts of information for unlabeled de-
+pendency parsing (McDonald et al., 2011, §3.1), so
+we find it reassuring that our latest grammar inducer
+is less dependent on gold tags than its predecessors.
+</bodyText>
+<subsectionHeader confidence="0.99359">
+5.2 Experiment #6: A Polysemous Clustering
+</subsectionHeader>
+<bodyText confidence="0.9999454">
+Results of experiments #1 and 3 (§3.1, 4.1) suggest
+that grammar induction stands to gain from relaxing
+the one class per word assumption. We next test this
+conjecture by inducing a polysemous unsupervised
+word clustering, then using it to induce a grammar.
+Previous work (Headden et al., 2008, §4) found
+that simple bitag hidden Markov models, classically
+trained using the Baum-Welch (Baum, 1972) variant
+of EM (HMM-EM), perform quite well,8 on aver-
+age, across different grammar induction tasks. Such
+sequence models incorporate a sensitivity to context
+via state transition probabilities PTRAN(ti  |ti−1), cap-
+turing the likelihood that a tag ti immediately fol-
+lows the tag ti−1; emission probabilities PElnT(wi  |ti)
+capture the likelihood that a word of type ti is wi.
+</bodyText>
+<footnote confidence="0.997521">
+7We also briefly comment on this result in the “punctuation”
+paper (Spitkovsky et al., 2011, §7), published concurrently.
+8They are also competitive with Bayesian estimators, on
+larger data sets, with cross-validation (Gao and Johnson, 2008).
+</footnote>
+<page confidence="0.951342">
+1286
+</page>
+<table confidence="0.95979575">
+System Description Accuracy
+(§5) “punctuation” (Spitkovsky et al., 2011) 58.4
+#5 (§5.1) “punctuation” with monosemous induced tags 58.2 (-0.2)
+#6 (§5.2) “punctuation” with context-sensitive induced tags 59.1 (+0.7)
+</table>
+<tableCaption confidence="0.997618">
+Table 5: Directed accuracies on Section 23 of WSJ (all sentences) for experiments with the state-of-the-art system.
+</tableCaption>
+<bodyText confidence="0.942138941176471">
+We need a context-sensitive tagger, and HMM
+models are good — relative to other tag-inducers.
+However, they are not better than gold tags, at least
+when trained using a modest amount of data.9 For
+this reason, we decided to relax the monosemous
+flat clustering, plugging it in as an initializer for the
+HMM. The main problem with this approach is that,
+at least without smoothing, every monosemous la-
+beling is trivially at a local optimum, since P(ti  |wi)
+is deterministic. To escape the initial assignment,
+we used a “noise injection” technique (Selman et
+al., 1994), inspired by the contexts of Clark (2000).
+First, we collected the MLE statistics for PR(ti+1  |ti)
+and PL(ti  |ti+1) in WSJ, using the flat monosemous
+tags. Next, we replicated the text of WSJ 100-fold.
+Finally, we retagged this larger data set, as follows:
+with probability 80%, a word kept its monosemous
+tag; with probability 10%, we sampled a new tag
+from the left context (PL) associated with the origi-
+nal (monosemous) tag of its rightmost neighbor; and
+with probability 10%, we drew a tag from the right
+context (PR) of its leftmost neighbor.10 Given that
+our initializer — and later the input to the grammar
+inducer — are hard assignments of tags to words, we
+opted for (the faster and simpler) Viterbi training.
+In the spirit of reproducibility, we again used an
+off-the-shelf component for tagging-related work.11
+Viterbi training converged after just 17 steps, re-
+placing the original monosemous tags for 22,280 (of
+1,028,348 non-punctuation) tokens in WSJ. For ex-
+9All of Headden et al.’s (2008) grammar induction experi-
+ments with induced parts-of-speech were worse than their best
+results using gold part-of-speech tags, most likely because they
+used a very small corpus (half of WSJ10) to cluster words.
+</bodyText>
+<footnote confidence="0.9163865">
+10We chose the sampling split (80:10:10) and replication pa-
+rameter (100) somewhat arbitrarily, so better results could likely
+be obtained with tuning. However, we suspect that the real gains
+would come from using soft clustering techniques (Hinton and
+Roweis, 2003; Pereira et al., 1993, inter alia) and propagating
+(joint) estimates of tag distributions into a parser. Our ad-hoc
+approach is intended to serve solely as a proof of concept.
+11David Elworthy’s C+ tagger, with options -i t -G -l,
+available from http://friendly-moose.appspot.com/
+code/NewCpTag.zip.
+</footnote>
+<bodyText confidence="0.997647611111111">
+ample, the first changed sentence is #3 (of 49,208):
+Some “circuit breakers” installed after
+the October 1987 crash failed their first
+test, traders say, unable to cool the selling
+panic in both stocks and futures.
+Above, the word cool gets relabeled as #188 (from
+#173 — see Table 3), since its context is more
+suggestive of an infinitive verb than of its usual
+grouping with adjectives. (A proper analysis of all
+changes, however, is beyond the scope of this work.)
+Using this new context-sensitive hard assignment
+of tokens to unsupervised categories our gram-
+mar inducer attained a directed accuracy of 59.1%,
+nearly a full point better than with the monosemous
+hard assignment (see Table 5). To the best of our
+knowledge it is also the first state-of-the-art unsuper-
+vised dependency parser to perform better with in-
+duced categories than with gold part-of-speech tags.
+</bodyText>
+<sectionHeader confidence="0.9999" genericHeader="method">
+6 Related Work
+</sectionHeader>
+<bodyText confidence="0.986811722222222">
+Early work in dependency grammar induction al-
+ready relied on gold part-of-speech tags (Carroll and
+Charniak, 1992). Some later models (Yuret, 1998;
+Paskin, 2001, inter alia) attempted full lexicaliza-
+tion. However, Klein and Manning (2004) demon-
+strated that effort to be worse at recovering depen-
+dency arcs than choosing parse structures at random,
+leading them to incorporate gold tags into the DMV.
+Klein and Manning (2004, §5, Figure 6) had also
+tested their own models with induced word classes,
+constructed using a distributional similarity cluster-
+ing method (Sch¨utze, 1995). Without gold part-of-
+speech tags, their combined DMV+CCM model was
+about five points worse, both in (directed) unlabeled
+dependency accuracy (42.3% vs. 47.5%)12 and unla-
+beled bracketing F1 (72.9% vs. 77.6%), on WSJ10.
+In constituent parsing, earlier Seginer (2007a, §6,
+Table 1) built a fully-lexicalized grammar inducer
+</bodyText>
+<footnote confidence="0.941383">
+12On the same evaluation set (WSJ10), our context-sensitive
+system without gold tags (Experiment #6, §5.2) scores 66.8%.
+</footnote>
+<page confidence="0.993113">
+1287
+</page>
+<bodyText confidence="0.998640020408163">
+that was competitive with DMV+CCM despite not
+using gold tags. His CCL parser has since been
+improved via a “zoomed learning” technique (Re-
+ichart and Rappoport, 2010). Moreover, Abend et
+al. (2010) reused CCL’s internal distributional rep-
+resentation of words in a cognitively-motivated part-
+of-speech inducer. Unfortunately their tagger did
+not make it into Christodoulopoulos et al.’s (2010)
+excellent and otherwise comprehensive evaluation.
+Outside monolingual grammar induction, fully-
+lexicalized statistical dependency transduction mod-
+els have been trained from unannotated parallel bi-
+texts for machine translation (Alshawi et al., 2000).
+More recently, McDonald et al. (2011) demonstrated
+an impressive alternative to grammar induction by
+projecting reference parse trees from languages that
+have annotations to ones that are resource-poor.13 It
+uses graph-based label propagation over a bilingual
+similarity graph for a sentence-aligned parallel cor-
+pus (Das and Petrov, 2011), inducing part-of-speech
+tags from a universal tag-set (Petrov et al., 2011).
+Even in supervised parsing we are starting to see
+a shift away from using gold tags. For example,
+Alshawi et al. (2011) demonstrated good results for
+mapping text to underspecified semantics via depen-
+dencies without resorting to gold tags. And Petrov et
+al. (2010, §4.4, Table 4) observed only a small per-
+formance loss “going POS-less” in question parsing.
+We are not aware of any systems that induce both
+syntactic trees and their part-of-speech categories.
+However, aside from the many systems that induce
+trees from gold tags, there are also unsupervised
+methods for inducing syntactic categories from gold
+trees (Finkel et al., 2007; Pereira et al., 1993), as
+well as for inducing dependencies from gold con-
+stituent annotations (Sangati and Zuidema, 2009;
+Chiang and Bikel, 2002). Considering that Headden
+et al.’s (2008) study of part-of-speech taggers found
+no correlation between standard tagging metrics and
+the quality of induced grammars, it may be time for
+a unified treatment of these very related syntax tasks.
+13When the target language is English, however, their best ac-
+curacy (projected from Greek) is low: 45.7% (McDonald et al.,
+2011, §4, Table 2); tested on the same CoNLL 2007 evaluation
+set (Nivre et al., 2007), our “punctuation” system with context-
+sensitive induced tags (trained on WSJ45, without gold tags)
+performs substantially better, scoring 51.6%. Note that this is
+also an improvement over our system trained on the CoNLL set
+using gold tags: 50.3% (Spitkovsky et al., 2011, §8, Table 6).
+</bodyText>
+<sectionHeader confidence="0.980615" genericHeader="discussions">
+7 Discussion and Conclusions
+</sectionHeader>
+<bodyText confidence="0.998417977777778">
+Unsupervised word clustering techniques of Brown
+et al. (1992) and Clark (2000) are well-suited to de-
+pendency parsing with the DMV. Both methods out-
+perform gold parts-of-speech in supervised modes.
+And both can do better than monosemous clusters
+derived from gold tags in unsupervised training. We
+showed how Clark’s (2000) flat tags can be relaxed,
+using context, with the resulting polysemous cluster-
+ing outperforming gold part-of-speech tags for the
+English dependency grammar induction task.
+Monolingual evaluation is a significant flaw in our
+methodology, however. One (of many) take-home
+points made in Christodoulopoulos et al.’s (2010)
+study is that results on one language do not neces-
+sarily correlate with other languages.14 Assuming
+that our results do generalize, it will still remain to
+remove the present reliance on gold tokenization and
+sentence boundary labels. Nevertheless, we feel that
+eliminating gold tags is an important step towards
+the goal of fully-unsupervised dependency parsing.
+We have cast the utility of a categorization scheme
+as a combination of two effects on parsing accuracy:
+a synonymy effect and a polysemy effect. Results
+of our experiments with both full and partial lexi-
+calization suggest that grouping similar words (i.e.,
+synonymy) is vital to grammar induction with the
+DMV. This is consistent with an established view-
+point, that simple tabulation of frequencies of words
+participating in certain configurations cannot be reli-
+ably used for comparing their likelihoods (Pereira et
+al., 1993, §4.2): “The statistics of natural languages
+is inherently ill defined. Because of Zipf’s law, there
+is never enough data for a reasonable estimation of
+joint object distributions.” Seginer’s (2007b, §1.4.4)
+argument, however, is that the Zipfian distribution
+— a property of words, not parts-of-speech —
+should allow frequent words to successfully guide
+14Furthermore, it would be interesting to know how sensitive
+different head-percolation schemes (Yamada and Matsumoto,
+2003; Johansson and Nugues, 2007) would be to gold versus
+unsupervised tags, since the Magerman-Collins rules (Mager-
+man, 1995; Collins, 1999) agree with gold dependency annota-
+tions only 85% of the time, even for WSJ (Sangati and Zuidema,
+2009). Proper intrinsic evaluation of dependency grammar in-
+ducers is not yet a solved problem (Schwartz et al., 2011).
+</bodyText>
+<page confidence="0.971712">
+1288
+</page>
+<bodyText confidence="0.999989675675675">
+parsing and learning: “A relatively small number of
+frequent words appears almost everywhere and most
+words are never too far from such a frequent word
+(this is also the principle behind successful part-of-
+speech induction).” We believe that it is important to
+thoroughly understand how to reconcile these only
+seemingly conflicting insights, balancing them both
+in theory and in practice. A useful starting point may
+be to incorporate frequency information in the pars-
+ing models directly — in particular, capturing the
+relationships between words of various frequencies.
+The polysemy effect appears smaller but is less
+controversial: Our experiments suggest that the pri-
+mary drawback of the classic clustering schemes
+stems from their one class per word nature — and
+not a lack of supervision, as may be widely believed.
+Monosemous groupings, even if they are themselves
+derived from human-annotated syntactic categories,
+simply cannot disambiguate words the way gold tags
+can. By relaxing Clark’s (2000) flat clustering, us-
+ing contextual cues, we improved dependency gram-
+mar induction: directed accuracy on Section 23 (all
+sentences) of the WSJ benchmark increased from
+58.2% to 59.1% — from slightly worse to better than
+with gold tags (58.4%, previous state-of-the-art).
+Since Clark’s (2000) word clustering algorithm is
+already context-sensitive in training, we suspect that
+one could do better simply by preserving the polyse-
+mous nature of its internal representation. Importing
+the relevant distributions into a sequence tagger di-
+rectly would make more sense than going through an
+intermediate monosemous summary. And exploring
+other uses of soft clustering algorithms — perhaps as
+inputs to part-of-speech disambiguators — may be
+another fruitful research direction. We believe that
+a joint treatment of grammar and parts-of-speech in-
+duction could fuel major advances in both tasks.
+</bodyText>
+<sectionHeader confidence="0.998301" genericHeader="acknowledgments">
+Acknowledgments
+</sectionHeader>
+<bodyText confidence="0.9895248">
+Partially funded by the Air Force Research Laboratory (AFRL),
+under prime contract no. FA8750-09-C-0181, and by NSF, via
+award #IIS-0811974. We thank Omri Abend, Spence Green,
+David McClosky and the anonymous reviewers for many help-
+ful comments on draft versions of this paper.
+</bodyText>
+<sectionHeader confidence="0.989876" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.999909">
+O. Abend, R. Reichart, and A. Rappoport. 2010. Im-
+proved unsupervised POS induction through prototype
+discovery. In ACL.
+H. Alshawi, S. Bangalore, and S. Douglas. 2000. Learn-
+ing dependency translation models as collections of
+finite-state head transducers. Computational Linguis-
+tics, 26.
+H. Alshawi, P.-C. Chang, and M. Ringgaard. 2011. De-
+terministic statistical mapping of sentences to under-
+specied semantics. In IWCS.
+H. Alshawi. 1996. Head automata for speech translation.
+In ICSLP.
+J. K. Baker. 1979. Trainable grammars for speech recog-
+nition. In Speech Communication Papers for the 97th
+Meeting of the Acoustical Society ofAmerica.
+M. Banko and R. C. Moore. 2004. Part of speech tagging
+in context. In COLING.
+L. E. Baum. 1972. An inequality and associated maxi-
+mization technique in statistical estimation for proba-
+bilistic functions of Markov processes. In Inequalities.
+R. Bod. 2006. An all-subtrees approach to unsupervised
+parsing. In COLING-ACL.
+P. F. Brown, V. J. Della Pietra, P. V. deSouza, J. C. Lai,
+and R. L. Mercer. 1992. Class-based n-gram models
+of natural language. Computational Linguistics, 18.
+G. Carroll and E. Charniak. 1992. Two experiments on
+learning probabilistic dependency grammars from cor-
+pora. Technical report, Brown University.
+D. Chiang and D. M. Bikel. 2002. Recovering latent
+information in treebanks. In COLING.
+C. Christodoulopoulos, S. Goldwater, and M. Steedman.
+2010. Two decades of unsupervised POS induction:
+How far have we come? In EMNLP.
+A. Clark. 2000. Inducing syntactic categories by context
+distribution clustering. In CoNLL-LLL.
+M. Collins. 1999. Head-Driven Statistical Models for
+Natural Language Parsing. Ph.D. thesis, University
+of Pennsylvania.
+B. Cramer. 2007. Limitations of current grammar induc-
+tion algorithms. In ACL: Student Research.
+D. Das and S. Petrov. 2011. Unsupervised part-of-
+speech tagging with bilingual graph-based projections.
+In ACL.
+J. R. Finkel and C. D. Manning. 2009. Joint parsing and
+named entity recognition. In NAACL-HLT.
+J. R. Finkel, T. Grenager, and C. D. Manning. 2007. The
+infinite tree. In ACL.
+J. Gao and M. Johnson. 2008. A comparison of Bayesian
+estimators for unsupervised Hidden Markov Model
+POS taggers. In EMNLP.
+</reference>
+<page confidence="0.858176">
+1289
+</page>
+<reference confidence="0.999913166666667">
+W. P. Headden, III, D. McClosky, and E. Charniak.
+2008. Evaluating unsupervised part-of-speech tagging
+for grammar induction. In COLING.
+W. P. Headden, III, M. Johnson, and D. McClosky.
+2009. Improving unsupervised dependency parsing
+with richer contexts and smoothing. In NAACL-HLT.
+G. Hinton and S. Roweis. 2003. Stochastic neighbor
+embedding. In NIPS.
+R. Johansson and P. Nugues. 2007. Extended
+constituent-to-dependency conversion for English. In
+NODALIDA.
+D. Klein and C. D. Manning. 2004. Corpus-based induc-
+tion of syntactic structure: Models of dependency and
+constituency. In ACL.
+D. Klein. 2005. The Unsupervised Learning of Natural
+Language Structure. Ph.D. thesis, Stanford Univer-
+sity.
+T. Koo. 2010. Advances in Discriminative Dependency
+Parsing. Ph.D. thesis, MIT.
+J. Kupiec. 1992. Robust part-of-speech tagging using
+a hidden Markov model. Computer Speech and Lan-
+guage, 6.
+D. M. Magerman. 1995. Statistical decision-tree models
+for parsing. In ACL.
+M. P. Marcus, B. Santorini, and M. A. Marcinkiewicz.
+1993. Building a large annotated corpus of English:
+The Penn Treebank. Computational Linguistics, 19.
+R. McDonald, S. Petrov, and K. Hall. 2011. Multi-
+source transfer of delexicalized dependency parsers.
+In EMNLP.
+B. Merialdo. 1994. Tagging English text with a proba-
+bilistic model. Computational Linguistics, 20.
+J. Nivre, J. Hall, S. K¨ubler, R. McDonald, J. Nils-
+son, S. Riedel, and D. Yuret. 2007. The CoNLL
+2007 shared task on dependency parsing. In EMNLP-
+CoNLL.
+M. A. Paskin. 2001. Grammatical bigrams. In NIPS.
+F. Pereira, N. Tishby, and L. Lee. 1993. Distributional
+clustering of English words. In ACL.
+S. Petrov, P.-C. Chang, M. Ringgaard, and H. Alshawi.
+2010. Uptraining for accurate deterministic question
+parsing. In EMNLP.
+S. Petrov, D. Das, and R. McDonald. 2011. A universal
+part-of-speech tagset. In ArXiv.
+R. Reichart and A. Rappoport. 2010. Improved fully un-
+supervised parsing with zoomed learning. In EMNLP.
+F. Sangati and W. Zuidema. 2009. Unsupervised meth-
+ods for head assignments. In EACL.
+H. Sch¨utze. 1995. Distributional part-of-speech tagging.
+In EACL.
+R. Schwartz, O. Abend, R. Reichart, and A. Rappoport.
+2011. Neutralizing linguistically problematic annota-
+tions in unsupervised dependency parsing evaluation.
+In ACL.
+Y. Seginer. 2007a. Fast unsupervised incremental pars-
+ing. In ACL.
+Y. Seginer. 2007b. Learning Syntactic Structure. Ph.D.
+thesis, University of Amsterdam.
+B. Selman, H. A. Kautz, and B. Cohen. 1994. Noise
+strategies for improving local search. In AAAI.
+V. I. Spitkovsky, H. Alshawi, and D. Jurafsky. 2009.
+Baby Steps: How “Less is More” in unsupervised de-
+pendency parsing. In NIPS: Grammar Induction, Rep-
+resentation ofLanguage and Language Learning.
+V. I. Spitkovsky, H. Alshawi, and D. Jurafsky. 2010a.
+From Baby Steps to Leapfrog: How “Less is More” in
+unsupervised dependency parsing. In NAACL-HLT.
+V. I. Spitkovsky, H. Alshawi, D. Jurafsky, and C. D. Man-
+ning. 2010b. Viterbi training improves unsupervised
+dependency parsing. In CoNLL.
+V. I. Spitkovsky, H. Alshawi, and D. Jurafsky. 2011.
+Punctuation: Making a point in unsupervised depen-
+dency parsing. In CoNLL.
+H. Yamada and Y. Matsumoto. 2003. Statistical de-
+pendency analysis with support vector machines. In
+IWPT.
+D. Yuret. 1998. Discovery of Linguistic Relations Using
+Lexical Attraction. Ph.D. thesis, MIT.
+</reference>
+<page confidence="0.987112">
+1290
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.192498">
+<title confidence="0.963905">Unsupervised Dependency Parsing without Gold Part-of-Speech Tags</title>
+<abstract confidence="0.335802666666667">I. valentin@cs.stanford.edu hiyan@google.com X.</abstract>
+<email confidence="0.991544">angelx@cs.stanford.edujurafsky@stanford.edu</email>
+<affiliation confidence="0.9976915">Science Department Research of Linguistics Stanford University Google Inc. Stanford University</affiliation>
+<address confidence="0.9998">Stanford, CA, 94305 Mountain View, CA, 94043 Stanford, CA, 94305</address>
+<abstract confidence="0.993669291666667">We show that categories induced by unsupervised word clustering can surpass the performance of gold part-of-speech tags in dependency grammar induction. Unlike classic clustering algorithms, our method allows a word to have different tags in different contexts. In an ablative analysis, we first demonstrate that this context-dependence is crucial to the superior performance of gold tags — requiring a word to always have the same part-ofspeech significantly degrades the performance of manual tags in grammar induction, eliminating the advantage that human annotation has over unsupervised tags. We then introduce a sequence modeling technique that combines the output of a word clustering algorithm with context-colored noise, to allow words to be tagged differently in different contexts. With these new induced tags as input, our state-ofthe-art dependency grammar inducer achieves 59.1% directed accuracy on Section 23 (all sentences) of the Wall Street Journal (WSJ) corpus — 0.7% higher than using gold tags.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>O Abend</author>
+<author>R Reichart</author>
+<author>A Rappoport</author>
+</authors>
+<title>Improved unsupervised POS induction through prototype discovery.</title>
+<date>2010</date>
+<booktitle>In ACL.</booktitle>
+<contexts>
+<context position="29199" citStr="Abend et al. (2010)" startWordPosition="4645" endWordPosition="4648">ch tags, their combined DMV+CCM model was about five points worse, both in (directed) unlabeled dependency accuracy (42.3% vs. 47.5%)12 and unlabeled bracketing F1 (72.9% vs. 77.6%), on WSJ10. In constituent parsing, earlier Seginer (2007a, §6, Table 1) built a fully-lexicalized grammar inducer 12On the same evaluation set (WSJ10), our context-sensitive system without gold tags (Experiment #6, §5.2) scores 66.8%. 1287 that was competitive with DMV+CCM despite not using gold tags. His CCL parser has since been improved via a “zoomed learning” technique (Reichart and Rappoport, 2010). Moreover, Abend et al. (2010) reused CCL’s internal distributional representation of words in a cognitively-motivated partof-speech inducer. Unfortunately their tagger did not make it into Christodoulopoulos et al.’s (2010) excellent and otherwise comprehensive evaluation. Outside monolingual grammar induction, fullylexicalized statistical dependency transduction models have been trained from unannotated parallel bitexts for machine translation (Alshawi et al., 2000). More recently, McDonald et al. (2011) demonstrated an impressive alternative to grammar induction by projecting reference parse trees from languages that ha</context>
+</contexts>
+<marker>Abend, Reichart, Rappoport, 2010</marker>
+<rawString>O. Abend, R. Reichart, and A. Rappoport. 2010. Improved unsupervised POS induction through prototype discovery. In ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>H Alshawi</author>
+<author>S Bangalore</author>
+<author>S Douglas</author>
+</authors>
+<title>Learning dependency translation models as collections of finite-state head transducers.</title>
+<date>2000</date>
+<journal>Computational Linguistics,</journal>
+<volume>26</volume>
+<contexts>
+<context position="29641" citStr="Alshawi et al., 2000" startWordPosition="4702" endWordPosition="4705">ve with DMV+CCM despite not using gold tags. His CCL parser has since been improved via a “zoomed learning” technique (Reichart and Rappoport, 2010). Moreover, Abend et al. (2010) reused CCL’s internal distributional representation of words in a cognitively-motivated partof-speech inducer. Unfortunately their tagger did not make it into Christodoulopoulos et al.’s (2010) excellent and otherwise comprehensive evaluation. Outside monolingual grammar induction, fullylexicalized statistical dependency transduction models have been trained from unannotated parallel bitexts for machine translation (Alshawi et al., 2000). More recently, McDonald et al. (2011) demonstrated an impressive alternative to grammar induction by projecting reference parse trees from languages that have annotations to ones that are resource-poor.13 It uses graph-based label propagation over a bilingual similarity graph for a sentence-aligned parallel corpus (Das and Petrov, 2011), inducing part-of-speech tags from a universal tag-set (Petrov et al., 2011). Even in supervised parsing we are starting to see a shift away from using gold tags. For example, Alshawi et al. (2011) demonstrated good results for mapping text to underspecified </context>
+</contexts>
+<marker>Alshawi, Bangalore, Douglas, 2000</marker>
+<rawString>H. Alshawi, S. Bangalore, and S. Douglas. 2000. Learning dependency translation models as collections of finite-state head transducers. Computational Linguistics, 26.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>H Alshawi</author>
+<author>P-C Chang</author>
+<author>M Ringgaard</author>
+</authors>
+<title>Deterministic statistical mapping of sentences to underspecied semantics.</title>
+<date>2011</date>
+<booktitle>In IWCS.</booktitle>
+<contexts>
+<context position="30179" citStr="Alshawi et al. (2011)" startWordPosition="4783" endWordPosition="4786">ed from unannotated parallel bitexts for machine translation (Alshawi et al., 2000). More recently, McDonald et al. (2011) demonstrated an impressive alternative to grammar induction by projecting reference parse trees from languages that have annotations to ones that are resource-poor.13 It uses graph-based label propagation over a bilingual similarity graph for a sentence-aligned parallel corpus (Das and Petrov, 2011), inducing part-of-speech tags from a universal tag-set (Petrov et al., 2011). Even in supervised parsing we are starting to see a shift away from using gold tags. For example, Alshawi et al. (2011) demonstrated good results for mapping text to underspecified semantics via dependencies without resorting to gold tags. And Petrov et al. (2010, §4.4, Table 4) observed only a small performance loss “going POS-less” in question parsing. We are not aware of any systems that induce both syntactic trees and their part-of-speech categories. However, aside from the many systems that induce trees from gold tags, there are also unsupervised methods for inducing syntactic categories from gold trees (Finkel et al., 2007; Pereira et al., 1993), as well as for inducing dependencies from gold constituent</context>
+</contexts>
+<marker>Alshawi, Chang, Ringgaard, 2011</marker>
+<rawString>H. Alshawi, P.-C. Chang, and M. Ringgaard. 2011. Deterministic statistical mapping of sentences to underspecied semantics. In IWCS.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>H Alshawi</author>
+</authors>
+<title>Head automata for speech translation.</title>
+<date>1996</date>
+<booktitle>In ICSLP.</booktitle>
+<contexts>
+<context position="4858" citStr="Alshawi, 1996" startWordPosition="764" endWordPosition="765">(VBD, R, F) X PSTOP(NNS, L, T) X PSTOP(NNS, R, T) X PSTOP(IN, L, T) X PSTOP(IN, R, F) X PSTOP(NN, L, T) X PSTOP(NN, R, T) X PSTOP(0, L, F) � �� � 1 1 Figure 1: A dependency structure for a short WSJ sentence and its probability, factored by the DMV, using gold tags, after summing out PORDaR (Spitkovsky et al., 2009). 2 Methodology In all experiments, we model the English grammar via Klein and Manning’s (2004) Dependency Model with Valence (DMV), induced from subsets of nottoo-long sentences of the Wall Street Journal (WSJ). 2.1 The Model The original DMV is a single-state head automata model (Alshawi, 1996) over lexical word classes {cw} — gold part-of-speech tags. Its generative story for a sub-tree rooted at a head (of class ch) rests on three types of independent decisions: (i) initial direction dir E {L, R} in which to attach children, via probability PORDaR(ch); (ii) whether to seal dir, stopping with probability PSTOP(ch, dir, adj), conditioned on adj E {T, F} (true iff considering dir’s first, i.e., adjacent, child); and (iii) attachments (of class ca), according to PATTACH(ch, dir, ca). This recursive process produces only projective trees. A root token Q generates the head of the senten</context>
+</contexts>
+<marker>Alshawi, 1996</marker>
+<rawString>H. Alshawi. 1996. Head automata for speech translation. In ICSLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J K Baker</author>
+</authors>
+<title>Trainable grammars for speech recognition.</title>
+<date>1979</date>
+<booktitle>In Speech Communication Papers for the 97th Meeting of the Acoustical Society</booktitle>
+<contexts>
+<context position="5653" citStr="Baker, 1979" startWordPosition="895" endWordPosition="896">al direction dir E {L, R} in which to attach children, via probability PORDaR(ch); (ii) whether to seal dir, stopping with probability PSTOP(ch, dir, adj), conditioned on adj E {T, F} (true iff considering dir’s first, i.e., adjacent, child); and (iii) attachments (of class ca), according to PATTACH(ch, dir, ca). This recursive process produces only projective trees. A root token Q generates the head of the sentence as its left (and only) child (see Figure 1 for a simple, concrete example). 2.2 Learning Algorithms The DMV lends itself to unsupervised learning via inside-outside re-estimation (Baker, 1979). Klein and Manning (2004) initialized their system using an “ad-hoc harmonic” completion, followed by training using 40 steps of EM (Klein, 2005). We reproduce this set-up, iterating without actually verifying convergence, in most of our experiments (#1–4, §3–4). Experiments #5–6 (§5) employ our new state-ofthe-art grammar inducer (Spitkovsky et al., 2011), which uses constrained Viterbi EM (details in §5). 2.3 Training Data The DMV is usually trained on a customized subset of Penn English Treebank’s Wall Street Journal portion (Marcus et al., 1993). Following Klein and Manning (2004), we beg</context>
+</contexts>
+<marker>Baker, 1979</marker>
+<rawString>J. K. Baker. 1979. Trainable grammars for speech recognition. In Speech Communication Papers for the 97th Meeting of the Acoustical Society ofAmerica. M. Banko and R. C. Moore. 2004. Part of speech tagging in context. In COLING.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>L E Baum</author>
+</authors>
+<title>An inequality and associated maximization technique in statistical estimation for probabilistic functions of Markov processes.</title>
+<date>1972</date>
+<journal>In Inequalities. R. Bod.</journal>
+<booktitle>In COLING-ACL.</booktitle>
+<contexts>
+<context position="23789" citStr="Baum, 1972" startWordPosition="3800" endWordPosition="3801">nlabeled dependency parsing (McDonald et al., 2011, §3.1), so we find it reassuring that our latest grammar inducer is less dependent on gold tags than its predecessors. 5.2 Experiment #6: A Polysemous Clustering Results of experiments #1 and 3 (§3.1, 4.1) suggest that grammar induction stands to gain from relaxing the one class per word assumption. We next test this conjecture by inducing a polysemous unsupervised word clustering, then using it to induce a grammar. Previous work (Headden et al., 2008, §4) found that simple bitag hidden Markov models, classically trained using the Baum-Welch (Baum, 1972) variant of EM (HMM-EM), perform quite well,8 on average, across different grammar induction tasks. Such sequence models incorporate a sensitivity to context via state transition probabilities PTRAN(ti |ti−1), capturing the likelihood that a tag ti immediately follows the tag ti−1; emission probabilities PElnT(wi |ti) capture the likelihood that a word of type ti is wi. 7We also briefly comment on this result in the “punctuation” paper (Spitkovsky et al., 2011, §7), published concurrently. 8They are also competitive with Bayesian estimators, on larger data sets, with cross-validation (Gao and </context>
+</contexts>
+<marker>Baum, 1972</marker>
+<rawString>L. E. Baum. 1972. An inequality and associated maximization technique in statistical estimation for probabilistic functions of Markov processes. In Inequalities. R. Bod. 2006. An all-subtrees approach to unsupervised parsing. In COLING-ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>P F Brown</author>
+<author>V J Della Pietra</author>
+<author>P V deSouza</author>
+<author>J C Lai</author>
+<author>R L Mercer</author>
+</authors>
+<title>Class-based n-gram models of natural language.</title>
+<date>1992</date>
+<journal>Computational Linguistics,</journal>
+<volume>18</volume>
+<contexts>
+<context position="3132" citStr="Brown et al. (1992)" startWordPosition="459" endWordPosition="462">the focus on grammar induction with supervised part-ofspeech tags (Bod, 2006), pace (Cramer, 2007). One of several drawbacks of this practice is that it weakens any conclusions that could be drawn about how computers (and possibly humans) learn in the absence of explicit feedback (McDonald et al., 2011). In turn, not all unsupervised taggers actually induce word categories: Many systems — known as part-of-speech disambiguators (Merialdo, 1994) — rely on external dictionaries of possible tags. Our work builds on two older part-of-speech inducers — word clustering algorithms of Clark (2000) and Brown et al. (1992) — that were recently shown to be more robust than other well-known fully unsupervised techniques (Christodoulopoulos et al., 2010). We investigate which properties of gold part-ofspeech tags are useful in grammar induction and parsing, and how these properties could be introduced into induced tags. We also explore the number of word classes that is good for grammar induction: in particular, whether categorization is needed at all. By removing the “unrealistic simplification” of using gold tags (Petrov et al., 2011, §3.2, Footnote 4), we will go on to demonstrate why grammar induction from pla</context>
+<context position="8815" citStr="Brown et al., 1992" startWordPosition="1414" endWordPosition="1417">WSJ (Spitkovsky et al., 2009). X PSTOP(0, R, T) � �� � . 1282 token mfc mfp ua it {PRP} {PRP} {PRP} gains {NNS} {VBZ, NNS} {VBZ, NNS} the {DT} {JJ, DT} {VBP, NNP, NN, JJ, DT, CD} Table 2: Example most frequent class, most frequent pair and union all reassignments for tokens it, the and gains. Viable Groups 36 34 160 328 Accuracy 1. manual tags Unsupervised 50.7 47.2 40.4 44.3 2. tagless lexicalized models full 25.8 partial 29.3 none 30.7 Sky 78.0 74.5 76.4 78.4 97.3 60.5 24.5 gold mfc mfp ua 49,180 176 1 3. tags from a flat (Clark, 2000) clustering 47.8 83.8 197 4. prefixes of a hierarchical (Brown et al., 1992) clustering first 7 bits 46.4 73.9 96 8 bits 48.0 77.8 165 9 bits 46.8 82.3 262 Table 1: Directed accuracies for the “less is more” DMV, trained on WSJ15 (after 40 steps of EM) and evaluated also against WSJ15, using various lexical categories in place of gold part-of-speech tags. For each tag-set, we include its effective number of (non-empty) categories in WSJ15 and the oracle skylines (supervised performance). 3 Motivation and Ablative Analyses The concepts of polysemy and synonymy are of fundamental importance in linguistics. For words that can take on multiple parts of speech, knowing the</context>
+<context position="17196" citStr="Brown et al., 1992" startWordPosition="2760" endWordPosition="2763">her than with all three derived hard assignments. This suggests that polysemy (i.e., ability to 5http://nlp.stanford.edu/software/ stanford-postagger-2008-09-28.tar.gz: models/egw.bnc.200 6http://people.csail.mit.edu/maestro/papers/ bllip-clusters.gz 1284 40 60 20 80 % none none k = 1 2 3 4 5 6 7 8 9 10 11 12 – 18 bits gold ua mfc mfp gold mfc partial partial mfp flat flat ua full full 1 4 16 64 256 1,024 (# of clusters) 49,180 Figure 2: Parsing performance (accuracy on WSJ15) as a “function” of the number of syntactic categories, for all prefix lengths — k E 11, ... ,18} — of a hierarchical (Brown et al., 1992) clustering, connected by solid lines (dependency grammar induction in blue; supervised oracle skylines in red, above). Tagless lexicalized models (full, partial and none) connected by dashed lines. Models based on gold part-of-speech tags, and derived monosemous clusters (mfc, mfp and ua), shown as vertices of gold polygons. Models based on a flat (Clark, 2000) clustering indicated by squares. tag a word differently in context) may be the primary advantage of manually constructed categorizations. 4.2 Experiment #4: A Hierarchical Clustering The purpose of this batch of experiments is to show </context>
+<context position="31671" citStr="Brown et al. (1992)" startWordPosition="5018" endWordPosition="5021">hese very related syntax tasks. 13When the target language is English, however, their best accuracy (projected from Greek) is low: 45.7% (McDonald et al., 2011, §4, Table 2); tested on the same CoNLL 2007 evaluation set (Nivre et al., 2007), our “punctuation” system with contextsensitive induced tags (trained on WSJ45, without gold tags) performs substantially better, scoring 51.6%. Note that this is also an improvement over our system trained on the CoNLL set using gold tags: 50.3% (Spitkovsky et al., 2011, §8, Table 6). 7 Discussion and Conclusions Unsupervised word clustering techniques of Brown et al. (1992) and Clark (2000) are well-suited to dependency parsing with the DMV. Both methods outperform gold parts-of-speech in supervised modes. And both can do better than monosemous clusters derived from gold tags in unsupervised training. We showed how Clark’s (2000) flat tags can be relaxed, using context, with the resulting polysemous clustering outperforming gold part-of-speech tags for the English dependency grammar induction task. Monolingual evaluation is a significant flaw in our methodology, however. One (of many) take-home points made in Christodoulopoulos et al.’s (2010) study is that resu</context>
+</contexts>
+<marker>Brown, Pietra, deSouza, Lai, Mercer, 1992</marker>
+<rawString>P. F. Brown, V. J. Della Pietra, P. V. deSouza, J. C. Lai, and R. L. Mercer. 1992. Class-based n-gram models of natural language. Computational Linguistics, 18.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>G Carroll</author>
+<author>E Charniak</author>
+</authors>
+<title>Two experiments on learning probabilistic dependency grammars from corpora.</title>
+<date>1992</date>
+<tech>Technical report,</tech>
+<institution>Brown University.</institution>
+<contexts>
+<context position="28089" citStr="Carroll and Charniak, 1992" startWordPosition="4476" endWordPosition="4479">th adjectives. (A proper analysis of all changes, however, is beyond the scope of this work.) Using this new context-sensitive hard assignment of tokens to unsupervised categories our grammar inducer attained a directed accuracy of 59.1%, nearly a full point better than with the monosemous hard assignment (see Table 5). To the best of our knowledge it is also the first state-of-the-art unsupervised dependency parser to perform better with induced categories than with gold part-of-speech tags. 6 Related Work Early work in dependency grammar induction already relied on gold part-of-speech tags (Carroll and Charniak, 1992). Some later models (Yuret, 1998; Paskin, 2001, inter alia) attempted full lexicalization. However, Klein and Manning (2004) demonstrated that effort to be worse at recovering dependency arcs than choosing parse structures at random, leading them to incorporate gold tags into the DMV. Klein and Manning (2004, §5, Figure 6) had also tested their own models with induced word classes, constructed using a distributional similarity clustering method (Sch¨utze, 1995). Without gold part-ofspeech tags, their combined DMV+CCM model was about five points worse, both in (directed) unlabeled dependency ac</context>
+</contexts>
+<marker>Carroll, Charniak, 1992</marker>
+<rawString>G. Carroll and E. Charniak. 1992. Two experiments on learning probabilistic dependency grammars from corpora. Technical report, Brown University.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D Chiang</author>
+<author>D M Bikel</author>
+</authors>
+<title>Recovering latent information in treebanks.</title>
+<date>2002</date>
+<booktitle>In COLING.</booktitle>
+<contexts>
+<context position="30843" citStr="Chiang and Bikel, 2002" startWordPosition="4887" endWordPosition="4890">xt to underspecified semantics via dependencies without resorting to gold tags. And Petrov et al. (2010, §4.4, Table 4) observed only a small performance loss “going POS-less” in question parsing. We are not aware of any systems that induce both syntactic trees and their part-of-speech categories. However, aside from the many systems that induce trees from gold tags, there are also unsupervised methods for inducing syntactic categories from gold trees (Finkel et al., 2007; Pereira et al., 1993), as well as for inducing dependencies from gold constituent annotations (Sangati and Zuidema, 2009; Chiang and Bikel, 2002). Considering that Headden et al.’s (2008) study of part-of-speech taggers found no correlation between standard tagging metrics and the quality of induced grammars, it may be time for a unified treatment of these very related syntax tasks. 13When the target language is English, however, their best accuracy (projected from Greek) is low: 45.7% (McDonald et al., 2011, §4, Table 2); tested on the same CoNLL 2007 evaluation set (Nivre et al., 2007), our “punctuation” system with contextsensitive induced tags (trained on WSJ45, without gold tags) performs substantially better, scoring 51.6%. Note </context>
+</contexts>
+<marker>Chiang, Bikel, 2002</marker>
+<rawString>D. Chiang and D. M. Bikel. 2002. Recovering latent information in treebanks. In COLING.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>C Christodoulopoulos</author>
+<author>S Goldwater</author>
+<author>M Steedman</author>
+</authors>
+<title>Two decades of unsupervised POS induction: How far have we come?</title>
+<date>2010</date>
+<booktitle>In EMNLP.</booktitle>
+<contexts>
+<context position="3263" citStr="Christodoulopoulos et al., 2010" startWordPosition="479" endWordPosition="482">wbacks of this practice is that it weakens any conclusions that could be drawn about how computers (and possibly humans) learn in the absence of explicit feedback (McDonald et al., 2011). In turn, not all unsupervised taggers actually induce word categories: Many systems — known as part-of-speech disambiguators (Merialdo, 1994) — rely on external dictionaries of possible tags. Our work builds on two older part-of-speech inducers — word clustering algorithms of Clark (2000) and Brown et al. (1992) — that were recently shown to be more robust than other well-known fully unsupervised techniques (Christodoulopoulos et al., 2010). We investigate which properties of gold part-ofspeech tags are useful in grammar induction and parsing, and how these properties could be introduced into induced tags. We also explore the number of word classes that is good for grammar induction: in particular, whether categorization is needed at all. By removing the “unrealistic simplification” of using gold tags (Petrov et al., 2011, §3.2, Footnote 4), we will go on to demonstrate why grammar induction from plain text is no longer “still too difficult.” 1281 Proceedings of the 2011 Conference on Empirical Methods in Natural Language Proces</context>
+</contexts>
+<marker>Christodoulopoulos, Goldwater, Steedman, 2010</marker>
+<rawString>C. Christodoulopoulos, S. Goldwater, and M. Steedman. 2010. Two decades of unsupervised POS induction: How far have we come? In EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>A Clark</author>
+</authors>
+<title>Inducing syntactic categories by context distribution clustering.</title>
+<date>2000</date>
+<booktitle>In CoNLL-LLL.</booktitle>
+<contexts>
+<context position="3108" citStr="Clark (2000)" startWordPosition="456" endWordPosition="457">xist, justifying the focus on grammar induction with supervised part-ofspeech tags (Bod, 2006), pace (Cramer, 2007). One of several drawbacks of this practice is that it weakens any conclusions that could be drawn about how computers (and possibly humans) learn in the absence of explicit feedback (McDonald et al., 2011). In turn, not all unsupervised taggers actually induce word categories: Many systems — known as part-of-speech disambiguators (Merialdo, 1994) — rely on external dictionaries of possible tags. Our work builds on two older part-of-speech inducers — word clustering algorithms of Clark (2000) and Brown et al. (1992) — that were recently shown to be more robust than other well-known fully unsupervised techniques (Christodoulopoulos et al., 2010). We investigate which properties of gold part-ofspeech tags are useful in grammar induction and parsing, and how these properties could be introduced into induced tags. We also explore the number of word classes that is good for grammar induction: in particular, whether categorization is needed at all. By removing the “unrealistic simplification” of using gold tags (Petrov et al., 2011, §3.2, Footnote 4), we will go on to demonstrate why gr</context>
+<context position="8739" citStr="Clark, 2000" startWordPosition="1403" endWordPosition="1404">er trade-off between the quantity and complexity of training data in WSJ (Spitkovsky et al., 2009). X PSTOP(0, R, T) � �� � . 1282 token mfc mfp ua it {PRP} {PRP} {PRP} gains {NNS} {VBZ, NNS} {VBZ, NNS} the {DT} {JJ, DT} {VBP, NNP, NN, JJ, DT, CD} Table 2: Example most frequent class, most frequent pair and union all reassignments for tokens it, the and gains. Viable Groups 36 34 160 328 Accuracy 1. manual tags Unsupervised 50.7 47.2 40.4 44.3 2. tagless lexicalized models full 25.8 partial 29.3 none 30.7 Sky 78.0 74.5 76.4 78.4 97.3 60.5 24.5 gold mfc mfp ua 49,180 176 1 3. tags from a flat (Clark, 2000) clustering 47.8 83.8 197 4. prefixes of a hierarchical (Brown et al., 1992) clustering first 7 bits 46.4 73.9 96 8 bits 48.0 77.8 165 9 bits 46.8 82.3 262 Table 1: Directed accuracies for the “less is more” DMV, trained on WSJ15 (after 40 steps of EM) and evaluated also against WSJ15, using various lexical categories in place of gold part-of-speech tags. For each tag-set, we include its effective number of (non-empty) categories in WSJ15 and the oracle skylines (supervised performance). 3 Motivation and Ablative Analyses The concepts of polysemy and synonymy are of fundamental importance in l</context>
+<context position="15542" citStr="Clark, 2000" startWordPosition="2489" endWordPosition="2490">s, each computed from a much larger data set than WSJ (approximately a million words). The first is a flat mapping (200 clusters) constructed by training Clark’s (2000) distributional similarity model over several hundred million words from the British National and the English Gigaword corpora.5 The second is a hierarchical clustering — binary strings up to eighteen bits long — constructed by running Brown et al.’s (1992) algorithm over 43 million words from the BLLIP corpus, minus WSJ.6 4.1 Experiment #3: A Flat Word Clustering Our main purely unsupervised results are with a flat clustering (Clark, 2000) that groups words having similar context distributions, according to KullbackLeibler divergence. (A word’s context is an ordered pair: its left- and right-adjacent neighboring words.) To avoid overfitting, we employed an implementation from previous literature (Finkel and Manning, 2009). The number of clusters (200) and the sufficient amount of training data (several hundredmillion words) were tuned to a task (NER) that is not directly related to dependency parsing. (Table 3 shows representative entries for two of the clusters.) We added one more category (#0) for unknown words. Now every tok</context>
+<context position="17560" citStr="Clark, 2000" startWordPosition="2816" endWordPosition="2817">flat ua full full 1 4 16 64 256 1,024 (# of clusters) 49,180 Figure 2: Parsing performance (accuracy on WSJ15) as a “function” of the number of syntactic categories, for all prefix lengths — k E 11, ... ,18} — of a hierarchical (Brown et al., 1992) clustering, connected by solid lines (dependency grammar induction in blue; supervised oracle skylines in red, above). Tagless lexicalized models (full, partial and none) connected by dashed lines. Models based on gold part-of-speech tags, and derived monosemous clusters (mfc, mfp and ua), shown as vertices of gold polygons. Models based on a flat (Clark, 2000) clustering indicated by squares. tag a word differently in context) may be the primary advantage of manually constructed categorizations. 4.2 Experiment #4: A Hierarchical Clustering The purpose of this batch of experiments is to show that Clark’s (2000) algorithm isn’t unique in its suitability for grammar induction. We found that Brown et al.’s (1992) older information-theoretic approach, which does not explicitly address the problems of rare and ambiguous words (Clark, 2000) and was designed to induce large numbers of plausible syntactic and semantic clusters, can perform just as well. Onc</context>
+<context position="25350" citStr="Clark (2000)" startWordPosition="4041" endWordPosition="4042">m. We need a context-sensitive tagger, and HMM models are good — relative to other tag-inducers. However, they are not better than gold tags, at least when trained using a modest amount of data.9 For this reason, we decided to relax the monosemous flat clustering, plugging it in as an initializer for the HMM. The main problem with this approach is that, at least without smoothing, every monosemous labeling is trivially at a local optimum, since P(ti |wi) is deterministic. To escape the initial assignment, we used a “noise injection” technique (Selman et al., 1994), inspired by the contexts of Clark (2000). First, we collected the MLE statistics for PR(ti+1 |ti) and PL(ti |ti+1) in WSJ, using the flat monosemous tags. Next, we replicated the text of WSJ 100-fold. Finally, we retagged this larger data set, as follows: with probability 80%, a word kept its monosemous tag; with probability 10%, we sampled a new tag from the left context (PL) associated with the original (monosemous) tag of its rightmost neighbor; and with probability 10%, we drew a tag from the right context (PR) of its leftmost neighbor.10 Given that our initializer — and later the input to the grammar inducer — are hard assignme</context>
+<context position="31688" citStr="Clark (2000)" startWordPosition="5023" endWordPosition="5024"> tasks. 13When the target language is English, however, their best accuracy (projected from Greek) is low: 45.7% (McDonald et al., 2011, §4, Table 2); tested on the same CoNLL 2007 evaluation set (Nivre et al., 2007), our “punctuation” system with contextsensitive induced tags (trained on WSJ45, without gold tags) performs substantially better, scoring 51.6%. Note that this is also an improvement over our system trained on the CoNLL set using gold tags: 50.3% (Spitkovsky et al., 2011, §8, Table 6). 7 Discussion and Conclusions Unsupervised word clustering techniques of Brown et al. (1992) and Clark (2000) are well-suited to dependency parsing with the DMV. Both methods outperform gold parts-of-speech in supervised modes. And both can do better than monosemous clusters derived from gold tags in unsupervised training. We showed how Clark’s (2000) flat tags can be relaxed, using context, with the resulting polysemous clustering outperforming gold part-of-speech tags for the English dependency grammar induction task. Monolingual evaluation is a significant flaw in our methodology, however. One (of many) take-home points made in Christodoulopoulos et al.’s (2010) study is that results on one langua</context>
+</contexts>
+<marker>Clark, 2000</marker>
+<rawString>A. Clark. 2000. Inducing syntactic categories by context distribution clustering. In CoNLL-LLL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>M Collins</author>
+</authors>
+<title>Head-Driven Statistical Models for Natural Language Parsing.</title>
+<date>1999</date>
+<tech>Ph.D. thesis,</tech>
+<institution>University of Pennsylvania.</institution>
+<contexts>
+<context position="7409" citStr="Collins, 1999" startWordPosition="1170" endWordPosition="1171">p initial training at WSJ15 (“less is more”) with an additional training run (“leapfrog”) that incorporates most sentences of the data set, at WSJ45. 2.4 Evaluation Methods Evaluation is against the training set, as is standard practice in unsupervised learning, in part because Klein and Manning (2004, §3) did not smooth the DMV (Klein, 2005, §6.2). For most of our experiments (#1–4, §3–4), this entails starting with the reference trees from WSJ15 (as modified in §2.3), automatically converting their labeled constituents into unlabeled dependencies using deterministic “headpercolation” rules (Collins, 1999), and then computing (directed) dependency accuracy scores of the corresponding induced trees. We report overall percentages of correctly guessed arcs, including the arcs from sentence root symbols, as is standard practice (Paskin, 2001; Klein and Manning, 2004). For a meaningful comparison with previous work, we also test some of the models from our earlier experiments (#1,3) — and both models from final experiments (#5,6) — against Section 23 of WSJ∞, after applying Laplace (a.k.a. “add one”) smoothing. 1WSJ15 contains 15,922 sentences up to length fifteen (a total of 163,715 tokens, not cou</context>
+<context position="33759" citStr="Collins, 1999" startWordPosition="5332" endWordPosition="5333">§4.2): “The statistics of natural languages is inherently ill defined. Because of Zipf’s law, there is never enough data for a reasonable estimation of joint object distributions.” Seginer’s (2007b, §1.4.4) argument, however, is that the Zipfian distribution — a property of words, not parts-of-speech — should allow frequent words to successfully guide 14Furthermore, it would be interesting to know how sensitive different head-percolation schemes (Yamada and Matsumoto, 2003; Johansson and Nugues, 2007) would be to gold versus unsupervised tags, since the Magerman-Collins rules (Magerman, 1995; Collins, 1999) agree with gold dependency annotations only 85% of the time, even for WSJ (Sangati and Zuidema, 2009). Proper intrinsic evaluation of dependency grammar inducers is not yet a solved problem (Schwartz et al., 2011). 1288 parsing and learning: “A relatively small number of frequent words appears almost everywhere and most words are never too far from such a frequent word (this is also the principle behind successful part-ofspeech induction).” We believe that it is important to thoroughly understand how to reconcile these only seemingly conflicting insights, balancing them both in theory and in </context>
+</contexts>
+<marker>Collins, 1999</marker>
+<rawString>M. Collins. 1999. Head-Driven Statistical Models for Natural Language Parsing. Ph.D. thesis, University of Pennsylvania.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>B Cramer</author>
+</authors>
+<title>Limitations of current grammar induction algorithms.</title>
+<date>2007</date>
+<booktitle>In ACL: Student Research.</booktitle>
+<contexts>
+<context position="2611" citStr="Cramer, 2007" startWordPosition="377" endWordPosition="378">ds are applicable to vast quantities of unlabeled monolingual text. Not all research on these problems has been fully unsupervised. For example, to the best of our knowledge, every new state-of-the-art dependency grammar inducer since Klein and Manning (2004) relied on gold part-of-speech tags. For some time, multipoint performance degradations caused by switching to automatically induced word categories have been interpreted as indications that “good enough” partsof-speech induction methods exist, justifying the focus on grammar induction with supervised part-ofspeech tags (Bod, 2006), pace (Cramer, 2007). One of several drawbacks of this practice is that it weakens any conclusions that could be drawn about how computers (and possibly humans) learn in the absence of explicit feedback (McDonald et al., 2011). In turn, not all unsupervised taggers actually induce word categories: Many systems — known as part-of-speech disambiguators (Merialdo, 1994) — rely on external dictionaries of possible tags. Our work builds on two older part-of-speech inducers — word clustering algorithms of Clark (2000) and Brown et al. (1992) — that were recently shown to be more robust than other well-known fully unsup</context>
+</contexts>
+<marker>Cramer, 2007</marker>
+<rawString>B. Cramer. 2007. Limitations of current grammar induction algorithms. In ACL: Student Research.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D Das</author>
+<author>S Petrov</author>
+</authors>
+<title>Unsupervised part-ofspeech tagging with bilingual graph-based projections.</title>
+<date>2011</date>
+<booktitle>In ACL.</booktitle>
+<contexts>
+<context position="29981" citStr="Das and Petrov, 2011" startWordPosition="4750" endWordPosition="4753">hristodoulopoulos et al.’s (2010) excellent and otherwise comprehensive evaluation. Outside monolingual grammar induction, fullylexicalized statistical dependency transduction models have been trained from unannotated parallel bitexts for machine translation (Alshawi et al., 2000). More recently, McDonald et al. (2011) demonstrated an impressive alternative to grammar induction by projecting reference parse trees from languages that have annotations to ones that are resource-poor.13 It uses graph-based label propagation over a bilingual similarity graph for a sentence-aligned parallel corpus (Das and Petrov, 2011), inducing part-of-speech tags from a universal tag-set (Petrov et al., 2011). Even in supervised parsing we are starting to see a shift away from using gold tags. For example, Alshawi et al. (2011) demonstrated good results for mapping text to underspecified semantics via dependencies without resorting to gold tags. And Petrov et al. (2010, §4.4, Table 4) observed only a small performance loss “going POS-less” in question parsing. We are not aware of any systems that induce both syntactic trees and their part-of-speech categories. However, aside from the many systems that induce trees from go</context>
+</contexts>
+<marker>Das, Petrov, 2011</marker>
+<rawString>D. Das and S. Petrov. 2011. Unsupervised part-ofspeech tagging with bilingual graph-based projections. In ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J R Finkel</author>
+<author>C D Manning</author>
+</authors>
+<title>Joint parsing and named entity recognition.</title>
+<date>2009</date>
+<booktitle>In NAACL-HLT.</booktitle>
+<contexts>
+<context position="15830" citStr="Finkel and Manning, 2009" startWordPosition="2527" endWordPosition="2530">sh Gigaword corpora.5 The second is a hierarchical clustering — binary strings up to eighteen bits long — constructed by running Brown et al.’s (1992) algorithm over 43 million words from the BLLIP corpus, minus WSJ.6 4.1 Experiment #3: A Flat Word Clustering Our main purely unsupervised results are with a flat clustering (Clark, 2000) that groups words having similar context distributions, according to KullbackLeibler divergence. (A word’s context is an ordered pair: its left- and right-adjacent neighboring words.) To avoid overfitting, we employed an implementation from previous literature (Finkel and Manning, 2009). The number of clusters (200) and the sufficient amount of training data (several hundredmillion words) were tuned to a task (NER) that is not directly related to dependency parsing. (Table 3 shows representative entries for two of the clusters.) We added one more category (#0) for unknown words. Now every token in WSJ could again be replaced by a coarse identifier (one of at most 201, instead of just 36), in both supervised and unsupervised training. (Our training code did not change.) The resulting supervised model, though not as good as the fully-lexicalized DMV, was more than five points </context>
+</contexts>
+<marker>Finkel, Manning, 2009</marker>
+<rawString>J. R. Finkel and C. D. Manning. 2009. Joint parsing and named entity recognition. In NAACL-HLT.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J R Finkel</author>
+<author>T Grenager</author>
+<author>C D Manning</author>
+</authors>
+<title>The infinite tree.</title>
+<date>2007</date>
+<booktitle>In ACL.</booktitle>
+<contexts>
+<context position="30696" citStr="Finkel et al., 2007" startWordPosition="4864" endWordPosition="4867">d parsing we are starting to see a shift away from using gold tags. For example, Alshawi et al. (2011) demonstrated good results for mapping text to underspecified semantics via dependencies without resorting to gold tags. And Petrov et al. (2010, §4.4, Table 4) observed only a small performance loss “going POS-less” in question parsing. We are not aware of any systems that induce both syntactic trees and their part-of-speech categories. However, aside from the many systems that induce trees from gold tags, there are also unsupervised methods for inducing syntactic categories from gold trees (Finkel et al., 2007; Pereira et al., 1993), as well as for inducing dependencies from gold constituent annotations (Sangati and Zuidema, 2009; Chiang and Bikel, 2002). Considering that Headden et al.’s (2008) study of part-of-speech taggers found no correlation between standard tagging metrics and the quality of induced grammars, it may be time for a unified treatment of these very related syntax tasks. 13When the target language is English, however, their best accuracy (projected from Greek) is low: 45.7% (McDonald et al., 2011, §4, Table 2); tested on the same CoNLL 2007 evaluation set (Nivre et al., 2007), ou</context>
+</contexts>
+<marker>Finkel, Grenager, Manning, 2007</marker>
+<rawString>J. R. Finkel, T. Grenager, and C. D. Manning. 2007. The infinite tree. In ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J Gao</author>
+<author>M Johnson</author>
+</authors>
+<title>A comparison of Bayesian estimators for unsupervised Hidden Markov Model POS taggers.</title>
+<date>2008</date>
+<booktitle>In EMNLP.</booktitle>
+<contexts>
+<context position="24403" citStr="Gao and Johnson, 2008" startWordPosition="3891" endWordPosition="3894">m, 1972) variant of EM (HMM-EM), perform quite well,8 on average, across different grammar induction tasks. Such sequence models incorporate a sensitivity to context via state transition probabilities PTRAN(ti |ti−1), capturing the likelihood that a tag ti immediately follows the tag ti−1; emission probabilities PElnT(wi |ti) capture the likelihood that a word of type ti is wi. 7We also briefly comment on this result in the “punctuation” paper (Spitkovsky et al., 2011, §7), published concurrently. 8They are also competitive with Bayesian estimators, on larger data sets, with cross-validation (Gao and Johnson, 2008). 1286 System Description Accuracy (§5) “punctuation” (Spitkovsky et al., 2011) 58.4 #5 (§5.1) “punctuation” with monosemous induced tags 58.2 (-0.2) #6 (§5.2) “punctuation” with context-sensitive induced tags 59.1 (+0.7) Table 5: Directed accuracies on Section 23 of WSJ (all sentences) for experiments with the state-of-the-art system. We need a context-sensitive tagger, and HMM models are good — relative to other tag-inducers. However, they are not better than gold tags, at least when trained using a modest amount of data.9 For this reason, we decided to relax the monosemous flat clustering, </context>
+</contexts>
+<marker>Gao, Johnson, 2008</marker>
+<rawString>J. Gao and M. Johnson. 2008. A comparison of Bayesian estimators for unsupervised Hidden Markov Model POS taggers. In EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>W P Headden</author>
+<author>D McClosky</author>
+<author>E Charniak</author>
+</authors>
+<title>Evaluating unsupervised part-of-speech tagging for grammar induction.</title>
+<date>2008</date>
+<booktitle>In COLING.</booktitle>
+<contexts>
+<context position="18985" citStr="Headden et al. (2008)" startWordPosition="3046" endWordPosition="3049">e isn’t a parameter for the number of categories), we doubt that there was a strong enough risk of overfitting to question the clustering’s unsupervised nature. As there isn’t a set number of categories, we used binary prefixes of length k from each word’s address in the computed hierarchy as cluster labels. Results for 7 &lt; k &lt; 9 bits (approximately 100–250 nonempty clusters, close to the 200 we used before) are similar to those of flat clusters (see Table 1: hierarchical). Outside of this range, however, performance can be substantially worse (see Figure 2), consistent with earlier findings: Headden et al. (2008) demonstrated that (constituent) grammar induction, using the singular-value decomposition (SVD-based) tagger of Sch¨utze (1995), also works best with 100–200 clusters. Important future research directions may include learning to automatically select a good number of word categories (in the case of flat clusterings) and ways of using multiple clustering assignments, perhaps of different granularities/resolutions, in tandem (e.g., in the case of a hierarchical clustering). 4.3 Further Evaluation It is important to enable easy comparison with previous and future work. Since WSJ15 is not a standa</context>
+<context position="22862" citStr="Headden et al., 2008" startWordPosition="3652" endWordPosition="3655">riment #5: A Monosemous Clustering As in experiment #3 (§4.1), we modified the base system in exactly one way: we swapped out gold part-of-speech tags and replaced them with a flat distributional similarity clustering. In contrast to simpler models, which suffer multi-point drops in accuracy from switching to unsupervised tags (e.g., 2.6%), our new system’s performance degrades only slightly, by 0.2% (see Tables 4 and 5). This result improves over substantial performance degradations previously observed for unsupervised dependency parsing with induced word categories (Klein and Manning, 2004; Headden et al., 2008, inter alia).7 One risk that arises from using gold tags is that newer systems could be finding cleverer ways to exploit manual labels (i.e., developing an over-reliance on gold tags) instead of actually learning to acquire language. Part-of-speech tags are known to contain significant amounts of information for unlabeled dependency parsing (McDonald et al., 2011, §3.1), so we find it reassuring that our latest grammar inducer is less dependent on gold tags than its predecessors. 5.2 Experiment #6: A Polysemous Clustering Results of experiments #1 and 3 (§3.1, 4.1) suggest that grammar induct</context>
+</contexts>
+<marker>Headden, McClosky, Charniak, 2008</marker>
+<rawString>W. P. Headden, III, D. McClosky, and E. Charniak. 2008. Evaluating unsupervised part-of-speech tagging for grammar induction. In COLING.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>W P Headden</author>
+<author>M Johnson</author>
+<author>D McClosky</author>
+</authors>
+<title>Improving unsupervised dependency parsing with richer contexts and smoothing.</title>
+<date>2009</date>
+<booktitle>In NAACL-HLT.</booktitle>
+<contexts>
+<context position="13222" citStr="Headden et al., 2009" startWordPosition="2120" endWordPosition="2123">ambiguity classes. 1283 First, not surprisingly, a fully-lexicalized model over nearly 50,000 unique words is able to essentially memorize the training set, supervised. (Without smoothing, it is possible to deterministically attach most rare words in a dependency tree correctly, etc.) Of course, local search is unlikely to find good instantiations for so many parameters, causing unsupervised accuracy for this model to drop in half. For our next experiment, we tried an intermediate, partially-lexicalized approach. We mapped frequent words — those seen at least 100 times in the training corpus (Headden et al., 2009) — to their own individual categories, lumping the rest into a single “unknown” cluster, for a total of under 200 groups. This model is significantly worse for supervised learning, compared even with the monosemous clusters derived from gold tags; yet it is only slightly more learnable than the broken fully-lexicalized variant. Finally, for completeness, we trained a model that maps every token to the same one “unknown” category. As expected, such a trivial “clustering” is ineffective in supervised training; however, it outperforms both lexicalized variants unsupervised,4 strongly suggesting t</context>
+</contexts>
+<marker>Headden, Johnson, McClosky, 2009</marker>
+<rawString>W. P. Headden, III, M. Johnson, and D. McClosky. 2009. Improving unsupervised dependency parsing with richer contexts and smoothing. In NAACL-HLT.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>G Hinton</author>
+<author>S Roweis</author>
+</authors>
+<title>Stochastic neighbor embedding.</title>
+<date>2003</date>
+<booktitle>In NIPS.</booktitle>
+<contexts>
+<context position="26787" citStr="Hinton and Roweis, 2003" startWordPosition="4270" endWordPosition="4273">just 17 steps, replacing the original monosemous tags for 22,280 (of 1,028,348 non-punctuation) tokens in WSJ. For ex9All of Headden et al.’s (2008) grammar induction experiments with induced parts-of-speech were worse than their best results using gold part-of-speech tags, most likely because they used a very small corpus (half of WSJ10) to cluster words. 10We chose the sampling split (80:10:10) and replication parameter (100) somewhat arbitrarily, so better results could likely be obtained with tuning. However, we suspect that the real gains would come from using soft clustering techniques (Hinton and Roweis, 2003; Pereira et al., 1993, inter alia) and propagating (joint) estimates of tag distributions into a parser. Our ad-hoc approach is intended to serve solely as a proof of concept. 11David Elworthy’s C+ tagger, with options -i t -G -l, available from http://friendly-moose.appspot.com/ code/NewCpTag.zip. ample, the first changed sentence is #3 (of 49,208): Some “circuit breakers” installed after the October 1987 crash failed their first test, traders say, unable to cool the selling panic in both stocks and futures. Above, the word cool gets relabeled as #188 (from #173 — see Table 3), since its con</context>
+</contexts>
+<marker>Hinton, Roweis, 2003</marker>
+<rawString>G. Hinton and S. Roweis. 2003. Stochastic neighbor embedding. In NIPS.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>R Johansson</author>
+<author>P Nugues</author>
+</authors>
+<title>Extended constituent-to-dependency conversion for English. In NODALIDA.</title>
+<date>2007</date>
+<contexts>
+<context position="33651" citStr="Johansson and Nugues, 2007" startWordPosition="5314" endWordPosition="5317">s participating in certain configurations cannot be reliably used for comparing their likelihoods (Pereira et al., 1993, §4.2): “The statistics of natural languages is inherently ill defined. Because of Zipf’s law, there is never enough data for a reasonable estimation of joint object distributions.” Seginer’s (2007b, §1.4.4) argument, however, is that the Zipfian distribution — a property of words, not parts-of-speech — should allow frequent words to successfully guide 14Furthermore, it would be interesting to know how sensitive different head-percolation schemes (Yamada and Matsumoto, 2003; Johansson and Nugues, 2007) would be to gold versus unsupervised tags, since the Magerman-Collins rules (Magerman, 1995; Collins, 1999) agree with gold dependency annotations only 85% of the time, even for WSJ (Sangati and Zuidema, 2009). Proper intrinsic evaluation of dependency grammar inducers is not yet a solved problem (Schwartz et al., 2011). 1288 parsing and learning: “A relatively small number of frequent words appears almost everywhere and most words are never too far from such a frequent word (this is also the principle behind successful part-ofspeech induction).” We believe that it is important to thoroughly </context>
+</contexts>
+<marker>Johansson, Nugues, 2007</marker>
+<rawString>R. Johansson and P. Nugues. 2007. Extended constituent-to-dependency conversion for English. In NODALIDA.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D Klein</author>
+<author>C D Manning</author>
+</authors>
+<title>Corpus-based induction of syntactic structure: Models of dependency and constituency.</title>
+<date>2004</date>
+<booktitle>In ACL.</booktitle>
+<contexts>
+<context position="2257" citStr="Klein and Manning (2004)" startWordPosition="325" endWordPosition="328">chniques have been successfully applied to tasks such as word alignment for machine translation. And since the advent of the web, algorithms that induce structure from unlabeled data have continued to steadily gain importance. In this paper we focus on unsupervised part-of-speech tagging and dependency parsing — two related problems of syntax discovery. Our methods are applicable to vast quantities of unlabeled monolingual text. Not all research on these problems has been fully unsupervised. For example, to the best of our knowledge, every new state-of-the-art dependency grammar inducer since Klein and Manning (2004) relied on gold part-of-speech tags. For some time, multipoint performance degradations caused by switching to automatically induced word categories have been interpreted as indications that “good enough” partsof-speech induction methods exist, justifying the focus on grammar induction with supervised part-ofspeech tags (Bod, 2006), pace (Cramer, 2007). One of several drawbacks of this practice is that it weakens any conclusions that could be drawn about how computers (and possibly humans) learn in the absence of explicit feedback (McDonald et al., 2011). In turn, not all unsupervised taggers </context>
+<context position="5679" citStr="Klein and Manning (2004)" startWordPosition="897" endWordPosition="900">ir E {L, R} in which to attach children, via probability PORDaR(ch); (ii) whether to seal dir, stopping with probability PSTOP(ch, dir, adj), conditioned on adj E {T, F} (true iff considering dir’s first, i.e., adjacent, child); and (iii) attachments (of class ca), according to PATTACH(ch, dir, ca). This recursive process produces only projective trees. A root token Q generates the head of the sentence as its left (and only) child (see Figure 1 for a simple, concrete example). 2.2 Learning Algorithms The DMV lends itself to unsupervised learning via inside-outside re-estimation (Baker, 1979). Klein and Manning (2004) initialized their system using an “ad-hoc harmonic” completion, followed by training using 40 steps of EM (Klein, 2005). We reproduce this set-up, iterating without actually verifying convergence, in most of our experiments (#1–4, §3–4). Experiments #5–6 (§5) employ our new state-ofthe-art grammar inducer (Spitkovsky et al., 2011), which uses constrained Viterbi EM (details in §5). 2.3 Training Data The DMV is usually trained on a customized subset of Penn English Treebank’s Wall Street Journal portion (Marcus et al., 1993). Following Klein and Manning (2004), we begin with reference constitu</context>
+<context position="7097" citStr="Klein and Manning (2004" startWordPosition="1121" endWordPosition="1124">isting of no more than fifteen tokens (WSJ15), in most of our experiments (#1–4, §3–4); by contrast, Klein and Manning’s (2004) original system was trained using less data: sentences up to length ten (WSJ10).1 Our final experiments (#5–6, §5) employ a simple scaffolding strategy (Spitkovsky et al., 2010a) that follows up initial training at WSJ15 (“less is more”) with an additional training run (“leapfrog”) that incorporates most sentences of the data set, at WSJ45. 2.4 Evaluation Methods Evaluation is against the training set, as is standard practice in unsupervised learning, in part because Klein and Manning (2004, §3) did not smooth the DMV (Klein, 2005, §6.2). For most of our experiments (#1–4, §3–4), this entails starting with the reference trees from WSJ15 (as modified in §2.3), automatically converting their labeled constituents into unlabeled dependencies using deterministic “headpercolation” rules (Collins, 1999), and then computing (directed) dependency accuracy scores of the corresponding induced trees. We report overall percentages of correctly guessed arcs, including the arcs from sentence root symbols, as is standard practice (Paskin, 2001; Klein and Manning, 2004). For a meaningful compari</context>
+<context position="22840" citStr="Klein and Manning, 2004" startWordPosition="3648" endWordPosition="3651">∞ (see Table 5). 5.1 Experiment #5: A Monosemous Clustering As in experiment #3 (§4.1), we modified the base system in exactly one way: we swapped out gold part-of-speech tags and replaced them with a flat distributional similarity clustering. In contrast to simpler models, which suffer multi-point drops in accuracy from switching to unsupervised tags (e.g., 2.6%), our new system’s performance degrades only slightly, by 0.2% (see Tables 4 and 5). This result improves over substantial performance degradations previously observed for unsupervised dependency parsing with induced word categories (Klein and Manning, 2004; Headden et al., 2008, inter alia).7 One risk that arises from using gold tags is that newer systems could be finding cleverer ways to exploit manual labels (i.e., developing an over-reliance on gold tags) instead of actually learning to acquire language. Part-of-speech tags are known to contain significant amounts of information for unlabeled dependency parsing (McDonald et al., 2011, §3.1), so we find it reassuring that our latest grammar inducer is less dependent on gold tags than its predecessors. 5.2 Experiment #6: A Polysemous Clustering Results of experiments #1 and 3 (§3.1, 4.1) sugge</context>
+<context position="28213" citStr="Klein and Manning (2004)" startWordPosition="4494" endWordPosition="4497">hard assignment of tokens to unsupervised categories our grammar inducer attained a directed accuracy of 59.1%, nearly a full point better than with the monosemous hard assignment (see Table 5). To the best of our knowledge it is also the first state-of-the-art unsupervised dependency parser to perform better with induced categories than with gold part-of-speech tags. 6 Related Work Early work in dependency grammar induction already relied on gold part-of-speech tags (Carroll and Charniak, 1992). Some later models (Yuret, 1998; Paskin, 2001, inter alia) attempted full lexicalization. However, Klein and Manning (2004) demonstrated that effort to be worse at recovering dependency arcs than choosing parse structures at random, leading them to incorporate gold tags into the DMV. Klein and Manning (2004, §5, Figure 6) had also tested their own models with induced word classes, constructed using a distributional similarity clustering method (Sch¨utze, 1995). Without gold part-ofspeech tags, their combined DMV+CCM model was about five points worse, both in (directed) unlabeled dependency accuracy (42.3% vs. 47.5%)12 and unlabeled bracketing F1 (72.9% vs. 77.6%), on WSJ10. In constituent parsing, earlier Seginer </context>
+</contexts>
+<marker>Klein, Manning, 2004</marker>
+<rawString>D. Klein and C. D. Manning. 2004. Corpus-based induction of syntactic structure: Models of dependency and constituency. In ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D Klein</author>
+</authors>
+<title>The Unsupervised Learning of Natural Language Structure.</title>
+<date>2005</date>
+<tech>Ph.D. thesis,</tech>
+<institution>Stanford University.</institution>
+<contexts>
+<context position="5799" citStr="Klein, 2005" startWordPosition="917" endWordPosition="918">ir, adj), conditioned on adj E {T, F} (true iff considering dir’s first, i.e., adjacent, child); and (iii) attachments (of class ca), according to PATTACH(ch, dir, ca). This recursive process produces only projective trees. A root token Q generates the head of the sentence as its left (and only) child (see Figure 1 for a simple, concrete example). 2.2 Learning Algorithms The DMV lends itself to unsupervised learning via inside-outside re-estimation (Baker, 1979). Klein and Manning (2004) initialized their system using an “ad-hoc harmonic” completion, followed by training using 40 steps of EM (Klein, 2005). We reproduce this set-up, iterating without actually verifying convergence, in most of our experiments (#1–4, §3–4). Experiments #5–6 (§5) employ our new state-ofthe-art grammar inducer (Spitkovsky et al., 2011), which uses constrained Viterbi EM (details in §5). 2.3 Training Data The DMV is usually trained on a customized subset of Penn English Treebank’s Wall Street Journal portion (Marcus et al., 1993). Following Klein and Manning (2004), we begin with reference constituent parses, prune out all empty sub-trees and remove punctuation and terminals (tagged # and $) that are not pronounced </context>
+<context position="7138" citStr="Klein, 2005" startWordPosition="1131" endWordPosition="1132">t of our experiments (#1–4, §3–4); by contrast, Klein and Manning’s (2004) original system was trained using less data: sentences up to length ten (WSJ10).1 Our final experiments (#5–6, §5) employ a simple scaffolding strategy (Spitkovsky et al., 2010a) that follows up initial training at WSJ15 (“less is more”) with an additional training run (“leapfrog”) that incorporates most sentences of the data set, at WSJ45. 2.4 Evaluation Methods Evaluation is against the training set, as is standard practice in unsupervised learning, in part because Klein and Manning (2004, §3) did not smooth the DMV (Klein, 2005, §6.2). For most of our experiments (#1–4, §3–4), this entails starting with the reference trees from WSJ15 (as modified in §2.3), automatically converting their labeled constituents into unlabeled dependencies using deterministic “headpercolation” rules (Collins, 1999), and then computing (directed) dependency accuracy scores of the corresponding induced trees. We report overall percentages of correctly guessed arcs, including the arcs from sentence root symbols, as is standard practice (Paskin, 2001; Klein and Manning, 2004). For a meaningful comparison with previous work, we also test some</context>
+</contexts>
+<marker>Klein, 2005</marker>
+<rawString>D. Klein. 2005. The Unsupervised Learning of Natural Language Structure. Ph.D. thesis, Stanford University.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>T Koo</author>
+</authors>
+<date>2010</date>
+<booktitle>Advances in Discriminative Dependency Parsing. Ph.D. thesis, MIT.</booktitle>
+<contexts>
+<context position="18255" citStr="Koo, 2010" startWordPosition="2926" endWordPosition="2927">ry advantage of manually constructed categorizations. 4.2 Experiment #4: A Hierarchical Clustering The purpose of this batch of experiments is to show that Clark’s (2000) algorithm isn’t unique in its suitability for grammar induction. We found that Brown et al.’s (1992) older information-theoretic approach, which does not explicitly address the problems of rare and ambiguous words (Clark, 2000) and was designed to induce large numbers of plausible syntactic and semantic clusters, can perform just as well. Once again, the sufficient amount of data (43 million words) was tuned in earlier work (Koo, 2010). His task of interest was, in fact, dependency parsing. But since this algorithm is hierarchical (i.e., there isn’t a parameter for the number of categories), we doubt that there was a strong enough risk of overfitting to question the clustering’s unsupervised nature. As there isn’t a set number of categories, we used binary prefixes of length k from each word’s address in the computed hierarchy as cluster labels. Results for 7 &lt; k &lt; 9 bits (approximately 100–250 nonempty clusters, close to the 200 we used before) are similar to those of flat clusters (see Table 1: hierarchical). Outside of t</context>
+</contexts>
+<marker>Koo, 2010</marker>
+<rawString>T. Koo. 2010. Advances in Discriminative Dependency Parsing. Ph.D. thesis, MIT.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J Kupiec</author>
+</authors>
+<title>Robust part-of-speech tagging using a hidden Markov model.</title>
+<date>1992</date>
+<journal>Computer Speech and Language,</journal>
+<volume>6</volume>
+<contexts>
+<context position="12516" citStr="Kupiec (1992)" startWordPosition="2012" endWordPosition="2013">orms strictly worse than union all, in both regimes. 3.2 Experiment #2: Lexicalization Baselines Our next set of experiments assesses the benefits of categorization, turning to lexicalized baselines that avoid grouping words altogether. All three models discussed below estimated the DMV without using the gold tags in any way (see Table 1: lexicalized). 2Some of these are annotation errors in the treebank (Banko and Moore, 2004, Figure 2): such (mis)taggings can severely degrade the accuracy of part-of-speech disambiguators, without additional supervision (Banko and Moore, 2004, §5, Table 1). 3Kupiec (1992) found that the 50,000-word vocabulary of the Brown corpus similarly reduces to ∼400 ambiguity classes. 1283 First, not surprisingly, a fully-lexicalized model over nearly 50,000 unique words is able to essentially memorize the training set, supervised. (Without smoothing, it is possible to deterministically attach most rare words in a dependency tree correctly, etc.) Of course, local search is unlikely to find good instantiations for so many parameters, causing unsupervised accuracy for this model to drop in half. For our next experiment, we tried an intermediate, partially-lexicalized approa</context>
+</contexts>
+<marker>Kupiec, 1992</marker>
+<rawString>J. Kupiec. 1992. Robust part-of-speech tagging using a hidden Markov model. Computer Speech and Language, 6.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D M Magerman</author>
+</authors>
+<title>Statistical decision-tree models for parsing.</title>
+<date>1995</date>
+<booktitle>In ACL.</booktitle>
+<contexts>
+<context position="33743" citStr="Magerman, 1995" startWordPosition="5329" endWordPosition="5331">a et al., 1993, §4.2): “The statistics of natural languages is inherently ill defined. Because of Zipf’s law, there is never enough data for a reasonable estimation of joint object distributions.” Seginer’s (2007b, §1.4.4) argument, however, is that the Zipfian distribution — a property of words, not parts-of-speech — should allow frequent words to successfully guide 14Furthermore, it would be interesting to know how sensitive different head-percolation schemes (Yamada and Matsumoto, 2003; Johansson and Nugues, 2007) would be to gold versus unsupervised tags, since the Magerman-Collins rules (Magerman, 1995; Collins, 1999) agree with gold dependency annotations only 85% of the time, even for WSJ (Sangati and Zuidema, 2009). Proper intrinsic evaluation of dependency grammar inducers is not yet a solved problem (Schwartz et al., 2011). 1288 parsing and learning: “A relatively small number of frequent words appears almost everywhere and most words are never too far from such a frequent word (this is also the principle behind successful part-ofspeech induction).” We believe that it is important to thoroughly understand how to reconcile these only seemingly conflicting insights, balancing them both i</context>
+</contexts>
+<marker>Magerman, 1995</marker>
+<rawString>D. M. Magerman. 1995. Statistical decision-tree models for parsing. In ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>M P Marcus</author>
+<author>B Santorini</author>
+<author>M A Marcinkiewicz</author>
+</authors>
+<title>Building a large annotated corpus of English: The Penn Treebank.</title>
+<date>1993</date>
+<journal>Computational Linguistics,</journal>
+<volume>19</volume>
+<contexts>
+<context position="6209" citStr="Marcus et al., 1993" startWordPosition="980" endWordPosition="983">pervised learning via inside-outside re-estimation (Baker, 1979). Klein and Manning (2004) initialized their system using an “ad-hoc harmonic” completion, followed by training using 40 steps of EM (Klein, 2005). We reproduce this set-up, iterating without actually verifying convergence, in most of our experiments (#1–4, §3–4). Experiments #5–6 (§5) employ our new state-ofthe-art grammar inducer (Spitkovsky et al., 2011), which uses constrained Viterbi EM (details in §5). 2.3 Training Data The DMV is usually trained on a customized subset of Penn English Treebank’s Wall Street Journal portion (Marcus et al., 1993). Following Klein and Manning (2004), we begin with reference constituent parses, prune out all empty sub-trees and remove punctuation and terminals (tagged # and $) that are not pronounced where they appear. We then train only on the remaining sentence yields consisting of no more than fifteen tokens (WSJ15), in most of our experiments (#1–4, §3–4); by contrast, Klein and Manning’s (2004) original system was trained using less data: sentences up to length ten (WSJ10).1 Our final experiments (#5–6, §5) employ a simple scaffolding strategy (Spitkovsky et al., 2010a) that follows up initial trai</context>
+</contexts>
+<marker>Marcus, Santorini, Marcinkiewicz, 1993</marker>
+<rawString>M. P. Marcus, B. Santorini, and M. A. Marcinkiewicz. 1993. Building a large annotated corpus of English: The Penn Treebank. Computational Linguistics, 19.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>R McDonald</author>
+<author>S Petrov</author>
+<author>K Hall</author>
+</authors>
+<title>Multisource transfer of delexicalized dependency parsers.</title>
+<date>2011</date>
+<booktitle>In EMNLP.</booktitle>
+<contexts>
+<context position="2817" citStr="McDonald et al., 2011" startWordPosition="411" endWordPosition="414">-art dependency grammar inducer since Klein and Manning (2004) relied on gold part-of-speech tags. For some time, multipoint performance degradations caused by switching to automatically induced word categories have been interpreted as indications that “good enough” partsof-speech induction methods exist, justifying the focus on grammar induction with supervised part-ofspeech tags (Bod, 2006), pace (Cramer, 2007). One of several drawbacks of this practice is that it weakens any conclusions that could be drawn about how computers (and possibly humans) learn in the absence of explicit feedback (McDonald et al., 2011). In turn, not all unsupervised taggers actually induce word categories: Many systems — known as part-of-speech disambiguators (Merialdo, 1994) — rely on external dictionaries of possible tags. Our work builds on two older part-of-speech inducers — word clustering algorithms of Clark (2000) and Brown et al. (1992) — that were recently shown to be more robust than other well-known fully unsupervised techniques (Christodoulopoulos et al., 2010). We investigate which properties of gold part-ofspeech tags are useful in grammar induction and parsing, and how these properties could be introduced int</context>
+<context position="23228" citStr="McDonald et al., 2011" startWordPosition="3709" endWordPosition="3712">rmance degrades only slightly, by 0.2% (see Tables 4 and 5). This result improves over substantial performance degradations previously observed for unsupervised dependency parsing with induced word categories (Klein and Manning, 2004; Headden et al., 2008, inter alia).7 One risk that arises from using gold tags is that newer systems could be finding cleverer ways to exploit manual labels (i.e., developing an over-reliance on gold tags) instead of actually learning to acquire language. Part-of-speech tags are known to contain significant amounts of information for unlabeled dependency parsing (McDonald et al., 2011, §3.1), so we find it reassuring that our latest grammar inducer is less dependent on gold tags than its predecessors. 5.2 Experiment #6: A Polysemous Clustering Results of experiments #1 and 3 (§3.1, 4.1) suggest that grammar induction stands to gain from relaxing the one class per word assumption. We next test this conjecture by inducing a polysemous unsupervised word clustering, then using it to induce a grammar. Previous work (Headden et al., 2008, §4) found that simple bitag hidden Markov models, classically trained using the Baum-Welch (Baum, 1972) variant of EM (HMM-EM), perform quite </context>
+<context position="29680" citStr="McDonald et al. (2011)" startWordPosition="4708" endWordPosition="4711"> tags. His CCL parser has since been improved via a “zoomed learning” technique (Reichart and Rappoport, 2010). Moreover, Abend et al. (2010) reused CCL’s internal distributional representation of words in a cognitively-motivated partof-speech inducer. Unfortunately their tagger did not make it into Christodoulopoulos et al.’s (2010) excellent and otherwise comprehensive evaluation. Outside monolingual grammar induction, fullylexicalized statistical dependency transduction models have been trained from unannotated parallel bitexts for machine translation (Alshawi et al., 2000). More recently, McDonald et al. (2011) demonstrated an impressive alternative to grammar induction by projecting reference parse trees from languages that have annotations to ones that are resource-poor.13 It uses graph-based label propagation over a bilingual similarity graph for a sentence-aligned parallel corpus (Das and Petrov, 2011), inducing part-of-speech tags from a universal tag-set (Petrov et al., 2011). Even in supervised parsing we are starting to see a shift away from using gold tags. For example, Alshawi et al. (2011) demonstrated good results for mapping text to underspecified semantics via dependencies without reso</context>
+<context position="31211" citStr="McDonald et al., 2011" startWordPosition="4945" endWordPosition="4948">there are also unsupervised methods for inducing syntactic categories from gold trees (Finkel et al., 2007; Pereira et al., 1993), as well as for inducing dependencies from gold constituent annotations (Sangati and Zuidema, 2009; Chiang and Bikel, 2002). Considering that Headden et al.’s (2008) study of part-of-speech taggers found no correlation between standard tagging metrics and the quality of induced grammars, it may be time for a unified treatment of these very related syntax tasks. 13When the target language is English, however, their best accuracy (projected from Greek) is low: 45.7% (McDonald et al., 2011, §4, Table 2); tested on the same CoNLL 2007 evaluation set (Nivre et al., 2007), our “punctuation” system with contextsensitive induced tags (trained on WSJ45, without gold tags) performs substantially better, scoring 51.6%. Note that this is also an improvement over our system trained on the CoNLL set using gold tags: 50.3% (Spitkovsky et al., 2011, §8, Table 6). 7 Discussion and Conclusions Unsupervised word clustering techniques of Brown et al. (1992) and Clark (2000) are well-suited to dependency parsing with the DMV. Both methods outperform gold parts-of-speech in supervised modes. And </context>
+</contexts>
+<marker>McDonald, Petrov, Hall, 2011</marker>
+<rawString>R. McDonald, S. Petrov, and K. Hall. 2011. Multisource transfer of delexicalized dependency parsers. In EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>B Merialdo</author>
+</authors>
+<title>Tagging English text with a probabilistic model.</title>
+<date>1994</date>
+<journal>Computational Linguistics,</journal>
+<volume>20</volume>
+<contexts>
+<context position="2960" citStr="Merialdo, 1994" startWordPosition="433" endWordPosition="434">caused by switching to automatically induced word categories have been interpreted as indications that “good enough” partsof-speech induction methods exist, justifying the focus on grammar induction with supervised part-ofspeech tags (Bod, 2006), pace (Cramer, 2007). One of several drawbacks of this practice is that it weakens any conclusions that could be drawn about how computers (and possibly humans) learn in the absence of explicit feedback (McDonald et al., 2011). In turn, not all unsupervised taggers actually induce word categories: Many systems — known as part-of-speech disambiguators (Merialdo, 1994) — rely on external dictionaries of possible tags. Our work builds on two older part-of-speech inducers — word clustering algorithms of Clark (2000) and Brown et al. (1992) — that were recently shown to be more robust than other well-known fully unsupervised techniques (Christodoulopoulos et al., 2010). We investigate which properties of gold part-ofspeech tags are useful in grammar induction and parsing, and how these properties could be introduced into induced tags. We also explore the number of word classes that is good for grammar induction: in particular, whether categorization is needed </context>
+</contexts>
+<marker>Merialdo, 1994</marker>
+<rawString>B. Merialdo. 1994. Tagging English text with a probabilistic model. Computational Linguistics, 20.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J Nivre</author>
+<author>J Hall</author>
+<author>S K¨ubler</author>
+<author>R McDonald</author>
+<author>J Nilsson</author>
+<author>S Riedel</author>
+<author>D Yuret</author>
+</authors>
+<title>The CoNLL</title>
+<date>2007</date>
+<booktitle>In EMNLPCoNLL.</booktitle>
+<marker>Nivre, Hall, K¨ubler, McDonald, Nilsson, Riedel, Yuret, 2007</marker>
+<rawString>J. Nivre, J. Hall, S. K¨ubler, R. McDonald, J. Nilsson, S. Riedel, and D. Yuret. 2007. The CoNLL 2007 shared task on dependency parsing. In EMNLPCoNLL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>M A Paskin</author>
+</authors>
+<title>Grammatical bigrams.</title>
+<date>2001</date>
+<booktitle>In NIPS.</booktitle>
+<contexts>
+<context position="7645" citStr="Paskin, 2001" startWordPosition="1206" endWordPosition="1207">n unsupervised learning, in part because Klein and Manning (2004, §3) did not smooth the DMV (Klein, 2005, §6.2). For most of our experiments (#1–4, §3–4), this entails starting with the reference trees from WSJ15 (as modified in §2.3), automatically converting their labeled constituents into unlabeled dependencies using deterministic “headpercolation” rules (Collins, 1999), and then computing (directed) dependency accuracy scores of the corresponding induced trees. We report overall percentages of correctly guessed arcs, including the arcs from sentence root symbols, as is standard practice (Paskin, 2001; Klein and Manning, 2004). For a meaningful comparison with previous work, we also test some of the models from our earlier experiments (#1,3) — and both models from final experiments (#5,6) — against Section 23 of WSJ∞, after applying Laplace (a.k.a. “add one”) smoothing. 1WSJ15 contains 15,922 sentences up to length fifteen (a total of 163,715 tokens, not counting punctuation) — versus 7,422 sentences of at most ten words (only 52,248 tokens) comprising WSJ10 — and is a better trade-off between the quantity and complexity of training data in WSJ (Spitkovsky et al., 2009). X PSTOP(0, R, T) �</context>
+<context position="28135" citStr="Paskin, 2001" startWordPosition="4485" endWordPosition="4486"> beyond the scope of this work.) Using this new context-sensitive hard assignment of tokens to unsupervised categories our grammar inducer attained a directed accuracy of 59.1%, nearly a full point better than with the monosemous hard assignment (see Table 5). To the best of our knowledge it is also the first state-of-the-art unsupervised dependency parser to perform better with induced categories than with gold part-of-speech tags. 6 Related Work Early work in dependency grammar induction already relied on gold part-of-speech tags (Carroll and Charniak, 1992). Some later models (Yuret, 1998; Paskin, 2001, inter alia) attempted full lexicalization. However, Klein and Manning (2004) demonstrated that effort to be worse at recovering dependency arcs than choosing parse structures at random, leading them to incorporate gold tags into the DMV. Klein and Manning (2004, §5, Figure 6) had also tested their own models with induced word classes, constructed using a distributional similarity clustering method (Sch¨utze, 1995). Without gold part-ofspeech tags, their combined DMV+CCM model was about five points worse, both in (directed) unlabeled dependency accuracy (42.3% vs. 47.5%)12 and unlabeled brack</context>
+</contexts>
+<marker>Paskin, 2001</marker>
+<rawString>M. A. Paskin. 2001. Grammatical bigrams. In NIPS.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>F Pereira</author>
+<author>N Tishby</author>
+<author>L Lee</author>
+</authors>
+<title>Distributional clustering of English words.</title>
+<date>1993</date>
+<booktitle>In ACL.</booktitle>
+<contexts>
+<context position="26809" citStr="Pereira et al., 1993" startWordPosition="4274" endWordPosition="4277">the original monosemous tags for 22,280 (of 1,028,348 non-punctuation) tokens in WSJ. For ex9All of Headden et al.’s (2008) grammar induction experiments with induced parts-of-speech were worse than their best results using gold part-of-speech tags, most likely because they used a very small corpus (half of WSJ10) to cluster words. 10We chose the sampling split (80:10:10) and replication parameter (100) somewhat arbitrarily, so better results could likely be obtained with tuning. However, we suspect that the real gains would come from using soft clustering techniques (Hinton and Roweis, 2003; Pereira et al., 1993, inter alia) and propagating (joint) estimates of tag distributions into a parser. Our ad-hoc approach is intended to serve solely as a proof of concept. 11David Elworthy’s C+ tagger, with options -i t -G -l, available from http://friendly-moose.appspot.com/ code/NewCpTag.zip. ample, the first changed sentence is #3 (of 49,208): Some “circuit breakers” installed after the October 1987 crash failed their first test, traders say, unable to cool the selling panic in both stocks and futures. Above, the word cool gets relabeled as #188 (from #173 — see Table 3), since its context is more suggestiv</context>
+<context position="30719" citStr="Pereira et al., 1993" startWordPosition="4868" endWordPosition="4871">ting to see a shift away from using gold tags. For example, Alshawi et al. (2011) demonstrated good results for mapping text to underspecified semantics via dependencies without resorting to gold tags. And Petrov et al. (2010, §4.4, Table 4) observed only a small performance loss “going POS-less” in question parsing. We are not aware of any systems that induce both syntactic trees and their part-of-speech categories. However, aside from the many systems that induce trees from gold tags, there are also unsupervised methods for inducing syntactic categories from gold trees (Finkel et al., 2007; Pereira et al., 1993), as well as for inducing dependencies from gold constituent annotations (Sangati and Zuidema, 2009; Chiang and Bikel, 2002). Considering that Headden et al.’s (2008) study of part-of-speech taggers found no correlation between standard tagging metrics and the quality of induced grammars, it may be time for a unified treatment of these very related syntax tasks. 13When the target language is English, however, their best accuracy (projected from Greek) is low: 45.7% (McDonald et al., 2011, §4, Table 2); tested on the same CoNLL 2007 evaluation set (Nivre et al., 2007), our “punctuation” system </context>
+<context position="33143" citStr="Pereira et al., 1993" startWordPosition="5242" endWordPosition="5245">ing gold tags is an important step towards the goal of fully-unsupervised dependency parsing. We have cast the utility of a categorization scheme as a combination of two effects on parsing accuracy: a synonymy effect and a polysemy effect. Results of our experiments with both full and partial lexicalization suggest that grouping similar words (i.e., synonymy) is vital to grammar induction with the DMV. This is consistent with an established viewpoint, that simple tabulation of frequencies of words participating in certain configurations cannot be reliably used for comparing their likelihoods (Pereira et al., 1993, §4.2): “The statistics of natural languages is inherently ill defined. Because of Zipf’s law, there is never enough data for a reasonable estimation of joint object distributions.” Seginer’s (2007b, §1.4.4) argument, however, is that the Zipfian distribution — a property of words, not parts-of-speech — should allow frequent words to successfully guide 14Furthermore, it would be interesting to know how sensitive different head-percolation schemes (Yamada and Matsumoto, 2003; Johansson and Nugues, 2007) would be to gold versus unsupervised tags, since the Magerman-Collins rules (Magerman, 1995</context>
+</contexts>
+<marker>Pereira, Tishby, Lee, 1993</marker>
+<rawString>F. Pereira, N. Tishby, and L. Lee. 1993. Distributional clustering of English words. In ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>S Petrov</author>
+<author>P-C Chang</author>
+<author>M Ringgaard</author>
+<author>H Alshawi</author>
+</authors>
+<title>Uptraining for accurate deterministic question parsing.</title>
+<date>2010</date>
+<booktitle>In EMNLP.</booktitle>
+<contexts>
+<context position="30323" citStr="Petrov et al. (2010" startWordPosition="4805" endWordPosition="4808">ive alternative to grammar induction by projecting reference parse trees from languages that have annotations to ones that are resource-poor.13 It uses graph-based label propagation over a bilingual similarity graph for a sentence-aligned parallel corpus (Das and Petrov, 2011), inducing part-of-speech tags from a universal tag-set (Petrov et al., 2011). Even in supervised parsing we are starting to see a shift away from using gold tags. For example, Alshawi et al. (2011) demonstrated good results for mapping text to underspecified semantics via dependencies without resorting to gold tags. And Petrov et al. (2010, §4.4, Table 4) observed only a small performance loss “going POS-less” in question parsing. We are not aware of any systems that induce both syntactic trees and their part-of-speech categories. However, aside from the many systems that induce trees from gold tags, there are also unsupervised methods for inducing syntactic categories from gold trees (Finkel et al., 2007; Pereira et al., 1993), as well as for inducing dependencies from gold constituent annotations (Sangati and Zuidema, 2009; Chiang and Bikel, 2002). Considering that Headden et al.’s (2008) study of part-of-speech taggers found</context>
+</contexts>
+<marker>Petrov, Chang, Ringgaard, Alshawi, 2010</marker>
+<rawString>S. Petrov, P.-C. Chang, M. Ringgaard, and H. Alshawi. 2010. Uptraining for accurate deterministic question parsing. In EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>S Petrov</author>
+<author>D Das</author>
+<author>R McDonald</author>
+</authors>
+<title>A universal part-of-speech tagset.</title>
+<date>2011</date>
+<booktitle>In ArXiv.</booktitle>
+<contexts>
+<context position="3652" citStr="Petrov et al., 2011" startWordPosition="542" endWordPosition="545"> older part-of-speech inducers — word clustering algorithms of Clark (2000) and Brown et al. (1992) — that were recently shown to be more robust than other well-known fully unsupervised techniques (Christodoulopoulos et al., 2010). We investigate which properties of gold part-ofspeech tags are useful in grammar induction and parsing, and how these properties could be introduced into induced tags. We also explore the number of word classes that is good for grammar induction: in particular, whether categorization is needed at all. By removing the “unrealistic simplification” of using gold tags (Petrov et al., 2011, §3.2, Footnote 4), we will go on to demonstrate why grammar induction from plain text is no longer “still too difficult.” 1281 Proceedings of the 2011 Conference on Empirical Methods in Natural Language Processing, pages 1281–1290, Edinburgh, Scotland, UK, July 27–31, 2011. c�2011 Association for Computational Linguistics NNS VBD IN NN ♦ Payrolls fell in September . 0 � �� � P = (1 − PSTOP(0, L, T)) X PATTACH(0, L, VBD) X (1 − PSTOP(VBD, L, T)) X PATTACH(VBD, L, NNS) X (1 − PSTOP(VBD, R, T)) X PATTACH(VBD, R, IN) X (1 − PSTOP(IN, R, T)) X PATTACH(IN, R, NN) X PSTOP(VBD, L, F) X PSTOP(VBD, R,</context>
+<context position="30058" citStr="Petrov et al., 2011" startWordPosition="4761" endWordPosition="4764">tion. Outside monolingual grammar induction, fullylexicalized statistical dependency transduction models have been trained from unannotated parallel bitexts for machine translation (Alshawi et al., 2000). More recently, McDonald et al. (2011) demonstrated an impressive alternative to grammar induction by projecting reference parse trees from languages that have annotations to ones that are resource-poor.13 It uses graph-based label propagation over a bilingual similarity graph for a sentence-aligned parallel corpus (Das and Petrov, 2011), inducing part-of-speech tags from a universal tag-set (Petrov et al., 2011). Even in supervised parsing we are starting to see a shift away from using gold tags. For example, Alshawi et al. (2011) demonstrated good results for mapping text to underspecified semantics via dependencies without resorting to gold tags. And Petrov et al. (2010, §4.4, Table 4) observed only a small performance loss “going POS-less” in question parsing. We are not aware of any systems that induce both syntactic trees and their part-of-speech categories. However, aside from the many systems that induce trees from gold tags, there are also unsupervised methods for inducing syntactic categorie</context>
+</contexts>
+<marker>Petrov, Das, McDonald, 2011</marker>
+<rawString>S. Petrov, D. Das, and R. McDonald. 2011. A universal part-of-speech tagset. In ArXiv.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>R Reichart</author>
+<author>A Rappoport</author>
+</authors>
+<title>Improved fully unsupervised parsing with zoomed learning.</title>
+<date>2010</date>
+<booktitle>In EMNLP.</booktitle>
+<contexts>
+<context position="29168" citStr="Reichart and Rappoport, 2010" startWordPosition="4639" endWordPosition="4643">Sch¨utze, 1995). Without gold part-ofspeech tags, their combined DMV+CCM model was about five points worse, both in (directed) unlabeled dependency accuracy (42.3% vs. 47.5%)12 and unlabeled bracketing F1 (72.9% vs. 77.6%), on WSJ10. In constituent parsing, earlier Seginer (2007a, §6, Table 1) built a fully-lexicalized grammar inducer 12On the same evaluation set (WSJ10), our context-sensitive system without gold tags (Experiment #6, §5.2) scores 66.8%. 1287 that was competitive with DMV+CCM despite not using gold tags. His CCL parser has since been improved via a “zoomed learning” technique (Reichart and Rappoport, 2010). Moreover, Abend et al. (2010) reused CCL’s internal distributional representation of words in a cognitively-motivated partof-speech inducer. Unfortunately their tagger did not make it into Christodoulopoulos et al.’s (2010) excellent and otherwise comprehensive evaluation. Outside monolingual grammar induction, fullylexicalized statistical dependency transduction models have been trained from unannotated parallel bitexts for machine translation (Alshawi et al., 2000). More recently, McDonald et al. (2011) demonstrated an impressive alternative to grammar induction by projecting reference par</context>
+</contexts>
+<marker>Reichart, Rappoport, 2010</marker>
+<rawString>R. Reichart and A. Rappoport. 2010. Improved fully unsupervised parsing with zoomed learning. In EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>F Sangati</author>
+<author>W Zuidema</author>
+</authors>
+<title>Unsupervised methods for head assignments.</title>
+<date>2009</date>
+<booktitle>In EACL.</booktitle>
+<contexts>
+<context position="30818" citStr="Sangati and Zuidema, 2009" startWordPosition="4883" endWordPosition="4886">good results for mapping text to underspecified semantics via dependencies without resorting to gold tags. And Petrov et al. (2010, §4.4, Table 4) observed only a small performance loss “going POS-less” in question parsing. We are not aware of any systems that induce both syntactic trees and their part-of-speech categories. However, aside from the many systems that induce trees from gold tags, there are also unsupervised methods for inducing syntactic categories from gold trees (Finkel et al., 2007; Pereira et al., 1993), as well as for inducing dependencies from gold constituent annotations (Sangati and Zuidema, 2009; Chiang and Bikel, 2002). Considering that Headden et al.’s (2008) study of part-of-speech taggers found no correlation between standard tagging metrics and the quality of induced grammars, it may be time for a unified treatment of these very related syntax tasks. 13When the target language is English, however, their best accuracy (projected from Greek) is low: 45.7% (McDonald et al., 2011, §4, Table 2); tested on the same CoNLL 2007 evaluation set (Nivre et al., 2007), our “punctuation” system with contextsensitive induced tags (trained on WSJ45, without gold tags) performs substantially bet</context>
+<context position="33861" citStr="Sangati and Zuidema, 2009" startWordPosition="5348" endWordPosition="5351">aw, there is never enough data for a reasonable estimation of joint object distributions.” Seginer’s (2007b, §1.4.4) argument, however, is that the Zipfian distribution — a property of words, not parts-of-speech — should allow frequent words to successfully guide 14Furthermore, it would be interesting to know how sensitive different head-percolation schemes (Yamada and Matsumoto, 2003; Johansson and Nugues, 2007) would be to gold versus unsupervised tags, since the Magerman-Collins rules (Magerman, 1995; Collins, 1999) agree with gold dependency annotations only 85% of the time, even for WSJ (Sangati and Zuidema, 2009). Proper intrinsic evaluation of dependency grammar inducers is not yet a solved problem (Schwartz et al., 2011). 1288 parsing and learning: “A relatively small number of frequent words appears almost everywhere and most words are never too far from such a frequent word (this is also the principle behind successful part-ofspeech induction).” We believe that it is important to thoroughly understand how to reconcile these only seemingly conflicting insights, balancing them both in theory and in practice. A useful starting point may be to incorporate frequency information in the parsing models di</context>
+</contexts>
+<marker>Sangati, Zuidema, 2009</marker>
+<rawString>F. Sangati and W. Zuidema. 2009. Unsupervised methods for head assignments. In EACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>H Sch¨utze</author>
+</authors>
+<title>Distributional part-of-speech tagging.</title>
+<date>1995</date>
+<booktitle>In EACL.</booktitle>
+<marker>Sch¨utze, 1995</marker>
+<rawString>H. Sch¨utze. 1995. Distributional part-of-speech tagging. In EACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>R Schwartz</author>
+<author>O Abend</author>
+<author>R Reichart</author>
+<author>A Rappoport</author>
+</authors>
+<title>Neutralizing linguistically problematic annotations in unsupervised dependency parsing evaluation.</title>
+<date>2011</date>
+<booktitle>In ACL.</booktitle>
+<contexts>
+<context position="33973" citStr="Schwartz et al., 2011" startWordPosition="5366" endWordPosition="5369"> argument, however, is that the Zipfian distribution — a property of words, not parts-of-speech — should allow frequent words to successfully guide 14Furthermore, it would be interesting to know how sensitive different head-percolation schemes (Yamada and Matsumoto, 2003; Johansson and Nugues, 2007) would be to gold versus unsupervised tags, since the Magerman-Collins rules (Magerman, 1995; Collins, 1999) agree with gold dependency annotations only 85% of the time, even for WSJ (Sangati and Zuidema, 2009). Proper intrinsic evaluation of dependency grammar inducers is not yet a solved problem (Schwartz et al., 2011). 1288 parsing and learning: “A relatively small number of frequent words appears almost everywhere and most words are never too far from such a frequent word (this is also the principle behind successful part-ofspeech induction).” We believe that it is important to thoroughly understand how to reconcile these only seemingly conflicting insights, balancing them both in theory and in practice. A useful starting point may be to incorporate frequency information in the parsing models directly — in particular, capturing the relationships between words of various frequencies. The polysemy effect ap</context>
+</contexts>
+<marker>Schwartz, Abend, Reichart, Rappoport, 2011</marker>
+<rawString>R. Schwartz, O. Abend, R. Reichart, and A. Rappoport. 2011. Neutralizing linguistically problematic annotations in unsupervised dependency parsing evaluation. In ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Y Seginer</author>
+</authors>
+<title>Fast unsupervised incremental parsing.</title>
+<date>2007</date>
+<booktitle>In ACL.</booktitle>
+<contexts>
+<context position="28818" citStr="Seginer (2007" startWordPosition="4589" endWordPosition="4590">g (2004) demonstrated that effort to be worse at recovering dependency arcs than choosing parse structures at random, leading them to incorporate gold tags into the DMV. Klein and Manning (2004, §5, Figure 6) had also tested their own models with induced word classes, constructed using a distributional similarity clustering method (Sch¨utze, 1995). Without gold part-ofspeech tags, their combined DMV+CCM model was about five points worse, both in (directed) unlabeled dependency accuracy (42.3% vs. 47.5%)12 and unlabeled bracketing F1 (72.9% vs. 77.6%), on WSJ10. In constituent parsing, earlier Seginer (2007a, §6, Table 1) built a fully-lexicalized grammar inducer 12On the same evaluation set (WSJ10), our context-sensitive system without gold tags (Experiment #6, §5.2) scores 66.8%. 1287 that was competitive with DMV+CCM despite not using gold tags. His CCL parser has since been improved via a “zoomed learning” technique (Reichart and Rappoport, 2010). Moreover, Abend et al. (2010) reused CCL’s internal distributional representation of words in a cognitively-motivated partof-speech inducer. Unfortunately their tagger did not make it into Christodoulopoulos et al.’s (2010) excellent and otherwise </context>
+</contexts>
+<marker>Seginer, 2007</marker>
+<rawString>Y. Seginer. 2007a. Fast unsupervised incremental parsing. In ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Y Seginer</author>
+</authors>
+<title>Learning Syntactic Structure.</title>
+<date>2007</date>
+<tech>Ph.D. thesis,</tech>
+<institution>University of Amsterdam.</institution>
+<contexts>
+<context position="28818" citStr="Seginer (2007" startWordPosition="4589" endWordPosition="4590">g (2004) demonstrated that effort to be worse at recovering dependency arcs than choosing parse structures at random, leading them to incorporate gold tags into the DMV. Klein and Manning (2004, §5, Figure 6) had also tested their own models with induced word classes, constructed using a distributional similarity clustering method (Sch¨utze, 1995). Without gold part-ofspeech tags, their combined DMV+CCM model was about five points worse, both in (directed) unlabeled dependency accuracy (42.3% vs. 47.5%)12 and unlabeled bracketing F1 (72.9% vs. 77.6%), on WSJ10. In constituent parsing, earlier Seginer (2007a, §6, Table 1) built a fully-lexicalized grammar inducer 12On the same evaluation set (WSJ10), our context-sensitive system without gold tags (Experiment #6, §5.2) scores 66.8%. 1287 that was competitive with DMV+CCM despite not using gold tags. His CCL parser has since been improved via a “zoomed learning” technique (Reichart and Rappoport, 2010). Moreover, Abend et al. (2010) reused CCL’s internal distributional representation of words in a cognitively-motivated partof-speech inducer. Unfortunately their tagger did not make it into Christodoulopoulos et al.’s (2010) excellent and otherwise </context>
+</contexts>
+<marker>Seginer, 2007</marker>
+<rawString>Y. Seginer. 2007b. Learning Syntactic Structure. Ph.D. thesis, University of Amsterdam.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>B Selman</author>
+<author>H A Kautz</author>
+<author>B Cohen</author>
+</authors>
+<title>Noise strategies for improving local search.</title>
+<date>1994</date>
+<booktitle>In AAAI.</booktitle>
+<contexts>
+<context position="25308" citStr="Selman et al., 1994" startWordPosition="4032" endWordPosition="4035">s) for experiments with the state-of-the-art system. We need a context-sensitive tagger, and HMM models are good — relative to other tag-inducers. However, they are not better than gold tags, at least when trained using a modest amount of data.9 For this reason, we decided to relax the monosemous flat clustering, plugging it in as an initializer for the HMM. The main problem with this approach is that, at least without smoothing, every monosemous labeling is trivially at a local optimum, since P(ti |wi) is deterministic. To escape the initial assignment, we used a “noise injection” technique (Selman et al., 1994), inspired by the contexts of Clark (2000). First, we collected the MLE statistics for PR(ti+1 |ti) and PL(ti |ti+1) in WSJ, using the flat monosemous tags. Next, we replicated the text of WSJ 100-fold. Finally, we retagged this larger data set, as follows: with probability 80%, a word kept its monosemous tag; with probability 10%, we sampled a new tag from the left context (PL) associated with the original (monosemous) tag of its rightmost neighbor; and with probability 10%, we drew a tag from the right context (PR) of its leftmost neighbor.10 Given that our initializer — and later the input </context>
+</contexts>
+<marker>Selman, Kautz, Cohen, 1994</marker>
+<rawString>B. Selman, H. A. Kautz, and B. Cohen. 1994. Noise strategies for improving local search. In AAAI.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>V I Spitkovsky</author>
+<author>H Alshawi</author>
+<author>D Jurafsky</author>
+</authors>
+<title>Baby Steps: How “Less is More” in unsupervised dependency parsing. In NIPS: Grammar Induction, Representation ofLanguage and Language Learning.</title>
+<date>2009</date>
+<contexts>
+<context position="4561" citStr="Spitkovsky et al., 2009" startWordPosition="715" endWordPosition="718">ssociation for Computational Linguistics NNS VBD IN NN ♦ Payrolls fell in September . 0 � �� � P = (1 − PSTOP(0, L, T)) X PATTACH(0, L, VBD) X (1 − PSTOP(VBD, L, T)) X PATTACH(VBD, L, NNS) X (1 − PSTOP(VBD, R, T)) X PATTACH(VBD, R, IN) X (1 − PSTOP(IN, R, T)) X PATTACH(IN, R, NN) X PSTOP(VBD, L, F) X PSTOP(VBD, R, F) X PSTOP(NNS, L, T) X PSTOP(NNS, R, T) X PSTOP(IN, L, T) X PSTOP(IN, R, F) X PSTOP(NN, L, T) X PSTOP(NN, R, T) X PSTOP(0, L, F) � �� � 1 1 Figure 1: A dependency structure for a short WSJ sentence and its probability, factored by the DMV, using gold tags, after summing out PORDaR (Spitkovsky et al., 2009). 2 Methodology In all experiments, we model the English grammar via Klein and Manning’s (2004) Dependency Model with Valence (DMV), induced from subsets of nottoo-long sentences of the Wall Street Journal (WSJ). 2.1 The Model The original DMV is a single-state head automata model (Alshawi, 1996) over lexical word classes {cw} — gold part-of-speech tags. Its generative story for a sub-tree rooted at a head (of class ch) rests on three types of independent decisions: (i) initial direction dir E {L, R} in which to attach children, via probability PORDaR(ch); (ii) whether to seal dir, stopping wi</context>
+<context position="8225" citStr="Spitkovsky et al., 2009" startWordPosition="1302" endWordPosition="1305">mbols, as is standard practice (Paskin, 2001; Klein and Manning, 2004). For a meaningful comparison with previous work, we also test some of the models from our earlier experiments (#1,3) — and both models from final experiments (#5,6) — against Section 23 of WSJ∞, after applying Laplace (a.k.a. “add one”) smoothing. 1WSJ15 contains 15,922 sentences up to length fifteen (a total of 163,715 tokens, not counting punctuation) — versus 7,422 sentences of at most ten words (only 52,248 tokens) comprising WSJ10 — and is a better trade-off between the quantity and complexity of training data in WSJ (Spitkovsky et al., 2009). X PSTOP(0, R, T) � �� � . 1282 token mfc mfp ua it {PRP} {PRP} {PRP} gains {NNS} {VBZ, NNS} {VBZ, NNS} the {DT} {JJ, DT} {VBP, NNP, NN, JJ, DT, CD} Table 2: Example most frequent class, most frequent pair and union all reassignments for tokens it, the and gains. Viable Groups 36 34 160 328 Accuracy 1. manual tags Unsupervised 50.7 47.2 40.4 44.3 2. tagless lexicalized models full 25.8 partial 29.3 none 30.7 Sky 78.0 74.5 76.4 78.4 97.3 60.5 24.5 gold mfc mfp ua 49,180 176 1 3. tags from a flat (Clark, 2000) clustering 47.8 83.8 197 4. prefixes of a hierarchical (Brown et al., 1992) clusterin</context>
+<context position="20023" citStr="Spitkovsky et al., 2009" startWordPosition="3211" endWordPosition="3214">s, in tandem (e.g., in the case of a hierarchical clustering). 4.3 Further Evaluation It is important to enable easy comparison with previous and future work. Since WSJ15 is not a standard test set, we evaluated two key experiments — “less is more” with gold part-of-speech tags (#1, Table 1: gold) and with Clark’s (2000) clusters (#3, Table 1: flat) — on all sentences (not just length fifteen and shorter), in Section 23 of WSJ (see Table 4). This required smoothing both final models (§2.4). We showed that two classic unsupervised word 1285 System Description Accuracy #1 (§3.1) “less is more” (Spitkovsky et al., 2009) 44.0 #3 (§4.1) “less is more” with monosemous induced tags 41.4 (-2.6) Table 4: Directed accuracies on Section 23 of WSJ (all sentences) for two experiments with the base system. clusterings — one flat and one hierarchical — can be better for dependency grammar induction than monosemous syntactic categories derived from gold part-of-speech tags. And we confirmed that the unsupervised tags are worse than the actual gold tags, in a simple dependency grammar induction system. 5 State-of-the-Art without Gold Tags Until now, we have deliberately kept our experimental methods simple and nearly iden</context>
+</contexts>
+<marker>Spitkovsky, Alshawi, Jurafsky, 2009</marker>
+<rawString>V. I. Spitkovsky, H. Alshawi, and D. Jurafsky. 2009. Baby Steps: How “Less is More” in unsupervised dependency parsing. In NIPS: Grammar Induction, Representation ofLanguage and Language Learning.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>V I Spitkovsky</author>
+<author>H Alshawi</author>
+<author>D Jurafsky</author>
+</authors>
+<title>From Baby Steps to Leapfrog: How “Less is More” in unsupervised dependency parsing.</title>
+<date>2010</date>
+<booktitle>In NAACL-HLT.</booktitle>
+<contexts>
+<context position="6778" citStr="Spitkovsky et al., 2010" startWordPosition="1071" endWordPosition="1074">nk’s Wall Street Journal portion (Marcus et al., 1993). Following Klein and Manning (2004), we begin with reference constituent parses, prune out all empty sub-trees and remove punctuation and terminals (tagged # and $) that are not pronounced where they appear. We then train only on the remaining sentence yields consisting of no more than fifteen tokens (WSJ15), in most of our experiments (#1–4, §3–4); by contrast, Klein and Manning’s (2004) original system was trained using less data: sentences up to length ten (WSJ10).1 Our final experiments (#5–6, §5) employ a simple scaffolding strategy (Spitkovsky et al., 2010a) that follows up initial training at WSJ15 (“less is more”) with an additional training run (“leapfrog”) that incorporates most sentences of the data set, at WSJ45. 2.4 Evaluation Methods Evaluation is against the training set, as is standard practice in unsupervised learning, in part because Klein and Manning (2004, §3) did not smooth the DMV (Klein, 2005, §6.2). For most of our experiments (#1–4, §3–4), this entails starting with the reference trees from WSJ15 (as modified in §2.3), automatically converting their labeled constituents into unlabeled dependencies using deterministic “headper</context>
+<context position="14579" citStr="Spitkovsky et al. (2010" startWordPosition="2338" endWordPosition="2341">ty. Cluster #173 Cluster #188 open 1. get free 2. make further 3. take higher 4. find lower 5. give similar 6. keep leading 7. pay present 8. buy growing 9. win increased 10. sell ... ... 37. cool 42. improve ... ... 1,688. up-wind 2,105. zero-out Table 3: Representative members for two of the flat word groupings: cluster #173 (left) contains adjectives, especially ones that take comparative (or other) complements; cluster #188 comprises bare-stem verbs (infinitive stems). (Of course, many of the words have other syntactic uses.) 4Note that it also beats supervised training. That isn’t a bug: Spitkovsky et al. (2010b, §7.2) explain this paradox in the DMV. 4 Grammars over Induced Word Clusters We have demonstrated the need for grouping similar words, estimated a bound on performance losses due to monosemous clusterings and are now ready to experiment with induced part-of-speech tags. We use two sets of established, publicly-available hard clustering assignments, each computed from a much larger data set than WSJ (approximately a million words). The first is a flat mapping (200 clusters) constructed by training Clark’s (2000) distributional similarity model over several hundred million words from the Brit</context>
+</contexts>
+<marker>Spitkovsky, Alshawi, Jurafsky, 2010</marker>
+<rawString>V. I. Spitkovsky, H. Alshawi, and D. Jurafsky. 2010a. From Baby Steps to Leapfrog: How “Less is More” in unsupervised dependency parsing. In NAACL-HLT.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>V I Spitkovsky</author>
+<author>H Alshawi</author>
+<author>D Jurafsky</author>
+<author>C D Manning</author>
+</authors>
+<title>Viterbi training improves unsupervised dependency parsing.</title>
+<date>2010</date>
+<booktitle>In CoNLL.</booktitle>
+<contexts>
+<context position="6778" citStr="Spitkovsky et al., 2010" startWordPosition="1071" endWordPosition="1074">nk’s Wall Street Journal portion (Marcus et al., 1993). Following Klein and Manning (2004), we begin with reference constituent parses, prune out all empty sub-trees and remove punctuation and terminals (tagged # and $) that are not pronounced where they appear. We then train only on the remaining sentence yields consisting of no more than fifteen tokens (WSJ15), in most of our experiments (#1–4, §3–4); by contrast, Klein and Manning’s (2004) original system was trained using less data: sentences up to length ten (WSJ10).1 Our final experiments (#5–6, §5) employ a simple scaffolding strategy (Spitkovsky et al., 2010a) that follows up initial training at WSJ15 (“less is more”) with an additional training run (“leapfrog”) that incorporates most sentences of the data set, at WSJ45. 2.4 Evaluation Methods Evaluation is against the training set, as is standard practice in unsupervised learning, in part because Klein and Manning (2004, §3) did not smooth the DMV (Klein, 2005, §6.2). For most of our experiments (#1–4, §3–4), this entails starting with the reference trees from WSJ15 (as modified in §2.3), automatically converting their labeled constituents into unlabeled dependencies using deterministic “headper</context>
+<context position="14579" citStr="Spitkovsky et al. (2010" startWordPosition="2338" endWordPosition="2341">ty. Cluster #173 Cluster #188 open 1. get free 2. make further 3. take higher 4. find lower 5. give similar 6. keep leading 7. pay present 8. buy growing 9. win increased 10. sell ... ... 37. cool 42. improve ... ... 1,688. up-wind 2,105. zero-out Table 3: Representative members for two of the flat word groupings: cluster #173 (left) contains adjectives, especially ones that take comparative (or other) complements; cluster #188 comprises bare-stem verbs (infinitive stems). (Of course, many of the words have other syntactic uses.) 4Note that it also beats supervised training. That isn’t a bug: Spitkovsky et al. (2010b, §7.2) explain this paradox in the DMV. 4 Grammars over Induced Word Clusters We have demonstrated the need for grouping similar words, estimated a bound on performance losses due to monosemous clusterings and are now ready to experiment with induced part-of-speech tags. We use two sets of established, publicly-available hard clustering assignments, each computed from a much larger data set than WSJ (approximately a million words). The first is a flat mapping (200 clusters) constructed by training Clark’s (2000) distributional similarity model over several hundred million words from the Brit</context>
+</contexts>
+<marker>Spitkovsky, Alshawi, Jurafsky, Manning, 2010</marker>
+<rawString>V. I. Spitkovsky, H. Alshawi, D. Jurafsky, and C. D. Manning. 2010b. Viterbi training improves unsupervised dependency parsing. In CoNLL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>V I Spitkovsky</author>
+<author>H Alshawi</author>
+<author>D Jurafsky</author>
+</authors>
+<title>Punctuation: Making a point in unsupervised dependency parsing.</title>
+<date>2011</date>
+<booktitle>In CoNLL.</booktitle>
+<contexts>
+<context position="6012" citStr="Spitkovsky et al., 2011" startWordPosition="946" endWordPosition="949">only projective trees. A root token Q generates the head of the sentence as its left (and only) child (see Figure 1 for a simple, concrete example). 2.2 Learning Algorithms The DMV lends itself to unsupervised learning via inside-outside re-estimation (Baker, 1979). Klein and Manning (2004) initialized their system using an “ad-hoc harmonic” completion, followed by training using 40 steps of EM (Klein, 2005). We reproduce this set-up, iterating without actually verifying convergence, in most of our experiments (#1–4, §3–4). Experiments #5–6 (§5) employ our new state-ofthe-art grammar inducer (Spitkovsky et al., 2011), which uses constrained Viterbi EM (details in §5). 2.3 Training Data The DMV is usually trained on a customized subset of Penn English Treebank’s Wall Street Journal portion (Marcus et al., 1993). Following Klein and Manning (2004), we begin with reference constituent parses, prune out all empty sub-trees and remove punctuation and terminals (tagged # and $) that are not pronounced where they appear. We then train only on the remaining sentence yields consisting of no more than fifteen tokens (WSJ15), in most of our experiments (#1–4, §3–4); by contrast, Klein and Manning’s (2004) original s</context>
+<context position="21300" citStr="Spitkovsky et al., 2011" startWordPosition="3408" endWordPosition="3411">t, we will explore how our main findings generalize beyond this toy setting. A preliminary test will simply quantify the effect of replacing gold part-of-speech tags with the monosemous flat clustering (as in experiment #3, §4.1) on a modern grammar inducer. And our last experiment will gauge the impact of using a polysemous (but still unsupervised) clustering instead, obtained by executing standard sequence labeling techniques to introduce context-sensitivity into the original (independent) assignment or words to categories. These final experiments are with our latest stateof-the-art system (Spitkovsky et al., 2011) — a partially lexicalized extension of the DMV that uses constrained Viterbi EM to train on nearly all of the data available in WSJ, at WSJ45 (48,418 sentences; 986,830 non-punctuation tokens). The key contribution that differentiates this model from its predecessors is that it incorporates punctuation into grammar induction (by turning it into parsing constraints, instead of ignoring punctuation marks altogether). In training, the model makes a simplifying assumption — that sentences can be split at punctuation and that the resulting fragments of text could be parsed independently of one ano</context>
+<context position="24253" citStr="Spitkovsky et al., 2011" startWordPosition="3871" endWordPosition="3874"> induce a grammar. Previous work (Headden et al., 2008, §4) found that simple bitag hidden Markov models, classically trained using the Baum-Welch (Baum, 1972) variant of EM (HMM-EM), perform quite well,8 on average, across different grammar induction tasks. Such sequence models incorporate a sensitivity to context via state transition probabilities PTRAN(ti |ti−1), capturing the likelihood that a tag ti immediately follows the tag ti−1; emission probabilities PElnT(wi |ti) capture the likelihood that a word of type ti is wi. 7We also briefly comment on this result in the “punctuation” paper (Spitkovsky et al., 2011, §7), published concurrently. 8They are also competitive with Bayesian estimators, on larger data sets, with cross-validation (Gao and Johnson, 2008). 1286 System Description Accuracy (§5) “punctuation” (Spitkovsky et al., 2011) 58.4 #5 (§5.1) “punctuation” with monosemous induced tags 58.2 (-0.2) #6 (§5.2) “punctuation” with context-sensitive induced tags 59.1 (+0.7) Table 5: Directed accuracies on Section 23 of WSJ (all sentences) for experiments with the state-of-the-art system. We need a context-sensitive tagger, and HMM models are good — relative to other tag-inducers. However, they are </context>
+<context position="31564" citStr="Spitkovsky et al., 2011" startWordPosition="5002" endWordPosition="5005">tween standard tagging metrics and the quality of induced grammars, it may be time for a unified treatment of these very related syntax tasks. 13When the target language is English, however, their best accuracy (projected from Greek) is low: 45.7% (McDonald et al., 2011, §4, Table 2); tested on the same CoNLL 2007 evaluation set (Nivre et al., 2007), our “punctuation” system with contextsensitive induced tags (trained on WSJ45, without gold tags) performs substantially better, scoring 51.6%. Note that this is also an improvement over our system trained on the CoNLL set using gold tags: 50.3% (Spitkovsky et al., 2011, §8, Table 6). 7 Discussion and Conclusions Unsupervised word clustering techniques of Brown et al. (1992) and Clark (2000) are well-suited to dependency parsing with the DMV. Both methods outperform gold parts-of-speech in supervised modes. And both can do better than monosemous clusters derived from gold tags in unsupervised training. We showed how Clark’s (2000) flat tags can be relaxed, using context, with the resulting polysemous clustering outperforming gold part-of-speech tags for the English dependency grammar induction task. Monolingual evaluation is a significant flaw in our methodo</context>
+</contexts>
+<marker>Spitkovsky, Alshawi, Jurafsky, 2011</marker>
+<rawString>V. I. Spitkovsky, H. Alshawi, and D. Jurafsky. 2011. Punctuation: Making a point in unsupervised dependency parsing. In CoNLL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>H Yamada</author>
+<author>Y Matsumoto</author>
+</authors>
+<title>Statistical dependency analysis with support vector machines.</title>
+<date>2003</date>
+<booktitle>In IWPT.</booktitle>
+<contexts>
+<context position="33622" citStr="Yamada and Matsumoto, 2003" startWordPosition="5310" endWordPosition="5313">ation of frequencies of words participating in certain configurations cannot be reliably used for comparing their likelihoods (Pereira et al., 1993, §4.2): “The statistics of natural languages is inherently ill defined. Because of Zipf’s law, there is never enough data for a reasonable estimation of joint object distributions.” Seginer’s (2007b, §1.4.4) argument, however, is that the Zipfian distribution — a property of words, not parts-of-speech — should allow frequent words to successfully guide 14Furthermore, it would be interesting to know how sensitive different head-percolation schemes (Yamada and Matsumoto, 2003; Johansson and Nugues, 2007) would be to gold versus unsupervised tags, since the Magerman-Collins rules (Magerman, 1995; Collins, 1999) agree with gold dependency annotations only 85% of the time, even for WSJ (Sangati and Zuidema, 2009). Proper intrinsic evaluation of dependency grammar inducers is not yet a solved problem (Schwartz et al., 2011). 1288 parsing and learning: “A relatively small number of frequent words appears almost everywhere and most words are never too far from such a frequent word (this is also the principle behind successful part-ofspeech induction).” We believe that i</context>
+</contexts>
+<marker>Yamada, Matsumoto, 2003</marker>
+<rawString>H. Yamada and Y. Matsumoto. 2003. Statistical dependency analysis with support vector machines. In IWPT.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D Yuret</author>
+</authors>
+<title>Discovery of Linguistic Relations Using Lexical Attraction.</title>
+<date>1998</date>
+<tech>Ph.D. thesis,</tech>
+<institution>MIT.</institution>
+<contexts>
+<context position="28121" citStr="Yuret, 1998" startWordPosition="4483" endWordPosition="4484">, however, is beyond the scope of this work.) Using this new context-sensitive hard assignment of tokens to unsupervised categories our grammar inducer attained a directed accuracy of 59.1%, nearly a full point better than with the monosemous hard assignment (see Table 5). To the best of our knowledge it is also the first state-of-the-art unsupervised dependency parser to perform better with induced categories than with gold part-of-speech tags. 6 Related Work Early work in dependency grammar induction already relied on gold part-of-speech tags (Carroll and Charniak, 1992). Some later models (Yuret, 1998; Paskin, 2001, inter alia) attempted full lexicalization. However, Klein and Manning (2004) demonstrated that effort to be worse at recovering dependency arcs than choosing parse structures at random, leading them to incorporate gold tags into the DMV. Klein and Manning (2004, §5, Figure 6) had also tested their own models with induced word classes, constructed using a distributional similarity clustering method (Sch¨utze, 1995). Without gold part-ofspeech tags, their combined DMV+CCM model was about five points worse, both in (directed) unlabeled dependency accuracy (42.3% vs. 47.5%)12 and u</context>
+</contexts>
+<marker>Yuret, 1998</marker>
+<rawString>D. Yuret. 1998. Discovery of Linguistic Relations Using Lexical Attraction. Ph.D. thesis, MIT.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

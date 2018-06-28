@@ -1,0 +1,1488 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.000001">
+<title confidence="0.930728">
+Coreference Resolution in a Modular, Entity-Centered Model
+</title>
+<author confidence="0.990342">
+Aria Haghighi
+</author>
+<affiliation confidence="0.9980365">
+Computer Science Division
+University of California, Berkeley
+</affiliation>
+<email confidence="0.989681">
+aria42@cs.berkeley.edu
+</email>
+<author confidence="0.99531">
+Dan Klein
+</author>
+<affiliation confidence="0.9986375">
+Computer Science Division
+University of California, Berkeley
+</affiliation>
+<email confidence="0.996769">
+klein@cs.berkeley.edu
+</email>
+<sectionHeader confidence="0.99475" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.999202428571429">
+Coreference resolution is governed by syntac-
+tic, semantic, and discourse constraints. We
+present a generative, model-based approach in
+which each of these factors is modularly en-
+capsulated and learned in a primarily unsu-
+pervised manner. Our semantic representation
+first hypothesizes an underlying set of latent
+entity types, which generate specific entities
+that in turn render individual mentions. By
+sharing lexical statistics at the level of abstract
+entity types, our model is able to substantially
+reduce semantic compatibility errors, result-
+ing in the best results to date on the complete
+end-to-end coreference task.
+</bodyText>
+<sectionHeader confidence="0.998787" genericHeader="introduction">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.999952784313725">
+Coreference systems exploit a variety of informa-
+tion sources, ranging from syntactic and discourse
+constraints, which are highly configurational, to se-
+mantic constraints, which are highly contingent on
+lexical meaning and world knowledge. Perhaps be-
+cause configurational features are inherently easier
+to learn from small data sets, past work has often
+emphasized them over semantic knowledge.
+Of course, all state-of-the-art coreference systems
+have needed to capture semantic compatibility to
+some degree. As an example of nominal headword
+compatibility, a “president” can be a “leader” but
+cannot be not an “increase.” Past systems have of-
+ten computed the compatibility of specific headword
+pairs, extracted either from lexical resources (Ng,
+2007; Bengston and Roth, 2008; Rahman and Ng,
+2009), web statistics (Yang et al., 2005), or sur-
+face syntactic patterns (Haghighi and Klein, 2009).
+While the pairwise approach has high precision, it is
+neither realistic nor scalable to explicitly enumerate
+all pairs of compatible word pairs. A more compact
+approach has been to rely on named-entity recog-
+nition (NER) systems to give coarse-grained entity
+types for each mention (Soon et al., 1999; Ng and
+Cardie, 2002). Unfortunately, current systems use
+small inventories of types and so provide little con-
+straint. In general, coreference errors in state-of-the-
+art systems are frequently due to poor models of se-
+mantic compatibility (Haghighi and Klein, 2009).
+In this work, we take a primarily unsupervised ap-
+proach to coreference resolution, broadly similar to
+Haghighi and Klein (2007), which addresses this is-
+sue. Our generative model exploits a large inven-
+tory of distributional entity types, including standard
+NER types like PERSON and ORG, as well as more
+refined types like WEAPON and VEHICLE. For each
+type, distributions over typical heads, modifiers, and
+governors are learned from large amounts of unla-
+beled data, capturing type-level semantic informa-
+tion (e.g. “spokesman” is a likely head for a PER-
+SON). Each entity inherits from a type but captures
+entity-level semantic information (e.g. “giant” may
+be a likely head for the Microsoft entity but not all
+ORGs). Separately from the type-entity semantic
+module, a log-linear discourse model captures con-
+figurational effects. Finally, a mention model assem-
+bles each textual mention by selecting semantically
+appropriate words from the entities and types.
+Despite being almost entirely unsupervised, our
+model yields the best reported end-to-end results on
+a range of standard coreference data sets.
+</bodyText>
+<sectionHeader confidence="0.955028" genericHeader="method">
+2 Key Abstractions
+</sectionHeader>
+<figureCaption confidence="0.8570815">
+The key abstractions of our model are illustrated in
+Figure 1 and described here.
+</figureCaption>
+<note confidence="0.354911">
+Mentions: A mention is an observed textual ref-
+erence to a latent real-world entity. Mentions are as-
+</note>
+<page confidence="0.979344">
+385
+</page>
+<note confidence="0.748393666666667">
+Human Language Technologies: The 2010 Annual Conference of the North American Chapter of the ACL, pages 385–393,
+Los Angeles, California, June 2010. c�2010 Association for Computational Linguistics
+Person
+</note>
+<table confidence="0.8739629375">
+r θr fr
+[Obama: 0.02, [1: 0.39,
+NAM-HEAD Smith:0.015, 0:0.18,
+Jr.: 0.01, ...] 2:0.13, ...]
+[president: 0.14, [0: 0.30,
+NOM-HEAD painter:0.11, 1:0.25,
+senator: 0.10,...] 2:0.20, ...]
+... ... ...
+Barack Obama Pablo Picasso
+r Lr r Lr
+NAM-HEAD [Obama, Barack] NAM-HEAD [Picasso, Pablo]
+NOM-HEAD [president, leader] NOM-HEAD [painter]
+r wr r wr
+NAM-HEAD Obama NOM-HEAD president
+NN-MOD Mr.
+r ama e pre en
+</table>
+<figureCaption confidence="0.995424333333333">
+Figure 1: The key abstractions of our model (Section 2).
+(a) Mentions map properties (r) to words (wr). (b) Enti-
+ties map properties (r) to word lists (Lr). (c) Types map
+properties (r) to distributions over property words (Br)
+and the fertilities of those distributions (fr). For (b) and
+(c), we only illustrate a subset of the properties.
+</figureCaption>
+<bodyText confidence="0.999872780487805">
+sociated with nodes in a parse tree and are typically
+realized as NPs. There are three basic forms of men-
+tions: proper (denoted NAM), nominal (NOM), and
+pronominal (PRO). We will often describe proper
+and nominal mentions together as referring men-
+tions.
+We represent each mention M as a collection of
+key-value pairs. The keys are called properties and
+the values are words. For example, the left mention
+in Figure 1(a) has a proper head property, denoted
+NAM-HEAD, with value “Obama.” The set of prop-
+erties we consider, denoted R, includes several va-
+rieties of heads, modifiers, and governors (see Sec-
+tion 5.2 for details). Not every mention has a value
+for every property.
+Entities: An entity is a specific individual or ob-
+ject in the world. Entities are always latent in text.
+Where a mention has a single word for each prop-
+erty, an entity has a list of signature words. For-
+mally, entities are mappings from properties r E R
+to lists Lr of “canonical” words which that entity
+uses for that property. For instance in Figure 1(b),
+the list of nominal heads for the Barack Obama en-
+tity includes “president.”
+Types: Coreference systems often make a men-
+tion / entity distinction. We extend this hierarchy
+to include types, which represent classes of entities
+(PERSON, ORGANIZATION, and so on). Types allow
+the sharing of properties across entities and mediate
+the generation of entities in our model (Section 3.1).
+See Figure 1(c) for a concrete example.
+We represent each type T as a mapping between
+properties r and pairs of multinomials (Br, fr). To-
+gether, these distributions control the lists Lr for en-
+tities of that type. Br is a unigram distribution of
+words that are semantically licensed for property r.
+fr is a “fertility” distribution over the integers that
+characterizes entity list lengths. For example, for the
+type PERSON, Br for proper heads is quite flat (there
+are many last names) but fr is peaked at 1 (people
+have a single last name).
+</bodyText>
+<sectionHeader confidence="0.999896" genericHeader="method">
+3 Generative Model
+</sectionHeader>
+<bodyText confidence="0.99992328">
+We now describe our generative model. At the pa-
+rameter level, we have one parameter group for the
+types τ = (0, T1, ... , Tt), where 0 is a multinomial
+prior over a fixed number t of types and the {TZ} are
+the parameters for each individual type, described in
+greater detail below. A second group comprises log-
+linear parameters π over discourse choices, also de-
+scribed below. Together, these two groups are drawn
+according to P(τ|λ)P(π|Q2), where λ and Q2 are a
+small number of scalar hyper-parameters described
+in Section 4.
+Conditioned on the parameters (τ, π), a docu-
+ment is generated as follows: A semantic module
+generates a sequence E of entities. E is in prin-
+ciple infinite, though during inference only a finite
+number are ever instantiated. A discourse module
+generates a vector Z which assigns an entity in-
+dex ZZ to each mention position i. Finally, a men-
+tion generation module independently renders the
+sequence of mentions (M) from their underlying en-
+tities. The syntactic position and structure of men-
+tions are treated as observed, including the mention
+forms (pronominal, etc.). We use X to refer to this
+ungenenerated information. Our model decomposes
+as follows:
+</bodyText>
+<equation confidence="0.9957595">
+P(E, Z, M|τ, π, X) =
+P(E|τ) [Semantic, Section 3.1]
+P(Z|π, X) [Discourse, Section 3.2]
+P(M|Z, E, τ) [Mention, Section 3.3]
+</equation>
+<bodyText confidence="0.9968425">
+We detail each of these components in subsequent
+sections.
+</bodyText>
+<figure confidence="0.9987385">
+(c)
+Types
+(b)
+Entities
+(a)
+Mentions
+</figure>
+<page confidence="0.524647">
+386
+</page>
+<figure confidence="0.995498384615385">
+fr θr
+Lr
+R
+E
+T = PERS
+0: 0.30
+1: 0.25
+2: 0.20
+3: 0.18
+...
+president
+leader
+official
+</figure>
+<figureCaption confidence="0.648370571428571">
+Figure 2: Depiction of the entity generation process (Sec-
+tion 3.1). Each entity draws a type (T) from 0, and, for
+each property r E R, forms a word list (Lr) by choosing
+a length from T’s fr distribution and then independently
+drawing that many words from T’s Br distribution. Ex-
+ample values are shown for the person type and the nom-
+inal head property (NOM-HEAD).
+</figureCaption>
+<subsectionHeader confidence="0.998895">
+3.1 Semantic Module
+</subsectionHeader>
+<bodyText confidence="0.9999808">
+The semantic module is responsible for generating
+a sequence of entities. Each entity E is generated
+independently and consists of a type indicator T, as
+well as a collection {Lr}rE7Z of word lists for each
+property. These elements are generated as follows:
+</bodyText>
+<subsectionHeader confidence="0.744396">
+Entity Generation
+</subsectionHeader>
+<bodyText confidence="0.828383055555555">
+Draw entity type T — 0
+For each mention property r E R,
+Fetch {(fr, Br)} for TT
+Draw word list length |Lr |— fr
+Draw |Lr |words from w — Br
+See Figure 2 for an illustration of this process. Each
+word list Lr is generated by first drawing a list
+length from fr and then independently populating
+that list from the property’s word distribution Br.1
+Past work has employed broadly similar distribu-
+tional models for unsupervised NER of proper men-
+1There is one exception: the sizes of the proper and nomi-
+nal head property lists are jointly generated, but their word lists
+are still independently populated.
+tions (Collins and Singer, 1999; Elsner et al., 2009).
+However, to our knowledge, this is the first work
+to incorporate such a model into an entity reference
+process.
+</bodyText>
+<subsectionHeader confidence="0.998668">
+3.2 Discourse Module
+</subsectionHeader>
+<bodyText confidence="0.9991288125">
+The discourse module is responsible for choosing
+an entity to evoke at each of the n mention posi-
+tions. Formally, this module generates an entity as-
+signment vector Z = (Zl, ... , Zn), where Zi indi-
+cates the entity index for the ith mention position.
+Most linguistic inquiry characterizes NP anaphora
+by the pairwise relations that hold between a men-
+tion and its antecedent (Hobbs, 1979; Kehler et al.,
+2008). Our discourse module utilizes this pairwise
+perspective to define each Zi in terms of an interme-
+diate “antecedent” variable Ai. Ai either points to a
+previous antecedent mention position (Ai &lt; i) and
+“steals” its entity assignment or begins a new entity
+(Ai = i). The choice of Ai is parametrized by affini-
+ties s7r(i, j; X) between mention positions i and j.
+Formally, this process is described as:
+</bodyText>
+<subsectionHeader confidence="0.653028">
+Entity Assignment
+</subsectionHeader>
+<bodyText confidence="0.414018">
+For each mention position, i = 1, ... , n,
+Draw antecedent position Ai E {1, ... , i}:
+</bodyText>
+<equation confidence="0.998227">
+P(Ai = j|X) a s7r(i, j; X)
+�
+ZA�, if Ai &lt; i
+Zi =
+K + 1, otherwise
+</equation>
+<bodyText confidence="0.999959277777778">
+Here, K denotes the number of entities allocated in
+the first i-1 mention positions. This process is an in-
+stance of the sequential distance-dependent Chinese
+Restaurant Process (DD-CRP) of Blei and Frazier
+(2009). During inference, we variously exploit both
+the A and Z representations (Section 4).
+For nominal and pronoun mentions, there are sev-
+eral well-studied anaphora cues, including centering
+(Grosz et al., 1995), nearness (Hobbs, 1978), and
+deterministic constraints, which have all been uti-
+lized in prior coreference work (Soon et al., 1999;
+Ng and Cardie, 2002). In order to combine these
+cues, we take a log-linear, feature-based approach
+and parametrize s7r(i, j; X) = exp{7rTfX(i, j)},
+where fX(i, j) is a feature vector over mention po-
+sitions i and j, and 7r is a parameter vector; the fea-
+tures may freely condition on X. We utilize the
+following features between a mention and an an-
+</bodyText>
+<figure confidence="0.975121842105263">
+ORG: 0.30
+PERS: 0.22
+GPE: 0.18
+LOC: 0.15
+WEA: 0.12
+VEH: 0.09
+PERS
+...
+T
+φ
+president: 0.14
+painter: 0.11
+senator: 0.10
+minister: 0.09
+leader: 0.08
+official: 0.06
+executive: 0.05
+For T = PERS
+...
+</figure>
+<page confidence="0.983199">
+387
+</page>
+<bodyText confidence="0.9997584">
+tecedent: tree distance, sentence distance, and the
+syntactic positions (subject, object, and oblique) of
+the mention and antecedent. Features for starting a
+new entity include: a definiteness feature (extracted
+from the mention’s determiner), the top CFG rule
+of the mention parse node, its syntactic role, and a
+bias feature. These features are conjoined with the
+mention form (nominal or pronoun). Additionally,
+we restrict pronoun antecedents to the current and
+last two sentences, and the current and last three sen-
+tences for nominals. Additionally, we disallow nom-
+inals from having direct pronoun antecedents.
+In addition to the above, if a mention is in a de-
+terministic coreference configuration, as defined in
+Haghighi and Klein (2009), we force it to take the
+required antecedent. In general, antecedent affini-
+ties learn to prefer close antecedents in prominent
+syntactic positions. We also learn that new entity
+nominals are typically indefinite or have SBAR com-
+plements (captured by the CFG feature).
+In contrast to nominals and pronouns, the choice
+of entity for a proper mention is governed more by
+entity frequency than antecedent distance. We cap-
+ture this by setting s,7r(i, j; X) in the proper case to
+1 for past positions and to a fixed α otherwise. 2
+</bodyText>
+<subsectionHeader confidence="0.999302">
+3.3 Mention Module
+</subsectionHeader>
+<bodyText confidence="0.817119833333333">
+Once the semantic module has generated entities and
+the discourse model selects entity assignments, each
+mention Mi generates word values for a set of ob-
+served properties Ri:
+Mention Generation
+For each mention Mi, i = 1, ... , n
+</bodyText>
+<equation confidence="0.9576295">
+Fetch (T, {Lr}rER) from EZi
+Fetch {(�r, Br)}rER from TT
+For r E Ri :
+w - (1 - αr)UNIFORM(Lr) + (αr)Br
+</equation>
+<bodyText confidence="0.9953022">
+For each property r, there is a hyper-parameter αr
+which interpolates between selecting a word from
+the entity list Lr and drawing from the underlying
+type property distribution Br. Intuitively, a small
+value of αr indicates that an entity prefers to re-use
+</bodyText>
+<footnote confidence="0.96599575">
+2As Blei and Frazier (2009) notes, when marginalizing out
+the Ai in this trivial case, the DD-CRP reduces to the traditional
+CRP (Pitman, 2002), so our discourse model roughly matches
+Haghighi and Klein (2007) for proper mentions.
+</footnote>
+<figure confidence="0.463027">
+Person Organization
+</figure>
+<figureCaption confidence="0.960462428571429">
+Figure 3: Depiction of the discourse module (Sec-
+tion 3.2); each random variable is annotated with an ex-
+ample value. For each mention position, an entity as-
+signment (Zi) is made. Conditioned on entities (EZ,),
+mentions (Mi) are rendered (Section 3.3). The Y sym-
+bol denotes that a random variable is the parent of all Y
+random variables.
+</figureCaption>
+<bodyText confidence="0.998786571428571">
+a small number of words for property r. This is typ-
+ically the case for proper and nominal heads as well
+as modifiers. At the other extreme, setting αr to 1
+indicates the property isn’t particular to the entity
+itself, but rather only on its type. We set αr to 1
+for pronoun heads as well as for the governor of the
+head properties.
+</bodyText>
+<sectionHeader confidence="0.94378" genericHeader="method">
+4 Learning and Inference
+</sectionHeader>
+<bodyText confidence="0.99797525">
+Our learning procedure involves finding parame-
+ters and assignments which are likely under our
+model’s posterior distribution P(E, Z, T, 9C|M, X).
+The model is modularized in such a way that run-
+ning EM on all variables simultaneously would be
+very difficult. Therefore, we adopt a variational ap-
+proach which optimizes various subgroups of the
+variables in a round-robin fashion, holding approx-
+imations to the others fixed. We first describe the
+variable groups, then the updates which optimize
+them in turn.
+Decomposition: We decompose the entity vari-
+</bodyText>
+<figure confidence="0.999134904761905">
+τ1
+E, M E, M
+τ2
+M
+E, -r
+E1
+NAM-
+HEAD
+NN-
+HEAD
+GOV-
+SUBJ
+τ τ
+M1 M2 M3
+Z1 Z2 Z3
+joined
+Ballmer
+Steve
+NAM-
+HEAD
+NOM-
+HEAD
+NN-
+NOD
+T
+E1
+[Steve,chief,
+Microsoft]
+[Ballmer,
+CEO]
+[officer,
+executive]
+PERS
+E, -r
+NAM-
+HEAD
+GOV-
+DOBJ
+joined
+Microsoft
+M
+E2
+E2
+NAM-
+HEAD
+NOM-
+HEAD
+NN-
+NOD
+E, -r
+T
+NAM-
+HEAD
+GOV-
+DOBJ
+[Microsoft]
+[company,
+firm]
+[software]
+ORG
+became
+CEO
+E1
+</figure>
+<page confidence="0.987181">
+388
+</page>
+<bodyText confidence="0.9994138">
+ables E into types, T, one for each entity, and word
+lists, L, one for each entity and property. We decom-
+pose the mentions M into referring mentions (prop-
+ers and nominals), Mr, and pronominal mentions,
+Mp (with sizes nr and np respectively). The en-
+tity assignments Z are similarly divided into Zr and
+Zp components. For pronouns, rather than use Zp,
+we instead work with the corresponding antecedent
+variables, denoted Ap, and marginalize over an-
+tecedents to obtain Zp.
+With these variable groups, we would
+like to approximation our model posterior
+P(T, L, Zr, Ap, -r, 7rJM, X) using a simple fac-
+tored representation. Our variational approximation
+takes the following form:
+</bodyText>
+<equation confidence="0.9919285">
+Q(T, L, Zr, Ap, -r, 7r) = δr(Zr, L)
+n np
+IIqk(Tk) I IIri(Api ) I δs(-r)δd(7r)
+k=1 i=1
+</equation>
+<bodyText confidence="0.9999831">
+We use a mean field approach to update each of the
+RHS factors in turn to minimize the KL-divergence
+between the current variational posterior and the
+true model posterior. The δr, δs, and δd factors
+place point estimates on a single value, just as in
+hard EM. Updating these factors involves finding the
+value which maximizes the model (expected) log-
+likelihood under the other factors. For instance, the
+δs factor is a point estimate of the type parameters,
+and is updated with:3
+</bodyText>
+<equation confidence="0.8271815">
+δs(-r) +— argmaxEQ_a3 ln P(E, Z, M, -r, 7r) (1)
+-r
+</equation>
+<bodyText confidence="0.990516525423729">
+where Q_63 denotes all factors of the variational
+approximation except for the factor being updated.
+The ri (pronoun antecedents) and qk (type indica-
+tor) factors maintain a soft approximation and so are
+slightly more complex. For example, the ri factor
+update takes the standard mean field form:
+ri(Api ) a exp{EQ_r, lnP(E, Z, M, -r, 7r)} (2)
+We briefly describe the update for each additional
+factor, omitting details for space.
+Updating type parameters δs(-r): The type pa-
+rameters -r consist of several multinomial distri-
+butions which can be updated by normalizing ex-
+pected counts as in the EM algorithm. The prior
+3Of course during learning, the argmax is performed over
+the entire document collection, rather than a single document.
+P(-r JA) consists of several finite Dirichlet draws for
+each multinomial, which are incorporated as pseu-
+docounts.4 Given the entity type variational poste-
+riors {qk(·)}, as well as the point estimates of the
+L and Zr elements, we obtain expected counts from
+each entity’s attribute word lists and referring men-
+tion usages.
+Updating discourse parameters δd(7r): The
+learned parameters for the discourse module rely on
+pairwise antecedent counts for assignments to nom-
+inal and pronominal mentions.5 Given these ex-
+pected counts, which can be easily obtained from
+other factors, the update reduces to a weighted max-
+imum entropy problem, which we optimize using
+LBFGS. The prior P(7rJσ2) is a zero-centered nor-
+mal distribution with shared diagonal variance σ2,
+which is incorporated via L2 regularization during
+optimization.
+Updating referring assignments and word lists
+δr(Zr, L): The word lists are usually concatena-
+tions of the words used in nominal and proper
+mentions and so are updated together with the
+assignments for those mentions. Updating the
+δr(Zr, L) factor involves finding the referring men-
+tion entity assignments, Zr, and property word
+lists L for instantiated entities which maximize
+]EQ_ar ln P(T, L, Zr, Ap, M, -r, 7r). We actually
+only need to optimize over Zr, since for any Zr, we
+can compute the optimal set of property word lists
+L. Essentially, for each entity we can compute the
+Lr which optimizes the probability of the referring
+mentions assigned to the entity (indicated by Zr). In
+practice, the optimal Lr is just the set of property
+words in the assigned mentions. Of course enumer-
+ating and scoring all Zr hypotheses is intractable,
+so we instead utilize a left-to-right sequential beam
+search. Each partial hypothesis is an assignment to a
+prefix of mention positions and is scored as though
+it were a complete hypothesis. Hypotheses are ex-
+tended via adding a new mention to an existing en-
+tity or creating a new one. For our experiments, we
+limited the number of hypotheses on the beam to the
+top fifty and did not notice an improvement in model
+score from increasing beam size.
+</bodyText>
+<footnote confidence="0.999865">
+4See software release for full hyper-parameter details.
+5Propers have no learned discourse parameters.
+</footnote>
+<page confidence="0.99899">
+389
+</page>
+<bodyText confidence="0.999933857142857">
+Updating pronominal antecedents ri(A?&apos;i ) and en-
+tity types qk(Tk): These updates are straightfor-
+ward instantiations of the mean-field update (2).
+To produce our final coreference partitions, we as-
+sign each referring mention to the entity given by the
+δr factor and each pronoun to the most likely entity
+given by the ri.
+</bodyText>
+<subsectionHeader confidence="0.997189">
+4.1 Factor Staging
+</subsectionHeader>
+<bodyText confidence="0.999778307692308">
+In order to facilitate learning, some factors are ini-
+tially set to fixed heuristic values and only learned
+in later iterations. Initially, the assignment factors
+δr and {ri} are fixed. For δr, we use a determin-
+istic entity assignment Zr, similar to the Haghighi
+and Klein (2009)’s SYN-CONSTR setting: each re-
+ferring mention is coreferent with any past men-
+tion with the same head or in a deterministic syn-
+tactic configuration (appositives or predicative nom-
+inatives constructions).6 The {ri} factors are heuris-
+tically set to place most of their mass on the closest
+antecedent by tree distance. During training, we pro-
+ceed in stages, each consisting of 5 iterations:
+</bodyText>
+<table confidence="0.92034725">
+Stage Learned Fixed B3All
+1 δs, δd, {qk} {ri},δr 74.6
+2 δs, δd, {qk}, δr {ri} 76.3
+3 δs, δd, {qk}, δr, {ri} – 78.0
+</table>
+<bodyText confidence="0.999467333333333">
+We evaluate our system at the end of stage using the
+B3All metric on the A05CU development set (see
+Section 5 for details).
+</bodyText>
+<sectionHeader confidence="0.998492" genericHeader="method">
+5 Experiments
+</sectionHeader>
+<bodyText confidence="0.999976555555556">
+We considered the challenging end-to-end system
+mention setting, where in addition to predicting
+mention partitions, a system must identify the men-
+tions themselves and their boundaries automati-
+cally. Our system deterministically extracts mention
+boundaries from parse trees (Section 5.2). We uti-
+lized no coreference annotation during training, but
+did use minimal prototype information to prime the
+learning of entity types (Section 5.3).
+</bodyText>
+<subsectionHeader confidence="0.9609">
+5.1 Datasets
+</subsectionHeader>
+<bodyText confidence="0.9917595">
+For evaluation, we used standard coreference data
+sets derived from the ACE corpora:
+</bodyText>
+<footnote confidence="0.8242585">
+6Forcing appositive coreference is essential for tying proper
+and nominal entity type vocabulary.
+</footnote>
+<listItem confidence="0.924977833333333">
+• A04CU: Train/dev/test split of the newswire
+portion of the ACE 2004 training set7 utilized
+in Culotta et al. (2007), Bengston and Roth
+(2008) and Stoyanov et al. (2009). Consists of
+90/68/38 documents respectively.
+• A05ST: Train/test split of the newswire portion
+of the ACE 2005 training set utilized in Stoy-
+anov et al. (2009). Consists of 57/24 docu-
+ments respectively.
+• A05RA: Train/test split of the ACE 2005 train-
+ing set utilized in Rahman and Ng (2009). Con-
+sists of 482/117 documents respectively.
+</listItem>
+<bodyText confidence="0.995370428571429">
+For all experiments, we evaluated on the dev and test
+sets above. To train, we included the text of all doc-
+uments above, though of course not looking at ei-
+ther their mention boundaries or reference annota-
+tions in any way. We also trained on the following
+much larger unlabeled datasets utilized in Haghighi
+and Klein (2009):
+</bodyText>
+<listItem confidence="0.960987428571429">
+• BLLIP: 5k articles of newswire parsed with the
+Charniak (2000) parser.
+• WIKI: 8k abstracts of English Wikipedia arti-
+cles parsed by the Berkeley parser (Petrov et
+al., 2006). Articles were selected to have sub-
+jects amongst the frequent proper nouns in the
+evaluation datasets.
+</listItem>
+<subsectionHeader confidence="0.999611">
+5.2 Mention Detection and Properties
+</subsectionHeader>
+<bodyText confidence="0.9999899375">
+Mention boundaries were automatically detected as
+follows: For each noun or pronoun (determined by
+parser POS tag), we associated a mention with the
+maximal NP projection of that head or that word it-
+self if no NP can be found. This procedure recovers
+over 90% of annotated mentions on the A05CU dev
+set, but also extracts many unannotated “spurious”
+mentions (for instance events, times, dates, or ab-
+stract nouns) which are not deemed to be of interest
+by the ACE annotation conventions.
+Mention properties were obtained from parse
+trees using the the Stanford typed dependency ex-
+tractor (de Marneffe et al., 2006). The mention prop-
+erties we considered are the mention head (anno-
+tated with mention type), the typed modifiers of the
+head, and the governor of the head (conjoined with
+</bodyText>
+<footnote confidence="0.9703305">
+7Due to licensing restriction, the formal ACE test sets are
+not available to non-participants.
+</footnote>
+<page confidence="0.984502">
+390
+</page>
+<table confidence="0.998765428571429">
+MUC B3All B3None Pairwise F1
+System P R F1 P R F1 P R F1 P R F1
+ACE2004-STOYANOV-TEST
+Stoyanov et al. (2009) - - 62.0 - - 76.5 - - 75.4 - - -
+Haghighi and Klein (2009) 67.5 61.6 64.4 77.4 69.4 73.2 77.4 67.1 71.3 58.3 44.5 50.5
+THIS WORK 67.4 66.6 67.0 81.2 73.3 77.0 80.6 75.2 77.3 59.2 50.3 54.4
+ACE2005-STOYANOV-TEST
+Stoyanov et al. (2009) - - 67.4 - - 73.7 - - 72.5 - - -
+Haghighi and Klein (2009) 73.1 58.8 65.2 82.1 63.9 71.8 81.2 61.6 70.1 66.1 37.9 48.1
+THIS WORK 74.6 62.7 68.1 83.2 68.4 75.1 82.7 66.3 73.6 64.3 41.4 50.4
+ACE2005-RAHMAN-TEST
+Rahman and Ng (2009) 75.4 64.1 69.3 - - - 54.4 70.5 61.4 - - -
+Haghighi and Klein (2009) 72.9 60.2 67.0 53.2 73.1 61.6 52.0 72.6 60.6 57.0 44.6 50.0
+THIS WORK 77.0 66.9 71.6 55.4 74.8 63.8 54.0 74.7 62.7 60.1 47.7 53.0
+</table>
+<tableCaption confidence="0.9646425">
+Table 1: Experimental results with system mentions. All systems except Haghighi and Klein (2009) and current work
+are fully supervised. The current work outperforms all other systems, supervised or unsupervised. For comparison pur-
+poses, the B3None variant used on A05RA is calculated slightly differently than other B3None results; see Rahman
+and Ng (2009).
+</tableCaption>
+<bodyText confidence="0.997294666666667">
+the mention’s syntactic position). We discard deter-
+miners, but make use of them in the discourse com-
+ponent (Section 3.2) for NP definiteness.
+</bodyText>
+<subsectionHeader confidence="0.999811">
+5.3 Prototyping Entity Types
+</subsectionHeader>
+<bodyText confidence="0.999929215686275">
+While it is possible to learn type distributions in a
+completely unsupervised fashion, we found it use-
+ful to prime the system with a handful of important
+types. Rather than relying on fully supervised data,
+we took the approach of Haghighi and Klein (2006).
+For each type of interest, we provided a (possibly-
+empty) prototype list of proper and nominal head
+words, as well as a list of allowed pronouns. For
+instance, for the PERSON type we might provide:
+Bush, Gore, Hussein
+president, minister, official
+he, his, she, him, her, you, ...
+The prototypes were used as follows: Any entity
+with a prototype on any proper or nominal head
+word attribute list (Section 3.1) was constrained to
+have the specified type; i.e. the qk factor (Section 4)
+places probability one on that single type. Simi-
+larly to Haghighi and Klein (2007) and Elsner et al.
+(2009), we biased these types’ pronoun distributions
+to the allowed set of pronouns.
+In general, the choice of entity types to prime
+with prototypes is a domain-specific question. For
+experiments here, we utilized the types which are
+annotated in the ACE coreference data: person
+(PERS), organization (ORG), geo-political entity
+(GPE), weapon (WEA), vehicle (VEH), location
+(LOC), and facility (FAC). Since the person type
+in ACE conflates individual persons with groups
+of people (e.g., soldier vs. soldiers), we added
+the group (GROUP) type and generated a prototype
+specification.
+We obtained our prototype list by extracting at
+most four common proper and nominal head words
+from the newswire portions of the 2004 and 2005
+ACE training sets (A04CU and A05ST); we chose
+prototype words to be minimally ambiguous with
+respect to type.8 When there are not at least three
+proper heads for a type (WEA for instance), we
+did not provide any proper prototypes and instead
+strongly biased the type fertility parameters to gen-
+erate empty NAM-HEAD lists.
+Because only certain semantic types were anno-
+tated under the arbitrary ACE guidelines, there are
+many mentions which do not fall into those limited
+categories. We therefore prototype (refinements of)
+the ACE types and then add an equal number of un-
+constrained “other” types which are automatically
+induced. A nice consequence of this approach is
+that we can simply run our model on all mentions,
+discarding at evaluation time any which are of non-
+prototyped types.
+</bodyText>
+<subsectionHeader confidence="0.82574">
+5.4 Evaluation
+</subsectionHeader>
+<bodyText confidence="0.759159428571429">
+We evaluated on multiple coreference resolution
+metrics, as no single one is clearly superior, partic-
+8Meaning those headwords were assigned to the target type
+for more than 75% of their usages.
+NAM
+NOM
+PRO
+</bodyText>
+<page confidence="0.996196">
+391
+</page>
+<bodyText confidence="0.9999631">
+ularly in dealing with the system mention setting.
+We utilized MUC (Vilain et al., 1995), B3All (Stoy-
+anov et al., 2009), B3None (Stoyanov et al., 2009),
+and Pairwise F1. The B3All and B3None are B3
+variants (Bagga and Baldwin, 1998) that differ in
+their treatment of spurious mentions. For Pairwise
+F1, precision measures how often pairs of predicted
+coreferent mentions are in the same annotated entity.
+We eliminated any mention pair from this calcula-
+tion where both mentions were spurious.9
+</bodyText>
+<sectionHeader confidence="0.850652" genericHeader="evaluation">
+5.5 Results
+</sectionHeader>
+<bodyText confidence="0.999908">
+Table 1 shows our results. We compared to two
+state-of-the-art supervised coreference systems. The
+Stoyanov et al. (2009) numbers represent their
+THRESHOLD ESTIMATION setting and the Rahman
+and Ng (2009) numbers represent their highest-
+performing cluster ranking model. We also com-
+pared to the strong deterministic system of Haghighi
+and Klein (2009).10 Across all data sets, our model,
+despite being largely unsupervised, consistently out-
+performs these systems, which are the best previ-
+ously reported results on end-to-end coreference res-
+olution (i.e. including mention detection). Perfor-
+mance on the A05RA dataset is generally lower be-
+cause it includes articles from blogs and web forums
+where parser quality is significantly degraded.
+While Bengston and Roth (2008) do not report on
+the full system mention task, they do report on the
+more optimistic setting where mention detection is
+performed but non-gold mentions are removed for
+evaluation using an oracle. On this more lenient set-
+ting, they report 78.4 B3 on the A04CU test set. Our
+model yields 80.3.
+</bodyText>
+<sectionHeader confidence="0.994781" genericHeader="evaluation">
+6 Analysis
+</sectionHeader>
+<bodyText confidence="0.960677289473684">
+We now discuss errors and improvements made
+by our system. One frequent source of error is
+the merging of mentions with explicitly contrasting
+modifiers, such as new president and old president.
+While it is not unusual for a single entity to admit
+multiple modifiers, the particular modifiers new and
+old are incompatible in a way that new and popular
+9Note that we are still penalized for marking a spurious
+mention coreferent with an annotated one.
+10Haghighi and Klein (2009) reports on true mentions; here,
+we report performance on automatically detected mentions.
+are not. Our model does not represent the negative
+covariance between these modifiers.
+We compared our output to the deterministic sys-
+tem of Haghighi and Klein (2009). Many improve-
+ments arise from correctly identifying mentions
+which are semantically compatible but which do
+not explicitly appear in an appositive or predicate-
+nominative configuration in the data. For example,
+analyst and it cannot corefer in our system because
+it is not a likely pronoun for the type PERSON.
+While the focus of our model is coreference res-
+olution, we can also isolate and evaluate the type
+component of our model as an NER system. We
+test this component by presenting our learned model
+with boundary-annotated non-pronominal entities
+from the A05ST dev set and querying their predicted
+type variable T. Doing so yields 83.2 entity clas-
+sification accuracy under the mapping between our
+prototyped types and the coarse ACE types. Note
+that this task is substantially more difficult than the
+unsupervised NER in Elsner et al. (2009) because
+the inventory of named entities is larger (7 vs. 3)
+and because we predict types over nominal mentions
+that are more difficult to judge from surface forms.
+In this task, the plurality of errors are confusions be-
+tween the GPE (geo-political entity) and ORG entity
+types, which have very similar distributions.
+</bodyText>
+<sectionHeader confidence="0.998452" genericHeader="conclusions">
+7 Conclusion
+</sectionHeader>
+<bodyText confidence="0.949942058823529">
+Our model is able to acquire and exploit knowledge
+at either the level of individual entities (“Obama” is
+a “president”) and entity types (“company” can refer
+to a corporation). As a result, it leverages semantic
+constraints more effectively than systems operating
+at either level alone. In conjunction with reasonable,
+but simple, factors capturing discourse and syntac-
+tic configurational preferences, our entity-centric se-
+mantic model lowers coreference error rate substan-
+tially, particularly on semantically disambiguated
+references, giving a sizable improvement over the
+state-of-the-art.11
+Acknowledgements: This project is funded in
+part by the Office of Naval Research under MURI
+Grant No. N000140911081.
+11See nlp.cs.berkeley.edu and aria42.com/software.html for
+software release.
+</bodyText>
+<page confidence="0.997308">
+392
+</page>
+<sectionHeader confidence="0.993768" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.999789768421052">
+A Bagga and B Baldwin. 1998. Algorithms for scoring
+coreference chains. In Linguistic Coreference Work-
+shop (LREC).
+Eric Bengston and Dan Roth. 2008. Understanding
+the Value of Features for Corefernce Resolution. In
+Empirical Methods in Natural Language Processing
+(EMNLP).
+David Blei and Peter I. Frazier. 2009. Dis-
+tance Dependent Chinese Restaurant Processes.
+http://arxiv.org/abs/0910.1022/.
+Eugene Charniak. 2000. Maximum Entropy Inspired
+Parser. In North American Chapter of the Association
+of Computational Linguistics (NAACL).
+Michael Collins and Yoram Singer. 1999. Unsupervised
+Models for Named Entity Classification. In Empirical
+Methods in Natural Language Processing (EMNLP).
+Mike Collins. 1999. Head-Driven Statistical Models for
+Natural Language Parsing. Ph.D. thesis, University of
+Pennsylvania.
+A Culotta, M Wick, R Hall, and A McCallum. 2007.
+First-order Probabilistic Models for Coreference Res-
+olution. In Proceedings of the conference on Human
+Language Technology and Empirical Methods in Nat-
+ural Language Processing (NAACL-HLT).
+M. C. de Marneffe, B. Maccartney, and C. D. Manning.
+2006. Generating Typed Dependency Parses from
+Phrase Structure Parses. In LREC.
+M Elsner, E Charniak, and M Johnson. 2009. Structured
+generative models for unsupervised named-entity clus-
+tering. In Proceedings of Human Language Technolo-
+gies: The 2009Annual Conference of the North Ameri-
+can Chapter of the Association for Computational Lin-
+guistics, pages 164–172.
+Barbara J. Grosz, Aravind K. Joshi, and Scott Weinstein.
+1995. Centering: A Framework for Modeling the Lo-
+cal Coherence of Discourse. Computational Linguis-
+tics, 21(2):203–225.
+Aria Haghighi and Dan Klein. 2006. Prototype-Driven
+Learning for Sequence Models. In HLT-NAACL. As-
+sociation for Computational Linguistics.
+Aria Haghighi and Dan Klein. 2007. Unsupervised
+Coreference Resolution in a Nonparametric Bayesian
+Model. In Proceedings of the 45th Annual Meeting of
+the Association of Computational Linguistics. Associ-
+ation for Computational Linguistics.
+Aria Haghighi and Dan Klein. 2009. Simple Coreference
+Resolution with Rich Syntactic and Semantic Features.
+In Proceedings of the 2009 Conference on Empirical
+Conference in Natural Language Processing.
+J. R. Hobbs. 1978. Resolving Pronoun References. Lin-
+gua, 44.
+J. R. Hobbs. 1979. Coherence and Coreference. Cogni-
+tive Science, 3:67–90.
+Andrew Kehler, Laura Kertz, Hannah Rohde, and Jeffrey
+Elman. 2008. Coherence and Coreference Revisited.
+Vincent Ng and Claire Cardie. 2002. Improving
+Machine Learning Approaches to Coreference Res-
+olution. In Association of Computational Linguists
+(ACL).
+Vincent Ng. 2005. Machine Learning for Corefer-
+ence Resolution: From Local Classification to Global
+Ranking. In Association of Computational Linguists
+(ACL).
+Vincent Ng. 2007. Shallow semantics for coreference
+resolution. In IJCAI’07: Proceedings of the 20th in-
+ternational joint conference on Artifical intelligence,
+pages 1689–1694.
+Slav Petrov, Leon Barrett, Romain Thibaux, and Dan
+Klein. 2006. Learning Accurate, Compact, and Inter-
+pretable Tree Annotation. In Proceedings of the 21st
+International Conference on Computational Linguis-
+tics and 44th Annual Meeting of the Association for
+Computational Linguistics, pages 433–440, Sydney,
+Australia, July. Association for Computational Lin-
+guistics.
+J. Pitman. 2002. Combinatorial Stochastic Processes. In
+Lecture Notes for St. Flour Summer School.
+A Rahman and V Ng. 2009. Supervised models for
+coreference resolution. In Proceedings of the 2009
+Conference on Empirical Conference in Natural Lan-
+guage Processing.
+W.H. Soon, H. T. Ng, and D. C. Y. Lim. 1999. A Ma-
+chine Learning Approach to Coreference Resolution
+of Noun Phrases.
+V Stoyanov, N Gilbert, C Cardie, and E Riloff. 2009.
+Conundrums in Noun Phrase Coreference Resolution:
+Making Sense of the State-of-the-art. In Associate of
+Computational Linguistics (ACL).
+Marc Vilain, John Burger, John Aberdeen, Dennis Con-
+nolly, and Lynette Hirschman. 1995. A model-
+theoretic coreference scoring scheme. In MUC-6.
+X Yang, J Su, and CL Tan. 2005. Improving pronoun
+resolution using statistics-based semantic compatibil-
+ity information. In Association of Computational Lin-
+guists (ACL).
+</reference>
+<page confidence="0.999367">
+393
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.665328">
+<title confidence="0.991755">Coreference Resolution in a Modular, Entity-Centered Model</title>
+<author confidence="0.70653">Aria</author>
+<affiliation confidence="0.99967">Computer Science University of California,</affiliation>
+<email confidence="0.998978">aria42@cs.berkeley.edu</email>
+<author confidence="0.969711">Dan</author>
+<affiliation confidence="0.999973">Computer Science University of California,</affiliation>
+<email confidence="0.999905">klein@cs.berkeley.edu</email>
+<abstract confidence="0.998078333333334">Coreference resolution is governed by syntactic, semantic, and discourse constraints. We present a generative, model-based approach in which each of these factors is modularly encapsulated and learned in a primarily unsupervised manner. Our semantic representation first hypothesizes an underlying set of latent which generate specific entities that in turn render individual mentions. By sharing lexical statistics at the level of abstract entity types, our model is able to substantially reduce semantic compatibility errors, resulting in the best results to date on the complete end-to-end coreference task.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>A Bagga</author>
+<author>B Baldwin</author>
+</authors>
+<title>Algorithms for scoring coreference chains.</title>
+<date>1998</date>
+<booktitle>In Linguistic Coreference Workshop (LREC).</booktitle>
+<contexts>
+<context position="27581" citStr="Bagga and Baldwin, 1998" startWordPosition="4589" endWordPosition="4592"> induced. A nice consequence of this approach is that we can simply run our model on all mentions, discarding at evaluation time any which are of nonprototyped types. 5.4 Evaluation We evaluated on multiple coreference resolution metrics, as no single one is clearly superior, partic8Meaning those headwords were assigned to the target type for more than 75% of their usages. NAM NOM PRO 391 ularly in dealing with the system mention setting. We utilized MUC (Vilain et al., 1995), B3All (Stoyanov et al., 2009), B3None (Stoyanov et al., 2009), and Pairwise F1. The B3All and B3None are B3 variants (Bagga and Baldwin, 1998) that differ in their treatment of spurious mentions. For Pairwise F1, precision measures how often pairs of predicted coreferent mentions are in the same annotated entity. We eliminated any mention pair from this calculation where both mentions were spurious.9 5.5 Results Table 1 shows our results. We compared to two state-of-the-art supervised coreference systems. The Stoyanov et al. (2009) numbers represent their THRESHOLD ESTIMATION setting and the Rahman and Ng (2009) numbers represent their highestperforming cluster ranking model. We also compared to the strong deterministic system of Ha</context>
+</contexts>
+<marker>Bagga, Baldwin, 1998</marker>
+<rawString>A Bagga and B Baldwin. 1998. Algorithms for scoring coreference chains. In Linguistic Coreference Workshop (LREC).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Eric Bengston</author>
+<author>Dan Roth</author>
+</authors>
+<title>Understanding the Value of Features for Corefernce Resolution.</title>
+<date>2008</date>
+<booktitle>In Empirical Methods in Natural Language Processing (EMNLP).</booktitle>
+<contexts>
+<context position="1674" citStr="Bengston and Roth, 2008" startWordPosition="231" endWordPosition="234">antic constraints, which are highly contingent on lexical meaning and world knowledge. Perhaps because configurational features are inherently easier to learn from small data sets, past work has often emphasized them over semantic knowledge. Of course, all state-of-the-art coreference systems have needed to capture semantic compatibility to some degree. As an example of nominal headword compatibility, a “president” can be a “leader” but cannot be not an “increase.” Past systems have often computed the compatibility of specific headword pairs, extracted either from lexical resources (Ng, 2007; Bengston and Roth, 2008; Rahman and Ng, 2009), web statistics (Yang et al., 2005), or surface syntactic patterns (Haghighi and Klein, 2009). While the pairwise approach has high precision, it is neither realistic nor scalable to explicitly enumerate all pairs of compatible word pairs. A more compact approach has been to rely on named-entity recognition (NER) systems to give coarse-grained entity types for each mention (Soon et al., 1999; Ng and Cardie, 2002). Unfortunately, current systems use small inventories of types and so provide little constraint. In general, coreference errors in state-of-theart systems are f</context>
+<context position="21581" citStr="Bengston and Roth (2008)" startWordPosition="3572" endWordPosition="3575">hemselves and their boundaries automatically. Our system deterministically extracts mention boundaries from parse trees (Section 5.2). We utilized no coreference annotation during training, but did use minimal prototype information to prime the learning of entity types (Section 5.3). 5.1 Datasets For evaluation, we used standard coreference data sets derived from the ACE corpora: 6Forcing appositive coreference is essential for tying proper and nominal entity type vocabulary. • A04CU: Train/dev/test split of the newswire portion of the ACE 2004 training set7 utilized in Culotta et al. (2007), Bengston and Roth (2008) and Stoyanov et al. (2009). Consists of 90/68/38 documents respectively. • A05ST: Train/test split of the newswire portion of the ACE 2005 training set utilized in Stoyanov et al. (2009). Consists of 57/24 documents respectively. • A05RA: Train/test split of the ACE 2005 training set utilized in Rahman and Ng (2009). Consists of 482/117 documents respectively. For all experiments, we evaluated on the dev and test sets above. To train, we included the text of all documents above, though of course not looking at either their mention boundaries or reference annotations in any way. We also traine</context>
+<context position="28622" citStr="Bengston and Roth (2008)" startWordPosition="4745" endWordPosition="4748">ir THRESHOLD ESTIMATION setting and the Rahman and Ng (2009) numbers represent their highestperforming cluster ranking model. We also compared to the strong deterministic system of Haghighi and Klein (2009).10 Across all data sets, our model, despite being largely unsupervised, consistently outperforms these systems, which are the best previously reported results on end-to-end coreference resolution (i.e. including mention detection). Performance on the A05RA dataset is generally lower because it includes articles from blogs and web forums where parser quality is significantly degraded. While Bengston and Roth (2008) do not report on the full system mention task, they do report on the more optimistic setting where mention detection is performed but non-gold mentions are removed for evaluation using an oracle. On this more lenient setting, they report 78.4 B3 on the A04CU test set. Our model yields 80.3. 6 Analysis We now discuss errors and improvements made by our system. One frequent source of error is the merging of mentions with explicitly contrasting modifiers, such as new president and old president. While it is not unusual for a single entity to admit multiple modifiers, the particular modifiers new</context>
+</contexts>
+<marker>Bengston, Roth, 2008</marker>
+<rawString>Eric Bengston and Dan Roth. 2008. Understanding the Value of Features for Corefernce Resolution. In Empirical Methods in Natural Language Processing (EMNLP).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>David Blei</author>
+<author>Peter I Frazier</author>
+</authors>
+<title>Distance Dependent Chinese Restaurant Processes.</title>
+<date>2009</date>
+<note>http://arxiv.org/abs/0910.1022/.</note>
+<contexts>
+<context position="10707" citStr="Blei and Frazier (2009)" startWordPosition="1751" endWordPosition="1754">antecedent mention position (Ai &lt; i) and “steals” its entity assignment or begins a new entity (Ai = i). The choice of Ai is parametrized by affinities s7r(i, j; X) between mention positions i and j. Formally, this process is described as: Entity Assignment For each mention position, i = 1, ... , n, Draw antecedent position Ai E {1, ... , i}: P(Ai = j|X) a s7r(i, j; X) � ZA�, if Ai &lt; i Zi = K + 1, otherwise Here, K denotes the number of entities allocated in the first i-1 mention positions. This process is an instance of the sequential distance-dependent Chinese Restaurant Process (DD-CRP) of Blei and Frazier (2009). During inference, we variously exploit both the A and Z representations (Section 4). For nominal and pronoun mentions, there are several well-studied anaphora cues, including centering (Grosz et al., 1995), nearness (Hobbs, 1978), and deterministic constraints, which have all been utilized in prior coreference work (Soon et al., 1999; Ng and Cardie, 2002). In order to combine these cues, we take a log-linear, feature-based approach and parametrize s7r(i, j; X) = exp{7rTfX(i, j)}, where fX(i, j) is a feature vector over mention positions i and j, and 7r is a parameter vector; the features may</context>
+<context position="13495" citStr="Blei and Frazier (2009)" startWordPosition="2217" endWordPosition="2220">odule Once the semantic module has generated entities and the discourse model selects entity assignments, each mention Mi generates word values for a set of observed properties Ri: Mention Generation For each mention Mi, i = 1, ... , n Fetch (T, {Lr}rER) from EZi Fetch {(�r, Br)}rER from TT For r E Ri : w - (1 - αr)UNIFORM(Lr) + (αr)Br For each property r, there is a hyper-parameter αr which interpolates between selecting a word from the entity list Lr and drawing from the underlying type property distribution Br. Intuitively, a small value of αr indicates that an entity prefers to re-use 2As Blei and Frazier (2009) notes, when marginalizing out the Ai in this trivial case, the DD-CRP reduces to the traditional CRP (Pitman, 2002), so our discourse model roughly matches Haghighi and Klein (2007) for proper mentions. Person Organization Figure 3: Depiction of the discourse module (Section 3.2); each random variable is annotated with an example value. For each mention position, an entity assignment (Zi) is made. Conditioned on entities (EZ,), mentions (Mi) are rendered (Section 3.3). The Y symbol denotes that a random variable is the parent of all Y random variables. a small number of words for property r. </context>
+</contexts>
+<marker>Blei, Frazier, 2009</marker>
+<rawString>David Blei and Peter I. Frazier. 2009. Distance Dependent Chinese Restaurant Processes. http://arxiv.org/abs/0910.1022/.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Eugene Charniak</author>
+</authors>
+<title>Maximum Entropy Inspired Parser.</title>
+<date>2000</date>
+<booktitle>In North American Chapter of the Association of Computational Linguistics (NAACL).</booktitle>
+<contexts>
+<context position="22334" citStr="Charniak (2000)" startWordPosition="3702" endWordPosition="3703">5 training set utilized in Stoyanov et al. (2009). Consists of 57/24 documents respectively. • A05RA: Train/test split of the ACE 2005 training set utilized in Rahman and Ng (2009). Consists of 482/117 documents respectively. For all experiments, we evaluated on the dev and test sets above. To train, we included the text of all documents above, though of course not looking at either their mention boundaries or reference annotations in any way. We also trained on the following much larger unlabeled datasets utilized in Haghighi and Klein (2009): • BLLIP: 5k articles of newswire parsed with the Charniak (2000) parser. • WIKI: 8k abstracts of English Wikipedia articles parsed by the Berkeley parser (Petrov et al., 2006). Articles were selected to have subjects amongst the frequent proper nouns in the evaluation datasets. 5.2 Mention Detection and Properties Mention boundaries were automatically detected as follows: For each noun or pronoun (determined by parser POS tag), we associated a mention with the maximal NP projection of that head or that word itself if no NP can be found. This procedure recovers over 90% of annotated mentions on the A05CU dev set, but also extracts many unannotated “spurious</context>
+</contexts>
+<marker>Charniak, 2000</marker>
+<rawString>Eugene Charniak. 2000. Maximum Entropy Inspired Parser. In North American Chapter of the Association of Computational Linguistics (NAACL).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Michael Collins</author>
+<author>Yoram Singer</author>
+</authors>
+<title>Unsupervised Models for Named Entity Classification.</title>
+<date>1999</date>
+<booktitle>In Empirical Methods in Natural Language Processing (EMNLP).</booktitle>
+<contexts>
+<context position="9359" citStr="Collins and Singer, 1999" startWordPosition="1512" endWordPosition="1515">ty type T — 0 For each mention property r E R, Fetch {(fr, Br)} for TT Draw word list length |Lr |— fr Draw |Lr |words from w — Br See Figure 2 for an illustration of this process. Each word list Lr is generated by first drawing a list length from fr and then independently populating that list from the property’s word distribution Br.1 Past work has employed broadly similar distributional models for unsupervised NER of proper men1There is one exception: the sizes of the proper and nominal head property lists are jointly generated, but their word lists are still independently populated. tions (Collins and Singer, 1999; Elsner et al., 2009). However, to our knowledge, this is the first work to incorporate such a model into an entity reference process. 3.2 Discourse Module The discourse module is responsible for choosing an entity to evoke at each of the n mention positions. Formally, this module generates an entity assignment vector Z = (Zl, ... , Zn), where Zi indicates the entity index for the ith mention position. Most linguistic inquiry characterizes NP anaphora by the pairwise relations that hold between a mention and its antecedent (Hobbs, 1979; Kehler et al., 2008). Our discourse module utilizes this</context>
+</contexts>
+<marker>Collins, Singer, 1999</marker>
+<rawString>Michael Collins and Yoram Singer. 1999. Unsupervised Models for Named Entity Classification. In Empirical Methods in Natural Language Processing (EMNLP).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Mike Collins</author>
+</authors>
+<title>Head-Driven Statistical Models for Natural Language Parsing.</title>
+<date>1999</date>
+<tech>Ph.D. thesis,</tech>
+<institution>University of Pennsylvania.</institution>
+<marker>Collins, 1999</marker>
+<rawString>Mike Collins. 1999. Head-Driven Statistical Models for Natural Language Parsing. Ph.D. thesis, University of Pennsylvania.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>A Culotta</author>
+<author>M Wick</author>
+<author>R Hall</author>
+<author>A McCallum</author>
+</authors>
+<title>First-order Probabilistic Models for Coreference Resolution.</title>
+<date>2007</date>
+<booktitle>In Proceedings of the conference on Human Language Technology and Empirical Methods in Natural Language Processing (NAACL-HLT).</booktitle>
+<contexts>
+<context position="21555" citStr="Culotta et al. (2007)" startWordPosition="3568" endWordPosition="3571">identify the mentions themselves and their boundaries automatically. Our system deterministically extracts mention boundaries from parse trees (Section 5.2). We utilized no coreference annotation during training, but did use minimal prototype information to prime the learning of entity types (Section 5.3). 5.1 Datasets For evaluation, we used standard coreference data sets derived from the ACE corpora: 6Forcing appositive coreference is essential for tying proper and nominal entity type vocabulary. • A04CU: Train/dev/test split of the newswire portion of the ACE 2004 training set7 utilized in Culotta et al. (2007), Bengston and Roth (2008) and Stoyanov et al. (2009). Consists of 90/68/38 documents respectively. • A05ST: Train/test split of the newswire portion of the ACE 2005 training set utilized in Stoyanov et al. (2009). Consists of 57/24 documents respectively. • A05RA: Train/test split of the ACE 2005 training set utilized in Rahman and Ng (2009). Consists of 482/117 documents respectively. For all experiments, we evaluated on the dev and test sets above. To train, we included the text of all documents above, though of course not looking at either their mention boundaries or reference annotations </context>
+</contexts>
+<marker>Culotta, Wick, Hall, McCallum, 2007</marker>
+<rawString>A Culotta, M Wick, R Hall, and A McCallum. 2007. First-order Probabilistic Models for Coreference Resolution. In Proceedings of the conference on Human Language Technology and Empirical Methods in Natural Language Processing (NAACL-HLT).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>M C de Marneffe</author>
+<author>B Maccartney</author>
+<author>C D Manning</author>
+</authors>
+<title>Generating Typed Dependency Parses from Phrase Structure Parses.</title>
+<date>2006</date>
+<booktitle>In LREC.</booktitle>
+<marker>de Marneffe, Maccartney, Manning, 2006</marker>
+<rawString>M. C. de Marneffe, B. Maccartney, and C. D. Manning. 2006. Generating Typed Dependency Parses from Phrase Structure Parses. In LREC.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>M Elsner</author>
+<author>E Charniak</author>
+<author>M Johnson</author>
+</authors>
+<title>Structured generative models for unsupervised named-entity clustering.</title>
+<date>2009</date>
+<booktitle>In Proceedings of Human Language Technologies: The 2009Annual Conference of the North American Chapter of the Association for Computational Linguistics,</booktitle>
+<pages>164--172</pages>
+<contexts>
+<context position="9381" citStr="Elsner et al., 2009" startWordPosition="1516" endWordPosition="1519">tion property r E R, Fetch {(fr, Br)} for TT Draw word list length |Lr |— fr Draw |Lr |words from w — Br See Figure 2 for an illustration of this process. Each word list Lr is generated by first drawing a list length from fr and then independently populating that list from the property’s word distribution Br.1 Past work has employed broadly similar distributional models for unsupervised NER of proper men1There is one exception: the sizes of the proper and nominal head property lists are jointly generated, but their word lists are still independently populated. tions (Collins and Singer, 1999; Elsner et al., 2009). However, to our knowledge, this is the first work to incorporate such a model into an entity reference process. 3.2 Discourse Module The discourse module is responsible for choosing an entity to evoke at each of the n mention positions. Formally, this module generates an entity assignment vector Z = (Zl, ... , Zn), where Zi indicates the entity index for the ith mention position. Most linguistic inquiry characterizes NP anaphora by the pairwise relations that hold between a mention and its antecedent (Hobbs, 1979; Kehler et al., 2008). Our discourse module utilizes this pairwise perspective </context>
+<context position="25617" citStr="Elsner et al. (2009)" startWordPosition="4271" endWordPosition="4274">f Haghighi and Klein (2006). For each type of interest, we provided a (possiblyempty) prototype list of proper and nominal head words, as well as a list of allowed pronouns. For instance, for the PERSON type we might provide: Bush, Gore, Hussein president, minister, official he, his, she, him, her, you, ... The prototypes were used as follows: Any entity with a prototype on any proper or nominal head word attribute list (Section 3.1) was constrained to have the specified type; i.e. the qk factor (Section 4) places probability one on that single type. Similarly to Haghighi and Klein (2007) and Elsner et al. (2009), we biased these types’ pronoun distributions to the allowed set of pronouns. In general, the choice of entity types to prime with prototypes is a domain-specific question. For experiments here, we utilized the types which are annotated in the ACE coreference data: person (PERS), organization (ORG), geo-political entity (GPE), weapon (WEA), vehicle (VEH), location (LOC), and facility (FAC). Since the person type in ACE conflates individual persons with groups of people (e.g., soldier vs. soldiers), we added the group (GROUP) type and generated a prototype specification. We obtained our protot</context>
+<context position="30509" citStr="Elsner et al. (2009)" startWordPosition="5053" endWordPosition="5056">nnot corefer in our system because it is not a likely pronoun for the type PERSON. While the focus of our model is coreference resolution, we can also isolate and evaluate the type component of our model as an NER system. We test this component by presenting our learned model with boundary-annotated non-pronominal entities from the A05ST dev set and querying their predicted type variable T. Doing so yields 83.2 entity classification accuracy under the mapping between our prototyped types and the coarse ACE types. Note that this task is substantially more difficult than the unsupervised NER in Elsner et al. (2009) because the inventory of named entities is larger (7 vs. 3) and because we predict types over nominal mentions that are more difficult to judge from surface forms. In this task, the plurality of errors are confusions between the GPE (geo-political entity) and ORG entity types, which have very similar distributions. 7 Conclusion Our model is able to acquire and exploit knowledge at either the level of individual entities (“Obama” is a “president”) and entity types (“company” can refer to a corporation). As a result, it leverages semantic constraints more effectively than systems operating at e</context>
+</contexts>
+<marker>Elsner, Charniak, Johnson, 2009</marker>
+<rawString>M Elsner, E Charniak, and M Johnson. 2009. Structured generative models for unsupervised named-entity clustering. In Proceedings of Human Language Technologies: The 2009Annual Conference of the North American Chapter of the Association for Computational Linguistics, pages 164–172.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Barbara J Grosz</author>
+<author>Aravind K Joshi</author>
+<author>Scott Weinstein</author>
+</authors>
+<title>Centering: A Framework for Modeling the Local Coherence of Discourse.</title>
+<date>1995</date>
+<journal>Computational Linguistics,</journal>
+<volume>21</volume>
+<issue>2</issue>
+<contexts>
+<context position="10914" citStr="Grosz et al., 1995" startWordPosition="1782" endWordPosition="1785">his process is described as: Entity Assignment For each mention position, i = 1, ... , n, Draw antecedent position Ai E {1, ... , i}: P(Ai = j|X) a s7r(i, j; X) � ZA�, if Ai &lt; i Zi = K + 1, otherwise Here, K denotes the number of entities allocated in the first i-1 mention positions. This process is an instance of the sequential distance-dependent Chinese Restaurant Process (DD-CRP) of Blei and Frazier (2009). During inference, we variously exploit both the A and Z representations (Section 4). For nominal and pronoun mentions, there are several well-studied anaphora cues, including centering (Grosz et al., 1995), nearness (Hobbs, 1978), and deterministic constraints, which have all been utilized in prior coreference work (Soon et al., 1999; Ng and Cardie, 2002). In order to combine these cues, we take a log-linear, feature-based approach and parametrize s7r(i, j; X) = exp{7rTfX(i, j)}, where fX(i, j) is a feature vector over mention positions i and j, and 7r is a parameter vector; the features may freely condition on X. We utilize the following features between a mention and an anORG: 0.30 PERS: 0.22 GPE: 0.18 LOC: 0.15 WEA: 0.12 VEH: 0.09 PERS ... T φ president: 0.14 painter: 0.11 senator: 0.10 mini</context>
+</contexts>
+<marker>Grosz, Joshi, Weinstein, 1995</marker>
+<rawString>Barbara J. Grosz, Aravind K. Joshi, and Scott Weinstein. 1995. Centering: A Framework for Modeling the Local Coherence of Discourse. Computational Linguistics, 21(2):203–225.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Aria Haghighi</author>
+<author>Dan Klein</author>
+</authors>
+<title>Prototype-Driven Learning for Sequence Models. In HLT-NAACL. Association for Computational Linguistics.</title>
+<date>2006</date>
+<contexts>
+<context position="25024" citStr="Haghighi and Klein (2006)" startWordPosition="4169" endWordPosition="4172">orms all other systems, supervised or unsupervised. For comparison purposes, the B3None variant used on A05RA is calculated slightly differently than other B3None results; see Rahman and Ng (2009). the mention’s syntactic position). We discard determiners, but make use of them in the discourse component (Section 3.2) for NP definiteness. 5.3 Prototyping Entity Types While it is possible to learn type distributions in a completely unsupervised fashion, we found it useful to prime the system with a handful of important types. Rather than relying on fully supervised data, we took the approach of Haghighi and Klein (2006). For each type of interest, we provided a (possiblyempty) prototype list of proper and nominal head words, as well as a list of allowed pronouns. For instance, for the PERSON type we might provide: Bush, Gore, Hussein president, minister, official he, his, she, him, her, you, ... The prototypes were used as follows: Any entity with a prototype on any proper or nominal head word attribute list (Section 3.1) was constrained to have the specified type; i.e. the qk factor (Section 4) places probability one on that single type. Similarly to Haghighi and Klein (2007) and Elsner et al. (2009), we bi</context>
+</contexts>
+<marker>Haghighi, Klein, 2006</marker>
+<rawString>Aria Haghighi and Dan Klein. 2006. Prototype-Driven Learning for Sequence Models. In HLT-NAACL. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Aria Haghighi</author>
+<author>Dan Klein</author>
+</authors>
+<title>Unsupervised Coreference Resolution in a Nonparametric Bayesian Model.</title>
+<date>2007</date>
+<booktitle>In Proceedings of the 45th Annual Meeting of the Association of Computational Linguistics. Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="2484" citStr="Haghighi and Klein (2007)" startWordPosition="358" endWordPosition="361">stic nor scalable to explicitly enumerate all pairs of compatible word pairs. A more compact approach has been to rely on named-entity recognition (NER) systems to give coarse-grained entity types for each mention (Soon et al., 1999; Ng and Cardie, 2002). Unfortunately, current systems use small inventories of types and so provide little constraint. In general, coreference errors in state-of-theart systems are frequently due to poor models of semantic compatibility (Haghighi and Klein, 2009). In this work, we take a primarily unsupervised approach to coreference resolution, broadly similar to Haghighi and Klein (2007), which addresses this issue. Our generative model exploits a large inventory of distributional entity types, including standard NER types like PERSON and ORG, as well as more refined types like WEAPON and VEHICLE. For each type, distributions over typical heads, modifiers, and governors are learned from large amounts of unlabeled data, capturing type-level semantic information (e.g. “spokesman” is a likely head for a PERSON). Each entity inherits from a type but captures entity-level semantic information (e.g. “giant” may be a likely head for the Microsoft entity but not all ORGs). Separately</context>
+<context position="13677" citStr="Haghighi and Klein (2007)" startWordPosition="2246" endWordPosition="2249"> Mention Generation For each mention Mi, i = 1, ... , n Fetch (T, {Lr}rER) from EZi Fetch {(�r, Br)}rER from TT For r E Ri : w - (1 - αr)UNIFORM(Lr) + (αr)Br For each property r, there is a hyper-parameter αr which interpolates between selecting a word from the entity list Lr and drawing from the underlying type property distribution Br. Intuitively, a small value of αr indicates that an entity prefers to re-use 2As Blei and Frazier (2009) notes, when marginalizing out the Ai in this trivial case, the DD-CRP reduces to the traditional CRP (Pitman, 2002), so our discourse model roughly matches Haghighi and Klein (2007) for proper mentions. Person Organization Figure 3: Depiction of the discourse module (Section 3.2); each random variable is annotated with an example value. For each mention position, an entity assignment (Zi) is made. Conditioned on entities (EZ,), mentions (Mi) are rendered (Section 3.3). The Y symbol denotes that a random variable is the parent of all Y random variables. a small number of words for property r. This is typically the case for proper and nominal heads as well as modifiers. At the other extreme, setting αr to 1 indicates the property isn’t particular to the entity itself, but </context>
+<context position="25592" citStr="Haghighi and Klein (2007)" startWordPosition="4266" endWordPosition="4269">d data, we took the approach of Haghighi and Klein (2006). For each type of interest, we provided a (possiblyempty) prototype list of proper and nominal head words, as well as a list of allowed pronouns. For instance, for the PERSON type we might provide: Bush, Gore, Hussein president, minister, official he, his, she, him, her, you, ... The prototypes were used as follows: Any entity with a prototype on any proper or nominal head word attribute list (Section 3.1) was constrained to have the specified type; i.e. the qk factor (Section 4) places probability one on that single type. Similarly to Haghighi and Klein (2007) and Elsner et al. (2009), we biased these types’ pronoun distributions to the allowed set of pronouns. In general, the choice of entity types to prime with prototypes is a domain-specific question. For experiments here, we utilized the types which are annotated in the ACE coreference data: person (PERS), organization (ORG), geo-political entity (GPE), weapon (WEA), vehicle (VEH), location (LOC), and facility (FAC). Since the person type in ACE conflates individual persons with groups of people (e.g., soldier vs. soldiers), we added the group (GROUP) type and generated a prototype specificatio</context>
+</contexts>
+<marker>Haghighi, Klein, 2007</marker>
+<rawString>Aria Haghighi and Dan Klein. 2007. Unsupervised Coreference Resolution in a Nonparametric Bayesian Model. In Proceedings of the 45th Annual Meeting of the Association of Computational Linguistics. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Aria Haghighi</author>
+<author>Dan Klein</author>
+</authors>
+<title>Simple Coreference Resolution with Rich Syntactic and Semantic Features.</title>
+<date>2009</date>
+<booktitle>In Proceedings of the 2009 Conference on Empirical Conference in Natural Language Processing.</booktitle>
+<contexts>
+<context position="1790" citStr="Haghighi and Klein, 2009" startWordPosition="250" endWordPosition="253">onal features are inherently easier to learn from small data sets, past work has often emphasized them over semantic knowledge. Of course, all state-of-the-art coreference systems have needed to capture semantic compatibility to some degree. As an example of nominal headword compatibility, a “president” can be a “leader” but cannot be not an “increase.” Past systems have often computed the compatibility of specific headword pairs, extracted either from lexical resources (Ng, 2007; Bengston and Roth, 2008; Rahman and Ng, 2009), web statistics (Yang et al., 2005), or surface syntactic patterns (Haghighi and Klein, 2009). While the pairwise approach has high precision, it is neither realistic nor scalable to explicitly enumerate all pairs of compatible word pairs. A more compact approach has been to rely on named-entity recognition (NER) systems to give coarse-grained entity types for each mention (Soon et al., 1999; Ng and Cardie, 2002). Unfortunately, current systems use small inventories of types and so provide little constraint. In general, coreference errors in state-of-theart systems are frequently due to poor models of semantic compatibility (Haghighi and Klein, 2009). In this work, we take a primarily</context>
+<context position="12333" citStr="Haghighi and Klein (2009)" startWordPosition="2015" endWordPosition="2018">and antecedent. Features for starting a new entity include: a definiteness feature (extracted from the mention’s determiner), the top CFG rule of the mention parse node, its syntactic role, and a bias feature. These features are conjoined with the mention form (nominal or pronoun). Additionally, we restrict pronoun antecedents to the current and last two sentences, and the current and last three sentences for nominals. Additionally, we disallow nominals from having direct pronoun antecedents. In addition to the above, if a mention is in a deterministic coreference configuration, as defined in Haghighi and Klein (2009), we force it to take the required antecedent. In general, antecedent affinities learn to prefer close antecedents in prominent syntactic positions. We also learn that new entity nominals are typically indefinite or have SBAR complements (captured by the CFG feature). In contrast to nominals and pronouns, the choice of entity for a proper mention is governed more by entity frequency than antecedent distance. We capture this by setting s,7r(i, j; X) in the proper case to 1 for past positions and to a fixed α otherwise. 2 3.3 Mention Module Once the semantic module has generated entities and the</context>
+<context position="20163" citStr="Haghighi and Klein (2009)" startWordPosition="3346" endWordPosition="3349">s. 389 Updating pronominal antecedents ri(A?&apos;i ) and entity types qk(Tk): These updates are straightforward instantiations of the mean-field update (2). To produce our final coreference partitions, we assign each referring mention to the entity given by the δr factor and each pronoun to the most likely entity given by the ri. 4.1 Factor Staging In order to facilitate learning, some factors are initially set to fixed heuristic values and only learned in later iterations. Initially, the assignment factors δr and {ri} are fixed. For δr, we use a deterministic entity assignment Zr, similar to the Haghighi and Klein (2009)’s SYN-CONSTR setting: each referring mention is coreferent with any past mention with the same head or in a deterministic syntactic configuration (appositives or predicative nominatives constructions).6 The {ri} factors are heuristically set to place most of their mass on the closest antecedent by tree distance. During training, we proceed in stages, each consisting of 5 iterations: Stage Learned Fixed B3All 1 δs, δd, {qk} {ri},δr 74.6 2 δs, δd, {qk}, δr {ri} 76.3 3 δs, δd, {qk}, δr, {ri} – 78.0 We evaluate our system at the end of stage using the B3All metric on the A05CU development set (se</context>
+<context position="22268" citStr="Haghighi and Klein (2009)" startWordPosition="3689" endWordPosition="3692">spectively. • A05ST: Train/test split of the newswire portion of the ACE 2005 training set utilized in Stoyanov et al. (2009). Consists of 57/24 documents respectively. • A05RA: Train/test split of the ACE 2005 training set utilized in Rahman and Ng (2009). Consists of 482/117 documents respectively. For all experiments, we evaluated on the dev and test sets above. To train, we included the text of all documents above, though of course not looking at either their mention boundaries or reference annotations in any way. We also trained on the following much larger unlabeled datasets utilized in Haghighi and Klein (2009): • BLLIP: 5k articles of newswire parsed with the Charniak (2000) parser. • WIKI: 8k abstracts of English Wikipedia articles parsed by the Berkeley parser (Petrov et al., 2006). Articles were selected to have subjects amongst the frequent proper nouns in the evaluation datasets. 5.2 Mention Detection and Properties Mention boundaries were automatically detected as follows: For each noun or pronoun (determined by parser POS tag), we associated a mention with the maximal NP projection of that head or that word itself if no NP can be found. This procedure recovers over 90% of annotated mentions </context>
+<context position="23635" citStr="Haghighi and Klein (2009)" startWordPosition="3925" endWordPosition="3928">not deemed to be of interest by the ACE annotation conventions. Mention properties were obtained from parse trees using the the Stanford typed dependency extractor (de Marneffe et al., 2006). The mention properties we considered are the mention head (annotated with mention type), the typed modifiers of the head, and the governor of the head (conjoined with 7Due to licensing restriction, the formal ACE test sets are not available to non-participants. 390 MUC B3All B3None Pairwise F1 System P R F1 P R F1 P R F1 P R F1 ACE2004-STOYANOV-TEST Stoyanov et al. (2009) - - 62.0 - - 76.5 - - 75.4 - - - Haghighi and Klein (2009) 67.5 61.6 64.4 77.4 69.4 73.2 77.4 67.1 71.3 58.3 44.5 50.5 THIS WORK 67.4 66.6 67.0 81.2 73.3 77.0 80.6 75.2 77.3 59.2 50.3 54.4 ACE2005-STOYANOV-TEST Stoyanov et al. (2009) - - 67.4 - - 73.7 - - 72.5 - - - Haghighi and Klein (2009) 73.1 58.8 65.2 82.1 63.9 71.8 81.2 61.6 70.1 66.1 37.9 48.1 THIS WORK 74.6 62.7 68.1 83.2 68.4 75.1 82.7 66.3 73.6 64.3 41.4 50.4 ACE2005-RAHMAN-TEST Rahman and Ng (2009) 75.4 64.1 69.3 - - - 54.4 70.5 61.4 - - - Haghighi and Klein (2009) 72.9 60.2 67.0 53.2 73.1 61.6 52.0 72.6 60.6 57.0 44.6 50.0 THIS WORK 77.0 66.9 71.6 55.4 74.8 63.8 54.0 74.7 62.7 60.1 47.7 5</context>
+<context position="28204" citStr="Haghighi and Klein (2009)" startWordPosition="4683" endWordPosition="4686">8) that differ in their treatment of spurious mentions. For Pairwise F1, precision measures how often pairs of predicted coreferent mentions are in the same annotated entity. We eliminated any mention pair from this calculation where both mentions were spurious.9 5.5 Results Table 1 shows our results. We compared to two state-of-the-art supervised coreference systems. The Stoyanov et al. (2009) numbers represent their THRESHOLD ESTIMATION setting and the Rahman and Ng (2009) numbers represent their highestperforming cluster ranking model. We also compared to the strong deterministic system of Haghighi and Klein (2009).10 Across all data sets, our model, despite being largely unsupervised, consistently outperforms these systems, which are the best previously reported results on end-to-end coreference resolution (i.e. including mention detection). Performance on the A05RA dataset is generally lower because it includes articles from blogs and web forums where parser quality is significantly degraded. While Bengston and Roth (2008) do not report on the full system mention task, they do report on the more optimistic setting where mention detection is performed but non-gold mentions are removed for evaluation us</context>
+<context position="29661" citStr="Haghighi and Klein (2009)" startWordPosition="4916" endWordPosition="4919">ions with explicitly contrasting modifiers, such as new president and old president. While it is not unusual for a single entity to admit multiple modifiers, the particular modifiers new and old are incompatible in a way that new and popular 9Note that we are still penalized for marking a spurious mention coreferent with an annotated one. 10Haghighi and Klein (2009) reports on true mentions; here, we report performance on automatically detected mentions. are not. Our model does not represent the negative covariance between these modifiers. We compared our output to the deterministic system of Haghighi and Klein (2009). Many improvements arise from correctly identifying mentions which are semantically compatible but which do not explicitly appear in an appositive or predicatenominative configuration in the data. For example, analyst and it cannot corefer in our system because it is not a likely pronoun for the type PERSON. While the focus of our model is coreference resolution, we can also isolate and evaluate the type component of our model as an NER system. We test this component by presenting our learned model with boundary-annotated non-pronominal entities from the A05ST dev set and querying their predi</context>
+</contexts>
+<marker>Haghighi, Klein, 2009</marker>
+<rawString>Aria Haghighi and Dan Klein. 2009. Simple Coreference Resolution with Rich Syntactic and Semantic Features. In Proceedings of the 2009 Conference on Empirical Conference in Natural Language Processing.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J R Hobbs</author>
+</authors>
+<title>Resolving Pronoun References.</title>
+<date>1978</date>
+<journal>Lingua,</journal>
+<volume>44</volume>
+<contexts>
+<context position="10938" citStr="Hobbs, 1978" startWordPosition="1787" endWordPosition="1788">tity Assignment For each mention position, i = 1, ... , n, Draw antecedent position Ai E {1, ... , i}: P(Ai = j|X) a s7r(i, j; X) � ZA�, if Ai &lt; i Zi = K + 1, otherwise Here, K denotes the number of entities allocated in the first i-1 mention positions. This process is an instance of the sequential distance-dependent Chinese Restaurant Process (DD-CRP) of Blei and Frazier (2009). During inference, we variously exploit both the A and Z representations (Section 4). For nominal and pronoun mentions, there are several well-studied anaphora cues, including centering (Grosz et al., 1995), nearness (Hobbs, 1978), and deterministic constraints, which have all been utilized in prior coreference work (Soon et al., 1999; Ng and Cardie, 2002). In order to combine these cues, we take a log-linear, feature-based approach and parametrize s7r(i, j; X) = exp{7rTfX(i, j)}, where fX(i, j) is a feature vector over mention positions i and j, and 7r is a parameter vector; the features may freely condition on X. We utilize the following features between a mention and an anORG: 0.30 PERS: 0.22 GPE: 0.18 LOC: 0.15 WEA: 0.12 VEH: 0.09 PERS ... T φ president: 0.14 painter: 0.11 senator: 0.10 minister: 0.09 leader: 0.08 </context>
+</contexts>
+<marker>Hobbs, 1978</marker>
+<rawString>J. R. Hobbs. 1978. Resolving Pronoun References. Lingua, 44.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J R Hobbs</author>
+</authors>
+<date>1979</date>
+<journal>Coherence and Coreference. Cognitive Science,</journal>
+<pages>3--67</pages>
+<contexts>
+<context position="9901" citStr="Hobbs, 1979" startWordPosition="1607" endWordPosition="1608">ts are still independently populated. tions (Collins and Singer, 1999; Elsner et al., 2009). However, to our knowledge, this is the first work to incorporate such a model into an entity reference process. 3.2 Discourse Module The discourse module is responsible for choosing an entity to evoke at each of the n mention positions. Formally, this module generates an entity assignment vector Z = (Zl, ... , Zn), where Zi indicates the entity index for the ith mention position. Most linguistic inquiry characterizes NP anaphora by the pairwise relations that hold between a mention and its antecedent (Hobbs, 1979; Kehler et al., 2008). Our discourse module utilizes this pairwise perspective to define each Zi in terms of an intermediate “antecedent” variable Ai. Ai either points to a previous antecedent mention position (Ai &lt; i) and “steals” its entity assignment or begins a new entity (Ai = i). The choice of Ai is parametrized by affinities s7r(i, j; X) between mention positions i and j. Formally, this process is described as: Entity Assignment For each mention position, i = 1, ... , n, Draw antecedent position Ai E {1, ... , i}: P(Ai = j|X) a s7r(i, j; X) � ZA�, if Ai &lt; i Zi = K + 1, otherwise Here, </context>
+</contexts>
+<marker>Hobbs, 1979</marker>
+<rawString>J. R. Hobbs. 1979. Coherence and Coreference. Cognitive Science, 3:67–90.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Andrew Kehler</author>
+<author>Laura Kertz</author>
+<author>Hannah Rohde</author>
+<author>Jeffrey Elman</author>
+</authors>
+<title>Coherence and Coreference Revisited.</title>
+<date>2008</date>
+<contexts>
+<context position="9923" citStr="Kehler et al., 2008" startWordPosition="1609" endWordPosition="1612">independently populated. tions (Collins and Singer, 1999; Elsner et al., 2009). However, to our knowledge, this is the first work to incorporate such a model into an entity reference process. 3.2 Discourse Module The discourse module is responsible for choosing an entity to evoke at each of the n mention positions. Formally, this module generates an entity assignment vector Z = (Zl, ... , Zn), where Zi indicates the entity index for the ith mention position. Most linguistic inquiry characterizes NP anaphora by the pairwise relations that hold between a mention and its antecedent (Hobbs, 1979; Kehler et al., 2008). Our discourse module utilizes this pairwise perspective to define each Zi in terms of an intermediate “antecedent” variable Ai. Ai either points to a previous antecedent mention position (Ai &lt; i) and “steals” its entity assignment or begins a new entity (Ai = i). The choice of Ai is parametrized by affinities s7r(i, j; X) between mention positions i and j. Formally, this process is described as: Entity Assignment For each mention position, i = 1, ... , n, Draw antecedent position Ai E {1, ... , i}: P(Ai = j|X) a s7r(i, j; X) � ZA�, if Ai &lt; i Zi = K + 1, otherwise Here, K denotes the number o</context>
+</contexts>
+<marker>Kehler, Kertz, Rohde, Elman, 2008</marker>
+<rawString>Andrew Kehler, Laura Kertz, Hannah Rohde, and Jeffrey Elman. 2008. Coherence and Coreference Revisited.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Vincent Ng</author>
+<author>Claire Cardie</author>
+</authors>
+<title>Improving Machine Learning Approaches to Coreference Resolution.</title>
+<date>2002</date>
+<booktitle>In Association of Computational Linguists (ACL).</booktitle>
+<contexts>
+<context position="2113" citStr="Ng and Cardie, 2002" startWordPosition="302" endWordPosition="305">annot be not an “increase.” Past systems have often computed the compatibility of specific headword pairs, extracted either from lexical resources (Ng, 2007; Bengston and Roth, 2008; Rahman and Ng, 2009), web statistics (Yang et al., 2005), or surface syntactic patterns (Haghighi and Klein, 2009). While the pairwise approach has high precision, it is neither realistic nor scalable to explicitly enumerate all pairs of compatible word pairs. A more compact approach has been to rely on named-entity recognition (NER) systems to give coarse-grained entity types for each mention (Soon et al., 1999; Ng and Cardie, 2002). Unfortunately, current systems use small inventories of types and so provide little constraint. In general, coreference errors in state-of-theart systems are frequently due to poor models of semantic compatibility (Haghighi and Klein, 2009). In this work, we take a primarily unsupervised approach to coreference resolution, broadly similar to Haghighi and Klein (2007), which addresses this issue. Our generative model exploits a large inventory of distributional entity types, including standard NER types like PERSON and ORG, as well as more refined types like WEAPON and VEHICLE. For each type,</context>
+<context position="11066" citStr="Ng and Cardie, 2002" startWordPosition="1806" endWordPosition="1809">(i, j; X) � ZA�, if Ai &lt; i Zi = K + 1, otherwise Here, K denotes the number of entities allocated in the first i-1 mention positions. This process is an instance of the sequential distance-dependent Chinese Restaurant Process (DD-CRP) of Blei and Frazier (2009). During inference, we variously exploit both the A and Z representations (Section 4). For nominal and pronoun mentions, there are several well-studied anaphora cues, including centering (Grosz et al., 1995), nearness (Hobbs, 1978), and deterministic constraints, which have all been utilized in prior coreference work (Soon et al., 1999; Ng and Cardie, 2002). In order to combine these cues, we take a log-linear, feature-based approach and parametrize s7r(i, j; X) = exp{7rTfX(i, j)}, where fX(i, j) is a feature vector over mention positions i and j, and 7r is a parameter vector; the features may freely condition on X. We utilize the following features between a mention and an anORG: 0.30 PERS: 0.22 GPE: 0.18 LOC: 0.15 WEA: 0.12 VEH: 0.09 PERS ... T φ president: 0.14 painter: 0.11 senator: 0.10 minister: 0.09 leader: 0.08 official: 0.06 executive: 0.05 For T = PERS ... 387 tecedent: tree distance, sentence distance, and the syntactic positions (sub</context>
+</contexts>
+<marker>Ng, Cardie, 2002</marker>
+<rawString>Vincent Ng and Claire Cardie. 2002. Improving Machine Learning Approaches to Coreference Resolution. In Association of Computational Linguists (ACL).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Vincent Ng</author>
+</authors>
+<title>Machine Learning for Coreference Resolution: From Local Classification to Global Ranking.</title>
+<date>2005</date>
+<booktitle>In Association of Computational Linguists (ACL).</booktitle>
+<marker>Ng, 2005</marker>
+<rawString>Vincent Ng. 2005. Machine Learning for Coreference Resolution: From Local Classification to Global Ranking. In Association of Computational Linguists (ACL).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Vincent Ng</author>
+</authors>
+<title>Shallow semantics for coreference resolution. In</title>
+<date>2007</date>
+<booktitle>IJCAI’07: Proceedings of the 20th international joint conference on Artifical intelligence,</booktitle>
+<pages>1689--1694</pages>
+<contexts>
+<context position="1649" citStr="Ng, 2007" startWordPosition="229" endWordPosition="230">al, to semantic constraints, which are highly contingent on lexical meaning and world knowledge. Perhaps because configurational features are inherently easier to learn from small data sets, past work has often emphasized them over semantic knowledge. Of course, all state-of-the-art coreference systems have needed to capture semantic compatibility to some degree. As an example of nominal headword compatibility, a “president” can be a “leader” but cannot be not an “increase.” Past systems have often computed the compatibility of specific headword pairs, extracted either from lexical resources (Ng, 2007; Bengston and Roth, 2008; Rahman and Ng, 2009), web statistics (Yang et al., 2005), or surface syntactic patterns (Haghighi and Klein, 2009). While the pairwise approach has high precision, it is neither realistic nor scalable to explicitly enumerate all pairs of compatible word pairs. A more compact approach has been to rely on named-entity recognition (NER) systems to give coarse-grained entity types for each mention (Soon et al., 1999; Ng and Cardie, 2002). Unfortunately, current systems use small inventories of types and so provide little constraint. In general, coreference errors in stat</context>
+</contexts>
+<marker>Ng, 2007</marker>
+<rawString>Vincent Ng. 2007. Shallow semantics for coreference resolution. In IJCAI’07: Proceedings of the 20th international joint conference on Artifical intelligence, pages 1689–1694.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Slav Petrov</author>
+<author>Leon Barrett</author>
+<author>Romain Thibaux</author>
+<author>Dan Klein</author>
+</authors>
+<title>Learning Accurate, Compact, and Interpretable Tree Annotation.</title>
+<date>2006</date>
+<booktitle>In Proceedings of the 21st International Conference on Computational Linguistics and 44th Annual Meeting of the Association for Computational Linguistics,</booktitle>
+<pages>433--440</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<location>Sydney, Australia,</location>
+<contexts>
+<context position="22445" citStr="Petrov et al., 2006" startWordPosition="3719" endWordPosition="3722">n/test split of the ACE 2005 training set utilized in Rahman and Ng (2009). Consists of 482/117 documents respectively. For all experiments, we evaluated on the dev and test sets above. To train, we included the text of all documents above, though of course not looking at either their mention boundaries or reference annotations in any way. We also trained on the following much larger unlabeled datasets utilized in Haghighi and Klein (2009): • BLLIP: 5k articles of newswire parsed with the Charniak (2000) parser. • WIKI: 8k abstracts of English Wikipedia articles parsed by the Berkeley parser (Petrov et al., 2006). Articles were selected to have subjects amongst the frequent proper nouns in the evaluation datasets. 5.2 Mention Detection and Properties Mention boundaries were automatically detected as follows: For each noun or pronoun (determined by parser POS tag), we associated a mention with the maximal NP projection of that head or that word itself if no NP can be found. This procedure recovers over 90% of annotated mentions on the A05CU dev set, but also extracts many unannotated “spurious” mentions (for instance events, times, dates, or abstract nouns) which are not deemed to be of interest by the</context>
+</contexts>
+<marker>Petrov, Barrett, Thibaux, Klein, 2006</marker>
+<rawString>Slav Petrov, Leon Barrett, Romain Thibaux, and Dan Klein. 2006. Learning Accurate, Compact, and Interpretable Tree Annotation. In Proceedings of the 21st International Conference on Computational Linguistics and 44th Annual Meeting of the Association for Computational Linguistics, pages 433–440, Sydney, Australia, July. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J Pitman</author>
+</authors>
+<title>Combinatorial Stochastic Processes.</title>
+<date>2002</date>
+<booktitle>In Lecture Notes</booktitle>
+<institution>for St. Flour Summer School.</institution>
+<contexts>
+<context position="13611" citStr="Pitman, 2002" startWordPosition="2238" endWordPosition="2239">rates word values for a set of observed properties Ri: Mention Generation For each mention Mi, i = 1, ... , n Fetch (T, {Lr}rER) from EZi Fetch {(�r, Br)}rER from TT For r E Ri : w - (1 - αr)UNIFORM(Lr) + (αr)Br For each property r, there is a hyper-parameter αr which interpolates between selecting a word from the entity list Lr and drawing from the underlying type property distribution Br. Intuitively, a small value of αr indicates that an entity prefers to re-use 2As Blei and Frazier (2009) notes, when marginalizing out the Ai in this trivial case, the DD-CRP reduces to the traditional CRP (Pitman, 2002), so our discourse model roughly matches Haghighi and Klein (2007) for proper mentions. Person Organization Figure 3: Depiction of the discourse module (Section 3.2); each random variable is annotated with an example value. For each mention position, an entity assignment (Zi) is made. Conditioned on entities (EZ,), mentions (Mi) are rendered (Section 3.3). The Y symbol denotes that a random variable is the parent of all Y random variables. a small number of words for property r. This is typically the case for proper and nominal heads as well as modifiers. At the other extreme, setting αr to 1 </context>
+</contexts>
+<marker>Pitman, 2002</marker>
+<rawString>J. Pitman. 2002. Combinatorial Stochastic Processes. In Lecture Notes for St. Flour Summer School.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>A Rahman</author>
+<author>V Ng</author>
+</authors>
+<title>Supervised models for coreference resolution.</title>
+<date>2009</date>
+<booktitle>In Proceedings of the 2009 Conference on Empirical Conference in Natural Language Processing.</booktitle>
+<contexts>
+<context position="1696" citStr="Rahman and Ng, 2009" startWordPosition="235" endWordPosition="238">are highly contingent on lexical meaning and world knowledge. Perhaps because configurational features are inherently easier to learn from small data sets, past work has often emphasized them over semantic knowledge. Of course, all state-of-the-art coreference systems have needed to capture semantic compatibility to some degree. As an example of nominal headword compatibility, a “president” can be a “leader” but cannot be not an “increase.” Past systems have often computed the compatibility of specific headword pairs, extracted either from lexical resources (Ng, 2007; Bengston and Roth, 2008; Rahman and Ng, 2009), web statistics (Yang et al., 2005), or surface syntactic patterns (Haghighi and Klein, 2009). While the pairwise approach has high precision, it is neither realistic nor scalable to explicitly enumerate all pairs of compatible word pairs. A more compact approach has been to rely on named-entity recognition (NER) systems to give coarse-grained entity types for each mention (Soon et al., 1999; Ng and Cardie, 2002). Unfortunately, current systems use small inventories of types and so provide little constraint. In general, coreference errors in state-of-theart systems are frequently due to poor </context>
+<context position="21899" citStr="Rahman and Ng (2009)" startWordPosition="3626" endWordPosition="3629">standard coreference data sets derived from the ACE corpora: 6Forcing appositive coreference is essential for tying proper and nominal entity type vocabulary. • A04CU: Train/dev/test split of the newswire portion of the ACE 2004 training set7 utilized in Culotta et al. (2007), Bengston and Roth (2008) and Stoyanov et al. (2009). Consists of 90/68/38 documents respectively. • A05ST: Train/test split of the newswire portion of the ACE 2005 training set utilized in Stoyanov et al. (2009). Consists of 57/24 documents respectively. • A05RA: Train/test split of the ACE 2005 training set utilized in Rahman and Ng (2009). Consists of 482/117 documents respectively. For all experiments, we evaluated on the dev and test sets above. To train, we included the text of all documents above, though of course not looking at either their mention boundaries or reference annotations in any way. We also trained on the following much larger unlabeled datasets utilized in Haghighi and Klein (2009): • BLLIP: 5k articles of newswire parsed with the Charniak (2000) parser. • WIKI: 8k abstracts of English Wikipedia articles parsed by the Berkeley parser (Petrov et al., 2006). Articles were selected to have subjects amongst the </context>
+<context position="24040" citStr="Rahman and Ng (2009)" startWordPosition="4003" endWordPosition="4006">sets are not available to non-participants. 390 MUC B3All B3None Pairwise F1 System P R F1 P R F1 P R F1 P R F1 ACE2004-STOYANOV-TEST Stoyanov et al. (2009) - - 62.0 - - 76.5 - - 75.4 - - - Haghighi and Klein (2009) 67.5 61.6 64.4 77.4 69.4 73.2 77.4 67.1 71.3 58.3 44.5 50.5 THIS WORK 67.4 66.6 67.0 81.2 73.3 77.0 80.6 75.2 77.3 59.2 50.3 54.4 ACE2005-STOYANOV-TEST Stoyanov et al. (2009) - - 67.4 - - 73.7 - - 72.5 - - - Haghighi and Klein (2009) 73.1 58.8 65.2 82.1 63.9 71.8 81.2 61.6 70.1 66.1 37.9 48.1 THIS WORK 74.6 62.7 68.1 83.2 68.4 75.1 82.7 66.3 73.6 64.3 41.4 50.4 ACE2005-RAHMAN-TEST Rahman and Ng (2009) 75.4 64.1 69.3 - - - 54.4 70.5 61.4 - - - Haghighi and Klein (2009) 72.9 60.2 67.0 53.2 73.1 61.6 52.0 72.6 60.6 57.0 44.6 50.0 THIS WORK 77.0 66.9 71.6 55.4 74.8 63.8 54.0 74.7 62.7 60.1 47.7 53.0 Table 1: Experimental results with system mentions. All systems except Haghighi and Klein (2009) and current work are fully supervised. The current work outperforms all other systems, supervised or unsupervised. For comparison purposes, the B3None variant used on A05RA is calculated slightly differently than other B3None results; see Rahman and Ng (2009). the mention’s syntactic position). We disca</context>
+<context position="28058" citStr="Rahman and Ng (2009)" startWordPosition="4661" endWordPosition="4664"> B3All (Stoyanov et al., 2009), B3None (Stoyanov et al., 2009), and Pairwise F1. The B3All and B3None are B3 variants (Bagga and Baldwin, 1998) that differ in their treatment of spurious mentions. For Pairwise F1, precision measures how often pairs of predicted coreferent mentions are in the same annotated entity. We eliminated any mention pair from this calculation where both mentions were spurious.9 5.5 Results Table 1 shows our results. We compared to two state-of-the-art supervised coreference systems. The Stoyanov et al. (2009) numbers represent their THRESHOLD ESTIMATION setting and the Rahman and Ng (2009) numbers represent their highestperforming cluster ranking model. We also compared to the strong deterministic system of Haghighi and Klein (2009).10 Across all data sets, our model, despite being largely unsupervised, consistently outperforms these systems, which are the best previously reported results on end-to-end coreference resolution (i.e. including mention detection). Performance on the A05RA dataset is generally lower because it includes articles from blogs and web forums where parser quality is significantly degraded. While Bengston and Roth (2008) do not report on the full system me</context>
+</contexts>
+<marker>Rahman, Ng, 2009</marker>
+<rawString>A Rahman and V Ng. 2009. Supervised models for coreference resolution. In Proceedings of the 2009 Conference on Empirical Conference in Natural Language Processing.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>W H Soon</author>
+<author>H T Ng</author>
+<author>D C Y Lim</author>
+</authors>
+<title>A Machine Learning Approach to Coreference Resolution of Noun Phrases.</title>
+<date>1999</date>
+<contexts>
+<context position="2091" citStr="Soon et al., 1999" startWordPosition="298" endWordPosition="301">be a “leader” but cannot be not an “increase.” Past systems have often computed the compatibility of specific headword pairs, extracted either from lexical resources (Ng, 2007; Bengston and Roth, 2008; Rahman and Ng, 2009), web statistics (Yang et al., 2005), or surface syntactic patterns (Haghighi and Klein, 2009). While the pairwise approach has high precision, it is neither realistic nor scalable to explicitly enumerate all pairs of compatible word pairs. A more compact approach has been to rely on named-entity recognition (NER) systems to give coarse-grained entity types for each mention (Soon et al., 1999; Ng and Cardie, 2002). Unfortunately, current systems use small inventories of types and so provide little constraint. In general, coreference errors in state-of-theart systems are frequently due to poor models of semantic compatibility (Haghighi and Klein, 2009). In this work, we take a primarily unsupervised approach to coreference resolution, broadly similar to Haghighi and Klein (2007), which addresses this issue. Our generative model exploits a large inventory of distributional entity types, including standard NER types like PERSON and ORG, as well as more refined types like WEAPON and V</context>
+<context position="11044" citStr="Soon et al., 1999" startWordPosition="1802" endWordPosition="1805">: P(Ai = j|X) a s7r(i, j; X) � ZA�, if Ai &lt; i Zi = K + 1, otherwise Here, K denotes the number of entities allocated in the first i-1 mention positions. This process is an instance of the sequential distance-dependent Chinese Restaurant Process (DD-CRP) of Blei and Frazier (2009). During inference, we variously exploit both the A and Z representations (Section 4). For nominal and pronoun mentions, there are several well-studied anaphora cues, including centering (Grosz et al., 1995), nearness (Hobbs, 1978), and deterministic constraints, which have all been utilized in prior coreference work (Soon et al., 1999; Ng and Cardie, 2002). In order to combine these cues, we take a log-linear, feature-based approach and parametrize s7r(i, j; X) = exp{7rTfX(i, j)}, where fX(i, j) is a feature vector over mention positions i and j, and 7r is a parameter vector; the features may freely condition on X. We utilize the following features between a mention and an anORG: 0.30 PERS: 0.22 GPE: 0.18 LOC: 0.15 WEA: 0.12 VEH: 0.09 PERS ... T φ president: 0.14 painter: 0.11 senator: 0.10 minister: 0.09 leader: 0.08 official: 0.06 executive: 0.05 For T = PERS ... 387 tecedent: tree distance, sentence distance, and the sy</context>
+</contexts>
+<marker>Soon, Ng, Lim, 1999</marker>
+<rawString>W.H. Soon, H. T. Ng, and D. C. Y. Lim. 1999. A Machine Learning Approach to Coreference Resolution of Noun Phrases.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>V Stoyanov</author>
+<author>N Gilbert</author>
+<author>C Cardie</author>
+<author>E Riloff</author>
+</authors>
+<date>2009</date>
+<booktitle>Conundrums in Noun Phrase Coreference Resolution: Making Sense of the State-of-the-art. In Associate of Computational Linguistics (ACL).</booktitle>
+<contexts>
+<context position="21608" citStr="Stoyanov et al. (2009)" startWordPosition="3577" endWordPosition="3580">s automatically. Our system deterministically extracts mention boundaries from parse trees (Section 5.2). We utilized no coreference annotation during training, but did use minimal prototype information to prime the learning of entity types (Section 5.3). 5.1 Datasets For evaluation, we used standard coreference data sets derived from the ACE corpora: 6Forcing appositive coreference is essential for tying proper and nominal entity type vocabulary. • A04CU: Train/dev/test split of the newswire portion of the ACE 2004 training set7 utilized in Culotta et al. (2007), Bengston and Roth (2008) and Stoyanov et al. (2009). Consists of 90/68/38 documents respectively. • A05ST: Train/test split of the newswire portion of the ACE 2005 training set utilized in Stoyanov et al. (2009). Consists of 57/24 documents respectively. • A05RA: Train/test split of the ACE 2005 training set utilized in Rahman and Ng (2009). Consists of 482/117 documents respectively. For all experiments, we evaluated on the dev and test sets above. To train, we included the text of all documents above, though of course not looking at either their mention boundaries or reference annotations in any way. We also trained on the following much lar</context>
+<context position="23576" citStr="Stoyanov et al. (2009)" startWordPosition="3909" endWordPosition="3912">ance events, times, dates, or abstract nouns) which are not deemed to be of interest by the ACE annotation conventions. Mention properties were obtained from parse trees using the the Stanford typed dependency extractor (de Marneffe et al., 2006). The mention properties we considered are the mention head (annotated with mention type), the typed modifiers of the head, and the governor of the head (conjoined with 7Due to licensing restriction, the formal ACE test sets are not available to non-participants. 390 MUC B3All B3None Pairwise F1 System P R F1 P R F1 P R F1 P R F1 ACE2004-STOYANOV-TEST Stoyanov et al. (2009) - - 62.0 - - 76.5 - - 75.4 - - - Haghighi and Klein (2009) 67.5 61.6 64.4 77.4 69.4 73.2 77.4 67.1 71.3 58.3 44.5 50.5 THIS WORK 67.4 66.6 67.0 81.2 73.3 77.0 80.6 75.2 77.3 59.2 50.3 54.4 ACE2005-STOYANOV-TEST Stoyanov et al. (2009) - - 67.4 - - 73.7 - - 72.5 - - - Haghighi and Klein (2009) 73.1 58.8 65.2 82.1 63.9 71.8 81.2 61.6 70.1 66.1 37.9 48.1 THIS WORK 74.6 62.7 68.1 83.2 68.4 75.1 82.7 66.3 73.6 64.3 41.4 50.4 ACE2005-RAHMAN-TEST Rahman and Ng (2009) 75.4 64.1 69.3 - - - 54.4 70.5 61.4 - - - Haghighi and Klein (2009) 72.9 60.2 67.0 53.2 73.1 61.6 52.0 72.6 60.6 57.0 44.6 50.0 THIS WO</context>
+<context position="27468" citStr="Stoyanov et al., 2009" startWordPosition="4569" endWordPosition="4573">finements of) the ACE types and then add an equal number of unconstrained “other” types which are automatically induced. A nice consequence of this approach is that we can simply run our model on all mentions, discarding at evaluation time any which are of nonprototyped types. 5.4 Evaluation We evaluated on multiple coreference resolution metrics, as no single one is clearly superior, partic8Meaning those headwords were assigned to the target type for more than 75% of their usages. NAM NOM PRO 391 ularly in dealing with the system mention setting. We utilized MUC (Vilain et al., 1995), B3All (Stoyanov et al., 2009), B3None (Stoyanov et al., 2009), and Pairwise F1. The B3All and B3None are B3 variants (Bagga and Baldwin, 1998) that differ in their treatment of spurious mentions. For Pairwise F1, precision measures how often pairs of predicted coreferent mentions are in the same annotated entity. We eliminated any mention pair from this calculation where both mentions were spurious.9 5.5 Results Table 1 shows our results. We compared to two state-of-the-art supervised coreference systems. The Stoyanov et al. (2009) numbers represent their THRESHOLD ESTIMATION setting and the Rahman and Ng (2009) numbers r</context>
+</contexts>
+<marker>Stoyanov, Gilbert, Cardie, Riloff, 2009</marker>
+<rawString>V Stoyanov, N Gilbert, C Cardie, and E Riloff. 2009. Conundrums in Noun Phrase Coreference Resolution: Making Sense of the State-of-the-art. In Associate of Computational Linguistics (ACL).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Marc Vilain</author>
+<author>John Burger</author>
+<author>John Aberdeen</author>
+<author>Dennis Connolly</author>
+<author>Lynette Hirschman</author>
+</authors>
+<title>A modeltheoretic coreference scoring scheme.</title>
+<date>1995</date>
+<booktitle>In MUC-6.</booktitle>
+<contexts>
+<context position="27437" citStr="Vilain et al., 1995" startWordPosition="4564" endWordPosition="4567">s. We therefore prototype (refinements of) the ACE types and then add an equal number of unconstrained “other” types which are automatically induced. A nice consequence of this approach is that we can simply run our model on all mentions, discarding at evaluation time any which are of nonprototyped types. 5.4 Evaluation We evaluated on multiple coreference resolution metrics, as no single one is clearly superior, partic8Meaning those headwords were assigned to the target type for more than 75% of their usages. NAM NOM PRO 391 ularly in dealing with the system mention setting. We utilized MUC (Vilain et al., 1995), B3All (Stoyanov et al., 2009), B3None (Stoyanov et al., 2009), and Pairwise F1. The B3All and B3None are B3 variants (Bagga and Baldwin, 1998) that differ in their treatment of spurious mentions. For Pairwise F1, precision measures how often pairs of predicted coreferent mentions are in the same annotated entity. We eliminated any mention pair from this calculation where both mentions were spurious.9 5.5 Results Table 1 shows our results. We compared to two state-of-the-art supervised coreference systems. The Stoyanov et al. (2009) numbers represent their THRESHOLD ESTIMATION setting and the</context>
+</contexts>
+<marker>Vilain, Burger, Aberdeen, Connolly, Hirschman, 1995</marker>
+<rawString>Marc Vilain, John Burger, John Aberdeen, Dennis Connolly, and Lynette Hirschman. 1995. A modeltheoretic coreference scoring scheme. In MUC-6.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>X Yang</author>
+<author>J Su</author>
+<author>CL Tan</author>
+</authors>
+<title>Improving pronoun resolution using statistics-based semantic compatibility information.</title>
+<date>2005</date>
+<booktitle>In Association of Computational Linguists (ACL).</booktitle>
+<contexts>
+<context position="1732" citStr="Yang et al., 2005" startWordPosition="241" endWordPosition="244">ng and world knowledge. Perhaps because configurational features are inherently easier to learn from small data sets, past work has often emphasized them over semantic knowledge. Of course, all state-of-the-art coreference systems have needed to capture semantic compatibility to some degree. As an example of nominal headword compatibility, a “president” can be a “leader” but cannot be not an “increase.” Past systems have often computed the compatibility of specific headword pairs, extracted either from lexical resources (Ng, 2007; Bengston and Roth, 2008; Rahman and Ng, 2009), web statistics (Yang et al., 2005), or surface syntactic patterns (Haghighi and Klein, 2009). While the pairwise approach has high precision, it is neither realistic nor scalable to explicitly enumerate all pairs of compatible word pairs. A more compact approach has been to rely on named-entity recognition (NER) systems to give coarse-grained entity types for each mention (Soon et al., 1999; Ng and Cardie, 2002). Unfortunately, current systems use small inventories of types and so provide little constraint. In general, coreference errors in state-of-theart systems are frequently due to poor models of semantic compatibility (Ha</context>
+</contexts>
+<marker>Yang, Su, Tan, 2005</marker>
+<rawString>X Yang, J Su, and CL Tan. 2005. Improving pronoun resolution using statistics-based semantic compatibility information. In Association of Computational Linguists (ACL).</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

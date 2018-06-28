@@ -1,0 +1,1583 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.000005">
+<title confidence="0.801876">
+Improved Models of Distortion Cost for Statistical Machine Translation
+</title>
+<author confidence="0.986192">
+Spence Green, Michel Galley, and Christopher D. Manning
+</author>
+<affiliation confidence="0.9871035">
+Computer Science Department
+Stanford University
+</affiliation>
+<address confidence="0.866977">
+Stanford, CA 94305
+</address>
+<email confidence="0.992286">
+{spenceg,mgalley,manning}@stanford.edu
+</email>
+<table confidence="0.377801">
+Abstract Verb NP-OBJ PP NP-SBJ
+JjLZ �� J=ayl ,b �������� �������� ������� �� �� !�
+</table>
+<bodyText confidence="0.997237571428571">
+The distortion cost function used in Moses-
+style machine translation systems has two
+flaws. First, it does not estimate the future
+cost of known required moves, thus increas-
+ing search errors. Second, all distortion is
+penalized linearly, even when appropriate re-
+orderings are performed. Because the cost
+function does not effectively constrain search,
+translation quality decreases at higher dis-
+tortion limits, which are often needed when
+translating between languages of different ty-
+pologies such as Arabic and English. To ad-
+dress these problems, we introduce a method
+for estimating future linear distortion cost, and
+a new discriminative distortion model that pre-
+dicts word movement during translation. In
+combination, these extensions give a statis-
+tically significant improvement over a base-
+line distortion parameterization. When we
+triple the distortion limit, our model achieves
+a +2.32 BLEU average gain over Moses.
+</bodyText>
+<sectionHeader confidence="0.999471" genericHeader="abstract">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.999969071428571">
+It is well-known that translation performance in
+Moses-style (Koehn et al., 2007) machine transla-
+tion (MT) systems deteriorates when high distortion
+is allowed. The linear distortion cost model used in
+these systems is partly at fault. It includes no es-
+timate of future distortion cost, thereby increasing
+the risk of search errors. Linear distortion also pe-
+nalizes all re-orderings equally, even when appro-
+priate re-orderings are performed. Because linear
+distortion, which is a soft constraint, does not effec-
+tively constrain search, a distortion limit is imposed
+on the translation model. But hard constraints are
+ultimately undesirable since they prune the search
+space. For languages with very different word or-
+</bodyText>
+<figureCaption confidence="0.845907">
+Followers of all of the Christian and Islamic sects
+Figure 1: The oracle translation for this Arabic VOS sen-
+tence would be pruned during search using typical dis-
+tortion parameters. The Arabic phrases read right-to-left,
+but we have ordered the sentence from left-to-right in or-
+der to clearly illustrate the re-ordering problem.
+</figureCaption>
+<bodyText confidence="0.94856812">
+ders in which significant re-ordering is required, the
+distortion limit can eliminate the oracle, or “best,”
+translation prior to search, placing an artificial limit
+on translation performance (Auli et al., 2009).
+To illustrate this problem, consider the Arabic-
+English example in Figure 1. Assuming that the En-
+glish translation is constructed left-to-right, the verb
+uljU shaaraka must be translated after the noun
+phrase (NP) subject. If P phrases are used to trans-
+late the Arabic source s to the English target t, then
+the (unsigned) linear distortion is given by
+D(s, t) = p�first + P ��pi��
+i=2 last + 1 − pi �� (1)
+first
+where pfirst and plast are the first and last source
+word indices, respectively, in phrase i. By this for-
+mula, the cost of the step to translate the NP sub-
+ject before the verb is 9, which is high relative to
+the monotone translation path. Moreover, a con-
+ventional distortion limit (e.g., 5) would likely force
+translation of the verb prior to the full subject un-
+less the exact subject phrase existed in the phrase
+table.1 Therefore, the correct re-ordering is either
+improbable or impossible, depending on the choice
+of distortion parameters.
+</bodyText>
+<footnote confidence="0.990232">
+1Our constrained NIST MT09 Arabic-English system,
+which placed second, used a limit of 5 (Galley et al., 2009).
+</footnote>
+<figure confidence="0.592992666666667">
+engaged
+in waiting
+for them
+</figure>
+<page confidence="0.954071">
+867
+</page>
+<note confidence="0.7478605">
+Human Language Technologies: The 2010 Annual Conference of the North American Chapter of the ACL, pages 867–875,
+Los Angeles, California, June 2010. c�2010 Association for Computational Linguistics
+</note>
+<bodyText confidence="0.999812">
+The objective of this work is to develop a dis-
+tortion cost model that allows the distortion limit
+to be raised significantly without a catastrophic de-
+crease in performance. We first describe an admis-
+sible future cost heuristic for linear distortion that
+restores baseline performance at high distortion lim-
+its. Then we add a feature-rich discriminative dis-
+tortion model that captures e.g. the tendency of Ara-
+bic verbs to move right during translation to English.
+Model parameters are learned from automatic bitext
+alignments. Together these two extensions allow
+us to triple the distortion limit in our NIST MT09
+Arabic-English system while maintaining a statisti-
+cally significant improvement over the low distor-
+tion baseline. At the high distortion limit, we also
+show a +2.32 BLEU average gain over Moses with
+an equivalent distortion parameterization.
+</bodyText>
+<sectionHeader confidence="0.999274" genericHeader="keywords">
+2 Background
+</sectionHeader>
+<subsectionHeader confidence="0.998597">
+2.1 Search in Phrase-based MT
+</subsectionHeader>
+<bodyText confidence="0.966415111111111">
+Given a J token source input string f = {fJ },
+i
+we seek the most probable I token translation e =
+�eI �. The Moses phrase-based decoder models the
+i
+� directly according
+posterior probability pλ �eI1|fJ 1
+to a log-linear model (Och and Ney, 2004), which
+gives the decision rule
+</bodyText>
+<equation confidence="0.957674">
+( M
+e = arg max X λmhm (e1, fJ1 )
+I,ei
+m=1
+� are M arbitrary feature functions
+</equation>
+<bodyText confidence="0.999782785714286">
+where hm �eI 1, fJ 1
+over sentence pairs, and λm are feature weights set
+using a discriminative training method like MERT
+(Och, 2003). This search is made tractable by the
+use of beams (Koehn et al., 2003). Hypotheses are
+pruned from the beams according the sum of the cur-
+rent model score and a future cost estimate for the
+uncovered source words. Since the number of re-
+ordering possibilities for those words is very large—
+in theory it is exponential—an inadmissible heuris-
+tic is typically used to estimate future cost. The
+baseline distortion cost model is a weighted feature
+in this framework and affects beam pruning only
+through the current model score.
+When we say linear distortion, we refer to the
+“simple distortion model” of Koehn et al. (2003) that
+is shown in Equation (1) and is converted to a cost
+by multiplying by −1. When extended to phrases,
+the key property of this model is that monotone de-
+coding gives the least costly translation path. Re-
+orderings internal to extracted phrases are not pe-
+nalized. In practice, we commonly see n-best lists
+of hypotheses with linear distortion costs equal to
+zero. More sophisticated local phrase re-ordering
+models have been proposed (Tillmann, 2004; Zens
+and Ney, 2006; Koehn et al., 2007; Galley and Man-
+ning, 2008), but these are typically used in addition
+to linear distortion.
+</bodyText>
+<subsectionHeader confidence="0.999852">
+2.2 Arabic Linguistic Essentials
+</subsectionHeader>
+<bodyText confidence="0.999631916666667">
+In this paper we use Arabic-English as a case study
+since we possess a strong experimental baseline.
+But we expect that the technique presented could
+be even more effective for high distortion language
+pairs such as Chinese-English and Hindi-English.
+Since the analysis that follows is framed in terms of
+Arabic, we point out several linguistic features that
+motivate our approach. From the perspective of the
+three criteria used to specify basic word order typol-
+ogy (Greenberg, 1966), Arabic is somewhat unusual
+in its combination of features: it has prepositions
+(not postpositions), adjectives post-modify nouns,
+and the basic word order is VSO, but SVO and VOS
+configurations also appear.
+The implications for translation to English are:
+(1) prepositions remain in place, (2) NPs are in-
+verted, and most importantly, (3) basic syntac-
+tic constituents must often be identified and pre-
+cisely re-ordered. The VOS configuration is espe-
+cially challenging for Arabic-English MT. It usu-
+ally appears when the direct object is short—e.g.,
+pronominal—and the subject is long. For example,
+translation of the VOS sentence in Figure 1 requires
+both a high distortion limit to accommodate the sub-
+ject movement and tight restrictions on the move-
+ment of the PP. The particularity of these require-
+ments in Arabic and other languages, and the dif-
+ficulty of modeling them in phrase-based systems,
+has inspired significant work in source language pre-
+processing (Collins et al., 2005; Habash and Sadat,
+2006; Habash, 2007).
+Finally, we observe that target language models
+cannot always select appropriate translations when
+basic word order transformation is required. By
+not modeling source side features like agreement—
+which, in Arabic, appears between both verb and
+</bodyText>
+<page confidence="0.988593">
+868
+</page>
+<figure confidence="0.965970125">
+step k Fk Acost D(s, t) D(s, t) + Acost
+0 3 3 1 4
+1 5 2 0 2
+2 7 2 0 2
+3 0 −7 4 −3
+4 0 0 3 3
+8 8
+dlimit-4
+</figure>
+<figureCaption confidence="0.999608">
+Figure 2: Translation sequence in which the distortion limit is reached and the decoder is forced to cover the first
+skipped word. Future cost estimation penalizes the two monotone steps, yet total distortion cost remains unchanged.
+</figureCaption>
+<bodyText confidence="0.999870125">
+subject, and adjective and noun—baseline phrase-
+based systems rely on the language model to spec-
+ify an appropriate target word order (Avramidis and
+Koehn, 2008). Returning to Figure 1, we could have
+an alternate hypothesis They waited for the followers
+of the Christian and Islamic sects, which is accept-
+able English and has low distortion, but is semanti-
+cally inconsistent with the Arabic.
+</bodyText>
+<sectionHeader confidence="0.999566" genericHeader="introduction">
+3 The Cost Model
+</sectionHeader>
+<bodyText confidence="0.9997075">
+In this section we describe the new distortion cost
+model, which has four independent components.
+</bodyText>
+<subsectionHeader confidence="0.998046">
+3.1 Future Cost Estimation
+</subsectionHeader>
+<bodyText confidence="0.999976916666667">
+Despite its lack of sophistication, linear distortion
+is a surprisingly effective baseline cost model for
+phrase-based MT systems. It can be computed in
+constant time, gives non-decreasing values that are
+good for search, and does not require an ancillary
+feature to adjust for the number of components in
+the calculation (e.g., language model scores are ad-
+justed by the word penalty). Moreover, when a large
+training bitext is used, many local re-orderings are
+captured in the phrase table, so the decoder can often
+realize competitive performance by finding a best set
+of phrases with low distortion. But linear distortion
+is not the only unlexicalized alternative: we can use
+any function of the jump width. Table 1 shows de-
+velopment set (MT04) performance for polynomials
+of degree 1.5 and degree 2. The linear model is more
+effective than the higher order functions, especially
+at a higher distortion limit.
+Nevertheless, Table 1 shows an unacceptable de-
+crease in translation performance at the high distor-
+tion limit for all three polynomial models. In Moses,
+the reason is due in part to a dramatic underestima-
+tion of future re-ordering cost. Consider Figure 2
+in which a distortion limit of 4 is used. The first
+</bodyText>
+<table confidence="0.9941945">
+dlimit = 5 dlimit = 15
+LINEAR 51.65 49.35
+DEGREE 1.5 51.69 (+0.04) 48.73 (−0.62)
+DEGREE 2 51.55 (−0.10) 48.40 (−0.95)
+</table>
+<tableCaption confidence="0.967528">
+Table 1: BLEU-4 [%] dev set (MT04) scores (uncased)
+for several polynomial distortion models. Higher degree
+polynomial distortion models underperform at a high dis-
+tortion limit (15).
+</tableCaption>
+<bodyText confidence="0.993134714285714">
+word is skipped, and translation proceeds monoton-
+ically until the distortion limit forces the decoder to
+cover the first word. At low distortion limits, sin-
+gle phrases often saturate the distortion window, so
+underestimation is not problematic. But at high dis-
+tortion limits, the decoder can skip many source po-
+sitions at low cost before the search is constrained
+by the distortion limit. Words and phrases sprinkled
+carelessly throughout the hypotheses are evidence of
+errant search directions that have not been appropri-
+ately penalized by the distortion cost model.
+To constrain search, we add an admissible future
+cost estimate to the linear model.2 By definition, the
+model has a least cost translation path: monotone.
+Therefore, we can add to the baseline calculation
+D(s, t) the cost of skipping back to the first uncov-
+ered source word and then translating the remaining
+positions monotonically. It can be verified by induc-
+tion on |C |that this is an admissible heuristic.
+Formally, let j represent the first uncovered index
+in the source coverage set C. Let Cj represent the
+subset of C starting from position j. Finally, let j�
+represent the leftmost position in phrase p applied at
+translation step k. Then the future cost estimate Fk
+2Moore and Quirk (2007) propose an alternate future cost
+formulation. However, their model seems prone to the same
+deterioration in performance shown in Table 1. They observed
+decreased translation quality above a distortion limit of 5.
+</bodyText>
+<page confidence="0.923712">
+869
+</page>
+<equation confidence="0.881658">
+is
+� |Cj |+ (j0 + |p |+ 1 − j) if j0 &gt; j
+</equation>
+<bodyText confidence="0.97838975">
+Fk = 0 otherwise
+For k &gt; 0, we add the difference between the
+current future cost estimate and the previous cost
+estimate Ocost = Fk − Fk−1 to the linear penalty
+D(s, t).3 Table 2 shows that, as expected, the dif-
+ference between the baseline and augmented models
+is statistically insignificant at a low distortion limit.
+However, at a very high distortion limit, the future
+cost estimate approximately restores baseline per-
+formance. While we still need a distortion limit for
+computational efficiency, it is no longer required to
+improve translation quality.
+</bodyText>
+<subsectionHeader confidence="0.998705">
+3.2 A Discriminative Distortion Model
+</subsectionHeader>
+<bodyText confidence="0.999962">
+So far, we have developed a search heuristic func-
+tion that gives us a greater ability to control search
+at high distortion limits. Now we need a cost model
+that is sensitive to the behavior of certain words dur-
+ing translation. The model must accommodate a
+potentially large number of overlapping source-side
+features defined over the (possibly whole) transla-
+tion sequence. Since we intend to train on auto-
+matic word alignments, data sparsity and noise are
+also risks. These requirements motivate two choices.
+First, we use a discriminative log-linear framework
+that predicts one of the nine discretized distortion
+classes in Figure 3. Let dj,j0 indicate the class cor-
+responding to a jump from source word j to j0 com-
+puted as (j + 1 − j0). The discriminative distortion
+classifier is then
+</bodyText>
+<equation confidence="0.9970346">
+1 , j, j0~ =
+pλ �dj,j0|fJ
+hPM 1 , j, j0, dj,j0�i
+exp m=1 λmhm �fJ
+hPM � ~i
+</equation>
+<bodyText confidence="0.955886636363636">
+exp m=1 λmhm fJ 1 , j, j0, dij,j0
+where λm are feature weights for the
+hm(fJ1 , j, j0, di j,j0) arbitrary feature functions.
+This log conditional objective function is convex
+and can be optimized with e.g. a gradient-based
+procedure.
+3One implementation choice is to estimate future cost to
+an artificial end-of-sentence token. Here the decoder incurs a
+penalty for covering the last word prior to completing a hypoth-
+esis. Although this implementation is inconsistent with Moses
+linear distortion, we find that it gives a small improvement.
+</bodyText>
+<figure confidence="0.375854333333333">
+dlimit = 5 dlimit = 15
+BASELINE 51.65 49.35
+FUTURECOST 51.73 51.65
+Table 2: BLEU-4 [%] dev set scores (uncased) for the
+linear distortion with future cost estimation.
+Discretized Distortion Classes
+</figure>
+<figureCaption confidence="0.6478124">
+Figure 3: Distortion in Arabic-English translation is
+largely monotonic, but with noticeable right movement
+as verbs move around arguments and nouns around mod-
+ifiers. The ability to predict movement decreases with the
+jump size, hence the increasing bin boundaries.
+</figureCaption>
+<bodyText confidence="0.999855529411765">
+Second, we expect that many words will not be
+useful for predicting translation order.4 In a large
+training bitext, it can be extremely tedious to iden-
+tify informative words and word classes analytically.
+Our final decision is then to optimize the parame-
+ter weights λm using L1 regularization (Andrew and
+Gao, 2007), a technique that can learn good models
+in the presence of many irrelevant features.5 The
+L1 regularizer saves us from filtering the training
+data (e.g., by discarding all words that appear less
+than an empirically-specified threshold), and pro-
+vides sparse feature vectors that can be analyzed
+separately during feature engineering.
+We train two independent distortion models. For
+a transition from source word j to j0, we learn an
+outbound model in which features are defined with
+respect to word j. We have a corresponding inbound
+</bodyText>
+<footnote confidence="0.878128">
+4To train the models, we inverted and sorted the intersection
+alignments in the bitext. In our baseline system, we observed
+no decrease in performance between intersection and e.g. grow-
+diag. However we do expect that our method could be extended
+to multi-word alignments.
+5We also add a Gaussian prior p (A) — N (0, 1) to the ob-
+jective (Chen and Rosenfeld, 1999). Using both L1 and L2 reg-
+ularization is mathematically odd, but often helps in practice.
+</footnote>
+<figure confidence="0.995824081081081">
+&lt; -6 [-6,-4] [-3,-2] -1 0 1 [2,3] [4,6] &gt; 6
+# Training Examples
+1900000
+1500000
+1200000
+900000
+600000
+300000
+0
+Pd�
+3 70
+870
+Outbound Distortion Model
+To left To right
+Distortion Class
+(a) J,1L;t / VBD shaaraka (“he engaged”)
+Inbound Distortion Model
+From right Distortion Class From left
+(b)t,wYl / JJ al-aamriikii (“American”)
+1 2 3 4 5 6 7 8 9
+1 2 3 4 5 6 7 8 9
+1 2 3 4 5 6 7 8 9
+0
+First Quintile
+−1
+−2
+−3
+−4
+−5
+−6
+Middle Quintile
+−1
+−2
+−3
+−4
+−5
+−6
+0
+0
+−1
+Last Quintile
+−2
+−3
+−4
+−5
+−6
+1 2 3 4 5 6 7 8 9
+1 2 3 4 5 6 7 8 9
+1 2 3 4 5 6 7 8 9
+0
+First Quintile
+−1
+−2
+−3
+−4
+−5
+−6
+Middle Quintile
+−1
+−2
+−3
+−4
+−5
+−6
+0
+0
+−1
+Last Quintile
+−2
+−3
+−4
+−5
+−6
+−7
+</figure>
+<figureCaption confidence="0.8299025">
+Figure 4: Selected discriminative cost curves (log scale) over three quintiles of the relative position feature. We
+condition on the word, POS, and length features. The classes correspond to those shown in Figure 3. (4a) The VSO
+</figureCaption>
+<bodyText confidence="0.974639366666667">
+basic word order is evident: early in the sentence, there is a strong tendency towards right movement around arguments
+after covering the verb. However, right movement is increasingly penalized at the end of the sentence. (4b) Adjectives
+post-modify nouns, so the model learns high inbound probabilities for jumps from positions earlier in the sentence.
+However, the curve is bi-modal reflecting right inbound moves from other adjectives in NPs with multiple modifiers.
+model trained on features with respect to f. At
+training time, we also add sentence beginning and
+ending delimiters such that inbound probabilities are
+learned for words that begin sentences (e.g., nouns)
+and outbound probabilities are available for tokens
+that end sentences (e.g., punctuation).
+As a baseline, we use the following binary
+features: words, part-of-speech (POS) tags, rela-
+tive source sentence position, and source sentence
+length. Relative source sentence position is dis-
+cretized into five bins, one for each quintile of the
+sentence. Source sentence length is divided into four
+bins with bounds set empirically such that training
+examples are distributed evenly. To simplify the de-
+coder integration for this evaluation, we have cho-
+sen context-free features, but the framework permits
+many other promising possibilities such as agree-
+ment morphology and POS tag chains.
+Our models reveal principled cost curves for spe-
+cific words (Figure 4). However, monotonic decod-
+ing no longer gives the least costly translation path,
+thus complicating future cost estimation. We would
+need to evaluate all possible re-orderings within the
+k-word distortion window. For an input sentence of
+length n, Zens (2008) shows that the number of re-
+ordering possibilities rn is
+</bodyText>
+<equation confidence="0.496166">
+� kn−k · k! n &gt; k
+rn � n! n&lt;k
+</equation>
+<bodyText confidence="0.999912714285714">
+which has an asymptotic complexity O(kn). In-
+stead of using an inadmissible heuristic as is done
+in beam pruning, we take a shortcut: we include
+the linear future cost model as a separate feature.
+Then we add the two discriminative distortion fea-
+tures, which calculate the inbound and outbound log
+probabilities of the word alignments in a hypothe-
+sis. Since hypotheses may have different numbers
+of alignments, we also include an alignment penalty
+that adjusts the discriminative distortion scores for
+unaligned source words. The implementation and
+behavior of the alignment penalty is analogous to
+that of the word penalty. In total, the new distortion
+cost model has four independent MT features.
+</bodyText>
+<sectionHeader confidence="0.999547" genericHeader="method">
+4 MT Evaluation
+</sectionHeader>
+<subsectionHeader confidence="0.991081">
+4.1 Experimental Setup
+</subsectionHeader>
+<bodyText confidence="0.995459">
+Our MT system is Phrasal (Cer et al., 2010),
+which is a Java re-implementation of the Moses
+</bodyText>
+<page confidence="0.999321">
+871
+</page>
+<tableCaption confidence="0.977003">
+Table 3: BLEU-4 [%] scores (uncased) at the distortion limit (5) used in our baseline NIST MT09 Arabic-English
+system (Galley et al., 2009). Avg is a weighted average of the performance deltas. The stars for positive results
+indicate statistical significance compared to the MOSESLINEAR baseline (*: significance atp &lt; 0.05; **: significance
+at p &lt; 0.01)
+</tableCaption>
+<table confidence="0.999762857142857">
+dlimit = 15 MT03 MT05 MT06 MT08 Avg
+MOSESLINEAR 51.04 51.35 41.01 38.83
+COUNTS 49.92 49.73 39.44 37.65
+LEX 50.96 51.21 41.87 39.38
+FUTURE 52.28 ** (+1.24) 52.45 ** (+1.10) 42.78 ** (+1.77) 41.01 ** (+2.18) +1.66
+DISCRIM+FUTURE 52.36 ** (+1.32) 53.05 ** (+1.70) 43.65 ** (+2.64) 41.68 ** (+2.85) +2.32
+num. sentences 663 1056 1797 1360 4876
+</table>
+<tableCaption confidence="0.950839">
+Table 4: BLEU-4 [%] scores (uncased) at a very high distortion limit (15). DISCRIM+FUTURE also achieves a
+statistically significant gain over the MOSESLINEAR dlimit=5 baseline for MT05 (p &lt; 0.06), MT06 (p &lt; 0.01), and
+MT08 (p &lt; 0.01).
+</tableCaption>
+<figure confidence="0.982155272727273">
+dlimit = 5
+MT03 MT05 MT06 MT08
+Avg
+MOSESLINEAR
+52.31 52.67 42.97 41.29
+COUNTS
+FUTURE
+DISCRIM+FUTURE
+−0.09
++0.59
+52.05 52.32 42.28 40.56
+</figure>
+<equation confidence="0.97165975">
+43.04 (+0.07)
+41.01 (−0.28)
+43.75** (+0.78)
+41.82** (+0.53)
+52.26 (−0.05)
+52.68* (+0.37)
+52.53 (−0.14)
+53.13* (+0.46)
+</equation>
+<bodyText confidence="0.998607458333333">
+decoder with the same standard features: four
+translation features (phrase-based translation prob-
+abilities and lexically-weighted probabilities), word
+penalty, phrase penalty, linear distortion, and lan-
+guage model score. We disable baseline linear dis-
+tortion when evaluating the other distortion cost
+models. To tune parameters, we run MERT with the
+Downhill Simplex algorithm on the MT04 dataset.
+For all models, we use 20 random starting points and
+generate 300-best lists.
+We use the NIST MT09 constrained track training
+data, but remove the UN and comparable data.6 The
+reduced training bitext has 181k aligned sentences
+with 6.20M English and 5.73M Arabic tokens. We
+create word alignments using the Berkeley Aligner
+(Liang et al., 2006) and take the intersection of the
+alignments in both directions. Phrase pairs with a
+maximum target or source length of 7 tokens are ex-
+tracted using the method of Och and Ney (2004).
+We build a 5-gram language model from the
+Xinhua and AFP sections of the Gigaword corpus
+(LDC2007T40), in addition to all of the target side
+training data permissible in the NIST MT09 con-
+strained competition. We manually remove Giga-
+</bodyText>
+<footnote confidence="0.9890205">
+6Removal of the UN data does not affect the baseline at
+a distortion limit of 5, and lowers the higher distortion base-
+line by −1.40 BLEU. The NIST MT09 data is available at
+http://www.itl.nist.gov/iad/mig/tests/mt/2009/.
+</footnote>
+<bodyText confidence="0.997760083333333">
+word documents that were released during periods
+that overlapped with the development and test sets.
+The language model is smoothed with the modified
+Kneser-Ney algorithm, retaining only trigrams, 4-
+grams, and 5-grams that occurred two, three, and
+three times, respectively, in the training data.
+We remove from the test sets source tokens not
+present in the phrase tables. For the discriminative
+distortion models, we tag the pre-processed input us-
+ing the log-linear POS tagger of Toutanova et al.
+(2003). After decoding, we strip any punctuation
+that appears at the beginning of a translation.
+</bodyText>
+<subsectionHeader confidence="0.689745">
+4.2 Results
+</subsectionHeader>
+<bodyText confidence="0.9974095">
+In Table 3 we report uncased BLEU-4 (Papineni et
+al., 2001) scores at the distortion limit (5) of our
+most competitive baseline Arabic-English system.
+MOSESLINEAR uses the linear distortion model
+present in Moses. COUNTS is a separate baseline
+with a discrete cost model that uses unlexicalized
+maximum likelihood estimates for the same classes
+present in the discriminative model. To show the
+effect of the components in our combined distor-
+tion model, we give separate results for linear dis-
+tortion with future cost estimation (FUTURE) and for
+the combined discriminative distortion model (DIS-
+CRIM+FUTURE) with all four features: linear distor-
+tion with future cost, inbound and outbound proba-
+</bodyText>
+<page confidence="0.993871">
+872
+</page>
+<table confidence="0.866827428571428">
+NP-OBJ NP-TW rrr-ssJ Verb
+Ar
+-LdA Hyl P9�t1 s:&amp;quot; • YSA 4A yta a:196�� C&apos;3,0
+Reference dutch national jaap de hoop scheffer today, monday, took up his responsibilities...
+XosesLinear-d5 over dutchman jaap de hoop today , monday , in the post of...
+XosesLinear-d15 dutch assumed his duties in the post of nato secretary general jaap de hoop today , monday...
+Discrim+Future the dutchman jaap de hoop today , monday , assumed his duties...
+</table>
+<figureCaption confidence="0.994324">
+Figure 5: Verb movement around both the subject and temporal NPs is impossible at a distortion limit of 5
+(MOSESLINEAR-d5). The baseline system at a high distortion limit mangles the translation (MOSESLINEAR-d15).
+DISCRIM+FUTURE (dlimit=15) correctly guides the search. The Arabic source is written right-to-left.
+</figureCaption>
+<bodyText confidence="0.999305583333333">
+bilities, and the alignment penalty.
+The main objective of this paper is to improve
+performance at very high distortion limits. Table 4
+shows performance at a distortion limit of 15. To
+the set of baselines we add LEX, which is the lex-
+icalized re-ordering model of Galley and Manning
+(2008). This model was shown to outperform other
+lexicalized re-ordering models in common use.
+Statistical significance was computed with the
+approximate randomization test of Riezler and
+Maxwell (2005), which is less sensitive to Type I
+errors than bootstrap re-sampling (Koehn, 2004).
+</bodyText>
+<sectionHeader confidence="0.998704" genericHeader="method">
+5 Discussion
+</sectionHeader>
+<bodyText confidence="0.99996835">
+The new distortion cost model allows us to triple the
+distortion limit while maintaining a statistically sig-
+nificant improvement over the MOSESLINEAR base-
+line at the lower distortion limit for three of the
+four test sets. More importantly, we can raise the
+distortion limit in the DISCRIM+FUTURE configu-
+ration at minimal cost: a statistically insignificant
+−0.2 BLEU performance decrease on average. We
+also see a considerable improvement over both the
+MOSESLINEAR and LEX baselines at the high dis-
+tortion limit (Figure 5). As expected, future cost es-
+timation alone does not increase performance at the
+lower distortion limit.
+We also observe that the effect of conditioning on
+evidence is significant: the COUNTS model is cate-
+gorically worse than all other models. To understand
+why, we randomly sampled 500 sentences from the
+excluded UN data and computed the log-likelihoods
+of the alignments according to the different models.7
+In this test, COUNTS is clearly better with a score of
+</bodyText>
+<footnote confidence="0.939705333333333">
+7We approximated linear distortion using a Laplacian dis-
+tribution with estimated parameters µ = 0.51 and b = 1.76
+(Goodman, 2004).
+</footnote>
+<bodyText confidence="0.999014913043478">
+−23388 versus, for example, the inbound model at
+−38244. The explanation is due in part to optimiza-
+tion. The two discriminative models often give very
+low probabilities for the outermost classes. Noise
+in the alignments along with the few cases of long-
+distance movement are penalized heavily. For Ara-
+bic, this property works in our favor as we do not
+want extreme movement (as we might with Chinese
+or German). But COUNTS applies a uniform penalty
+for all movement that exceeds the outermost class
+boundaries, making it more prone to search errors
+than even linear distortion despite its favorable per-
+formance when tested in isolation.
+Finally, we note that previous attempts to improve
+re-ordering during search (particularly long-distance
+re-ordering (Chiang, 2007)) have delivered remark-
+able gains for languages like Chinese, but improve-
+ments for Arabic have been less exceptional. By
+relaxing the distortion limit, we have left room for
+more sophisticated re-ordering models in conven-
+tional phrase-based decoders while maintaining a
+significant performance advantage over hierarchical
+systems (Marton and Resnik, 2008).
+</bodyText>
+<sectionHeader confidence="0.999714" genericHeader="method">
+6 Prior Work
+</sectionHeader>
+<bodyText confidence="0.99986175">
+There is an expansive literature on re-ordering in
+statistical MT. We first review the development of
+re-ordering constraints, then describe previous cost
+models for those constraints in beam search de-
+coders. Because we allow re-ordering during search,
+we omit discussion of the many different methods
+for preprocessing the source input prior to mono-
+tonic translation. Likewise, we do not recite prior
+work in re-ranking translations.
+Re-ordering constraints were first introduced by
+Berger et al. (1996) in the context of the IBM trans-
+lation models. The IBM constraints treat the source
+</bodyText>
+<page confidence="0.995913">
+873
+</page>
+<bodyText confidence="0.995560455882353">
+word sequence as a coverage set C that is processed
+sequentially. A source token is “covered” when it is
+aligned with a new target token. For a fixed value
+of k, we may leave up to k − 1 positions uncov-
+ered and return to them later. We can alter the con-
+straint slightly such that for the first uncovered posi-
+tion u V C we can cover position j when
+j − u &lt; k j V C
+which is the definition of the distortion limit used in
+Moses. Variations of the IBM constraints also ex-
+ist (Kanthak et al., 2005), as do entirely different
+regimes like the hierarchical ITG constraints, which
+represent the source as a sequence of blocks that
+can be iteratively merged and inverted (Wu, 1996).
+Zens and Ney (2003) exhaustively compare the IBM
+and ITG constraints, concluding that although the
+ITG constraints permit more flexible re-orderings,
+the IBM constraints result in higher BLEU scores.
+Since our work falls under the IBM paradigm, we
+consider cost models for those constraints. We have
+said that linear distortion is the simplest cost model.
+The primary criticism of linear distortion is that
+it is unlexicalized, thus penalizing all re-orderings
+equally (Khalilov et al., 2009). When extended to
+phrases as in Equation (1), linear distortion is also
+agnostic to internal phrase alignments.
+To remedy these deficiencies, Al-Onaizan and
+Papineni (2006) proposed a lexicalized, generative
+distortion model. Maximum likelihood estimates
+for inbound, outbound, and pairwise transitions are
+computed from automatic word alignments. But no
+estimate of future cost is included, and their model
+cannot easily accommodate features defined over the
+entire translation sequence. As for experimental re-
+sults, they use a distortion limit that is half of what
+we report, and compare against a baseline that lacks
+a distortion model entirely. Neither their model nor
+ours requires generation of lattices prior to search
+(Zhang et al., 2007; Niehues and Kolss, 2009).
+Lexicalized re-ordering models are the other sig-
+nificant approach to re-ordering. These models
+make local predictions about the next phrase to be
+translated during decoding, typically assigning costs
+to one of three categories: monotone, swap, or dis-
+continuous. Both generative (Tillmann, 2004; Och
+and Ney, 2004; Koehn et al., 2007) and discrimina-
+tive training (Tillmann and Zhang, 2005; Zens and
+Ney, 2006; Liang et al., 2006) algorithms have been
+proposed. Recently, Galley and Manning (2008) in-
+troduced a hierarchical model capable of analyzing
+alignments beyond adjacent phrases. Our discrimi-
+native distortion framework is not designed as a re-
+placement for lexicalized re-ordering models, but as
+a substitute for linear distortion.
+Finally, we comment on differences between our
+Arabic-English results and the well-known high dis-
+tortion system of Zollmann et al. (2008), who find
+optimal baseline performance at a distortion limit of
+9. First, they use approximately two orders of mag-
+nitude more training data, which allows them to ex-
+tract much longer phrases (12 tokens v. our maxi-
+mum of 7). In this setting, many Arabic-English re-
+orderings can be captured in the phrase table. Sec-
+ond, their “Full” system uses three language models
+each trained with significantly more data than our
+single model. Finally, although they use a lexical-
+ized re-ordering model, no details are given about
+the baseline distortion cost model.
+</bodyText>
+<sectionHeader confidence="0.99901" genericHeader="conclusions">
+7 Conclusion
+</sectionHeader>
+<bodyText confidence="0.999996083333333">
+We have presented a discriminative cost framework
+that both estimates future distortion cost and learns
+principled cost curves. The model delivers a statis-
+tically significant +2.32 BLEU improvement over
+Moses at a high distortion limit. Unlike previous
+discriminative local orientation models (Zens and
+Ney, 2006), our framework permits the definition of
+global features. The evaluation in this paper used
+context-free features to simplify the decoder integra-
+tion, but we expect that context-dependent features
+could result in gains for other language pairs with
+more complex re-ordering phenomena.
+</bodyText>
+<sectionHeader confidence="0.99649" genericHeader="acknowledgments">
+Acknowledgements
+</sectionHeader>
+<bodyText confidence="0.9999361">
+We thank the three anonymous reviewers and Daniel
+Cer for constructive comments, and Claude Re-
+ichard for editorial assistance. The first author is
+supported by a National Defense Science and Engi-
+neering Graduate (NDSEG) fellowship. This paper
+is based on work supported in part by the Defense
+Advanced Research Projects Agency through IBM.
+The content does not necessarily reflect the views of
+the U.S. Government, and no official endorsement
+should be inferred.
+</bodyText>
+<page confidence="0.997635">
+874
+</page>
+<sectionHeader confidence="0.998272" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.998781019607843">
+Y Al-Onaizan and K Papineni. 2006. Distortion models
+for statistical machine translation. In ACL.
+G Andrew and J Gao. 2007. Scalable training of L1-
+regularized log-linear models. In ICML.
+M Auli, A Lopez, H Hoang, and P Koehn. 2009. A
+systematic analysis of translation model search spaces.
+In WMT.
+E Avramidis and P Koehn. 2008. Enriching morpholog-
+ically poor languages for statistical machine transla-
+tion. In ACL.
+A Berger, P Brown, S Della Pietra, V Della Pietra,
+A Kehler, and R Mercer. 1996. Language translation
+apparatus and method using context-based translation
+models. US Patent 5,510,981.
+D Cer, M Galley, D Jurafsky, and C D Manning. 2010.
+Phrasal: A statistical machine translation toolkit for
+exploring new model features. In NAACL, Demonstra-
+tion Session.
+S Chen and R Rosenfeld. 1999. A Gaussian prior for
+smoothing maximum entropy models. Technical Re-
+port CMU-CS-99-10S, Carnegie Mellon University.
+D Chiang. 2007. Hierarchical phrase-based translation.
+Computational Linguistics, 33(2):201–228.
+M Collins, P Koehn, and I Kucerova. 2005. Clause re-
+structuring for statistical machine translation. In ACL.
+M Galley and C D Manning. 2008. A simple and effec-
+tive hierarchical phrase reordering model. In EMNLP.
+M Galley, S Green, D Cer, P-C Chang, and C D Manning.
+2009. Stanford University’s Arabic-to-English statisti-
+cal machine translation system for the 2009 NIST eval-
+uation. Technical report, Stanford University.
+J Goodman. 2004. Exponential priors for maximum en-
+tropy models. In NAACL.
+JH Greenberg, 1966. Some universals of grammar with
+particular reference to the order of meaningful ele-
+ments, pages 73–113. London: MIT Press.
+N Habash and F Sadat. 2006. Arabic preprocessing
+schemes for statistical machine translation. In NAACL.
+N Habash. 2007. Syntactic preprocessing for statistical
+machine translation. In MT Summit XI.
+S Kanthak, D Vilar, E Matusov, R Zens, and H Ney.
+2005. Novel reordering approaches in phrase-based
+statistical machine translation. In ACL Workshop on
+Building and Using Parallel Texts.
+M Khalilov, J A R Fonollosa, and M Dras. 2009. Cou-
+pling hierarchical word reordering and decoding in
+phrase-based statistical machine translation. In SSST.
+P Koehn, F J Och, and D Marcu. 2003. Statistical phrase-
+based translation. In NAACL.
+P Koehn, H Hoang, A Birch, C Callison-Burch, M Fed-
+erico, N Bertoldi, B Cowan, W Shen, C Moran,
+R Zens, C Dyer, O Bojar, A Constantin, and E Herbst.
+2007. Moses: Open source toolkit for statistical ma-
+chine translation. In ACL, Demonstration Session.
+P Koehn. 2004. Statistical significance tests for machine
+translation evaluation. In EMNLP.
+P Liang, B Taskar, and D Klein. 2006. Alignment by
+agreement. In NAACL.
+Y Marton and P Resnik. 2008. Soft syntactic constraints
+for hierarchical phrased-based translation. In ACL.
+R C Moore and C Quirk. 2007. Faster beam-search de-
+coding for phrasal statistical machine translation. In
+MT Summit XI.
+J Niehues and M Kolss. 2009. A POS-based model for
+long-range reorderings in SMT. In WMT.
+F J Och and H Ney. 2004. The alignment template ap-
+proach to statistical machine translation. Computa-
+tional Linguistics, 30:417–449.
+F J Och. 2003. Minimum error rate training for statistical
+machine translation. In ACL.
+K Papineni, S Roukos, T Ward, and W-J Zhu. 2001.
+BLEU: a method for automatic evaluation of machine
+translation. In ACL.
+S Riezler and J T Maxwell. 2005. On some pitfalls in au-
+tomatic evaluation and significance testing in MT. In
+ACL Workshop on Intrinsic and Extrinsic Evaluation
+Measures for Machine Translation and/or Summariza-
+tion (MTSE’05).
+C Tillmann and T Zhang. 2005. A localized prediction
+model for statistical machine translation. In ACL.
+C Tillmann. 2004. A unigram orientation model for sta-
+tistical machine translation. In NAACL.
+K Toutanova, D Klein, C D Manning, and Y Singer.
+2003. Feature-rich part-of-speech tagging with a
+cyclic dependency network. In NAACL.
+D Wu. 1996. A polynomial-time algorithm for statistical
+machine translation. In ACL.
+R Zens and H Ney. 2003. A comparative study on re-
+ordering constraints in statistical machine translation.
+In ACL.
+R Zens and H Ney. 2006. Discriminative reordering
+models for statistical machine translation. In WMT.
+R Zens. 2008. Phrase-based Statistical Machine Trans-
+lation: Models, Search, Training. Ph.D. thesis, RWTH
+Aachen University.
+Y Zhang, R Zens, and H Ney. 2007. Chunk-level re-
+ordering of source language sentences with automati-
+cally learned rules for statistical machine translation.
+In SSST.
+A Zollmann, A Venugopal, F J Och, and J Ponte. 2008.
+A systematic comparison of phrase-based, hierarchical
+and syntax-augmented statistical MT. In COLING.
+</reference>
+<page confidence="0.998857">
+875
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.435251">
+<title confidence="0.932353">Improved Models of Distortion Cost for Statistical Machine Translation</title>
+<author confidence="0.747178">Michel Galley Green</author>
+<author confidence="0.747178">D</author>
+<affiliation confidence="0.820118">Computer Science Stanford</affiliation>
+<address confidence="0.906695">Stanford, CA</address>
+<abstract confidence="0.997939956521739">Verb NP-OBJ PP NP-SBJ �� ,b �������� �������� ������� �� �� !� The distortion cost function used in Mosesstyle machine translation systems has two flaws. First, it does not estimate the future cost of known required moves, thus increasing search errors. Second, all distortion is penalized linearly, even when appropriate reorderings are performed. Because the cost function does not effectively constrain search, translation quality decreases at higher distortion limits, which are often needed when translating between languages of different typologies such as Arabic and English. To address these problems, we introduce a method for estimating future linear distortion cost, and a new discriminative distortion model that predicts word movement during translation. In combination, these extensions give a statistically significant improvement over a baseline distortion parameterization. When we triple the distortion limit, our model achieves BLEU average gain over Moses.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>Y Al-Onaizan</author>
+<author>K Papineni</author>
+</authors>
+<title>Distortion models for statistical machine translation.</title>
+<date>2006</date>
+<booktitle>In ACL.</booktitle>
+<contexts>
+<context position="28739" citStr="Al-Onaizan and Papineni (2006)" startWordPosition="4695" endWordPosition="4698">mpare the IBM and ITG constraints, concluding that although the ITG constraints permit more flexible re-orderings, the IBM constraints result in higher BLEU scores. Since our work falls under the IBM paradigm, we consider cost models for those constraints. We have said that linear distortion is the simplest cost model. The primary criticism of linear distortion is that it is unlexicalized, thus penalizing all re-orderings equally (Khalilov et al., 2009). When extended to phrases as in Equation (1), linear distortion is also agnostic to internal phrase alignments. To remedy these deficiencies, Al-Onaizan and Papineni (2006) proposed a lexicalized, generative distortion model. Maximum likelihood estimates for inbound, outbound, and pairwise transitions are computed from automatic word alignments. But no estimate of future cost is included, and their model cannot easily accommodate features defined over the entire translation sequence. As for experimental results, they use a distortion limit that is half of what we report, and compare against a baseline that lacks a distortion model entirely. Neither their model nor ours requires generation of lattices prior to search (Zhang et al., 2007; Niehues and Kolss, 2009).</context>
+</contexts>
+<marker>Al-Onaizan, Papineni, 2006</marker>
+<rawString>Y Al-Onaizan and K Papineni. 2006. Distortion models for statistical machine translation. In ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>G Andrew</author>
+<author>J Gao</author>
+</authors>
+<title>Scalable training of L1-regularized log-linear models.</title>
+<date>2007</date>
+<booktitle>In ICML.</booktitle>
+<contexts>
+<context position="14883" citStr="Andrew and Gao, 2007" startWordPosition="2426" endWordPosition="2429">imation. Discretized Distortion Classes Figure 3: Distortion in Arabic-English translation is largely monotonic, but with noticeable right movement as verbs move around arguments and nouns around modifiers. The ability to predict movement decreases with the jump size, hence the increasing bin boundaries. Second, we expect that many words will not be useful for predicting translation order.4 In a large training bitext, it can be extremely tedious to identify informative words and word classes analytically. Our final decision is then to optimize the parameter weights λm using L1 regularization (Andrew and Gao, 2007), a technique that can learn good models in the presence of many irrelevant features.5 The L1 regularizer saves us from filtering the training data (e.g., by discarding all words that appear less than an empirically-specified threshold), and provides sparse feature vectors that can be analyzed separately during feature engineering. We train two independent distortion models. For a transition from source word j to j0, we learn an outbound model in which features are defined with respect to word j. We have a corresponding inbound 4To train the models, we inverted and sorted the intersection alig</context>
+</contexts>
+<marker>Andrew, Gao, 2007</marker>
+<rawString>G Andrew and J Gao. 2007. Scalable training of L1-regularized log-linear models. In ICML.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>M Auli</author>
+<author>A Lopez</author>
+<author>H Hoang</author>
+<author>P Koehn</author>
+</authors>
+<title>A systematic analysis of translation model search spaces.</title>
+<date>2009</date>
+<booktitle>In WMT.</booktitle>
+<contexts>
+<context position="2509" citStr="Auli et al., 2009" startWordPosition="369" endWordPosition="372">e since they prune the search space. For languages with very different word orFollowers of all of the Christian and Islamic sects Figure 1: The oracle translation for this Arabic VOS sentence would be pruned during search using typical distortion parameters. The Arabic phrases read right-to-left, but we have ordered the sentence from left-to-right in order to clearly illustrate the re-ordering problem. ders in which significant re-ordering is required, the distortion limit can eliminate the oracle, or “best,” translation prior to search, placing an artificial limit on translation performance (Auli et al., 2009). To illustrate this problem, consider the ArabicEnglish example in Figure 1. Assuming that the English translation is constructed left-to-right, the verb uljU shaaraka must be translated after the noun phrase (NP) subject. If P phrases are used to translate the Arabic source s to the English target t, then the (unsigned) linear distortion is given by D(s, t) = p�first + P ��pi�� i=2 last + 1 − pi �� (1) first where pfirst and plast are the first and last source word indices, respectively, in phrase i. By this formula, the cost of the step to translate the NP subject before the verb is 9, whic</context>
+</contexts>
+<marker>Auli, Lopez, Hoang, Koehn, 2009</marker>
+<rawString>M Auli, A Lopez, H Hoang, and P Koehn. 2009. A systematic analysis of translation model search spaces. In WMT.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>E Avramidis</author>
+<author>P Koehn</author>
+</authors>
+<title>Enriching morphologically poor languages for statistical machine translation.</title>
+<date>2008</date>
+<booktitle>In ACL.</booktitle>
+<contexts>
+<context position="8685" citStr="Avramidis and Koehn, 2008" startWordPosition="1402" endWordPosition="1405">sformation is required. By not modeling source side features like agreement— which, in Arabic, appears between both verb and 868 step k Fk Acost D(s, t) D(s, t) + Acost 0 3 3 1 4 1 5 2 0 2 2 7 2 0 2 3 0 −7 4 −3 4 0 0 3 3 8 8 dlimit-4 Figure 2: Translation sequence in which the distortion limit is reached and the decoder is forced to cover the first skipped word. Future cost estimation penalizes the two monotone steps, yet total distortion cost remains unchanged. subject, and adjective and noun—baseline phrasebased systems rely on the language model to specify an appropriate target word order (Avramidis and Koehn, 2008). Returning to Figure 1, we could have an alternate hypothesis They waited for the followers of the Christian and Islamic sects, which is acceptable English and has low distortion, but is semantically inconsistent with the Arabic. 3 The Cost Model In this section we describe the new distortion cost model, which has four independent components. 3.1 Future Cost Estimation Despite its lack of sophistication, linear distortion is a surprisingly effective baseline cost model for phrase-based MT systems. It can be computed in constant time, gives non-decreasing values that are good for search, and d</context>
+</contexts>
+<marker>Avramidis, Koehn, 2008</marker>
+<rawString>E Avramidis and P Koehn. 2008. Enriching morphologically poor languages for statistical machine translation. In ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>A Berger</author>
+<author>P Brown</author>
+<author>S Della Pietra</author>
+<author>V Della Pietra</author>
+<author>A Kehler</author>
+<author>R Mercer</author>
+</authors>
+<title>Language translation apparatus and method using context-based translation models.</title>
+<date>1996</date>
+<tech>US Patent 5,510,981.</tech>
+<contexts>
+<context position="27311" citStr="Berger et al. (1996)" startWordPosition="4449" endWordPosition="4452">e maintaining a significant performance advantage over hierarchical systems (Marton and Resnik, 2008). 6 Prior Work There is an expansive literature on re-ordering in statistical MT. We first review the development of re-ordering constraints, then describe previous cost models for those constraints in beam search decoders. Because we allow re-ordering during search, we omit discussion of the many different methods for preprocessing the source input prior to monotonic translation. Likewise, we do not recite prior work in re-ranking translations. Re-ordering constraints were first introduced by Berger et al. (1996) in the context of the IBM translation models. The IBM constraints treat the source 873 word sequence as a coverage set C that is processed sequentially. A source token is “covered” when it is aligned with a new target token. For a fixed value of k, we may leave up to k − 1 positions uncovered and return to them later. We can alter the constraint slightly such that for the first uncovered position u V C we can cover position j when j − u &lt; k j V C which is the definition of the distortion limit used in Moses. Variations of the IBM constraints also exist (Kanthak et al., 2005), as do entirely d</context>
+</contexts>
+<marker>Berger, Brown, Pietra, Pietra, Kehler, Mercer, 1996</marker>
+<rawString>A Berger, P Brown, S Della Pietra, V Della Pietra, A Kehler, and R Mercer. 1996. Language translation apparatus and method using context-based translation models. US Patent 5,510,981.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D Cer</author>
+<author>M Galley</author>
+<author>D Jurafsky</author>
+<author>C D Manning</author>
+</authors>
+<title>Phrasal: A statistical machine translation toolkit for exploring new model features. In NAACL, Demonstration Session.</title>
+<date>2010</date>
+<contexts>
+<context position="19297" citStr="Cer et al., 2010" startWordPosition="3193" endWordPosition="3196">ost model as a separate feature. Then we add the two discriminative distortion features, which calculate the inbound and outbound log probabilities of the word alignments in a hypothesis. Since hypotheses may have different numbers of alignments, we also include an alignment penalty that adjusts the discriminative distortion scores for unaligned source words. The implementation and behavior of the alignment penalty is analogous to that of the word penalty. In total, the new distortion cost model has four independent MT features. 4 MT Evaluation 4.1 Experimental Setup Our MT system is Phrasal (Cer et al., 2010), which is a Java re-implementation of the Moses 871 Table 3: BLEU-4 [%] scores (uncased) at the distortion limit (5) used in our baseline NIST MT09 Arabic-English system (Galley et al., 2009). Avg is a weighted average of the performance deltas. The stars for positive results indicate statistical significance compared to the MOSESLINEAR baseline (*: significance atp &lt; 0.05; **: significance at p &lt; 0.01) dlimit = 15 MT03 MT05 MT06 MT08 Avg MOSESLINEAR 51.04 51.35 41.01 38.83 COUNTS 49.92 49.73 39.44 37.65 LEX 50.96 51.21 41.87 39.38 FUTURE 52.28 ** (+1.24) 52.45 ** (+1.10) 42.78 ** (+1.77) 41.</context>
+</contexts>
+<marker>Cer, Galley, Jurafsky, Manning, 2010</marker>
+<rawString>D Cer, M Galley, D Jurafsky, and C D Manning. 2010. Phrasal: A statistical machine translation toolkit for exploring new model features. In NAACL, Demonstration Session.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>S Chen</author>
+<author>R Rosenfeld</author>
+</authors>
+<title>A Gaussian prior for smoothing maximum entropy models.</title>
+<date>1999</date>
+<tech>Technical Report CMU-CS-99-10S,</tech>
+<institution>Carnegie Mellon University.</institution>
+<contexts>
+<context position="15779" citStr="Chen and Rosenfeld, 1999" startWordPosition="2574" endWordPosition="2577">rs that can be analyzed separately during feature engineering. We train two independent distortion models. For a transition from source word j to j0, we learn an outbound model in which features are defined with respect to word j. We have a corresponding inbound 4To train the models, we inverted and sorted the intersection alignments in the bitext. In our baseline system, we observed no decrease in performance between intersection and e.g. growdiag. However we do expect that our method could be extended to multi-word alignments. 5We also add a Gaussian prior p (A) — N (0, 1) to the objective (Chen and Rosenfeld, 1999). Using both L1 and L2 regularization is mathematically odd, but often helps in practice. &lt; -6 [-6,-4] [-3,-2] -1 0 1 [2,3] [4,6] &gt; 6 # Training Examples 1900000 1500000 1200000 900000 600000 300000 0 Pd� 3 70 870 Outbound Distortion Model To left To right Distortion Class (a) J,1L;t / VBD shaaraka (“he engaged”) Inbound Distortion Model From right Distortion Class From left (b)t,wYl / JJ al-aamriikii (“American”) 1 2 3 4 5 6 7 8 9 1 2 3 4 5 6 7 8 9 1 2 3 4 5 6 7 8 9 0 First Quintile −1 −2 −3 −4 −5 −6 Middle Quintile −1 −2 −3 −4 −5 −6 0 0 −1 Last Quintile −2 −3 −4 −5 −6 1 2 3 4 5 6 7 8 9 1 2 3</context>
+</contexts>
+<marker>Chen, Rosenfeld, 1999</marker>
+<rawString>S Chen and R Rosenfeld. 1999. A Gaussian prior for smoothing maximum entropy models. Technical Report CMU-CS-99-10S, Carnegie Mellon University.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D Chiang</author>
+</authors>
+<title>Hierarchical phrase-based translation.</title>
+<date>2007</date>
+<journal>Computational Linguistics,</journal>
+<volume>33</volume>
+<issue>2</issue>
+<contexts>
+<context position="26437" citStr="Chiang, 2007" startWordPosition="4323" endWordPosition="4324"> probabilities for the outermost classes. Noise in the alignments along with the few cases of longdistance movement are penalized heavily. For Arabic, this property works in our favor as we do not want extreme movement (as we might with Chinese or German). But COUNTS applies a uniform penalty for all movement that exceeds the outermost class boundaries, making it more prone to search errors than even linear distortion despite its favorable performance when tested in isolation. Finally, we note that previous attempts to improve re-ordering during search (particularly long-distance re-ordering (Chiang, 2007)) have delivered remarkable gains for languages like Chinese, but improvements for Arabic have been less exceptional. By relaxing the distortion limit, we have left room for more sophisticated re-ordering models in conventional phrase-based decoders while maintaining a significant performance advantage over hierarchical systems (Marton and Resnik, 2008). 6 Prior Work There is an expansive literature on re-ordering in statistical MT. We first review the development of re-ordering constraints, then describe previous cost models for those constraints in beam search decoders. Because we allow re-o</context>
+</contexts>
+<marker>Chiang, 2007</marker>
+<rawString>D Chiang. 2007. Hierarchical phrase-based translation. Computational Linguistics, 33(2):201–228.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>M Collins</author>
+<author>P Koehn</author>
+<author>I Kucerova</author>
+</authors>
+<title>Clause restructuring for statistical machine translation.</title>
+<date>2005</date>
+<booktitle>In ACL.</booktitle>
+<contexts>
+<context position="7898" citStr="Collins et al., 2005" startWordPosition="1261" endWordPosition="1264">ituents must often be identified and precisely re-ordered. The VOS configuration is especially challenging for Arabic-English MT. It usually appears when the direct object is short—e.g., pronominal—and the subject is long. For example, translation of the VOS sentence in Figure 1 requires both a high distortion limit to accommodate the subject movement and tight restrictions on the movement of the PP. The particularity of these requirements in Arabic and other languages, and the difficulty of modeling them in phrase-based systems, has inspired significant work in source language preprocessing (Collins et al., 2005; Habash and Sadat, 2006; Habash, 2007). Finally, we observe that target language models cannot always select appropriate translations when basic word order transformation is required. By not modeling source side features like agreement— which, in Arabic, appears between both verb and 868 step k Fk Acost D(s, t) D(s, t) + Acost 0 3 3 1 4 1 5 2 0 2 2 7 2 0 2 3 0 −7 4 −3 4 0 0 3 3 8 8 dlimit-4 Figure 2: Translation sequence in which the distortion limit is reached and the decoder is forced to cover the first skipped word. Future cost estimation penalizes the two monotone steps, yet total distort</context>
+</contexts>
+<marker>Collins, Koehn, Kucerova, 2005</marker>
+<rawString>M Collins, P Koehn, and I Kucerova. 2005. Clause restructuring for statistical machine translation. In ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>M Galley</author>
+<author>C D Manning</author>
+</authors>
+<title>A simple and effective hierarchical phrase reordering model.</title>
+<date>2008</date>
+<booktitle>In EMNLP.</booktitle>
+<contexts>
+<context position="6335" citStr="Galley and Manning, 2008" startWordPosition="1014" endWordPosition="1018">model score. When we say linear distortion, we refer to the “simple distortion model” of Koehn et al. (2003) that is shown in Equation (1) and is converted to a cost by multiplying by −1. When extended to phrases, the key property of this model is that monotone decoding gives the least costly translation path. Reorderings internal to extracted phrases are not penalized. In practice, we commonly see n-best lists of hypotheses with linear distortion costs equal to zero. More sophisticated local phrase re-ordering models have been proposed (Tillmann, 2004; Zens and Ney, 2006; Koehn et al., 2007; Galley and Manning, 2008), but these are typically used in addition to linear distortion. 2.2 Arabic Linguistic Essentials In this paper we use Arabic-English as a case study since we possess a strong experimental baseline. But we expect that the technique presented could be even more effective for high distortion language pairs such as Chinese-English and Hindi-English. Since the analysis that follows is framed in terms of Arabic, we point out several linguistic features that motivate our approach. From the perspective of the three criteria used to specify basic word order typology (Greenberg, 1966), Arabic is somewh</context>
+<context position="24258" citStr="Galley and Manning (2008)" startWordPosition="3980" endWordPosition="3983">ssumed his duties... Figure 5: Verb movement around both the subject and temporal NPs is impossible at a distortion limit of 5 (MOSESLINEAR-d5). The baseline system at a high distortion limit mangles the translation (MOSESLINEAR-d15). DISCRIM+FUTURE (dlimit=15) correctly guides the search. The Arabic source is written right-to-left. bilities, and the alignment penalty. The main objective of this paper is to improve performance at very high distortion limits. Table 4 shows performance at a distortion limit of 15. To the set of baselines we add LEX, which is the lexicalized re-ordering model of Galley and Manning (2008). This model was shown to outperform other lexicalized re-ordering models in common use. Statistical significance was computed with the approximate randomization test of Riezler and Maxwell (2005), which is less sensitive to Type I errors than bootstrap re-sampling (Koehn, 2004). 5 Discussion The new distortion cost model allows us to triple the distortion limit while maintaining a statistically significant improvement over the MOSESLINEAR baseline at the lower distortion limit for three of the four test sets. More importantly, we can raise the distortion limit in the DISCRIM+FUTURE configurat</context>
+<context position="29835" citStr="Galley and Manning (2008)" startWordPosition="4860" endWordPosition="4863">rely. Neither their model nor ours requires generation of lattices prior to search (Zhang et al., 2007; Niehues and Kolss, 2009). Lexicalized re-ordering models are the other significant approach to re-ordering. These models make local predictions about the next phrase to be translated during decoding, typically assigning costs to one of three categories: monotone, swap, or discontinuous. Both generative (Tillmann, 2004; Och and Ney, 2004; Koehn et al., 2007) and discriminative training (Tillmann and Zhang, 2005; Zens and Ney, 2006; Liang et al., 2006) algorithms have been proposed. Recently, Galley and Manning (2008) introduced a hierarchical model capable of analyzing alignments beyond adjacent phrases. Our discriminative distortion framework is not designed as a replacement for lexicalized re-ordering models, but as a substitute for linear distortion. Finally, we comment on differences between our Arabic-English results and the well-known high distortion system of Zollmann et al. (2008), who find optimal baseline performance at a distortion limit of 9. First, they use approximately two orders of magnitude more training data, which allows them to extract much longer phrases (12 tokens v. our maximum of 7</context>
+</contexts>
+<marker>Galley, Manning, 2008</marker>
+<rawString>M Galley and C D Manning. 2008. A simple and effective hierarchical phrase reordering model. In EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>M Galley</author>
+<author>S Green</author>
+<author>D Cer</author>
+<author>P-C Chang</author>
+<author>C D Manning</author>
+</authors>
+<title>Stanford University’s Arabic-to-English statistical machine translation system for the 2009 NIST evaluation.</title>
+<date>2009</date>
+<tech>Technical report,</tech>
+<institution>Stanford University.</institution>
+<contexts>
+<context position="3576" citStr="Galley et al., 2009" startWordPosition="554" endWordPosition="557">rst and last source word indices, respectively, in phrase i. By this formula, the cost of the step to translate the NP subject before the verb is 9, which is high relative to the monotone translation path. Moreover, a conventional distortion limit (e.g., 5) would likely force translation of the verb prior to the full subject unless the exact subject phrase existed in the phrase table.1 Therefore, the correct re-ordering is either improbable or impossible, depending on the choice of distortion parameters. 1Our constrained NIST MT09 Arabic-English system, which placed second, used a limit of 5 (Galley et al., 2009). engaged in waiting for them 867 Human Language Technologies: The 2010 Annual Conference of the North American Chapter of the ACL, pages 867–875, Los Angeles, California, June 2010. c�2010 Association for Computational Linguistics The objective of this work is to develop a distortion cost model that allows the distortion limit to be raised significantly without a catastrophic decrease in performance. We first describe an admissible future cost heuristic for linear distortion that restores baseline performance at high distortion limits. Then we add a feature-rich discriminative distortion mode</context>
+<context position="19489" citStr="Galley et al., 2009" startWordPosition="3225" endWordPosition="3228">ince hypotheses may have different numbers of alignments, we also include an alignment penalty that adjusts the discriminative distortion scores for unaligned source words. The implementation and behavior of the alignment penalty is analogous to that of the word penalty. In total, the new distortion cost model has four independent MT features. 4 MT Evaluation 4.1 Experimental Setup Our MT system is Phrasal (Cer et al., 2010), which is a Java re-implementation of the Moses 871 Table 3: BLEU-4 [%] scores (uncased) at the distortion limit (5) used in our baseline NIST MT09 Arabic-English system (Galley et al., 2009). Avg is a weighted average of the performance deltas. The stars for positive results indicate statistical significance compared to the MOSESLINEAR baseline (*: significance atp &lt; 0.05; **: significance at p &lt; 0.01) dlimit = 15 MT03 MT05 MT06 MT08 Avg MOSESLINEAR 51.04 51.35 41.01 38.83 COUNTS 49.92 49.73 39.44 37.65 LEX 50.96 51.21 41.87 39.38 FUTURE 52.28 ** (+1.24) 52.45 ** (+1.10) 42.78 ** (+1.77) 41.01 ** (+2.18) +1.66 DISCRIM+FUTURE 52.36 ** (+1.32) 53.05 ** (+1.70) 43.65 ** (+2.64) 41.68 ** (+2.85) +2.32 num. sentences 663 1056 1797 1360 4876 Table 4: BLEU-4 [%] scores (uncased) at a ve</context>
+</contexts>
+<marker>Galley, Green, Cer, Chang, Manning, 2009</marker>
+<rawString>M Galley, S Green, D Cer, P-C Chang, and C D Manning. 2009. Stanford University’s Arabic-to-English statistical machine translation system for the 2009 NIST evaluation. Technical report, Stanford University.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J Goodman</author>
+</authors>
+<title>Exponential priors for maximum entropy models.</title>
+<date>2004</date>
+<booktitle>In NAACL.</booktitle>
+<contexts>
+<context position="25668" citStr="Goodman, 2004" startWordPosition="4202" endWordPosition="4203">ion limit (Figure 5). As expected, future cost estimation alone does not increase performance at the lower distortion limit. We also observe that the effect of conditioning on evidence is significant: the COUNTS model is categorically worse than all other models. To understand why, we randomly sampled 500 sentences from the excluded UN data and computed the log-likelihoods of the alignments according to the different models.7 In this test, COUNTS is clearly better with a score of 7We approximated linear distortion using a Laplacian distribution with estimated parameters µ = 0.51 and b = 1.76 (Goodman, 2004). −23388 versus, for example, the inbound model at −38244. The explanation is due in part to optimization. The two discriminative models often give very low probabilities for the outermost classes. Noise in the alignments along with the few cases of longdistance movement are penalized heavily. For Arabic, this property works in our favor as we do not want extreme movement (as we might with Chinese or German). But COUNTS applies a uniform penalty for all movement that exceeds the outermost class boundaries, making it more prone to search errors than even linear distortion despite its favorable </context>
+</contexts>
+<marker>Goodman, 2004</marker>
+<rawString>J Goodman. 2004. Exponential priors for maximum entropy models. In NAACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>JH Greenberg</author>
+</authors>
+<title>Some universals of grammar with particular reference to the order of meaningful elements,</title>
+<date>1966</date>
+<pages>73--113</pages>
+<publisher>MIT Press.</publisher>
+<location>London:</location>
+<contexts>
+<context position="6917" citStr="Greenberg, 1966" startWordPosition="1108" endWordPosition="1109">., 2007; Galley and Manning, 2008), but these are typically used in addition to linear distortion. 2.2 Arabic Linguistic Essentials In this paper we use Arabic-English as a case study since we possess a strong experimental baseline. But we expect that the technique presented could be even more effective for high distortion language pairs such as Chinese-English and Hindi-English. Since the analysis that follows is framed in terms of Arabic, we point out several linguistic features that motivate our approach. From the perspective of the three criteria used to specify basic word order typology (Greenberg, 1966), Arabic is somewhat unusual in its combination of features: it has prepositions (not postpositions), adjectives post-modify nouns, and the basic word order is VSO, but SVO and VOS configurations also appear. The implications for translation to English are: (1) prepositions remain in place, (2) NPs are inverted, and most importantly, (3) basic syntactic constituents must often be identified and precisely re-ordered. The VOS configuration is especially challenging for Arabic-English MT. It usually appears when the direct object is short—e.g., pronominal—and the subject is long. For example, tra</context>
+</contexts>
+<marker>Greenberg, 1966</marker>
+<rawString>JH Greenberg, 1966. Some universals of grammar with particular reference to the order of meaningful elements, pages 73–113. London: MIT Press.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>N Habash</author>
+<author>F Sadat</author>
+</authors>
+<title>Arabic preprocessing schemes for statistical machine translation.</title>
+<date>2006</date>
+<booktitle>In NAACL.</booktitle>
+<contexts>
+<context position="7922" citStr="Habash and Sadat, 2006" startWordPosition="1265" endWordPosition="1268">identified and precisely re-ordered. The VOS configuration is especially challenging for Arabic-English MT. It usually appears when the direct object is short—e.g., pronominal—and the subject is long. For example, translation of the VOS sentence in Figure 1 requires both a high distortion limit to accommodate the subject movement and tight restrictions on the movement of the PP. The particularity of these requirements in Arabic and other languages, and the difficulty of modeling them in phrase-based systems, has inspired significant work in source language preprocessing (Collins et al., 2005; Habash and Sadat, 2006; Habash, 2007). Finally, we observe that target language models cannot always select appropriate translations when basic word order transformation is required. By not modeling source side features like agreement— which, in Arabic, appears between both verb and 868 step k Fk Acost D(s, t) D(s, t) + Acost 0 3 3 1 4 1 5 2 0 2 2 7 2 0 2 3 0 −7 4 −3 4 0 0 3 3 8 8 dlimit-4 Figure 2: Translation sequence in which the distortion limit is reached and the decoder is forced to cover the first skipped word. Future cost estimation penalizes the two monotone steps, yet total distortion cost remains unchang</context>
+</contexts>
+<marker>Habash, Sadat, 2006</marker>
+<rawString>N Habash and F Sadat. 2006. Arabic preprocessing schemes for statistical machine translation. In NAACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>N Habash</author>
+</authors>
+<title>Syntactic preprocessing for statistical machine translation.</title>
+<date>2007</date>
+<booktitle>In MT Summit XI.</booktitle>
+<contexts>
+<context position="7937" citStr="Habash, 2007" startWordPosition="1269" endWordPosition="1270"> re-ordered. The VOS configuration is especially challenging for Arabic-English MT. It usually appears when the direct object is short—e.g., pronominal—and the subject is long. For example, translation of the VOS sentence in Figure 1 requires both a high distortion limit to accommodate the subject movement and tight restrictions on the movement of the PP. The particularity of these requirements in Arabic and other languages, and the difficulty of modeling them in phrase-based systems, has inspired significant work in source language preprocessing (Collins et al., 2005; Habash and Sadat, 2006; Habash, 2007). Finally, we observe that target language models cannot always select appropriate translations when basic word order transformation is required. By not modeling source side features like agreement— which, in Arabic, appears between both verb and 868 step k Fk Acost D(s, t) D(s, t) + Acost 0 3 3 1 4 1 5 2 0 2 2 7 2 0 2 3 0 −7 4 −3 4 0 0 3 3 8 8 dlimit-4 Figure 2: Translation sequence in which the distortion limit is reached and the decoder is forced to cover the first skipped word. Future cost estimation penalizes the two monotone steps, yet total distortion cost remains unchanged. subject, an</context>
+</contexts>
+<marker>Habash, 2007</marker>
+<rawString>N Habash. 2007. Syntactic preprocessing for statistical machine translation. In MT Summit XI.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>S Kanthak</author>
+<author>D Vilar</author>
+<author>E Matusov</author>
+<author>R Zens</author>
+<author>H Ney</author>
+</authors>
+<title>Novel reordering approaches in phrase-based statistical machine translation.</title>
+<date>2005</date>
+<booktitle>In ACL Workshop on Building and Using Parallel Texts.</booktitle>
+<contexts>
+<context position="27893" citStr="Kanthak et al., 2005" startWordPosition="4567" endWordPosition="4570">irst introduced by Berger et al. (1996) in the context of the IBM translation models. The IBM constraints treat the source 873 word sequence as a coverage set C that is processed sequentially. A source token is “covered” when it is aligned with a new target token. For a fixed value of k, we may leave up to k − 1 positions uncovered and return to them later. We can alter the constraint slightly such that for the first uncovered position u V C we can cover position j when j − u &lt; k j V C which is the definition of the distortion limit used in Moses. Variations of the IBM constraints also exist (Kanthak et al., 2005), as do entirely different regimes like the hierarchical ITG constraints, which represent the source as a sequence of blocks that can be iteratively merged and inverted (Wu, 1996). Zens and Ney (2003) exhaustively compare the IBM and ITG constraints, concluding that although the ITG constraints permit more flexible re-orderings, the IBM constraints result in higher BLEU scores. Since our work falls under the IBM paradigm, we consider cost models for those constraints. We have said that linear distortion is the simplest cost model. The primary criticism of linear distortion is that it is unlexi</context>
+</contexts>
+<marker>Kanthak, Vilar, Matusov, Zens, Ney, 2005</marker>
+<rawString>S Kanthak, D Vilar, E Matusov, R Zens, and H Ney. 2005. Novel reordering approaches in phrase-based statistical machine translation. In ACL Workshop on Building and Using Parallel Texts.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>M Khalilov</author>
+<author>J A R Fonollosa</author>
+<author>M Dras</author>
+</authors>
+<title>Coupling hierarchical word reordering and decoding in phrase-based statistical machine translation.</title>
+<date>2009</date>
+<booktitle>In SSST.</booktitle>
+<contexts>
+<context position="28566" citStr="Khalilov et al., 2009" startWordPosition="4670" endWordPosition="4673">hical ITG constraints, which represent the source as a sequence of blocks that can be iteratively merged and inverted (Wu, 1996). Zens and Ney (2003) exhaustively compare the IBM and ITG constraints, concluding that although the ITG constraints permit more flexible re-orderings, the IBM constraints result in higher BLEU scores. Since our work falls under the IBM paradigm, we consider cost models for those constraints. We have said that linear distortion is the simplest cost model. The primary criticism of linear distortion is that it is unlexicalized, thus penalizing all re-orderings equally (Khalilov et al., 2009). When extended to phrases as in Equation (1), linear distortion is also agnostic to internal phrase alignments. To remedy these deficiencies, Al-Onaizan and Papineni (2006) proposed a lexicalized, generative distortion model. Maximum likelihood estimates for inbound, outbound, and pairwise transitions are computed from automatic word alignments. But no estimate of future cost is included, and their model cannot easily accommodate features defined over the entire translation sequence. As for experimental results, they use a distortion limit that is half of what we report, and compare against a</context>
+</contexts>
+<marker>Khalilov, Fonollosa, Dras, 2009</marker>
+<rawString>M Khalilov, J A R Fonollosa, and M Dras. 2009. Coupling hierarchical word reordering and decoding in phrase-based statistical machine translation. In SSST.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>P Koehn</author>
+<author>F J Och</author>
+<author>D Marcu</author>
+</authors>
+<title>Statistical phrasebased translation.</title>
+<date>2003</date>
+<booktitle>In NAACL.</booktitle>
+<contexts>
+<context position="5269" citStr="Koehn et al., 2003" startWordPosition="836" endWordPosition="839">eterization. 2 Background 2.1 Search in Phrase-based MT Given a J token source input string f = {fJ }, i we seek the most probable I token translation e = �eI �. The Moses phrase-based decoder models the i � directly according posterior probability pλ �eI1|fJ 1 to a log-linear model (Och and Ney, 2004), which gives the decision rule ( M e = arg max X λmhm (e1, fJ1 ) I,ei m=1 � are M arbitrary feature functions where hm �eI 1, fJ 1 over sentence pairs, and λm are feature weights set using a discriminative training method like MERT (Och, 2003). This search is made tractable by the use of beams (Koehn et al., 2003). Hypotheses are pruned from the beams according the sum of the current model score and a future cost estimate for the uncovered source words. Since the number of reordering possibilities for those words is very large— in theory it is exponential—an inadmissible heuristic is typically used to estimate future cost. The baseline distortion cost model is a weighted feature in this framework and affects beam pruning only through the current model score. When we say linear distortion, we refer to the “simple distortion model” of Koehn et al. (2003) that is shown in Equation (1) and is converted to </context>
+</contexts>
+<marker>Koehn, Och, Marcu, 2003</marker>
+<rawString>P Koehn, F J Och, and D Marcu. 2003. Statistical phrasebased translation. In NAACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>P Koehn</author>
+<author>H Hoang</author>
+<author>A Birch</author>
+<author>C Callison-Burch</author>
+<author>M Federico</author>
+<author>N Bertoldi</author>
+<author>B Cowan</author>
+<author>W Shen</author>
+<author>C Moran</author>
+<author>R Zens</author>
+<author>C Dyer</author>
+<author>O Bojar</author>
+<author>A Constantin</author>
+<author>E Herbst</author>
+</authors>
+<title>Moses: Open source toolkit for statistical machine translation.</title>
+<date>2007</date>
+<booktitle>In ACL, Demonstration Session.</booktitle>
+<contexts>
+<context position="1334" citStr="Koehn et al., 2007" startWordPosition="189" endWordPosition="192">on limits, which are often needed when translating between languages of different typologies such as Arabic and English. To address these problems, we introduce a method for estimating future linear distortion cost, and a new discriminative distortion model that predicts word movement during translation. In combination, these extensions give a statistically significant improvement over a baseline distortion parameterization. When we triple the distortion limit, our model achieves a +2.32 BLEU average gain over Moses. 1 Introduction It is well-known that translation performance in Moses-style (Koehn et al., 2007) machine translation (MT) systems deteriorates when high distortion is allowed. The linear distortion cost model used in these systems is partly at fault. It includes no estimate of future distortion cost, thereby increasing the risk of search errors. Linear distortion also penalizes all re-orderings equally, even when appropriate re-orderings are performed. Because linear distortion, which is a soft constraint, does not effectively constrain search, a distortion limit is imposed on the translation model. But hard constraints are ultimately undesirable since they prune the search space. For la</context>
+<context position="6308" citStr="Koehn et al., 2007" startWordPosition="1010" endWordPosition="1013">through the current model score. When we say linear distortion, we refer to the “simple distortion model” of Koehn et al. (2003) that is shown in Equation (1) and is converted to a cost by multiplying by −1. When extended to phrases, the key property of this model is that monotone decoding gives the least costly translation path. Reorderings internal to extracted phrases are not penalized. In practice, we commonly see n-best lists of hypotheses with linear distortion costs equal to zero. More sophisticated local phrase re-ordering models have been proposed (Tillmann, 2004; Zens and Ney, 2006; Koehn et al., 2007; Galley and Manning, 2008), but these are typically used in addition to linear distortion. 2.2 Arabic Linguistic Essentials In this paper we use Arabic-English as a case study since we possess a strong experimental baseline. But we expect that the technique presented could be even more effective for high distortion language pairs such as Chinese-English and Hindi-English. Since the analysis that follows is framed in terms of Arabic, we point out several linguistic features that motivate our approach. From the perspective of the three criteria used to specify basic word order typology (Greenbe</context>
+<context position="29673" citStr="Koehn et al., 2007" startWordPosition="4835" endWordPosition="4838">. As for experimental results, they use a distortion limit that is half of what we report, and compare against a baseline that lacks a distortion model entirely. Neither their model nor ours requires generation of lattices prior to search (Zhang et al., 2007; Niehues and Kolss, 2009). Lexicalized re-ordering models are the other significant approach to re-ordering. These models make local predictions about the next phrase to be translated during decoding, typically assigning costs to one of three categories: monotone, swap, or discontinuous. Both generative (Tillmann, 2004; Och and Ney, 2004; Koehn et al., 2007) and discriminative training (Tillmann and Zhang, 2005; Zens and Ney, 2006; Liang et al., 2006) algorithms have been proposed. Recently, Galley and Manning (2008) introduced a hierarchical model capable of analyzing alignments beyond adjacent phrases. Our discriminative distortion framework is not designed as a replacement for lexicalized re-ordering models, but as a substitute for linear distortion. Finally, we comment on differences between our Arabic-English results and the well-known high distortion system of Zollmann et al. (2008), who find optimal baseline performance at a distortion lim</context>
+</contexts>
+<marker>Koehn, Hoang, Birch, Callison-Burch, Federico, Bertoldi, Cowan, Shen, Moran, Zens, Dyer, Bojar, Constantin, Herbst, 2007</marker>
+<rawString>P Koehn, H Hoang, A Birch, C Callison-Burch, M Federico, N Bertoldi, B Cowan, W Shen, C Moran, R Zens, C Dyer, O Bojar, A Constantin, and E Herbst. 2007. Moses: Open source toolkit for statistical machine translation. In ACL, Demonstration Session.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>P Koehn</author>
+</authors>
+<title>Statistical significance tests for machine translation evaluation.</title>
+<date>2004</date>
+<booktitle>In EMNLP.</booktitle>
+<contexts>
+<context position="24537" citStr="Koehn, 2004" startWordPosition="4022" endWordPosition="4023">he Arabic source is written right-to-left. bilities, and the alignment penalty. The main objective of this paper is to improve performance at very high distortion limits. Table 4 shows performance at a distortion limit of 15. To the set of baselines we add LEX, which is the lexicalized re-ordering model of Galley and Manning (2008). This model was shown to outperform other lexicalized re-ordering models in common use. Statistical significance was computed with the approximate randomization test of Riezler and Maxwell (2005), which is less sensitive to Type I errors than bootstrap re-sampling (Koehn, 2004). 5 Discussion The new distortion cost model allows us to triple the distortion limit while maintaining a statistically significant improvement over the MOSESLINEAR baseline at the lower distortion limit for three of the four test sets. More importantly, we can raise the distortion limit in the DISCRIM+FUTURE configuration at minimal cost: a statistically insignificant −0.2 BLEU performance decrease on average. We also see a considerable improvement over both the MOSESLINEAR and LEX baselines at the high distortion limit (Figure 5). As expected, future cost estimation alone does not increase p</context>
+</contexts>
+<marker>Koehn, 2004</marker>
+<rawString>P Koehn. 2004. Statistical significance tests for machine translation evaluation. In EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>P Liang</author>
+<author>B Taskar</author>
+<author>D Klein</author>
+</authors>
+<title>Alignment by agreement.</title>
+<date>2006</date>
+<booktitle>In NAACL.</booktitle>
+<contexts>
+<context position="21276" citStr="Liang et al., 2006" startWordPosition="3504" endWordPosition="3507">ighted probabilities), word penalty, phrase penalty, linear distortion, and language model score. We disable baseline linear distortion when evaluating the other distortion cost models. To tune parameters, we run MERT with the Downhill Simplex algorithm on the MT04 dataset. For all models, we use 20 random starting points and generate 300-best lists. We use the NIST MT09 constrained track training data, but remove the UN and comparable data.6 The reduced training bitext has 181k aligned sentences with 6.20M English and 5.73M Arabic tokens. We create word alignments using the Berkeley Aligner (Liang et al., 2006) and take the intersection of the alignments in both directions. Phrase pairs with a maximum target or source length of 7 tokens are extracted using the method of Och and Ney (2004). We build a 5-gram language model from the Xinhua and AFP sections of the Gigaword corpus (LDC2007T40), in addition to all of the target side training data permissible in the NIST MT09 constrained competition. We manually remove Giga6Removal of the UN data does not affect the baseline at a distortion limit of 5, and lowers the higher distortion baseline by −1.40 BLEU. The NIST MT09 data is available at http://www.i</context>
+<context position="29768" citStr="Liang et al., 2006" startWordPosition="4851" endWordPosition="4854">compare against a baseline that lacks a distortion model entirely. Neither their model nor ours requires generation of lattices prior to search (Zhang et al., 2007; Niehues and Kolss, 2009). Lexicalized re-ordering models are the other significant approach to re-ordering. These models make local predictions about the next phrase to be translated during decoding, typically assigning costs to one of three categories: monotone, swap, or discontinuous. Both generative (Tillmann, 2004; Och and Ney, 2004; Koehn et al., 2007) and discriminative training (Tillmann and Zhang, 2005; Zens and Ney, 2006; Liang et al., 2006) algorithms have been proposed. Recently, Galley and Manning (2008) introduced a hierarchical model capable of analyzing alignments beyond adjacent phrases. Our discriminative distortion framework is not designed as a replacement for lexicalized re-ordering models, but as a substitute for linear distortion. Finally, we comment on differences between our Arabic-English results and the well-known high distortion system of Zollmann et al. (2008), who find optimal baseline performance at a distortion limit of 9. First, they use approximately two orders of magnitude more training data, which allows</context>
+</contexts>
+<marker>Liang, Taskar, Klein, 2006</marker>
+<rawString>P Liang, B Taskar, and D Klein. 2006. Alignment by agreement. In NAACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Y Marton</author>
+<author>P Resnik</author>
+</authors>
+<title>Soft syntactic constraints for hierarchical phrased-based translation.</title>
+<date>2008</date>
+<booktitle>In ACL.</booktitle>
+<contexts>
+<context position="26792" citStr="Marton and Resnik, 2008" startWordPosition="4371" endWordPosition="4374">boundaries, making it more prone to search errors than even linear distortion despite its favorable performance when tested in isolation. Finally, we note that previous attempts to improve re-ordering during search (particularly long-distance re-ordering (Chiang, 2007)) have delivered remarkable gains for languages like Chinese, but improvements for Arabic have been less exceptional. By relaxing the distortion limit, we have left room for more sophisticated re-ordering models in conventional phrase-based decoders while maintaining a significant performance advantage over hierarchical systems (Marton and Resnik, 2008). 6 Prior Work There is an expansive literature on re-ordering in statistical MT. We first review the development of re-ordering constraints, then describe previous cost models for those constraints in beam search decoders. Because we allow re-ordering during search, we omit discussion of the many different methods for preprocessing the source input prior to monotonic translation. Likewise, we do not recite prior work in re-ranking translations. Re-ordering constraints were first introduced by Berger et al. (1996) in the context of the IBM translation models. The IBM constraints treat the sour</context>
+</contexts>
+<marker>Marton, Resnik, 2008</marker>
+<rawString>Y Marton and P Resnik. 2008. Soft syntactic constraints for hierarchical phrased-based translation. In ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>R C Moore</author>
+<author>C Quirk</author>
+</authors>
+<title>Faster beam-search decoding for phrasal statistical machine translation.</title>
+<date>2007</date>
+<booktitle>In MT Summit XI.</booktitle>
+<contexts>
+<context position="11845" citStr="Moore and Quirk (2007)" startWordPosition="1919" endWordPosition="1922">model.2 By definition, the model has a least cost translation path: monotone. Therefore, we can add to the baseline calculation D(s, t) the cost of skipping back to the first uncovered source word and then translating the remaining positions monotonically. It can be verified by induction on |C |that this is an admissible heuristic. Formally, let j represent the first uncovered index in the source coverage set C. Let Cj represent the subset of C starting from position j. Finally, let j� represent the leftmost position in phrase p applied at translation step k. Then the future cost estimate Fk 2Moore and Quirk (2007) propose an alternate future cost formulation. However, their model seems prone to the same deterioration in performance shown in Table 1. They observed decreased translation quality above a distortion limit of 5. 869 is � |Cj |+ (j0 + |p |+ 1 − j) if j0 &gt; j Fk = 0 otherwise For k &gt; 0, we add the difference between the current future cost estimate and the previous cost estimate Ocost = Fk − Fk−1 to the linear penalty D(s, t).3 Table 2 shows that, as expected, the difference between the baseline and augmented models is statistically insignificant at a low distortion limit. However, at a very hi</context>
+</contexts>
+<marker>Moore, Quirk, 2007</marker>
+<rawString>R C Moore and C Quirk. 2007. Faster beam-search decoding for phrasal statistical machine translation. In MT Summit XI.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J Niehues</author>
+<author>M Kolss</author>
+</authors>
+<title>A POS-based model for long-range reorderings in SMT.</title>
+<date>2009</date>
+<booktitle>In WMT.</booktitle>
+<contexts>
+<context position="29338" citStr="Niehues and Kolss, 2009" startWordPosition="4785" endWordPosition="4788">aizan and Papineni (2006) proposed a lexicalized, generative distortion model. Maximum likelihood estimates for inbound, outbound, and pairwise transitions are computed from automatic word alignments. But no estimate of future cost is included, and their model cannot easily accommodate features defined over the entire translation sequence. As for experimental results, they use a distortion limit that is half of what we report, and compare against a baseline that lacks a distortion model entirely. Neither their model nor ours requires generation of lattices prior to search (Zhang et al., 2007; Niehues and Kolss, 2009). Lexicalized re-ordering models are the other significant approach to re-ordering. These models make local predictions about the next phrase to be translated during decoding, typically assigning costs to one of three categories: monotone, swap, or discontinuous. Both generative (Tillmann, 2004; Och and Ney, 2004; Koehn et al., 2007) and discriminative training (Tillmann and Zhang, 2005; Zens and Ney, 2006; Liang et al., 2006) algorithms have been proposed. Recently, Galley and Manning (2008) introduced a hierarchical model capable of analyzing alignments beyond adjacent phrases. Our discrimin</context>
+</contexts>
+<marker>Niehues, Kolss, 2009</marker>
+<rawString>J Niehues and M Kolss. 2009. A POS-based model for long-range reorderings in SMT. In WMT.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>F J Och</author>
+<author>H Ney</author>
+</authors>
+<title>The alignment template approach to statistical machine translation.</title>
+<date>2004</date>
+<journal>Computational Linguistics,</journal>
+<pages>30--417</pages>
+<contexts>
+<context position="4953" citStr="Och and Ney, 2004" startWordPosition="774" endWordPosition="777">ogether these two extensions allow us to triple the distortion limit in our NIST MT09 Arabic-English system while maintaining a statistically significant improvement over the low distortion baseline. At the high distortion limit, we also show a +2.32 BLEU average gain over Moses with an equivalent distortion parameterization. 2 Background 2.1 Search in Phrase-based MT Given a J token source input string f = {fJ }, i we seek the most probable I token translation e = �eI �. The Moses phrase-based decoder models the i � directly according posterior probability pλ �eI1|fJ 1 to a log-linear model (Och and Ney, 2004), which gives the decision rule ( M e = arg max X λmhm (e1, fJ1 ) I,ei m=1 � are M arbitrary feature functions where hm �eI 1, fJ 1 over sentence pairs, and λm are feature weights set using a discriminative training method like MERT (Och, 2003). This search is made tractable by the use of beams (Koehn et al., 2003). Hypotheses are pruned from the beams according the sum of the current model score and a future cost estimate for the uncovered source words. Since the number of reordering possibilities for those words is very large— in theory it is exponential—an inadmissible heuristic is typicall</context>
+<context position="21457" citStr="Och and Ney (2004)" startWordPosition="3537" endWordPosition="3540">ls. To tune parameters, we run MERT with the Downhill Simplex algorithm on the MT04 dataset. For all models, we use 20 random starting points and generate 300-best lists. We use the NIST MT09 constrained track training data, but remove the UN and comparable data.6 The reduced training bitext has 181k aligned sentences with 6.20M English and 5.73M Arabic tokens. We create word alignments using the Berkeley Aligner (Liang et al., 2006) and take the intersection of the alignments in both directions. Phrase pairs with a maximum target or source length of 7 tokens are extracted using the method of Och and Ney (2004). We build a 5-gram language model from the Xinhua and AFP sections of the Gigaword corpus (LDC2007T40), in addition to all of the target side training data permissible in the NIST MT09 constrained competition. We manually remove Giga6Removal of the UN data does not affect the baseline at a distortion limit of 5, and lowers the higher distortion baseline by −1.40 BLEU. The NIST MT09 data is available at http://www.itl.nist.gov/iad/mig/tests/mt/2009/. word documents that were released during periods that overlapped with the development and test sets. The language model is smoothed with the modi</context>
+<context position="29652" citStr="Och and Ney, 2004" startWordPosition="4831" endWordPosition="4834">ranslation sequence. As for experimental results, they use a distortion limit that is half of what we report, and compare against a baseline that lacks a distortion model entirely. Neither their model nor ours requires generation of lattices prior to search (Zhang et al., 2007; Niehues and Kolss, 2009). Lexicalized re-ordering models are the other significant approach to re-ordering. These models make local predictions about the next phrase to be translated during decoding, typically assigning costs to one of three categories: monotone, swap, or discontinuous. Both generative (Tillmann, 2004; Och and Ney, 2004; Koehn et al., 2007) and discriminative training (Tillmann and Zhang, 2005; Zens and Ney, 2006; Liang et al., 2006) algorithms have been proposed. Recently, Galley and Manning (2008) introduced a hierarchical model capable of analyzing alignments beyond adjacent phrases. Our discriminative distortion framework is not designed as a replacement for lexicalized re-ordering models, but as a substitute for linear distortion. Finally, we comment on differences between our Arabic-English results and the well-known high distortion system of Zollmann et al. (2008), who find optimal baseline performanc</context>
+</contexts>
+<marker>Och, Ney, 2004</marker>
+<rawString>F J Och and H Ney. 2004. The alignment template approach to statistical machine translation. Computational Linguistics, 30:417–449.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>F J Och</author>
+</authors>
+<title>Minimum error rate training for statistical machine translation.</title>
+<date>2003</date>
+<booktitle>In ACL.</booktitle>
+<contexts>
+<context position="5197" citStr="Och, 2003" startWordPosition="824" endWordPosition="825">LEU average gain over Moses with an equivalent distortion parameterization. 2 Background 2.1 Search in Phrase-based MT Given a J token source input string f = {fJ }, i we seek the most probable I token translation e = �eI �. The Moses phrase-based decoder models the i � directly according posterior probability pλ �eI1|fJ 1 to a log-linear model (Och and Ney, 2004), which gives the decision rule ( M e = arg max X λmhm (e1, fJ1 ) I,ei m=1 � are M arbitrary feature functions where hm �eI 1, fJ 1 over sentence pairs, and λm are feature weights set using a discriminative training method like MERT (Och, 2003). This search is made tractable by the use of beams (Koehn et al., 2003). Hypotheses are pruned from the beams according the sum of the current model score and a future cost estimate for the uncovered source words. Since the number of reordering possibilities for those words is very large— in theory it is exponential—an inadmissible heuristic is typically used to estimate future cost. The baseline distortion cost model is a weighted feature in this framework and affects beam pruning only through the current model score. When we say linear distortion, we refer to the “simple distortion model” o</context>
+</contexts>
+<marker>Och, 2003</marker>
+<rawString>F J Och. 2003. Minimum error rate training for statistical machine translation. In ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>K Papineni</author>
+<author>S Roukos</author>
+<author>T Ward</author>
+<author>W-J Zhu</author>
+</authors>
+<title>BLEU: a method for automatic evaluation of machine translation.</title>
+<date>2001</date>
+<booktitle>In ACL.</booktitle>
+<contexts>
+<context position="22580" citStr="Papineni et al., 2001" startWordPosition="3716" endWordPosition="3719">ds that overlapped with the development and test sets. The language model is smoothed with the modified Kneser-Ney algorithm, retaining only trigrams, 4- grams, and 5-grams that occurred two, three, and three times, respectively, in the training data. We remove from the test sets source tokens not present in the phrase tables. For the discriminative distortion models, we tag the pre-processed input using the log-linear POS tagger of Toutanova et al. (2003). After decoding, we strip any punctuation that appears at the beginning of a translation. 4.2 Results In Table 3 we report uncased BLEU-4 (Papineni et al., 2001) scores at the distortion limit (5) of our most competitive baseline Arabic-English system. MOSESLINEAR uses the linear distortion model present in Moses. COUNTS is a separate baseline with a discrete cost model that uses unlexicalized maximum likelihood estimates for the same classes present in the discriminative model. To show the effect of the components in our combined distortion model, we give separate results for linear distortion with future cost estimation (FUTURE) and for the combined discriminative distortion model (DISCRIM+FUTURE) with all four features: linear distortion with futur</context>
+</contexts>
+<marker>Papineni, Roukos, Ward, Zhu, 2001</marker>
+<rawString>K Papineni, S Roukos, T Ward, and W-J Zhu. 2001. BLEU: a method for automatic evaluation of machine translation. In ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>S Riezler</author>
+<author>J T Maxwell</author>
+</authors>
+<title>On some pitfalls in automatic evaluation and significance testing in MT.</title>
+<date>2005</date>
+<booktitle>In ACL Workshop on Intrinsic and Extrinsic Evaluation Measures for Machine Translation and/or Summarization (MTSE’05).</booktitle>
+<contexts>
+<context position="24454" citStr="Riezler and Maxwell (2005)" startWordPosition="4007" endWordPosition="4010">gles the translation (MOSESLINEAR-d15). DISCRIM+FUTURE (dlimit=15) correctly guides the search. The Arabic source is written right-to-left. bilities, and the alignment penalty. The main objective of this paper is to improve performance at very high distortion limits. Table 4 shows performance at a distortion limit of 15. To the set of baselines we add LEX, which is the lexicalized re-ordering model of Galley and Manning (2008). This model was shown to outperform other lexicalized re-ordering models in common use. Statistical significance was computed with the approximate randomization test of Riezler and Maxwell (2005), which is less sensitive to Type I errors than bootstrap re-sampling (Koehn, 2004). 5 Discussion The new distortion cost model allows us to triple the distortion limit while maintaining a statistically significant improvement over the MOSESLINEAR baseline at the lower distortion limit for three of the four test sets. More importantly, we can raise the distortion limit in the DISCRIM+FUTURE configuration at minimal cost: a statistically insignificant −0.2 BLEU performance decrease on average. We also see a considerable improvement over both the MOSESLINEAR and LEX baselines at the high distort</context>
+</contexts>
+<marker>Riezler, Maxwell, 2005</marker>
+<rawString>S Riezler and J T Maxwell. 2005. On some pitfalls in automatic evaluation and significance testing in MT. In ACL Workshop on Intrinsic and Extrinsic Evaluation Measures for Machine Translation and/or Summarization (MTSE’05).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>C Tillmann</author>
+<author>T Zhang</author>
+</authors>
+<title>A localized prediction model for statistical machine translation.</title>
+<date>2005</date>
+<booktitle>In ACL. C Tillmann.</booktitle>
+<contexts>
+<context position="29727" citStr="Tillmann and Zhang, 2005" startWordPosition="4843" endWordPosition="4846">ion limit that is half of what we report, and compare against a baseline that lacks a distortion model entirely. Neither their model nor ours requires generation of lattices prior to search (Zhang et al., 2007; Niehues and Kolss, 2009). Lexicalized re-ordering models are the other significant approach to re-ordering. These models make local predictions about the next phrase to be translated during decoding, typically assigning costs to one of three categories: monotone, swap, or discontinuous. Both generative (Tillmann, 2004; Och and Ney, 2004; Koehn et al., 2007) and discriminative training (Tillmann and Zhang, 2005; Zens and Ney, 2006; Liang et al., 2006) algorithms have been proposed. Recently, Galley and Manning (2008) introduced a hierarchical model capable of analyzing alignments beyond adjacent phrases. Our discriminative distortion framework is not designed as a replacement for lexicalized re-ordering models, but as a substitute for linear distortion. Finally, we comment on differences between our Arabic-English results and the well-known high distortion system of Zollmann et al. (2008), who find optimal baseline performance at a distortion limit of 9. First, they use approximately two orders of m</context>
+</contexts>
+<marker>Tillmann, Zhang, 2005</marker>
+<rawString>C Tillmann and T Zhang. 2005. A localized prediction model for statistical machine translation. In ACL. C Tillmann. 2004. A unigram orientation model for statistical machine translation. In NAACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>K Toutanova</author>
+<author>D Klein</author>
+<author>C D Manning</author>
+<author>Y Singer</author>
+</authors>
+<title>Feature-rich part-of-speech tagging with a cyclic dependency network.</title>
+<date>2003</date>
+<booktitle>In NAACL.</booktitle>
+<contexts>
+<context position="22418" citStr="Toutanova et al. (2003)" startWordPosition="3689" endWordPosition="3692">istortion baseline by −1.40 BLEU. The NIST MT09 data is available at http://www.itl.nist.gov/iad/mig/tests/mt/2009/. word documents that were released during periods that overlapped with the development and test sets. The language model is smoothed with the modified Kneser-Ney algorithm, retaining only trigrams, 4- grams, and 5-grams that occurred two, three, and three times, respectively, in the training data. We remove from the test sets source tokens not present in the phrase tables. For the discriminative distortion models, we tag the pre-processed input using the log-linear POS tagger of Toutanova et al. (2003). After decoding, we strip any punctuation that appears at the beginning of a translation. 4.2 Results In Table 3 we report uncased BLEU-4 (Papineni et al., 2001) scores at the distortion limit (5) of our most competitive baseline Arabic-English system. MOSESLINEAR uses the linear distortion model present in Moses. COUNTS is a separate baseline with a discrete cost model that uses unlexicalized maximum likelihood estimates for the same classes present in the discriminative model. To show the effect of the components in our combined distortion model, we give separate results for linear distorti</context>
+</contexts>
+<marker>Toutanova, Klein, Manning, Singer, 2003</marker>
+<rawString>K Toutanova, D Klein, C D Manning, and Y Singer. 2003. Feature-rich part-of-speech tagging with a cyclic dependency network. In NAACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D Wu</author>
+</authors>
+<title>A polynomial-time algorithm for statistical machine translation.</title>
+<date>1996</date>
+<booktitle>In ACL.</booktitle>
+<contexts>
+<context position="28072" citStr="Wu, 1996" startWordPosition="4597" endWordPosition="4598">. A source token is “covered” when it is aligned with a new target token. For a fixed value of k, we may leave up to k − 1 positions uncovered and return to them later. We can alter the constraint slightly such that for the first uncovered position u V C we can cover position j when j − u &lt; k j V C which is the definition of the distortion limit used in Moses. Variations of the IBM constraints also exist (Kanthak et al., 2005), as do entirely different regimes like the hierarchical ITG constraints, which represent the source as a sequence of blocks that can be iteratively merged and inverted (Wu, 1996). Zens and Ney (2003) exhaustively compare the IBM and ITG constraints, concluding that although the ITG constraints permit more flexible re-orderings, the IBM constraints result in higher BLEU scores. Since our work falls under the IBM paradigm, we consider cost models for those constraints. We have said that linear distortion is the simplest cost model. The primary criticism of linear distortion is that it is unlexicalized, thus penalizing all re-orderings equally (Khalilov et al., 2009). When extended to phrases as in Equation (1), linear distortion is also agnostic to internal phrase align</context>
+</contexts>
+<marker>Wu, 1996</marker>
+<rawString>D Wu. 1996. A polynomial-time algorithm for statistical machine translation. In ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>R Zens</author>
+<author>H Ney</author>
+</authors>
+<title>A comparative study on reordering constraints in statistical machine translation.</title>
+<date>2003</date>
+<booktitle>In ACL.</booktitle>
+<contexts>
+<context position="28093" citStr="Zens and Ney (2003)" startWordPosition="4599" endWordPosition="4602">token is “covered” when it is aligned with a new target token. For a fixed value of k, we may leave up to k − 1 positions uncovered and return to them later. We can alter the constraint slightly such that for the first uncovered position u V C we can cover position j when j − u &lt; k j V C which is the definition of the distortion limit used in Moses. Variations of the IBM constraints also exist (Kanthak et al., 2005), as do entirely different regimes like the hierarchical ITG constraints, which represent the source as a sequence of blocks that can be iteratively merged and inverted (Wu, 1996). Zens and Ney (2003) exhaustively compare the IBM and ITG constraints, concluding that although the ITG constraints permit more flexible re-orderings, the IBM constraints result in higher BLEU scores. Since our work falls under the IBM paradigm, we consider cost models for those constraints. We have said that linear distortion is the simplest cost model. The primary criticism of linear distortion is that it is unlexicalized, thus penalizing all re-orderings equally (Khalilov et al., 2009). When extended to phrases as in Equation (1), linear distortion is also agnostic to internal phrase alignments. To remedy thes</context>
+</contexts>
+<marker>Zens, Ney, 2003</marker>
+<rawString>R Zens and H Ney. 2003. A comparative study on reordering constraints in statistical machine translation. In ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>R Zens</author>
+<author>H Ney</author>
+</authors>
+<title>Discriminative reordering models for statistical machine translation.</title>
+<date>2006</date>
+<booktitle>In WMT.</booktitle>
+<contexts>
+<context position="6288" citStr="Zens and Ney, 2006" startWordPosition="1006" endWordPosition="1009">s beam pruning only through the current model score. When we say linear distortion, we refer to the “simple distortion model” of Koehn et al. (2003) that is shown in Equation (1) and is converted to a cost by multiplying by −1. When extended to phrases, the key property of this model is that monotone decoding gives the least costly translation path. Reorderings internal to extracted phrases are not penalized. In practice, we commonly see n-best lists of hypotheses with linear distortion costs equal to zero. More sophisticated local phrase re-ordering models have been proposed (Tillmann, 2004; Zens and Ney, 2006; Koehn et al., 2007; Galley and Manning, 2008), but these are typically used in addition to linear distortion. 2.2 Arabic Linguistic Essentials In this paper we use Arabic-English as a case study since we possess a strong experimental baseline. But we expect that the technique presented could be even more effective for high distortion language pairs such as Chinese-English and Hindi-English. Since the analysis that follows is framed in terms of Arabic, we point out several linguistic features that motivate our approach. From the perspective of the three criteria used to specify basic word ord</context>
+<context position="29747" citStr="Zens and Ney, 2006" startWordPosition="4847" endWordPosition="4850">what we report, and compare against a baseline that lacks a distortion model entirely. Neither their model nor ours requires generation of lattices prior to search (Zhang et al., 2007; Niehues and Kolss, 2009). Lexicalized re-ordering models are the other significant approach to re-ordering. These models make local predictions about the next phrase to be translated during decoding, typically assigning costs to one of three categories: monotone, swap, or discontinuous. Both generative (Tillmann, 2004; Och and Ney, 2004; Koehn et al., 2007) and discriminative training (Tillmann and Zhang, 2005; Zens and Ney, 2006; Liang et al., 2006) algorithms have been proposed. Recently, Galley and Manning (2008) introduced a hierarchical model capable of analyzing alignments beyond adjacent phrases. Our discriminative distortion framework is not designed as a replacement for lexicalized re-ordering models, but as a substitute for linear distortion. Finally, we comment on differences between our Arabic-English results and the well-known high distortion system of Zollmann et al. (2008), who find optimal baseline performance at a distortion limit of 9. First, they use approximately two orders of magnitude more traini</context>
+<context position="31093" citStr="Zens and Ney, 2006" startWordPosition="5055" endWordPosition="5058"> reorderings can be captured in the phrase table. Second, their “Full” system uses three language models each trained with significantly more data than our single model. Finally, although they use a lexicalized re-ordering model, no details are given about the baseline distortion cost model. 7 Conclusion We have presented a discriminative cost framework that both estimates future distortion cost and learns principled cost curves. The model delivers a statistically significant +2.32 BLEU improvement over Moses at a high distortion limit. Unlike previous discriminative local orientation models (Zens and Ney, 2006), our framework permits the definition of global features. The evaluation in this paper used context-free features to simplify the decoder integration, but we expect that context-dependent features could result in gains for other language pairs with more complex re-ordering phenomena. Acknowledgements We thank the three anonymous reviewers and Daniel Cer for constructive comments, and Claude Reichard for editorial assistance. The first author is supported by a National Defense Science and Engineering Graduate (NDSEG) fellowship. This paper is based on work supported in part by the Defense Adva</context>
+</contexts>
+<marker>Zens, Ney, 2006</marker>
+<rawString>R Zens and H Ney. 2006. Discriminative reordering models for statistical machine translation. In WMT.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>R Zens</author>
+</authors>
+<title>Phrase-based Statistical Machine Translation: Models, Search,</title>
+<date>2008</date>
+<tech>Training. Ph.D. thesis,</tech>
+<institution>RWTH Aachen University.</institution>
+<contexts>
+<context position="18430" citStr="Zens (2008)" startWordPosition="3048" endWordPosition="3049">th bounds set empirically such that training examples are distributed evenly. To simplify the decoder integration for this evaluation, we have chosen context-free features, but the framework permits many other promising possibilities such as agreement morphology and POS tag chains. Our models reveal principled cost curves for specific words (Figure 4). However, monotonic decoding no longer gives the least costly translation path, thus complicating future cost estimation. We would need to evaluate all possible re-orderings within the k-word distortion window. For an input sentence of length n, Zens (2008) shows that the number of reordering possibilities rn is � kn−k · k! n &gt; k rn � n! n&lt;k which has an asymptotic complexity O(kn). Instead of using an inadmissible heuristic as is done in beam pruning, we take a shortcut: we include the linear future cost model as a separate feature. Then we add the two discriminative distortion features, which calculate the inbound and outbound log probabilities of the word alignments in a hypothesis. Since hypotheses may have different numbers of alignments, we also include an alignment penalty that adjusts the discriminative distortion scores for unaligned so</context>
+</contexts>
+<marker>Zens, 2008</marker>
+<rawString>R Zens. 2008. Phrase-based Statistical Machine Translation: Models, Search, Training. Ph.D. thesis, RWTH Aachen University.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Y Zhang</author>
+<author>R Zens</author>
+<author>H Ney</author>
+</authors>
+<title>Chunk-level reordering of source language sentences with automatically learned rules for statistical machine translation.</title>
+<date>2007</date>
+<booktitle>In SSST.</booktitle>
+<contexts>
+<context position="29312" citStr="Zhang et al., 2007" startWordPosition="4781" endWordPosition="4784"> deficiencies, Al-Onaizan and Papineni (2006) proposed a lexicalized, generative distortion model. Maximum likelihood estimates for inbound, outbound, and pairwise transitions are computed from automatic word alignments. But no estimate of future cost is included, and their model cannot easily accommodate features defined over the entire translation sequence. As for experimental results, they use a distortion limit that is half of what we report, and compare against a baseline that lacks a distortion model entirely. Neither their model nor ours requires generation of lattices prior to search (Zhang et al., 2007; Niehues and Kolss, 2009). Lexicalized re-ordering models are the other significant approach to re-ordering. These models make local predictions about the next phrase to be translated during decoding, typically assigning costs to one of three categories: monotone, swap, or discontinuous. Both generative (Tillmann, 2004; Och and Ney, 2004; Koehn et al., 2007) and discriminative training (Tillmann and Zhang, 2005; Zens and Ney, 2006; Liang et al., 2006) algorithms have been proposed. Recently, Galley and Manning (2008) introduced a hierarchical model capable of analyzing alignments beyond adjac</context>
+</contexts>
+<marker>Zhang, Zens, Ney, 2007</marker>
+<rawString>Y Zhang, R Zens, and H Ney. 2007. Chunk-level reordering of source language sentences with automatically learned rules for statistical machine translation. In SSST.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>A Zollmann</author>
+<author>A Venugopal</author>
+<author>F J Och</author>
+<author>J Ponte</author>
+</authors>
+<title>A systematic comparison of phrase-based, hierarchical and syntax-augmented statistical MT.</title>
+<date>2008</date>
+<booktitle>In COLING.</booktitle>
+<contexts>
+<context position="30214" citStr="Zollmann et al. (2008)" startWordPosition="4916" endWordPosition="4919">ntinuous. Both generative (Tillmann, 2004; Och and Ney, 2004; Koehn et al., 2007) and discriminative training (Tillmann and Zhang, 2005; Zens and Ney, 2006; Liang et al., 2006) algorithms have been proposed. Recently, Galley and Manning (2008) introduced a hierarchical model capable of analyzing alignments beyond adjacent phrases. Our discriminative distortion framework is not designed as a replacement for lexicalized re-ordering models, but as a substitute for linear distortion. Finally, we comment on differences between our Arabic-English results and the well-known high distortion system of Zollmann et al. (2008), who find optimal baseline performance at a distortion limit of 9. First, they use approximately two orders of magnitude more training data, which allows them to extract much longer phrases (12 tokens v. our maximum of 7). In this setting, many Arabic-English reorderings can be captured in the phrase table. Second, their “Full” system uses three language models each trained with significantly more data than our single model. Finally, although they use a lexicalized re-ordering model, no details are given about the baseline distortion cost model. 7 Conclusion We have presented a discriminative</context>
+</contexts>
+<marker>Zollmann, Venugopal, Och, Ponte, 2008</marker>
+<rawString>A Zollmann, A Venugopal, F J Och, and J Ponte. 2008. A systematic comparison of phrase-based, hierarchical and syntax-augmented statistical MT. In COLING.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

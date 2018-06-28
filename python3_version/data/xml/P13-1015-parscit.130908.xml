@@ -1,0 +1,1630 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.000008">
+<title confidence="0.996359">
+Generic binarization for parsing and translation
+</title>
+<author confidence="0.987613">
+Matthias B¨uchse Alexander Koller Heiko Vogler
+</author>
+<affiliation confidence="0.982578">
+Technische Universit¨at Dresden University of Potsdam Technische Universit¨at Dresden
+</affiliation>
+<email confidence="0.961311">
+matthias.buechse@tu-dresden.de koller@ling.uni-potsdam.de heiko.vogler@tu-dresden.de
+</email>
+<sectionHeader confidence="0.993954" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.999101">
+Binarization of grammars is crucial for im-
+proving the complexity and performance
+of parsing and translation. We present a
+versatile binarization algorithm that can
+be tailored to a number of grammar for-
+malisms by simply varying a formal pa-
+rameter. We apply our algorithm to bi-
+narizing tree-to-string transducers used in
+syntax-based machine translation.
+</bodyText>
+<sectionHeader confidence="0.998434" genericHeader="introduction">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.999887956521739">
+Binarization amounts to transforming a given
+grammar into an equivalent grammar of rank 2,
+i.e., with at most two nonterminals on any right-
+hand side. The ability to binarize grammars is
+crucial for efficient parsing, because for many
+grammar formalisms the parsing complexity de-
+pends exponentially on the rank of the gram-
+mar. It is also critically important for tractable
+statistical machine translation (SMT). Syntax-
+based SMT systems (Chiang, 2007; Graehl et
+al., 2008) typically use some type of synchronous
+grammar describing a binary translation rela-
+tion between strings and/or trees, such as syn-
+chronous context-free grammars (SCFGs) (Lewis
+and Stearns, 1966; Chiang, 2007), synchronous
+tree-substitution grammars (Eisner, 2003), syn-
+chronous tree-adjoining grammars (Nesson et al.,
+2006; DeNeefe and Knight, 2009), and tree-to-
+string transducers (Yamada and Knight, 2001;
+Graehl et al., 2008). These grammars typically
+have a large number of rules, many of which have
+rank greater than two.
+The classical approach to binarization, as
+known from the Chomsky normal form transfor-
+mation for context-free grammars (CFGs), pro-
+ceeds rule by rule. It replaces each rule of rank
+greater than 2 by an equivalent collection of rules
+of rank 2. All CFGs can be binarized in this
+way, which is why their recognition problem is
+cubic. In the case of linear context-free rewriting
+systems (LCFRSs, (Weir, 1988)) the rule-by-rule
+technique also applies to every grammar, as long
+as an increased fanout it permitted (Rambow and
+Satta, 1999).
+There are also grammar formalisms for which
+the rule-by-rule technique is not complete. In the
+case of SCFGs, not every grammar has an equiva-
+lent representation of rank 2 in the first place (Aho
+and Ullman, 1969). Even when such a represen-
+tation exists, it is not always possible to compute
+it rule by rule. Nevertheless, the rule-by-rule bi-
+narization algorithm of Huang et al. (2009) is very
+useful in practice.
+In this paper, we offer a generic approach
+for transferring the rule-by-rule binarization tech-
+nique to new grammar formalisms. At the core of
+our approach is a binarization algorithm that can
+be adapted to a new formalism by changing a pa-
+rameter at runtime. Thus it only needs to be im-
+plemented once, and can then be reused for a va-
+riety of formalisms. More specifically, our algo-
+rithm requires the user to (i) encode the grammar
+formalism as a subclass of interpreted regular tree
+grammars (IRTGs, (Koller and Kuhlmann, 2011))
+and (ii) supply a collection of b-rules, which rep-
+resent equivalence of grammars syntactically. Our
+algorithm then replaces, in a given grammar, each
+rule of rank greater than 2 by an equivalent collec-
+tion of rules of rank 2, if such a collection is li-
+censed by the b-rules. We define completeness of
+b-rules in a way that ensures that if any equivalent
+collection of rules of rank 2 exists, the algorithm
+finds one. As a consequence, the algorithm bina-
+rizes every grammar that can be binarized rule by
+rule. Step (i) is possible for all the grammar for-
+malisms mentioned above. We show Step (ii) for
+SCFGs and tree-to-string transducers.
+We will use SCFGs as our running example
+throughout the paper. We will also apply the algo-
+</bodyText>
+<page confidence="0.983726">
+145
+</page>
+<note confidence="0.91447">
+Proceedings of the 51st Annual Meeting of the Association for Computational Linguistics, pages 145–154,
+Sofia, Bulgaria, August 4-9 2013. c�2013 Association for Computational Linguistics
+</note>
+<bodyText confidence="0.999300473684211">
+rithm to tree-to-string transducers (Graehl et al.,
+2008; Galley et al., 2004), which describe rela-
+tions between strings in one language and parse
+trees of another, which means that existing meth-
+ods for binarizing SCFGs and LCFRSs cannot be
+directly applied to these systems. To our knowl-
+edge, our binarization algorithm is the first to bi-
+narize such transducers. We illustrate the effec-
+tiveness of our system by binarizing a large tree-
+to-string transducer for English-German SMT.
+Plan of the paper. We start by defining IRTGs
+in Section 2. In Section 3, we define the gen-
+eral outline of our approach to rule-by-rule bina-
+rization for IRTGs, and then extend this to an ef-
+ficient binarization algorithm based on b-rules in
+Section 4. In Section 5 we show how to use the
+algorithm to perform rule-by-rule binarization of
+SCFGs and tree-to-string transducers, and relate
+the results to existing work.
+</bodyText>
+<sectionHeader confidence="0.962655" genericHeader="method">
+2 Interpreted regular tree grammars
+</sectionHeader>
+<bodyText confidence="0.999751925">
+Grammar formalisms employed in parsing and
+SMT, such as those mentioned in the introduc-
+tion, differ in the the derived objects—e.g., strings,
+trees, and graphs—and the operations involved in
+the derivation—e.g., concatenation, substitution,
+and adjoining. Interpreted regular tree grammars
+(IRTGs) permit a uniform treatment of many of
+these formalisms. To this end, IRTGs combine
+two ideas, which we explain here.
+Algebras IRTGs represent the objects and op-
+erations symbolically using terms; the object in
+question is obtained by interpreting each symbol
+in the term as a function. As an example, Table 1
+shows terms for a string and a tree, together with
+the denoted object. In the string case, we describe
+complex strings as concatenation (con2) of ele-
+mentary symbols (e.g., a, b); in the tree case, we
+alternate the construction of a sequence of trees
+(con2) with the construction of a single tree by
+placing a symbol (e.g., α, β, σ) on top of a (pos-
+sibly empty) sequence of trees. Whenever a term
+contains variables, it does not denote an object,
+but rather a function. In the parlance of universal-
+algebra theory, we are employing initial-algebra
+semantics (Goguen et al., 1977).
+An alphabet is a nonempty finite set. Through-
+out this paper, let X = {x1, x2,... } be a set,
+whose elements we call variables. We let Xk de-
+note the set {x1, ... , xk} for every k &gt; 0. Let E
+be an alphabet and V C X. We write TE(V ) for
+the set of all terms over E with variables V , i.e.,
+the smallest set T such that (i) V C_ T and (ii) for
+every σ E E, k &gt; 0, and t1, . , tk E T, we
+have σ(t1, ... , tk) E T. Alternatively, we view
+TE(V ) as the set of all (rooted, labeled, ordered,
+unranked) trees over E and V , and draw them
+as usual. By TE we abbreviate TE(0). The set
+CE(V ) of contexts over E and V is the set of all
+trees over E and V in which each variable in V
+occurs exactly once.
+A signature is an alphabet E where each symbol
+is equipped with an arity. We write E|k for the
+subset of all k-ary symbols of E, and σ|k to denote
+σ E E|k. We denote the signature by E as well.
+A signature is binary if the arities do not exceed 2.
+Whenever we use TE(V ) with a signature E, we
+assume that the trees are ranked, i.e., each node
+labeled by σ E E|k has exactly k children.
+Let A be a signature. A A-algebra A consists
+of a nonempty set A called the domain and, for
+each symbol f E A with rank k, a total function
+fA : Ak -+ A, the operation associated with f.
+We can evaluate any term t in TA(Xk) in A, to
+obtain a k-ary operation tA over the domain. In
+particular, terms in TA evaluate to elements of A.
+For instance, in the string algebra shown in Ta-
+ble 1, the term con2(a, b) evaluates to ab, and the
+term con2(con2(x2, a), x1) evaluates to a binary
+operation f such that, e.g., f(b, c) = cab.
+Bimorphisms IRTGs separate the finite control
+(state behavior) of a derivation from its derived
+object (in its term representation; generational be-
+havior); the former is captured by a regular tree
+language, while the latter is obtained by applying
+a tree homomorphism. This idea goes back to the
+tree bimorphisms of Arnold and Dauchet (1976).
+Let E be a signature. A regular tree grammar
+(RTG) G over E is a triple (Q, q0, R) where Q
+is a finite set (of states), q0 E Q, and R is a fi-
+nite set of rules of the form q -+ α(q1, ... , qk),
+where q E Q, α E E|k and q, q1, ... , qk E Q.
+We call α the terminal symbol and k the rank
+of the rule. Rules of rank greater than two are
+called suprabinary. For every q E Q we de-
+fine the language Lq(G) derived from q as the set
+{α(t1, ... , tk)  |q -+ α(q1, ... , qk) E R, tj E
+Lqj(G)}. If q = q0, we drop the superscript and
+write L(G) for the tree language of G. In the lit-
+erature, there is a definition of RTG which also
+permits more than one terminal symbol per rule,
+</bodyText>
+<page confidence="0.996304">
+146
+</page>
+<figure confidence="0.965888733333333">
+strings over F trees over F
+σ
+σ
+cont
+7→
+7→ ab
+cont
+a b
+α
+β
+con°
+con°
+example term
+and denoted object
+α β
+</figure>
+<equation confidence="0.929953">
+domain F∗ Tr (set of sequences of trees)
+signature A {a|0  |a ∈ F} ∪ {γ|1  |γ ∈ F} ∪
+{conk|k  |0 ≤ k ≤ K,k =61} {conk|k  |0 ≤ k ≤ K,k =61}
+operations a: () 7→ a γ: x1 7→ γ(x1)
+conk : (x1, ... , xk) 7→ x1 ··· xk conk: (x1, ... , xk) 7→ x1 ··· xk
+</equation>
+<tableCaption confidence="0.922099">
+Table 1: Algebras for strings and trees, given an alphabet F and a maximum arity K ∈ N.
+</tableCaption>
+<bodyText confidence="0.961601846153846">
+or none. This does not increase the generative ca-
+pacity (Brainerd, 1969).
+A (linear, nondeleting) tree homomorphism is a
+mapping h: TE(X) → TA(X) that satisfies the
+following condition: there is a mapping g: E →
+TA(X) such that (i) g(σ) ∈ CA(Xk) for every
+σ ∈ E|k, (ii) h(σ(t1, ... , tk)) is the tree obtained
+from g(σ) by replacing the occurrence of xj by
+h(tj), and (iii) h(xj) = xj. This extends the
+usual definition of linear and nondeleting homo-
+morphisms (G´ecseg and Steinby, 1997) to trees
+with variables. We abuse notation and write h(σ)
+for g(σ) for every σ ∈ E.
+Let n ≥ 1 and A1, ... , An be signatures. A
+(generalized) bimorphism over (A1, ... , An) is a
+tuple B = (G, h1, ... , hn) where G is an RTG
+over some signature E and hi is a tree homo-
+morphism from TE(X) into TA,(X). The lan-
+guage L(B) induced by B is the tree relation
+{(h1(t), ... , hn(t))  |t ∈ L(G)}.
+An IRTG is a bimorphism whose derived trees
+are viewed as terms over algebras; see Fig. 1.
+Formally, an IRTG G over (A1, ... , An) is a
+tuple (B, A1, ... , An) such that B is a bimor-
+phism over (A1, ... , An) and Ai is a Ai-algebra.
+The language L(G) induced by G is the relation
+</bodyText>
+<equation confidence="0.537881">
+{(tA1
+1 ,... , tAn
+</equation>
+<bodyText confidence="0.974019555555556">
+n )  |(t1, ... , tn) ∈ L(B)}. We call
+the trees in L(G) derivation trees and the terms
+in L(B) semantic terms. We say that two IRTGs
+G and G0 are equivalent if L(G) = L(G0). IRTGs
+were first defined in (Koller and Kuhlmann, 2011).
+For example, Fig. 2 is an IRTG that encodes
+a synchronous context-free grammar (SCFG). It
+contains a bimorphism B = (G, h1, h2) consist-
+ing of an RTG G with four rules and homomor-
+</bodyText>
+<equation confidence="0.864003">
+IRTG G = (B, A1, A2)
+Figure 1: IRTG, bimorphism overview.
+b ←−� α1
+h1 7−→h2 b
+c ←−� α2
+h1
+d ←−� α�
+h1 7−→ h2 d
+</equation>
+<figureCaption confidence="0.949266">
+Figure 2: An IRTG encoding an SCFG.
+</figureCaption>
+<bodyText confidence="0.999871333333333">
+phisms h1 and h2 which map derivation trees to
+trees over the signature of the string algebra in Ta-
+ble 1. By evaluating these trees in the algebra,
+the symbols coni and con4 are interpreted as con-
+catenation, and we see that the first rule encodes
+the SCFG rule A → hBCD, DaBCi. Figure 3
+shows a derivation tree with its two homomorphic
+images, which evaluate to the strings bcd and dabc.
+IRTGs can be tailored to the expressive capacity
+of specific grammar formalisms by selecting suit-
+able algebras. The string algebra in Table 1 yields
+context-free languages, more complex string al-
+</bodyText>
+<figure confidence="0.995998388888889">
+A1 ··· An
+bimorphism B = (G, h1, h2)
+L(G) C TE
+h1 hn
+TΔ1 ··· TΔn
+(.)A1 (.)An
+derivation
+trees
+semantic
+terms
+derived
+objects
+A → α(B, C, D)
+B → α1, C → α2, D → α3
+con3 ←−� α 7−→ h2 con4
+h1
+x1 x2 x3 x3 a x1 x2
+7−→ h2c
+</figure>
+<page confidence="0.595816">
+147
+</page>
+<figureCaption confidence="0.998943">
+Figure 3: Derivation tree and semantic terms.
+</figureCaption>
+<equation confidence="0.9923192">
+A → α0(A0, D)
+A0 → α00(B, C)
+con2
+con2 Hα00 � con2
+x1 x2 x1 x2
+</equation>
+<figureCaption confidence="0.953375">
+Figure 4: Binary rules corresponding to the α-rule
+in Fig. 2.
+</figureCaption>
+<bodyText confidence="0.998084285714286">
+gebras yield tree-adjoining languages (Koller and
+Kuhlmann, 2012), and algebras over other do-
+mains can yield languages of trees, graphs, or
+other objects. Furthermore, IRTGs with n = 1 de-
+scribe languages that are subsets of the algebra’s
+domain, n = 2 yields synchronous languages or
+tree transductions, and so on.
+</bodyText>
+<sectionHeader confidence="0.997339" genericHeader="method">
+3 IRTG binarization
+</sectionHeader>
+<bodyText confidence="0.999798444444445">
+We will now show how to apply the rule-by-rule
+binarization technique to IRTGs. We start in this
+section by defining the binarization of a rule in an
+IRTG, and characterizing it in terms of binariza-
+tion terms and variable trees. We derive the actual
+binarization algorithm from this in Section 4.
+For the remainder of this paper, let G =
+(B, A1, ... , An) be an IRTG over (A1, ... , An)
+with B = (G, h1, ... , hn).
+</bodyText>
+<subsectionHeader confidence="0.999358">
+3.1 An introductory example
+</subsectionHeader>
+<bodyText confidence="0.999757195121951">
+We start with an example to give an intuition of
+our approach. Consider the first rule in Fig. 2,
+which has rank three. This rule derives (in one
+step) the fragment α(x1, x2, x3) of the derivation
+tree in Fig. 3, which is mapped to the semantic
+terms h1(α) and h2(α) shown in Fig. 2. Now con-
+sider the rules in Fig. 4. These rules can be used to
+derive (in two steps) the derivation tree fragment ξ
+in Fig. 5e. Note that the terms h01(ξ) and h1(α)
+are equivalent in that they denote the same func-
+tion over the string algebra, and so are the terms
+h02(ξ) and h2(α). Thus, replacing the α-rule by
+the rules in Fig. 4 does not change the language of
+the IRTG. However, since the new rules are binary,
+parsing and translation will be cheaper.
+Now we want to construct the binary rules sys-
+tematically. In the example, we proceed as fol-
+lows (cf. Fig. 5). For each of the terms h1(α) and
+h2(α) (Fig. 5a), we consider all terms that satisfy
+two properties (Fig. 5b): (i) they are equivalent
+to h1(α) and h2(α), respectively, and (ii) at each
+node at most two subtrees contain variables. As
+Fig. 5 suggests, there may be many different terms
+of this kind. For each of these terms, we ana-
+lyze the bracketing of variables, obtaining what we
+call a variable tree (Fig. 5c). Now we pick terms
+t1 and t2 corresponding to h1(α) and h2(α), re-
+spectively, such that (iii) they have the same vari-
+able tree, say T. We construct a tree ξ from T by a
+simple relabeling, and we read off the tree homo-
+morphisms h01 and h02 from a decomposition we
+perform on t1 and t2, respectively; see Fig. 5, dot-
+ted arrows, and compare the boxes in Fig. 5d with
+the homomorphisms in Fig. 4. Now the rules in
+Fig. 4 are easily extracted from ξ.
+These rules are equivalent to r because of (i);
+they are binary because ξ is binary, which in turn
+holds because of (ii); finally, the decompositions
+of t1 and t2 are compatible with ξ because of (iii).
+We call terms t1 and t2 binarization terms if they
+satisfy (i)–(iii). We will see below that we can con-
+</bodyText>
+<figure confidence="0.9714385">
+con2
+h&apos; h&apos;
+12
+x1
+con2
+x2 a
+←−� α0 7−→
+x1 x2
+</figure>
+<figureCaption confidence="0.988503">
+Figure 5: Outline of the binarization algorithm.
+</figureCaption>
+<figure confidence="0.987421901234568">
+con2
+con2
+x
+2
+con2
+x1 x2
+con2
+x3 a
+con2
+x1 x2
+x3
+x3 con2
+a x1
+{x3}
+{x2}
+(c)
+con2
+con2
+x1 x2
+con2
+x1
+x2 a
+(d)
+con2
+x1
+con2
+x1 x2
+x1
+x1 x2
+x1 x2
+x1 x2
+con2
+(b) x1 con2
+x2 x3
+{x1, x2, x3}
+{x1} {x2,x3}
+{x2} {x3}
+t1: con2 t2: con2
+{x1,x2}
+{x1} {x2}
+T : {x1, x2, x3} {x1, x2, x3}
+{x1, x3}
+{x1} {x3}
+f:
+α′
+t2:
+con2
+con2
+t1 :
+x3
+x3
+α″
+(e)
+l
+ih�
+con2
+con2
+h′
+7−→2
+con2
+x3 a
+x1 x2
+x1 x2
+x1 x2
+con4
+x3 a x1 x2
+con3
+(a)
+x1 x2 x3
+7−→ h2
+←−� α
+h1
+α
+7−→h2
+←−�
+h1
+α1 α2 α3
+con4
+d a b c
+coni
+b c d
+</figure>
+<page confidence="0.972876">
+148
+</page>
+<bodyText confidence="0.9988214">
+struct binary rules equivalent to r from any given
+sequence of binarization terms t1, t2, and that bi-
+narization terms exist whenever equivalent binary
+rules exist. The majority of this paper revolves
+around the question of finding binarization terms.
+Rule-by-rule binarization of IRTGs follows the
+intuition laid out in this example closely: it means
+processing each suprabinary rule, attempting to
+replace it with an equivalent collection of binary
+rules.
+</bodyText>
+<subsectionHeader confidence="0.999788">
+3.2 Binarization terms
+</subsectionHeader>
+<bodyText confidence="0.999634">
+We will now make this intuition precise. To this
+end, we assume that r = q → α(q1, ... , qk) is a
+suprabinary rule of G. As we have seen, binariz-
+ing r boils down to constructing:
+</bodyText>
+<listItem confidence="0.993441">
+• a tree ξ over some binary signature Σ0 and
+• tree homomorphisms h01, ... , h0n of type
+h0i : TΣ,(X) → TΔi(X),
+</listItem>
+<bodyText confidence="0.969169132352942">
+such that h0i(ξ) and hi(α) are equivalent, i.e., they
+denote the same function over Ai. We call such a
+tuple (ξ, h01, ... , h0n) a binarization of the rule r.
+Note that a binarization of r need not exist. The
+problem of rule-by-rule binarization consists in
+computing a binarization of each suprabinary rule
+of a grammar. If such a binarization does not exist,
+the problem does not have a solution.
+In order to define variable trees, we assume a
+mapping seq that maps each finite set U of pair-
+wise disjoint variable sets to a sequence over U
+which contains each element exactly once. Let
+t E CΔ(Xk). The variable set of t is the set of
+all variables that occur in t. The set S(t) of sub-
+tree variables of t consists of the nonempty vari-
+able sets of all subtrees of t. We represent S(t)
+as a tree v(t), which we call variable tree as fol-
+lows. Any two elements of S(t) are either compa-
+rable (with respect to the subset relation) or dis-
+joint. We extend this ordering to a tree struc-
+ture by ordering disjoint elements via seq. We let
+v(L) = {v(t)  |t E L} for every L C CΔ(Xk).
+In the example of Fig. 5, t1 and t2 have the same
+set of subtree variables; it is {{x1}, {x2}, {x3},
+{x1, x2}, {x1, x2, x3}}. If we assume that seq or-
+ders sets of variables according to the least vari-
+able index, we arrive at the variable tree in the cen-
+ter of Fig. 5.
+Now let t1 E TΔ,(Xk),... , tn E TΔn(Xk).
+We call the tuple t1, ... , tn binarization terms of
+r if the following properties hold: (i) hi(α) and ti
+are equivalent; (ii) at each node the tree ti contains
+at most two subtrees with variables; and (iii) the
+terms t1, ... , tn have the same variable tree.
+Assume for now that we have found binariza-
+tion terms t1, ... , tn. We show how to construct a
+binarization (ξ, h01, ... , h0n) of r with ti = h0i(ξ).
+First, we construct ξ. Since t1, ... , tn are bi-
+narization terms, they have the same variable tree,
+say, τ. We obtain ξ from τ by replacing every la-
+bel of the form {xj} with xj, and every other label
+with a fresh symbol. Because of condition (ii) in
+in the definition of binarization terms, ξ is binary.
+In order to construct h0i(σ) for each symbol σ
+in ξ, we transform ti into a tree t0i with labels from
+CΔi(X) and the same structure as ξ. Then we read
+off h0i(σ) from the node of t0i that corresponds to
+the σ-labeled node of ξ. The transformation pro-
+ceeds as illustrated in Fig. 6: first, we apply the
+maximal decomposition operation `d; it replaces
+every label f E Δi|k by the tree f(x1,... , xk),
+represented as a box. After that, we keep applying
+the merge operation `m as often as possible; it
+merges two boxes that are in a parent-child rela-
+tion, given that one of them has at most one child.
+Thus the number of variables in any box can only
+decrease. Finally, the reorder operation `o orders
+the children of each box according to the seq of
+their variable sets. These operations do not change
+the variable tree; one can use this to show that t0i
+has the same structure as ξ.
+Thus, if we can find binarization terms, we
+can construct a binarization of r. Conversely, for
+any given binarization (ξ, h01, ... , h0n) the seman-
+tic terms h01(ξ), ... , h0n(ξ) are binarization terms.
+This proves the following lemma.
+Lemma 1 There is a binarization of r if and only
+if there are binarization terms of r.
+</bodyText>
+<subsectionHeader confidence="0.998763">
+3.3 Finding binarization terms
+</subsectionHeader>
+<bodyText confidence="0.895974153846154">
+It remains to show how we can find binarization
+terms of r, if there are any.
+Let bi : TΔi(Xk) → P(TΔi(Xk)) the mapping
+with bi(t) = {t0 E TΔi(Xk)  |t and t0 are equiv-
+alent, and at each node t0 has at most two chil-
+dren with variables}. Figure 5b shows some ele-
+ments of b1(h1(α)) and b2(h2(α)) for our exam-
+ple. Terms t1, ... , tn are binarization terms pre-
+cisely when ti E bi(hi(α)) and t1, ... , tn have the
+same variable tree. Thus we can characterize bi-
+narization terms as follows.
+Lemma 2 There are binarization terms if and
+only if ni v(bi(hi(α))) =� ∅.
+</bodyText>
+<page confidence="0.991415">
+149
+</page>
+<figure confidence="0.998326694444445">
+con2
+con2 x1
+x2 a
+con2
+x1 x2
+con2
+con2
+x1 x2
+con2
+con2 x2
+x1 a
+con2
+x1 x2
+con2
+x1 x2
+o
+ire
+ire
+d
+con2
+con2
+x1 x2
+x3 a
+x3
+con2
+x1 x2
+con2
+x1 a
+con2
+x1 x2
+a
+x1 x2
+x1 x2
+x3
+x3
+x1 x2 x1 x2
+</figure>
+<figureCaption confidence="0.990346">
+Figure 6: Transforming t2 into t02.
+</figureCaption>
+<equation confidence="0.843583">
+con2
+x1 x2
+x3
+</equation>
+<bodyText confidence="0.999500666666667">
+This result suggests the following procedure
+for obtaining binarization terms. First, determine
+whether the intersection in Lemma 2 is empty. If
+it is, then there is no binarization of r. Otherwise,
+select a variable tree τ from this set. We know that
+there are trees t1, ... , tn such that ti E bi(hi(α))
+and v(ti) = τ. We can therefore select arbitrary
+concrete trees ti E bi(hi(α)) n v−1(τ). The terms
+t1, ... , tn are then binarization terms.
+</bodyText>
+<sectionHeader confidence="0.997484" genericHeader="method">
+4 Effective IRTG binarization
+</sectionHeader>
+<bodyText confidence="0.999242">
+In this section we develop our binarization algo-
+rithm. Its key task is finding binarization terms
+t1, ... , tn. This task involves deciding term equiv-
+alence, as ti must be equivalent to hi(α). In gen-
+eral, equivalence is undecidable, so the task can-
+not be solved. We avoid deciding equivalence by
+requiring the user to specify an explicit approxi-
+mation of bi, which we call a b-rule. This param-
+eter gives rise to a restricted version of the rule-
+by-rule binarization problem, which is efficiently
+computable while remaining practically relevant.
+Let A be a signature. A binarization rule (b-
+rule) over A is a mapping b: A -+ P(TΔ(X))
+where for every f E A|k we have that b(f) C_
+CΔ(Xk), at each node of a tree in b(f) only two
+children contain variables, and b(f) is a regular
+tree language. We extend b to TΔ(X) by setting
+</bodyText>
+<equation confidence="0.764345">
+b(xj) = {xj} and b(f(t1,...,tk)) = {t[xj/t0j |
+1 G j G k]  |t E b(f), t0j E b(tj)}, where [xj/t0j]
+</equation>
+<bodyText confidence="0.996172392156863">
+denotes substitution of xj by t0j. Given an alge-
+bra A over A, a b-rule b over A is called a b-rule
+over A if, for every t E TΔ(Xk) and t0 E b(t),
+t0 and t are equivalent in A. Such a b-rule encodes
+equivalence in A, and it does so in an explicit and
+compact way: because b(f) is a regular tree lan-
+guage, a b-rule can be specified by a finite collec-
+tion of RTGs, one for each symbol f E A. We will
+look at examples (for the string and tree algebras
+shown earlier) in Section 5.
+From now on, we assume that b1, ... , bn are
+b-rules over A1, ... , An, respectively. A bina-
+rization (ξ, h01, ... , h0n) of r is a binarization of r
+with respect to b1, ... , bn if h0i(ξ) E bi(hi(α)).
+Likewise, binarization terms t1, ... , tn are bi-
+narization terms with respect to b1, ... , bn if
+ti E bi(hi(α)). Lemmas 1 and 2 carry over to
+the restricted notions. The problem of rule-by-
+rule binarization with respect to b1, ... , bn con-
+sists in computing a binarization with respect to
+b1, ... , bn for each suprabinary rule.
+By definition, every solution to this restricted
+problem is also a solution to the general prob-
+lem. The converse need not be true. However,
+we can guarantee that the restricted problem has
+at least one solution whenever the general problem
+has one, by requiring v(bi(hi(α)) = v(b(hi(α)).
+Then the intersection in Lemma 2 is empty in the
+restricted case if and only if it is empty in the gen-
+eral case. We call the b-rules b1, ... , b1 complete
+on G if the equation holds for every α E E.
+Now we show how to effectively compute bina-
+rization terms with respect to b1, ... , bn, along the
+lines of Section 3.3. More specifically, we con-
+struct an RTG for each of the sets (i) bi(hi(α)),
+(ii) b0 i = v(bi(hi(α))), (iii) ni b0i, and (iv) b00 i =
+bi(hi(α))nv−1(τ) (given τ). Then we can select τ
+from (iii) and ti from (iv) using a standard algo-
+rithm, such as the Viterbi algorithm or Knuth’s
+algorithm (Knuth, 1977; Nederhof, 2003; Huang
+and Chiang, 2005). The effectiveness of our pro-
+cedure stems from the fact that we only manipulate
+RTGs and never enumerate languages.
+The construction for (i) is recursive, following
+the definition of bi. The base case is a language
+{xj}, for which the RTG is easy. For the recursive
+case, we use the fact that regular tree languages
+are closed under substitution (G´ecseg and Steinby,
+1997, Prop. 7.3). Thus we obtain an RTG Gi with
+L(Gi) = bi(hi(α)).
+For (ii) and (iv), we need the following auxiliary
+</bodyText>
+<page confidence="0.995013">
+150
+</page>
+<bodyText confidence="0.994693285714286">
+construction. Let Gi = (P, p0, R). We define the
+mapping vari : P → P(Xk) such that for every
+p ∈ P, every t ∈ Lp(Gi) contains exactly the vari-
+ables in vari(p). We construct it as follows. We
+initialize vari(p) to “unknown” for every p. For
+every rule p → xj, we set vari(p) = {xj}. For
+every rule p → σ(p1, ... , pk) such that vari(pj) is
+known, we set vari(p) = Uj vari(pj). This is iter-
+ated; it can be shown that vari(p) is never assigned
+two different values for the same p. Finally, we set
+all remaining unknown entries to ∅.
+For (ii), we construct an RTG G&apos;i with L(G&apos;i) =
+b&apos;i as follows. We let G&apos;i = ({hvari(p)i  |p ∈
+P}, vari(p0), R&apos;) where R&apos; consists of the rules
+</bodyText>
+<equation confidence="0.9949962">
+h{xj}i → {xj} if p → xi ∈ R ,
+hvari(p)i → vari(p)(hU1i, ... , hUlii)
+if p → σ(p1,... ,pk) ∈ R,
+V = {vari(pj)  |1 ≤ j ≤ k} \ {∅},
+|V  |≥ 2,seq(V) = (U1,...,Ul) .
+</equation>
+<bodyText confidence="0.9994058">
+For (iii), we use the standard product construc-
+tion (G´ecseg and Steinby, 1997, Prop. 7.1).
+For (iv), we construct an RTG G&apos;&apos;i such that
+L(G&apos;&apos;i ) = b&apos;&apos; i as follows. We let G&apos;&apos; i = (P, p0, R&apos;&apos;),
+where R&apos;&apos; consists of the rules
+</bodyText>
+<equation confidence="0.994832">
+p → σ(p1, ... ,pk)
+if p → σ(p1, ... ,pk) ∈ R,
+V = {vari(pj)  |1 ≤ j ≤ k} \ {∅},
+if |V  |≥ 2, then
+(vari(p), seq(V)) is a fork in τ .
+</equation>
+<bodyText confidence="0.961618333333333">
+By a fork (u, u1 · · · uk) in τ, we mean that there
+is a node labeled u with k children labeled u1 up
+to uk.
+At this point we have all the ingredients for our
+binarization algorithm, shown in Algorithm 1. It
+operates directly on a bimorphism, because all the
+relevant information about the algebras is captured
+by the b-rules. The following theorem documents
+the behavior of the algorithm. In short, it solves
+the problem of rule-by-rule binarization with re-
+spect to b-rules b1, ... , bn.
+Theorem 3 Let G = (B, A1, ... , An) be
+an IRTG, and let b1, ... , bn be b-rules over
+A1, ... , An, respectively.
+Algorithm 1 terminates. Let B&apos; be the
+bimorphism computed by Algorithm 1 on B
+and b1, ... , bn. Then G&apos; = (B&apos;, A1, ... , An) is
+equivalent to G, and G&apos; is of rank 2 if and only
+Input: bimorphism B = (G, h1, ... , hn),
+b-rules b1, ... , bn over O1, ... , On
+Output: bimorphism B&apos;
+</bodyText>
+<listItem confidence="0.975483055555556">
+1: B&apos; ← (G|&lt;2, h1, ... , hn)
+2: for ruler: q → α(q1, ... , qk) of G|&gt;2 do
+3: for i = 1,...,n do
+4: compute RTG Gi for bi(hi(α))
+5: compute RTG G&apos;i for v(bi(hi(α)))
+6: compute RTG Gv for ni L(G&apos;i)
+7: if L(Gv) = ∅ then
+8: add r to B&apos;
+9: else
+10: select t&apos; ∈ L(Gv)
+11: for i = 1,...,n do
+12: compute RTG G&apos;&apos;i for
+b&apos;&apos;
+13: i = bi(hi(α)) ∩ v−1(t&apos;)
+14: select ti ∈ L(G&apos;&apos;i )
+15: construct binarization for t1, ... , tn
+16: add appropriate rules to B&apos;
+Algorithm 1: Complete binarization algorithm,
+</listItem>
+<bodyText confidence="0.9943031">
+where G|&lt;2 and G|&gt;2 is G restricted to binary and
+suprabinary rules, respectively.
+if every suprabinary rule of G has a binarization
+with respect to b1, ... , bn.
+The runtime of Algorithm 1 is dominated by the
+intersection construction in line 6, which is O(m1·
+. . . ·mn) per rule, where mi is the size of G&apos;i. The
+quantity mi is linear in the size of the terms on the
+right-hand side of hi, and in the number of rules in
+the b-rule bi.
+</bodyText>
+<sectionHeader confidence="0.988539" genericHeader="method">
+5 Applications
+</sectionHeader>
+<bodyText confidence="0.999834125">
+Algorithm 1 implements rule-by-rule binarization
+with respect to given b-rules. If a rule of the given
+IRTG does not have a binarization with respect to
+these b-rules, it is simply carried over to the new
+grammar, which then has a rank higher than 2. The
+number of remaining suprabinary rules depends
+on the b-rules (except for rules that have no bi-
+narization at all). The user can thus engineer the
+b-rules according to their current needs, trading off
+completeness, runtime, and engineering effort.
+By contrast, earlier binarization algorithms for
+formalisms such as SCFG and LCFRS simply at-
+tempt to find an equivalent grammar of rank 2;
+there is no analogue of our b-rules. The problem
+these algorithms solve corresponds to the general
+rule-by-rule binarization problem from Section 3.
+</bodyText>
+<page confidence="0.988735">
+151
+</page>
+<figure confidence="0.989254">
+NP
+x2:JJ x3:NN
+NP
+con3
+NP
+−→ das x2 x3 der x1
+NP → α(NNP, JJ, NN)
+DT x1:NNP POS
+the ’s
+</figure>
+<figureCaption confidence="0.934838">
+Figure 7: A rule of a tree-to-string transducer.
+</figureCaption>
+<figure confidence="0.99034575">
+NP
+con3
+DT x1 POS
+the ’s
+con° con°
+cons
+das x2 x3 der x1
+x2 x3
+h2
+←−� α
+h1
+7−→
+</figure>
+<bodyText confidence="0.999220714285714">
+We show that under certain conditions, our algo-
+rithm can be used to solve this problem as well.
+In the following two subsections, we illustrate this
+for SCFGs and tree-to-string transducers, respec-
+tively. In the final subsection, we discuss how to
+extend this approach to other grammar formalisms
+as well.
+</bodyText>
+<subsectionHeader confidence="0.999083">
+5.1 Synchronous context-free grammars
+</subsectionHeader>
+<bodyText confidence="0.9999285">
+We have used SCFGs as the running example in
+this paper. SCFGs are IRTGs with two interpre-
+tations into the string algebra of Table 1, as illus-
+trated by the example in Fig. 2. In order to make
+our algorithm ready to use, it remains to specify a
+b-rule for the string algeba.
+We use the following b-rule for both b1 and b2.
+Each symbol a ∈ Ai|0 is mapped to the language
+{a}. Each symbol conk, k ≥ 2, is mapped to
+the language induced by the following RTG with
+states of the form [j, j0] (where 0 ≤ j &lt; j0 ≤ k)
+and final state [0, k]:
+</bodyText>
+<equation confidence="0.911298333333333">
+[j − 1,j] → xj (1 ≤ j ≤ k)
+[j, j0] → con2([j, j00],[j00,j0])
+(0 ≤ j &lt; j00 &lt; j0 ≤ k)
+</equation>
+<bodyText confidence="0.998360363636364">
+This language expresses all possible ways in
+which conk can be written in terms of con2.
+Our definition of rule-by-rule binarization with
+respect to b1 and b2 coincides with that of Huang
+et al. (2009): any rule can be binarized by
+both algorithms or neither. For instance, for the
+SCFG rule A → hBCDE, CEBDi, the sets
+v(b1(h1(α))) and v(b2(h2(α))) are disjoint, thus
+no binarization exists. Two strings of length N
+can be parsed with a binary IRTG that represents
+an SCFG in time O(N6).
+</bodyText>
+<subsectionHeader confidence="0.997144">
+5.2 Tree-to-string transducers
+</subsectionHeader>
+<bodyText confidence="0.9995508">
+Some approaches to SMT go beyond string-to-
+string translation models such as SCFG by exploit-
+ing known syntactic structures in the source or tar-
+get language. This perspective on translation nat-
+urally leads to the use of tree-to-string transducers
+</bodyText>
+<figureCaption confidence="0.931822">
+Figure 8: An IRTG rule encoding the rule in Fig. 7.
+</figureCaption>
+<bodyText confidence="0.999471048780488">
+(Yamada and Knight, 2001; Galley et al., 2004;
+Huang et al., 2006; Graehl et al., 2008). Figure 7
+shows an example of a tree-to-string rule. It might
+be used to translate “the Commission’s strategic
+plan” into “das langfristige Programm der Kom-
+mission”.
+Our algorithm can binarize tree-to-string trans-
+ducers; to our knowledge, it is the first algorithm
+to do so. We model the tree-to-string transducer
+as an IRTG G = ((G, h1, h2), A1, A2), where
+A2 is the string algebra, but this time A1 is the
+tree algebra shown in Table 1. This algebra has
+operations conk to concatenate sequences of trees
+and unary y that maps any sequence (t1, ... , tl) of
+trees to the tree y(t1, ... , tl), viewed as a sequence
+of length 1. Note that we exclude the operation
+con1 because it is the identity and thus unneces-
+sary. Thus the rule in Fig. 7 translates to the IRTG
+rule shown in Fig. 8.
+For the string algebra, we reuse the b-rule from
+Section 5.1; we call it b2 here. For the tree algebra,
+we use the following b-rule b1. It maps con0 to
+{con0} and each unary symbol y to {y(x1)}. Each
+symbol conk, k ≥ 2, is treated as in the string
+case. Using these b-rules, we can binarize the rule
+in Fig. 8 and obtain the rules in Fig. 9. Parsing
+of a binary IRTG that represents a tree-to-string
+transducer is O(N3 · M) for a string of length N
+and a tree with M nodes.
+We have implemented our binarization algo-
+rithm and the b-rules for the string and the tree
+algebra. In order to test our implementation, we
+extracted a tree-to-string transducer from about a
+million parallel sentences of English-German Eu-
+roparl data, using the GHKM rule extractor (Gal-
+ley, 2010). Then we binarized the transducer. The
+results are shown in Fig. 10. Of the 2.15 million
+rules in the extracted transducer, 460,000 were
+suprabinary, and 67 % of these could be binarized.
+Binarization took 4.4 minutes on a single core of
+an Intel Core i5 2520M processor.
+</bodyText>
+<page confidence="0.977423">
+152
+</page>
+<figure confidence="0.893501">
+NP → α&apos;(NNP, A&apos;)
+A&apos; → α&apos;&apos;(JJ, NN)
+H α&apos; �−→
+Hα&apos;&apos; � con2
+x1 x2
+</figure>
+<figureCaption confidence="0.999705">
+Figure 9: Binarization of the rule in Fig. 8.
+</figureCaption>
+<figure confidence="0.386652">
+ext bin
+</figure>
+<figureCaption confidence="0.5987425">
+Figure 10: Rules of a transducer extracted from
+Europarl (ext) vs. its binarization (bin).
+</figureCaption>
+<subsectionHeader confidence="0.993459">
+5.3 General approach
+</subsectionHeader>
+<bodyText confidence="0.999991742857143">
+Our binarization algorithm can be used to solve
+the general rule-by-rule binarization problem for
+a specific grammar formalism, provided that one
+can find appropriate b-rules. More precisely,
+we need to devise a class C of IRTGs over the
+same sequence A1, ... , A,,, of algebras that en-
+codes the grammar formalism, together with b-
+rules b1, ... , b,,, over A1, ... , A,,, that are com-
+plete on every grammar in C, as defined in Sec-
+tion 4.
+We have already seen the b-rules for SCFGs and
+tree-to-string transducers in the preceding subsec-
+tions; now we have a closer look at the class C
+for SCFGs. We used the class of all IRTGs with
+two string algebras and in which hi(α) contains
+at most one occurrence of a symbol conk for ev-
+ery α E E. On such a grammar the b-rules are
+complete. Note that this would not be the case
+if we allowed several occurrences of conk, as in
+con2(con2(x1,x2),x3). This term is equivalent
+to itself and to con2(x1, con2(x2, x3)), but the b-
+rules only cover the former. Thus they miss one
+variable tree. For the term con3(x1, x2, x3), how-
+ever, the b-rules cover both variable trees.
+Generally speaking, given C and b-rules
+b1, ... , b,,, that are complete on every IRTG in C,
+Algorithm 1 solves the general rule-by-rule bina-
+rization problem on C. We can adapt Theorem 3 by
+requiring that G must be in C, and replacing each
+of the two occurrences of “binarization with re-
+spect to b1, ... , b,,,” by simply “binarization”. If C
+is such that every grammar from a given grammar
+formalism can be encoded as an IRTG in C, this
+solves the general rule-by-rule binarization prob-
+lem of that grammar formalism.
+</bodyText>
+<sectionHeader confidence="0.999439" genericHeader="conclusions">
+6 Conclusion
+</sectionHeader>
+<bodyText confidence="0.99994168">
+We have presented an algorithm for binarizing
+IRTGs rule by rule, with respect to b-rules that
+the user specifies for each algebra. This improves
+the complexity of parsing and translation with any
+monolingual or synchronous grammar that can be
+represented as an IRTG. A novel algorithm for
+binarizing tree-to-string transducers falls out as a
+special case.
+In this paper, we have taken the perspective that
+the binarized IRTG uses the same algebras as the
+original IRTG. Our algorithm extends to gram-
+mars of arbitrary fanout (such as synchronous
+tree-adjoining grammar (Koller and Kuhlmann,
+2012)), but unlike LCFRS-based approaches to bi-
+narization, it will not increase the fanout to en-
+sure binarizability. In the future, we will ex-
+plore IRTG binarization with fanout increase. This
+could be done by binarizing into an IRTG with
+a more complicated algebra (e.g., of string tu-
+ples). We might compute binarizations that are
+optimal with respect to some measure (e.g., fanout
+(Gomez-Rodriguez et al., 2009) or parsing com-
+plexity (Gildea, 2010)) by keeping track of this
+measure in the b-rule and taking intersections of
+weighted tree automata.
+</bodyText>
+<sectionHeader confidence="0.998822" genericHeader="acknowledgments">
+Acknowledgments
+</sectionHeader>
+<bodyText confidence="0.99994875">
+We thank the anonymous referees for their insight-
+ful remarks, and Sarah Hemmen for implementing
+an early version of the algorithm. Matthias B¨uchse
+was financially supported by DFG VO 1011/6-1.
+</bodyText>
+<figure confidence="0.998558085714286">
+rank
+8-10
+6-7
+5
+4
+3
+2
+1
+0
+# rules (millions) 2.4
+2.2
+2
+1.8
+1.6
+1.4
+1.2
+1
+NP
+coni
+NP xi
+coni
+con2
+x1 x2
+DT
+the
+con°
+coni
+x1 POS
+’s
+con°
+con2
+con2
+das x2
+con2
+der x1
+</figure>
+<page confidence="0.969777">
+153
+</page>
+<note confidence="0.79059">
+Liang Huang, Hao Zhang, Daniel Gildea, and Kevin
+</note>
+<figureCaption confidence="0.596011">
+Knight. 2009. Binarization of synchronous
+context-free grammars. Computational Linguistics,
+35(4):559–595.
+</figureCaption>
+<sectionHeader confidence="0.585084" genericHeader="references">
+References
+</sectionHeader>
+<bodyText confidence="0.696982333333333">
+Alfred V. Aho and Jeffrey D. Ullman. 1969. Syntax
+directed translations and the pushdown assembler.
+Journal of Computer and System Sciences, 3:37–56.
+</bodyText>
+<reference confidence="0.99835697368421">
+Andr´e Arnold and Max Dauchet. 1976. Bi-
+transduction de forˆets. In Proc. 3rd Int. Coll. Au-
+tomata, Languages and Programming, pages 74–86.
+Edinburgh University Press.
+Walter S. Brainerd. 1969. Tree generating regular sys-
+tems. Information and Control, 14(2):217–231.
+David Chiang. 2007. Hierarchical phrase-based trans-
+lation. Computational Linguistics, 33(2):201–228.
+Steve DeNeefe and Kevin Knight. 2009. Synchronous
+tree-adjoining machine translation. In Proceedings
+of EMNLP, pages 727–736.
+Jason Eisner. 2003. Learning non-isomorphic tree
+mappings for machine translation. In Proceedings
+of the 41st ACL, pages 205–208.
+Michel Galley, Mark Hopkins, Kevin Knight, and
+Daniel Marcu. 2004. What’s in a translation rule?
+In Proceedings of HLT/NAACL, pages 273–280.
+Michael Galley. 2010. GHKM rule extractor. http:
+//www-nlp.stanford.edu/˜mgalley/
+software/stanford-ghkm-latest.tar.
+gz, retrieved on March 28, 2012.
+Ferenc G´ecseg and Magnus Steinby. 1997. Tree lan-
+guages. In G. Rozenberg and A. Salomaa, editors,
+Handbook of Formal Languages, volume 3, chap-
+ter 1, pages 1–68. Springer-Verlag.
+Daniel Gildea. 2010. Optimal parsing strategies for
+linear context-free rewriting systems. In Proceed-
+ings of NAACL HLT.
+Joseph A. Goguen, Jim W. Thatcher, Eric G. Wagner,
+and Jesse B. Wright. 1977. Initial algebra seman-
+tics and continuous algebras. Journal of the ACM,
+24:68–95.
+Carlos Gomez-Rodriguez, Marco Kuhlmann, Giorgio
+Satta, and David Weir. 2009. Optimal reduction of
+rule length in linear context-free rewriting systems.
+In Proceedings of NAACL HLT.
+Jonathan Graehl, Kevin Knight, and Jonathan May.
+2008. Training tree transducers. Computational
+Linguistics, 34(3):391–427.
+Liang Huang and David Chiang. 2005. Better k-best
+parsing. In Proceedings of the 9th IWPT, pages 53–
+64.
+Liang Huang, Kevin Knight, and Aravind Joshi. 2006.
+Statistical syntax-directed translation with extended
+domain of locality. In Proceedings of the 7th AMTA,
+pages 66–73.
+Donald E. Knuth. 1977. A generalization of Dijkstra’s
+algorithm. Information Processing Letters, 6(1):1–
+5.
+Alexander Koller and Marco Kuhlmann. 2011. A gen-
+eralized view on parsing and translation. In Pro-
+ceedings of the 12th IWPT, pages 2–13.
+Alexander Koller and Marco Kuhlmann. 2012. De-
+composing TAG algorithms using simple alge-
+braizations. In Proceedings of the 11th TAG+ Work-
+shop, pages 135–143.
+Philip M. Lewis and Richard E. Stearns. 1966. Syn-
+tax directed transduction. Foundations of Computer
+Science, IEEE Annual Symposium on, 0:21–35.
+Mark-Jan Nederhof. 2003. Weighted deductive pars-
+ing and Knuth’s algorithm. Computational Linguis-
+tics, 29(1):135–143.
+Rebecca Nesson, Stuart M. Shieber, and Alexander
+Rush. 2006. Induction of probabilistic synchronous
+tree-insertion grammars for machine translation. In
+Proceedings of the 7th AMTA.
+Owen Rambow and Giorgio Satta. 1999. Independent
+parallelism in finite copying parallel rewriting sys-
+tems. Theoretical Computer Science, 223(1–2):87–
+120.
+David J. Weir. 1988. Characterizing Mildly Context-
+Sensitive Grammar Formalisms. Ph.D. thesis, Uni-
+versity of Pennsylvania.
+Kenji Yamada and Kevin Knight. 2001. A syntax-
+based statistical translation model. In Proceedings
+of the 39th ACL, pages 523–530.
+</reference>
+<page confidence="0.999768">
+154
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.666682">
+<title confidence="0.999815">Generic binarization for parsing and translation</title>
+<author confidence="0.996367">Matthias B¨uchse Alexander Koller Heiko Vogler</author>
+<affiliation confidence="0.900322">Technische Universit¨at Dresden University of Potsdam Technische Universit¨at Dresden</affiliation>
+<email confidence="0.749025">matthias.buechse@tu-dresden.dekoller@ling.uni-potsdam.deheiko.vogler@tu-dresden.de</email>
+<abstract confidence="0.9985981">Binarization of grammars is crucial for improving the complexity and performance of parsing and translation. We present a versatile binarization algorithm that can be tailored to a number of grammar formalisms by simply varying a formal parameter. We apply our algorithm to binarizing tree-to-string transducers used in syntax-based machine translation.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>Andr´e Arnold</author>
+<author>Max Dauchet</author>
+</authors>
+<title>Bitransduction de forˆets.</title>
+<date>1976</date>
+<booktitle>In Proc. 3rd Int. Coll. Automata, Languages and Programming,</booktitle>
+<pages>74--86</pages>
+<publisher>Edinburgh University Press.</publisher>
+<contexts>
+<context position="8099" citStr="Arnold and Dauchet (1976)" startWordPosition="1378" endWordPosition="1381">a k-ary operation tA over the domain. In particular, terms in TA evaluate to elements of A. For instance, in the string algebra shown in Table 1, the term con2(a, b) evaluates to ab, and the term con2(con2(x2, a), x1) evaluates to a binary operation f such that, e.g., f(b, c) = cab. Bimorphisms IRTGs separate the finite control (state behavior) of a derivation from its derived object (in its term representation; generational behavior); the former is captured by a regular tree language, while the latter is obtained by applying a tree homomorphism. This idea goes back to the tree bimorphisms of Arnold and Dauchet (1976). Let E be a signature. A regular tree grammar (RTG) G over E is a triple (Q, q0, R) where Q is a finite set (of states), q0 E Q, and R is a finite set of rules of the form q -+ α(q1, ... , qk), where q E Q, α E E|k and q, q1, ... , qk E Q. We call α the terminal symbol and k the rank of the rule. Rules of rank greater than two are called suprabinary. For every q E Q we define the language Lq(G) derived from q as the set {α(t1, ... , tk) |q -+ α(q1, ... , qk) E R, tj E Lqj(G)}. If q = q0, we drop the superscript and write L(G) for the tree language of G. In the literature, there is a definitio</context>
+</contexts>
+<marker>Arnold, Dauchet, 1976</marker>
+<rawString>Andr´e Arnold and Max Dauchet. 1976. Bitransduction de forˆets. In Proc. 3rd Int. Coll. Automata, Languages and Programming, pages 74–86. Edinburgh University Press.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Walter S Brainerd</author>
+</authors>
+<title>Tree generating regular systems.</title>
+<date>1969</date>
+<journal>Information and Control,</journal>
+<volume>14</volume>
+<issue>2</issue>
+<contexts>
+<context position="9277" citStr="Brainerd, 1969" startWordPosition="1653" endWordPosition="1654"> the literature, there is a definition of RTG which also permits more than one terminal symbol per rule, 146 strings over F trees over F σ σ cont 7→ 7→ ab cont a b α β con° con° example term and denoted object α β domain F∗ Tr (set of sequences of trees) signature A {a|0 |a ∈ F} ∪ {γ|1 |γ ∈ F} ∪ {conk|k |0 ≤ k ≤ K,k =61} {conk|k |0 ≤ k ≤ K,k =61} operations a: () 7→ a γ: x1 7→ γ(x1) conk : (x1, ... , xk) 7→ x1 ··· xk conk: (x1, ... , xk) 7→ x1 ··· xk Table 1: Algebras for strings and trees, given an alphabet F and a maximum arity K ∈ N. or none. This does not increase the generative capacity (Brainerd, 1969). A (linear, nondeleting) tree homomorphism is a mapping h: TE(X) → TA(X) that satisfies the following condition: there is a mapping g: E → TA(X) such that (i) g(σ) ∈ CA(Xk) for every σ ∈ E|k, (ii) h(σ(t1, ... , tk)) is the tree obtained from g(σ) by replacing the occurrence of xj by h(tj), and (iii) h(xj) = xj. This extends the usual definition of linear and nondeleting homomorphisms (G´ecseg and Steinby, 1997) to trees with variables. We abuse notation and write h(σ) for g(σ) for every σ ∈ E. Let n ≥ 1 and A1, ... , An be signatures. A (generalized) bimorphism over (A1, ... , An) is a tuple </context>
+</contexts>
+<marker>Brainerd, 1969</marker>
+<rawString>Walter S. Brainerd. 1969. Tree generating regular systems. Information and Control, 14(2):217–231.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>David Chiang</author>
+</authors>
+<title>Hierarchical phrase-based translation.</title>
+<date>2007</date>
+<journal>Computational Linguistics,</journal>
+<volume>33</volume>
+<issue>2</issue>
+<contexts>
+<context position="1093" citStr="Chiang, 2007" startWordPosition="149" endWordPosition="150">isms by simply varying a formal parameter. We apply our algorithm to binarizing tree-to-string transducers used in syntax-based machine translation. 1 Introduction Binarization amounts to transforming a given grammar into an equivalent grammar of rank 2, i.e., with at most two nonterminals on any righthand side. The ability to binarize grammars is crucial for efficient parsing, because for many grammar formalisms the parsing complexity depends exponentially on the rank of the grammar. It is also critically important for tractable statistical machine translation (SMT). Syntaxbased SMT systems (Chiang, 2007; Graehl et al., 2008) typically use some type of synchronous grammar describing a binary translation relation between strings and/or trees, such as synchronous context-free grammars (SCFGs) (Lewis and Stearns, 1966; Chiang, 2007), synchronous tree-substitution grammars (Eisner, 2003), synchronous tree-adjoining grammars (Nesson et al., 2006; DeNeefe and Knight, 2009), and tree-tostring transducers (Yamada and Knight, 2001; Graehl et al., 2008). These grammars typically have a large number of rules, many of which have rank greater than two. The classical approach to binarization, as known from</context>
+</contexts>
+<marker>Chiang, 2007</marker>
+<rawString>David Chiang. 2007. Hierarchical phrase-based translation. Computational Linguistics, 33(2):201–228.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Steve DeNeefe</author>
+<author>Kevin Knight</author>
+</authors>
+<title>Synchronous tree-adjoining machine translation.</title>
+<date>2009</date>
+<booktitle>In Proceedings of EMNLP,</booktitle>
+<pages>727--736</pages>
+<contexts>
+<context position="1463" citStr="DeNeefe and Knight, 2009" startWordPosition="198" endWordPosition="201"> for efficient parsing, because for many grammar formalisms the parsing complexity depends exponentially on the rank of the grammar. It is also critically important for tractable statistical machine translation (SMT). Syntaxbased SMT systems (Chiang, 2007; Graehl et al., 2008) typically use some type of synchronous grammar describing a binary translation relation between strings and/or trees, such as synchronous context-free grammars (SCFGs) (Lewis and Stearns, 1966; Chiang, 2007), synchronous tree-substitution grammars (Eisner, 2003), synchronous tree-adjoining grammars (Nesson et al., 2006; DeNeefe and Knight, 2009), and tree-tostring transducers (Yamada and Knight, 2001; Graehl et al., 2008). These grammars typically have a large number of rules, many of which have rank greater than two. The classical approach to binarization, as known from the Chomsky normal form transformation for context-free grammars (CFGs), proceeds rule by rule. It replaces each rule of rank greater than 2 by an equivalent collection of rules of rank 2. All CFGs can be binarized in this way, which is why their recognition problem is cubic. In the case of linear context-free rewriting systems (LCFRSs, (Weir, 1988)) the rule-by-rule</context>
+</contexts>
+<marker>DeNeefe, Knight, 2009</marker>
+<rawString>Steve DeNeefe and Kevin Knight. 2009. Synchronous tree-adjoining machine translation. In Proceedings of EMNLP, pages 727–736.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jason Eisner</author>
+</authors>
+<title>Learning non-isomorphic tree mappings for machine translation.</title>
+<date>2003</date>
+<booktitle>In Proceedings of the 41st ACL,</booktitle>
+<pages>205--208</pages>
+<contexts>
+<context position="1378" citStr="Eisner, 2003" startWordPosition="188" endWordPosition="189">minals on any righthand side. The ability to binarize grammars is crucial for efficient parsing, because for many grammar formalisms the parsing complexity depends exponentially on the rank of the grammar. It is also critically important for tractable statistical machine translation (SMT). Syntaxbased SMT systems (Chiang, 2007; Graehl et al., 2008) typically use some type of synchronous grammar describing a binary translation relation between strings and/or trees, such as synchronous context-free grammars (SCFGs) (Lewis and Stearns, 1966; Chiang, 2007), synchronous tree-substitution grammars (Eisner, 2003), synchronous tree-adjoining grammars (Nesson et al., 2006; DeNeefe and Knight, 2009), and tree-tostring transducers (Yamada and Knight, 2001; Graehl et al., 2008). These grammars typically have a large number of rules, many of which have rank greater than two. The classical approach to binarization, as known from the Chomsky normal form transformation for context-free grammars (CFGs), proceeds rule by rule. It replaces each rule of rank greater than 2 by an equivalent collection of rules of rank 2. All CFGs can be binarized in this way, which is why their recognition problem is cubic. In the </context>
+</contexts>
+<marker>Eisner, 2003</marker>
+<rawString>Jason Eisner. 2003. Learning non-isomorphic tree mappings for machine translation. In Proceedings of the 41st ACL, pages 205–208.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Michel Galley</author>
+<author>Mark Hopkins</author>
+<author>Kevin Knight</author>
+<author>Daniel Marcu</author>
+</authors>
+<title>What’s in a translation rule?</title>
+<date>2004</date>
+<booktitle>In Proceedings of HLT/NAACL,</booktitle>
+<pages>273--280</pages>
+<contexts>
+<context position="4113" citStr="Galley et al., 2004" startWordPosition="642" endWordPosition="645">rank 2 exists, the algorithm finds one. As a consequence, the algorithm binarizes every grammar that can be binarized rule by rule. Step (i) is possible for all the grammar formalisms mentioned above. We show Step (ii) for SCFGs and tree-to-string transducers. We will use SCFGs as our running example throughout the paper. We will also apply the algo145 Proceedings of the 51st Annual Meeting of the Association for Computational Linguistics, pages 145–154, Sofia, Bulgaria, August 4-9 2013. c�2013 Association for Computational Linguistics rithm to tree-to-string transducers (Graehl et al., 2008; Galley et al., 2004), which describe relations between strings in one language and parse trees of another, which means that existing methods for binarizing SCFGs and LCFRSs cannot be directly applied to these systems. To our knowledge, our binarization algorithm is the first to binarize such transducers. We illustrate the effectiveness of our system by binarizing a large treeto-string transducer for English-German SMT. Plan of the paper. We start by defining IRTGs in Section 2. In Section 3, we define the general outline of our approach to rule-by-rule binarization for IRTGs, and then extend this to an efficient </context>
+<context position="29855" citStr="Galley et al., 2004" startWordPosition="5670" endWordPosition="5673">ithms or neither. For instance, for the SCFG rule A → hBCDE, CEBDi, the sets v(b1(h1(α))) and v(b2(h2(α))) are disjoint, thus no binarization exists. Two strings of length N can be parsed with a binary IRTG that represents an SCFG in time O(N6). 5.2 Tree-to-string transducers Some approaches to SMT go beyond string-tostring translation models such as SCFG by exploiting known syntactic structures in the source or target language. This perspective on translation naturally leads to the use of tree-to-string transducers Figure 8: An IRTG rule encoding the rule in Fig. 7. (Yamada and Knight, 2001; Galley et al., 2004; Huang et al., 2006; Graehl et al., 2008). Figure 7 shows an example of a tree-to-string rule. It might be used to translate “the Commission’s strategic plan” into “das langfristige Programm der Kommission”. Our algorithm can binarize tree-to-string transducers; to our knowledge, it is the first algorithm to do so. We model the tree-to-string transducer as an IRTG G = ((G, h1, h2), A1, A2), where A2 is the string algebra, but this time A1 is the tree algebra shown in Table 1. This algebra has operations conk to concatenate sequences of trees and unary y that maps any sequence (t1, ... , tl) o</context>
+</contexts>
+<marker>Galley, Hopkins, Knight, Marcu, 2004</marker>
+<rawString>Michel Galley, Mark Hopkins, Kevin Knight, and Daniel Marcu. 2004. What’s in a translation rule? In Proceedings of HLT/NAACL, pages 273–280.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Michael Galley</author>
+</authors>
+<title>GHKM rule extractor. http: //www-nlp.stanford.edu/˜mgalley/ software/stanford-ghkm-latest.tar. gz, retrieved on</title>
+<date>2010</date>
+<contexts>
+<context position="31453" citStr="Galley, 2010" startWordPosition="5966" endWordPosition="5968">0} and each unary symbol y to {y(x1)}. Each symbol conk, k ≥ 2, is treated as in the string case. Using these b-rules, we can binarize the rule in Fig. 8 and obtain the rules in Fig. 9. Parsing of a binary IRTG that represents a tree-to-string transducer is O(N3 · M) for a string of length N and a tree with M nodes. We have implemented our binarization algorithm and the b-rules for the string and the tree algebra. In order to test our implementation, we extracted a tree-to-string transducer from about a million parallel sentences of English-German Europarl data, using the GHKM rule extractor (Galley, 2010). Then we binarized the transducer. The results are shown in Fig. 10. Of the 2.15 million rules in the extracted transducer, 460,000 were suprabinary, and 67 % of these could be binarized. Binarization took 4.4 minutes on a single core of an Intel Core i5 2520M processor. 152 NP → α&apos;(NNP, A&apos;) A&apos; → α&apos;&apos;(JJ, NN) H α&apos; �−→ Hα&apos;&apos; � con2 x1 x2 Figure 9: Binarization of the rule in Fig. 8. ext bin Figure 10: Rules of a transducer extracted from Europarl (ext) vs. its binarization (bin). 5.3 General approach Our binarization algorithm can be used to solve the general rule-by-rule binarization problem fo</context>
+</contexts>
+<marker>Galley, 2010</marker>
+<rawString>Michael Galley. 2010. GHKM rule extractor. http: //www-nlp.stanford.edu/˜mgalley/ software/stanford-ghkm-latest.tar. gz, retrieved on March 28, 2012.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ferenc G´ecseg</author>
+<author>Magnus Steinby</author>
+</authors>
+<title>Tree languages.</title>
+<date>1997</date>
+<booktitle>Handbook of Formal Languages,</booktitle>
+<volume>3</volume>
+<pages>1--68</pages>
+<editor>In G. Rozenberg and A. Salomaa, editors,</editor>
+<publisher>Springer-Verlag.</publisher>
+<marker>G´ecseg, Steinby, 1997</marker>
+<rawString>Ferenc G´ecseg and Magnus Steinby. 1997. Tree languages. In G. Rozenberg and A. Salomaa, editors, Handbook of Formal Languages, volume 3, chapter 1, pages 1–68. Springer-Verlag.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Daniel Gildea</author>
+</authors>
+<title>Optimal parsing strategies for linear context-free rewriting systems.</title>
+<date>2010</date>
+<booktitle>In Proceedings of NAACL HLT.</booktitle>
+<contexts>
+<context position="34631" citStr="Gildea, 2010" startWordPosition="6524" endWordPosition="6525">es the same algebras as the original IRTG. Our algorithm extends to grammars of arbitrary fanout (such as synchronous tree-adjoining grammar (Koller and Kuhlmann, 2012)), but unlike LCFRS-based approaches to binarization, it will not increase the fanout to ensure binarizability. In the future, we will explore IRTG binarization with fanout increase. This could be done by binarizing into an IRTG with a more complicated algebra (e.g., of string tuples). We might compute binarizations that are optimal with respect to some measure (e.g., fanout (Gomez-Rodriguez et al., 2009) or parsing complexity (Gildea, 2010)) by keeping track of this measure in the b-rule and taking intersections of weighted tree automata. Acknowledgments We thank the anonymous referees for their insightful remarks, and Sarah Hemmen for implementing an early version of the algorithm. Matthias B¨uchse was financially supported by DFG VO 1011/6-1. rank 8-10 6-7 5 4 3 2 1 0 # rules (millions) 2.4 2.2 2 1.8 1.6 1.4 1.2 1 NP coni NP xi coni con2 x1 x2 DT the con° coni x1 POS ’s con° con2 con2 das x2 con2 der x1 153 Liang Huang, Hao Zhang, Daniel Gildea, and Kevin Knight. 2009. Binarization of synchronous context-free grammars. Computa</context>
+</contexts>
+<marker>Gildea, 2010</marker>
+<rawString>Daniel Gildea. 2010. Optimal parsing strategies for linear context-free rewriting systems. In Proceedings of NAACL HLT.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Joseph A Goguen</author>
+<author>Jim W Thatcher</author>
+<author>Eric G Wagner</author>
+<author>Jesse B Wright</author>
+</authors>
+<title>Initial algebra semantics and continuous algebras.</title>
+<date>1977</date>
+<journal>Journal of the ACM,</journal>
+<pages>24--68</pages>
+<contexts>
+<context position="6151" citStr="Goguen et al., 1977" startWordPosition="977" endWordPosition="980">term as a function. As an example, Table 1 shows terms for a string and a tree, together with the denoted object. In the string case, we describe complex strings as concatenation (con2) of elementary symbols (e.g., a, b); in the tree case, we alternate the construction of a sequence of trees (con2) with the construction of a single tree by placing a symbol (e.g., α, β, σ) on top of a (possibly empty) sequence of trees. Whenever a term contains variables, it does not denote an object, but rather a function. In the parlance of universalalgebra theory, we are employing initial-algebra semantics (Goguen et al., 1977). An alphabet is a nonempty finite set. Throughout this paper, let X = {x1, x2,... } be a set, whose elements we call variables. We let Xk denote the set {x1, ... , xk} for every k &gt; 0. Let E be an alphabet and V C X. We write TE(V ) for the set of all terms over E with variables V , i.e., the smallest set T such that (i) V C_ T and (ii) for every σ E E, k &gt; 0, and t1, . , tk E T, we have σ(t1, ... , tk) E T. Alternatively, we view TE(V ) as the set of all (rooted, labeled, ordered, unranked) trees over E and V , and draw them as usual. By TE we abbreviate TE(0). The set CE(V ) of contexts ove</context>
+</contexts>
+<marker>Goguen, Thatcher, Wagner, Wright, 1977</marker>
+<rawString>Joseph A. Goguen, Jim W. Thatcher, Eric G. Wagner, and Jesse B. Wright. 1977. Initial algebra semantics and continuous algebras. Journal of the ACM, 24:68–95.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Carlos Gomez-Rodriguez</author>
+<author>Marco Kuhlmann</author>
+<author>Giorgio Satta</author>
+<author>David Weir</author>
+</authors>
+<title>Optimal reduction of rule length in linear context-free rewriting systems.</title>
+<date>2009</date>
+<booktitle>In Proceedings of NAACL HLT.</booktitle>
+<contexts>
+<context position="34594" citStr="Gomez-Rodriguez et al., 2009" startWordPosition="6516" endWordPosition="6519">have taken the perspective that the binarized IRTG uses the same algebras as the original IRTG. Our algorithm extends to grammars of arbitrary fanout (such as synchronous tree-adjoining grammar (Koller and Kuhlmann, 2012)), but unlike LCFRS-based approaches to binarization, it will not increase the fanout to ensure binarizability. In the future, we will explore IRTG binarization with fanout increase. This could be done by binarizing into an IRTG with a more complicated algebra (e.g., of string tuples). We might compute binarizations that are optimal with respect to some measure (e.g., fanout (Gomez-Rodriguez et al., 2009) or parsing complexity (Gildea, 2010)) by keeping track of this measure in the b-rule and taking intersections of weighted tree automata. Acknowledgments We thank the anonymous referees for their insightful remarks, and Sarah Hemmen for implementing an early version of the algorithm. Matthias B¨uchse was financially supported by DFG VO 1011/6-1. rank 8-10 6-7 5 4 3 2 1 0 # rules (millions) 2.4 2.2 2 1.8 1.6 1.4 1.2 1 NP coni NP xi coni con2 x1 x2 DT the con° coni x1 POS ’s con° con2 con2 das x2 con2 der x1 153 Liang Huang, Hao Zhang, Daniel Gildea, and Kevin Knight. 2009. Binarization of synch</context>
+</contexts>
+<marker>Gomez-Rodriguez, Kuhlmann, Satta, Weir, 2009</marker>
+<rawString>Carlos Gomez-Rodriguez, Marco Kuhlmann, Giorgio Satta, and David Weir. 2009. Optimal reduction of rule length in linear context-free rewriting systems. In Proceedings of NAACL HLT.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jonathan Graehl</author>
+<author>Kevin Knight</author>
+<author>Jonathan May</author>
+</authors>
+<title>Training tree transducers.</title>
+<date>2008</date>
+<journal>Computational Linguistics,</journal>
+<volume>34</volume>
+<issue>3</issue>
+<contexts>
+<context position="1115" citStr="Graehl et al., 2008" startWordPosition="151" endWordPosition="154"> varying a formal parameter. We apply our algorithm to binarizing tree-to-string transducers used in syntax-based machine translation. 1 Introduction Binarization amounts to transforming a given grammar into an equivalent grammar of rank 2, i.e., with at most two nonterminals on any righthand side. The ability to binarize grammars is crucial for efficient parsing, because for many grammar formalisms the parsing complexity depends exponentially on the rank of the grammar. It is also critically important for tractable statistical machine translation (SMT). Syntaxbased SMT systems (Chiang, 2007; Graehl et al., 2008) typically use some type of synchronous grammar describing a binary translation relation between strings and/or trees, such as synchronous context-free grammars (SCFGs) (Lewis and Stearns, 1966; Chiang, 2007), synchronous tree-substitution grammars (Eisner, 2003), synchronous tree-adjoining grammars (Nesson et al., 2006; DeNeefe and Knight, 2009), and tree-tostring transducers (Yamada and Knight, 2001; Graehl et al., 2008). These grammars typically have a large number of rules, many of which have rank greater than two. The classical approach to binarization, as known from the Chomsky normal fo</context>
+<context position="4091" citStr="Graehl et al., 2008" startWordPosition="638" endWordPosition="641">llection of rules of rank 2 exists, the algorithm finds one. As a consequence, the algorithm binarizes every grammar that can be binarized rule by rule. Step (i) is possible for all the grammar formalisms mentioned above. We show Step (ii) for SCFGs and tree-to-string transducers. We will use SCFGs as our running example throughout the paper. We will also apply the algo145 Proceedings of the 51st Annual Meeting of the Association for Computational Linguistics, pages 145–154, Sofia, Bulgaria, August 4-9 2013. c�2013 Association for Computational Linguistics rithm to tree-to-string transducers (Graehl et al., 2008; Galley et al., 2004), which describe relations between strings in one language and parse trees of another, which means that existing methods for binarizing SCFGs and LCFRSs cannot be directly applied to these systems. To our knowledge, our binarization algorithm is the first to binarize such transducers. We illustrate the effectiveness of our system by binarizing a large treeto-string transducer for English-German SMT. Plan of the paper. We start by defining IRTGs in Section 2. In Section 3, we define the general outline of our approach to rule-by-rule binarization for IRTGs, and then extend</context>
+<context position="29897" citStr="Graehl et al., 2008" startWordPosition="5678" endWordPosition="5681">CFG rule A → hBCDE, CEBDi, the sets v(b1(h1(α))) and v(b2(h2(α))) are disjoint, thus no binarization exists. Two strings of length N can be parsed with a binary IRTG that represents an SCFG in time O(N6). 5.2 Tree-to-string transducers Some approaches to SMT go beyond string-tostring translation models such as SCFG by exploiting known syntactic structures in the source or target language. This perspective on translation naturally leads to the use of tree-to-string transducers Figure 8: An IRTG rule encoding the rule in Fig. 7. (Yamada and Knight, 2001; Galley et al., 2004; Huang et al., 2006; Graehl et al., 2008). Figure 7 shows an example of a tree-to-string rule. It might be used to translate “the Commission’s strategic plan” into “das langfristige Programm der Kommission”. Our algorithm can binarize tree-to-string transducers; to our knowledge, it is the first algorithm to do so. We model the tree-to-string transducer as an IRTG G = ((G, h1, h2), A1, A2), where A2 is the string algebra, but this time A1 is the tree algebra shown in Table 1. This algebra has operations conk to concatenate sequences of trees and unary y that maps any sequence (t1, ... , tl) of trees to the tree y(t1, ... , tl), viewe</context>
+</contexts>
+<marker>Graehl, Knight, May, 2008</marker>
+<rawString>Jonathan Graehl, Kevin Knight, and Jonathan May. 2008. Training tree transducers. Computational Linguistics, 34(3):391–427.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Liang Huang</author>
+<author>David Chiang</author>
+</authors>
+<title>Better k-best parsing.</title>
+<date>2005</date>
+<booktitle>In Proceedings of the 9th IWPT,</booktitle>
+<pages>53--64</pages>
+<contexts>
+<context position="23520" citStr="Huang and Chiang, 2005" startWordPosition="4441" endWordPosition="4444">mpty in the restricted case if and only if it is empty in the general case. We call the b-rules b1, ... , b1 complete on G if the equation holds for every α E E. Now we show how to effectively compute binarization terms with respect to b1, ... , bn, along the lines of Section 3.3. More specifically, we construct an RTG for each of the sets (i) bi(hi(α)), (ii) b0 i = v(bi(hi(α))), (iii) ni b0i, and (iv) b00 i = bi(hi(α))nv−1(τ) (given τ). Then we can select τ from (iii) and ti from (iv) using a standard algorithm, such as the Viterbi algorithm or Knuth’s algorithm (Knuth, 1977; Nederhof, 2003; Huang and Chiang, 2005). The effectiveness of our procedure stems from the fact that we only manipulate RTGs and never enumerate languages. The construction for (i) is recursive, following the definition of bi. The base case is a language {xj}, for which the RTG is easy. For the recursive case, we use the fact that regular tree languages are closed under substitution (G´ecseg and Steinby, 1997, Prop. 7.3). Thus we obtain an RTG Gi with L(Gi) = bi(hi(α)). For (ii) and (iv), we need the following auxiliary 150 construction. Let Gi = (P, p0, R). We define the mapping vari : P → P(Xk) such that for every p ∈ P, every t </context>
+</contexts>
+<marker>Huang, Chiang, 2005</marker>
+<rawString>Liang Huang and David Chiang. 2005. Better k-best parsing. In Proceedings of the 9th IWPT, pages 53– 64.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Liang Huang</author>
+<author>Kevin Knight</author>
+<author>Aravind Joshi</author>
+</authors>
+<title>Statistical syntax-directed translation with extended domain of locality.</title>
+<date>2006</date>
+<booktitle>In Proceedings of the 7th AMTA,</booktitle>
+<pages>66--73</pages>
+<contexts>
+<context position="29875" citStr="Huang et al., 2006" startWordPosition="5674" endWordPosition="5677"> instance, for the SCFG rule A → hBCDE, CEBDi, the sets v(b1(h1(α))) and v(b2(h2(α))) are disjoint, thus no binarization exists. Two strings of length N can be parsed with a binary IRTG that represents an SCFG in time O(N6). 5.2 Tree-to-string transducers Some approaches to SMT go beyond string-tostring translation models such as SCFG by exploiting known syntactic structures in the source or target language. This perspective on translation naturally leads to the use of tree-to-string transducers Figure 8: An IRTG rule encoding the rule in Fig. 7. (Yamada and Knight, 2001; Galley et al., 2004; Huang et al., 2006; Graehl et al., 2008). Figure 7 shows an example of a tree-to-string rule. It might be used to translate “the Commission’s strategic plan” into “das langfristige Programm der Kommission”. Our algorithm can binarize tree-to-string transducers; to our knowledge, it is the first algorithm to do so. We model the tree-to-string transducer as an IRTG G = ((G, h1, h2), A1, A2), where A2 is the string algebra, but this time A1 is the tree algebra shown in Table 1. This algebra has operations conk to concatenate sequences of trees and unary y that maps any sequence (t1, ... , tl) of trees to the tree </context>
+</contexts>
+<marker>Huang, Knight, Joshi, 2006</marker>
+<rawString>Liang Huang, Kevin Knight, and Aravind Joshi. 2006. Statistical syntax-directed translation with extended domain of locality. In Proceedings of the 7th AMTA, pages 66–73.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Donald E Knuth</author>
+</authors>
+<title>A generalization of Dijkstra’s algorithm.</title>
+<date>1977</date>
+<journal>Information Processing Letters,</journal>
+<volume>6</volume>
+<issue>1</issue>
+<pages>5</pages>
+<contexts>
+<context position="23479" citStr="Knuth, 1977" startWordPosition="4437" endWordPosition="4438"> intersection in Lemma 2 is empty in the restricted case if and only if it is empty in the general case. We call the b-rules b1, ... , b1 complete on G if the equation holds for every α E E. Now we show how to effectively compute binarization terms with respect to b1, ... , bn, along the lines of Section 3.3. More specifically, we construct an RTG for each of the sets (i) bi(hi(α)), (ii) b0 i = v(bi(hi(α))), (iii) ni b0i, and (iv) b00 i = bi(hi(α))nv−1(τ) (given τ). Then we can select τ from (iii) and ti from (iv) using a standard algorithm, such as the Viterbi algorithm or Knuth’s algorithm (Knuth, 1977; Nederhof, 2003; Huang and Chiang, 2005). The effectiveness of our procedure stems from the fact that we only manipulate RTGs and never enumerate languages. The construction for (i) is recursive, following the definition of bi. The base case is a language {xj}, for which the RTG is easy. For the recursive case, we use the fact that regular tree languages are closed under substitution (G´ecseg and Steinby, 1997, Prop. 7.3). Thus we obtain an RTG Gi with L(Gi) = bi(hi(α)). For (ii) and (iv), we need the following auxiliary 150 construction. Let Gi = (P, p0, R). We define the mapping vari : P → </context>
+</contexts>
+<marker>Knuth, 1977</marker>
+<rawString>Donald E. Knuth. 1977. A generalization of Dijkstra’s algorithm. Information Processing Letters, 6(1):1– 5.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Alexander Koller</author>
+<author>Marco Kuhlmann</author>
+</authors>
+<title>A generalized view on parsing and translation.</title>
+<date>2011</date>
+<booktitle>In Proceedings of the 12th IWPT,</booktitle>
+<pages>2--13</pages>
+<contexts>
+<context position="3114" citStr="Koller and Kuhlmann, 2011" startWordPosition="477" endWordPosition="480">theless, the rule-by-rule binarization algorithm of Huang et al. (2009) is very useful in practice. In this paper, we offer a generic approach for transferring the rule-by-rule binarization technique to new grammar formalisms. At the core of our approach is a binarization algorithm that can be adapted to a new formalism by changing a parameter at runtime. Thus it only needs to be implemented once, and can then be reused for a variety of formalisms. More specifically, our algorithm requires the user to (i) encode the grammar formalism as a subclass of interpreted regular tree grammars (IRTGs, (Koller and Kuhlmann, 2011)) and (ii) supply a collection of b-rules, which represent equivalence of grammars syntactically. Our algorithm then replaces, in a given grammar, each rule of rank greater than 2 by an equivalent collection of rules of rank 2, if such a collection is licensed by the b-rules. We define completeness of b-rules in a way that ensures that if any equivalent collection of rules of rank 2 exists, the algorithm finds one. As a consequence, the algorithm binarizes every grammar that can be binarized rule by rule. Step (i) is possible for all the grammar formalisms mentioned above. We show Step (ii) fo</context>
+<context position="10605" citStr="Koller and Kuhlmann, 2011" startWordPosition="1921" endWordPosition="1924"> into TA,(X). The language L(B) induced by B is the tree relation {(h1(t), ... , hn(t)) |t ∈ L(G)}. An IRTG is a bimorphism whose derived trees are viewed as terms over algebras; see Fig. 1. Formally, an IRTG G over (A1, ... , An) is a tuple (B, A1, ... , An) such that B is a bimorphism over (A1, ... , An) and Ai is a Ai-algebra. The language L(G) induced by G is the relation {(tA1 1 ,... , tAn n ) |(t1, ... , tn) ∈ L(B)}. We call the trees in L(G) derivation trees and the terms in L(B) semantic terms. We say that two IRTGs G and G0 are equivalent if L(G) = L(G0). IRTGs were first defined in (Koller and Kuhlmann, 2011). For example, Fig. 2 is an IRTG that encodes a synchronous context-free grammar (SCFG). It contains a bimorphism B = (G, h1, h2) consisting of an RTG G with four rules and homomorIRTG G = (B, A1, A2) Figure 1: IRTG, bimorphism overview. b ←−� α1 h1 7−→h2 b c ←−� α2 h1 d ←−� α� h1 7−→ h2 d Figure 2: An IRTG encoding an SCFG. phisms h1 and h2 which map derivation trees to trees over the signature of the string algebra in Table 1. By evaluating these trees in the algebra, the symbols coni and con4 are interpreted as concatenation, and we see that the first rule encodes the SCFG rule A → hBCD, Da</context>
+</contexts>
+<marker>Koller, Kuhlmann, 2011</marker>
+<rawString>Alexander Koller and Marco Kuhlmann. 2011. A generalized view on parsing and translation. In Proceedings of the 12th IWPT, pages 2–13.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Alexander Koller</author>
+<author>Marco Kuhlmann</author>
+</authors>
+<title>Decomposing TAG algorithms using simple algebraizations.</title>
+<date>2012</date>
+<booktitle>In Proceedings of the 11th TAG+ Workshop,</booktitle>
+<pages>135--143</pages>
+<contexts>
+<context position="11972" citStr="Koller and Kuhlmann, 2012" startWordPosition="2191" endWordPosition="2194">he expressive capacity of specific grammar formalisms by selecting suitable algebras. The string algebra in Table 1 yields context-free languages, more complex string alA1 ··· An bimorphism B = (G, h1, h2) L(G) C TE h1 hn TΔ1 ··· TΔn (.)A1 (.)An derivation trees semantic terms derived objects A → α(B, C, D) B → α1, C → α2, D → α3 con3 ←−� α 7−→ h2 con4 h1 x1 x2 x3 x3 a x1 x2 7−→ h2c 147 Figure 3: Derivation tree and semantic terms. A → α0(A0, D) A0 → α00(B, C) con2 con2 Hα00 � con2 x1 x2 x1 x2 Figure 4: Binary rules corresponding to the α-rule in Fig. 2. gebras yield tree-adjoining languages (Koller and Kuhlmann, 2012), and algebras over other domains can yield languages of trees, graphs, or other objects. Furthermore, IRTGs with n = 1 describe languages that are subsets of the algebra’s domain, n = 2 yields synchronous languages or tree transductions, and so on. 3 IRTG binarization We will now show how to apply the rule-by-rule binarization technique to IRTGs. We start in this section by defining the binarization of a rule in an IRTG, and characterizing it in terms of binarization terms and variable trees. We derive the actual binarization algorithm from this in Section 4. For the remainder of this paper, </context>
+<context position="34186" citStr="Koller and Kuhlmann, 2012" startWordPosition="6450" endWordPosition="6453">ammar formalism. 6 Conclusion We have presented an algorithm for binarizing IRTGs rule by rule, with respect to b-rules that the user specifies for each algebra. This improves the complexity of parsing and translation with any monolingual or synchronous grammar that can be represented as an IRTG. A novel algorithm for binarizing tree-to-string transducers falls out as a special case. In this paper, we have taken the perspective that the binarized IRTG uses the same algebras as the original IRTG. Our algorithm extends to grammars of arbitrary fanout (such as synchronous tree-adjoining grammar (Koller and Kuhlmann, 2012)), but unlike LCFRS-based approaches to binarization, it will not increase the fanout to ensure binarizability. In the future, we will explore IRTG binarization with fanout increase. This could be done by binarizing into an IRTG with a more complicated algebra (e.g., of string tuples). We might compute binarizations that are optimal with respect to some measure (e.g., fanout (Gomez-Rodriguez et al., 2009) or parsing complexity (Gildea, 2010)) by keeping track of this measure in the b-rule and taking intersections of weighted tree automata. Acknowledgments We thank the anonymous referees for th</context>
+</contexts>
+<marker>Koller, Kuhlmann, 2012</marker>
+<rawString>Alexander Koller and Marco Kuhlmann. 2012. Decomposing TAG algorithms using simple algebraizations. In Proceedings of the 11th TAG+ Workshop, pages 135–143.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Philip M Lewis</author>
+<author>Richard E Stearns</author>
+</authors>
+<title>Syntax directed transduction.</title>
+<date>1966</date>
+<journal>Foundations of Computer Science, IEEE Annual Symposium on,</journal>
+<pages>0--21</pages>
+<contexts>
+<context position="1308" citStr="Lewis and Stearns, 1966" startWordPosition="179" endWordPosition="182">iven grammar into an equivalent grammar of rank 2, i.e., with at most two nonterminals on any righthand side. The ability to binarize grammars is crucial for efficient parsing, because for many grammar formalisms the parsing complexity depends exponentially on the rank of the grammar. It is also critically important for tractable statistical machine translation (SMT). Syntaxbased SMT systems (Chiang, 2007; Graehl et al., 2008) typically use some type of synchronous grammar describing a binary translation relation between strings and/or trees, such as synchronous context-free grammars (SCFGs) (Lewis and Stearns, 1966; Chiang, 2007), synchronous tree-substitution grammars (Eisner, 2003), synchronous tree-adjoining grammars (Nesson et al., 2006; DeNeefe and Knight, 2009), and tree-tostring transducers (Yamada and Knight, 2001; Graehl et al., 2008). These grammars typically have a large number of rules, many of which have rank greater than two. The classical approach to binarization, as known from the Chomsky normal form transformation for context-free grammars (CFGs), proceeds rule by rule. It replaces each rule of rank greater than 2 by an equivalent collection of rules of rank 2. All CFGs can be binarized</context>
+</contexts>
+<marker>Lewis, Stearns, 1966</marker>
+<rawString>Philip M. Lewis and Richard E. Stearns. 1966. Syntax directed transduction. Foundations of Computer Science, IEEE Annual Symposium on, 0:21–35.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Mark-Jan Nederhof</author>
+</authors>
+<title>Weighted deductive parsing and Knuth’s algorithm.</title>
+<date>2003</date>
+<journal>Computational Linguistics,</journal>
+<volume>29</volume>
+<issue>1</issue>
+<contexts>
+<context position="23495" citStr="Nederhof, 2003" startWordPosition="4439" endWordPosition="4440"> in Lemma 2 is empty in the restricted case if and only if it is empty in the general case. We call the b-rules b1, ... , b1 complete on G if the equation holds for every α E E. Now we show how to effectively compute binarization terms with respect to b1, ... , bn, along the lines of Section 3.3. More specifically, we construct an RTG for each of the sets (i) bi(hi(α)), (ii) b0 i = v(bi(hi(α))), (iii) ni b0i, and (iv) b00 i = bi(hi(α))nv−1(τ) (given τ). Then we can select τ from (iii) and ti from (iv) using a standard algorithm, such as the Viterbi algorithm or Knuth’s algorithm (Knuth, 1977; Nederhof, 2003; Huang and Chiang, 2005). The effectiveness of our procedure stems from the fact that we only manipulate RTGs and never enumerate languages. The construction for (i) is recursive, following the definition of bi. The base case is a language {xj}, for which the RTG is easy. For the recursive case, we use the fact that regular tree languages are closed under substitution (G´ecseg and Steinby, 1997, Prop. 7.3). Thus we obtain an RTG Gi with L(Gi) = bi(hi(α)). For (ii) and (iv), we need the following auxiliary 150 construction. Let Gi = (P, p0, R). We define the mapping vari : P → P(Xk) such that </context>
+</contexts>
+<marker>Nederhof, 2003</marker>
+<rawString>Mark-Jan Nederhof. 2003. Weighted deductive parsing and Knuth’s algorithm. Computational Linguistics, 29(1):135–143.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Rebecca Nesson</author>
+<author>Stuart M Shieber</author>
+<author>Alexander Rush</author>
+</authors>
+<title>Induction of probabilistic synchronous tree-insertion grammars for machine translation.</title>
+<date>2006</date>
+<booktitle>In Proceedings of the 7th AMTA.</booktitle>
+<contexts>
+<context position="1436" citStr="Nesson et al., 2006" startWordPosition="194" endWordPosition="197">e grammars is crucial for efficient parsing, because for many grammar formalisms the parsing complexity depends exponentially on the rank of the grammar. It is also critically important for tractable statistical machine translation (SMT). Syntaxbased SMT systems (Chiang, 2007; Graehl et al., 2008) typically use some type of synchronous grammar describing a binary translation relation between strings and/or trees, such as synchronous context-free grammars (SCFGs) (Lewis and Stearns, 1966; Chiang, 2007), synchronous tree-substitution grammars (Eisner, 2003), synchronous tree-adjoining grammars (Nesson et al., 2006; DeNeefe and Knight, 2009), and tree-tostring transducers (Yamada and Knight, 2001; Graehl et al., 2008). These grammars typically have a large number of rules, many of which have rank greater than two. The classical approach to binarization, as known from the Chomsky normal form transformation for context-free grammars (CFGs), proceeds rule by rule. It replaces each rule of rank greater than 2 by an equivalent collection of rules of rank 2. All CFGs can be binarized in this way, which is why their recognition problem is cubic. In the case of linear context-free rewriting systems (LCFRSs, (We</context>
+</contexts>
+<marker>Nesson, Shieber, Rush, 2006</marker>
+<rawString>Rebecca Nesson, Stuart M. Shieber, and Alexander Rush. 2006. Induction of probabilistic synchronous tree-insertion grammars for machine translation. In Proceedings of the 7th AMTA.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Owen Rambow</author>
+<author>Giorgio Satta</author>
+</authors>
+<title>Independent parallelism in finite copying parallel rewriting systems.</title>
+<date>1999</date>
+<journal>Theoretical Computer Science,</journal>
+<volume>223</volume>
+<issue>1</issue>
+<pages>120</pages>
+<contexts>
+<context position="2173" citStr="Rambow and Satta, 1999" startWordPosition="315" endWordPosition="318">rammars typically have a large number of rules, many of which have rank greater than two. The classical approach to binarization, as known from the Chomsky normal form transformation for context-free grammars (CFGs), proceeds rule by rule. It replaces each rule of rank greater than 2 by an equivalent collection of rules of rank 2. All CFGs can be binarized in this way, which is why their recognition problem is cubic. In the case of linear context-free rewriting systems (LCFRSs, (Weir, 1988)) the rule-by-rule technique also applies to every grammar, as long as an increased fanout it permitted (Rambow and Satta, 1999). There are also grammar formalisms for which the rule-by-rule technique is not complete. In the case of SCFGs, not every grammar has an equivalent representation of rank 2 in the first place (Aho and Ullman, 1969). Even when such a representation exists, it is not always possible to compute it rule by rule. Nevertheless, the rule-by-rule binarization algorithm of Huang et al. (2009) is very useful in practice. In this paper, we offer a generic approach for transferring the rule-by-rule binarization technique to new grammar formalisms. At the core of our approach is a binarization algorithm th</context>
+</contexts>
+<marker>Rambow, Satta, 1999</marker>
+<rawString>Owen Rambow and Giorgio Satta. 1999. Independent parallelism in finite copying parallel rewriting systems. Theoretical Computer Science, 223(1–2):87– 120.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>David J Weir</author>
+</authors>
+<title>Characterizing Mildly ContextSensitive Grammar Formalisms.</title>
+<date>1988</date>
+<tech>Ph.D. thesis,</tech>
+<institution>University of Pennsylvania.</institution>
+<contexts>
+<context position="2045" citStr="Weir, 1988" startWordPosition="297" endWordPosition="298">06; DeNeefe and Knight, 2009), and tree-tostring transducers (Yamada and Knight, 2001; Graehl et al., 2008). These grammars typically have a large number of rules, many of which have rank greater than two. The classical approach to binarization, as known from the Chomsky normal form transformation for context-free grammars (CFGs), proceeds rule by rule. It replaces each rule of rank greater than 2 by an equivalent collection of rules of rank 2. All CFGs can be binarized in this way, which is why their recognition problem is cubic. In the case of linear context-free rewriting systems (LCFRSs, (Weir, 1988)) the rule-by-rule technique also applies to every grammar, as long as an increased fanout it permitted (Rambow and Satta, 1999). There are also grammar formalisms for which the rule-by-rule technique is not complete. In the case of SCFGs, not every grammar has an equivalent representation of rank 2 in the first place (Aho and Ullman, 1969). Even when such a representation exists, it is not always possible to compute it rule by rule. Nevertheless, the rule-by-rule binarization algorithm of Huang et al. (2009) is very useful in practice. In this paper, we offer a generic approach for transferri</context>
+</contexts>
+<marker>Weir, 1988</marker>
+<rawString>David J. Weir. 1988. Characterizing Mildly ContextSensitive Grammar Formalisms. Ph.D. thesis, University of Pennsylvania.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Kenji Yamada</author>
+<author>Kevin Knight</author>
+</authors>
+<title>A syntaxbased statistical translation model.</title>
+<date>2001</date>
+<booktitle>In Proceedings of the 39th ACL,</booktitle>
+<pages>523--530</pages>
+<contexts>
+<context position="1519" citStr="Yamada and Knight, 2001" startWordPosition="206" endWordPosition="209">s the parsing complexity depends exponentially on the rank of the grammar. It is also critically important for tractable statistical machine translation (SMT). Syntaxbased SMT systems (Chiang, 2007; Graehl et al., 2008) typically use some type of synchronous grammar describing a binary translation relation between strings and/or trees, such as synchronous context-free grammars (SCFGs) (Lewis and Stearns, 1966; Chiang, 2007), synchronous tree-substitution grammars (Eisner, 2003), synchronous tree-adjoining grammars (Nesson et al., 2006; DeNeefe and Knight, 2009), and tree-tostring transducers (Yamada and Knight, 2001; Graehl et al., 2008). These grammars typically have a large number of rules, many of which have rank greater than two. The classical approach to binarization, as known from the Chomsky normal form transformation for context-free grammars (CFGs), proceeds rule by rule. It replaces each rule of rank greater than 2 by an equivalent collection of rules of rank 2. All CFGs can be binarized in this way, which is why their recognition problem is cubic. In the case of linear context-free rewriting systems (LCFRSs, (Weir, 1988)) the rule-by-rule technique also applies to every grammar, as long as an </context>
+<context position="29834" citStr="Yamada and Knight, 2001" startWordPosition="5666" endWordPosition="5669">e binarized by both algorithms or neither. For instance, for the SCFG rule A → hBCDE, CEBDi, the sets v(b1(h1(α))) and v(b2(h2(α))) are disjoint, thus no binarization exists. Two strings of length N can be parsed with a binary IRTG that represents an SCFG in time O(N6). 5.2 Tree-to-string transducers Some approaches to SMT go beyond string-tostring translation models such as SCFG by exploiting known syntactic structures in the source or target language. This perspective on translation naturally leads to the use of tree-to-string transducers Figure 8: An IRTG rule encoding the rule in Fig. 7. (Yamada and Knight, 2001; Galley et al., 2004; Huang et al., 2006; Graehl et al., 2008). Figure 7 shows an example of a tree-to-string rule. It might be used to translate “the Commission’s strategic plan” into “das langfristige Programm der Kommission”. Our algorithm can binarize tree-to-string transducers; to our knowledge, it is the first algorithm to do so. We model the tree-to-string transducer as an IRTG G = ((G, h1, h2), A1, A2), where A2 is the string algebra, but this time A1 is the tree algebra shown in Table 1. This algebra has operations conk to concatenate sequences of trees and unary y that maps any sequ</context>
+</contexts>
+<marker>Yamada, Knight, 2001</marker>
+<rawString>Kenji Yamada and Kevin Knight. 2001. A syntaxbased statistical translation model. In Proceedings of the 39th ACL, pages 523–530.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>
