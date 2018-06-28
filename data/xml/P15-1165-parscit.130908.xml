@@ -1,0 +1,1482 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.000004">
+<title confidence="0.8191905">
+Inverted indexing for cross-lingual NLP
+Anders Søgaard* ˇZeljko Agi´c* H´ector Martinez Alonso*
+</title>
+<author confidence="0.991347">
+Barbara Plank* Bernd Bohnet† Anders Johannsen*
+</author>
+<affiliation confidence="0.8336785">
+*Center for Language Technology, University of Copenhagen, Denmark
+†Google, London, United Kingdom
+</affiliation>
+<email confidence="0.996833">
+soegaard@hum.ku.dk
+</email>
+<sectionHeader confidence="0.993863" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.999797214285714">
+We present a novel, count-based approach
+to obtaining inter-lingual word represen-
+tations based on inverted indexing of
+Wikipedia. We present experiments ap-
+plying these representations to 17 datasets
+in document classification, POS tagging,
+dependency parsing, and word alignment.
+Our approach has the advantage that it
+is simple, computationally efficient and
+almost parameter-free, and, more im-
+portantly, it enables multi-source cross-
+lingual learning. In 14/17 cases, we im-
+prove over using state-of-the-art bilingual
+embeddings.
+</bodyText>
+<sectionHeader confidence="0.998993" genericHeader="keywords">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.999777775862069">
+Linguistic resources are hard to come by and un-
+evenly distributed across the world’s languages.
+Consequently, transferring linguistic resources or
+knowledge from one language to another has been
+identified as an important research problem. Most
+work on cross-lingual transfer has used English
+as the source language. There are two reasons
+for this; namely, the availability of English re-
+sources and the availability of parallel data for
+(and translations between) English and most other
+languages.
+In cross-lingual syntactic parsing, for exam-
+ple, two approaches to cross-lingual learning
+have been explored, namely annotation projec-
+tion and delexicalized transfer. Annotation pro-
+jection (Hwa et al., 2005) uses word-alignments
+in human translations to project predicted source-
+side analyses to the target language, producing a
+noisy syntactically annotated resource for the tar-
+get language. On the other hand, delexicalized
+transfer (Zeman and Resnik, 2008; McDonald et
+al., 2011; Søgaard, 2011) simply removes lexi-
+cal features from mono-lingual parsing models,
+but assumes reliable POS tagging for the target
+language. Delexicalized transfer works particu-
+larly well when resources from several source lan-
+guages are used for training; learning from mul-
+tiple other languages prevents over-fitting to the
+peculiarities of the source language. Some au-
+thors have also combined annotation projection
+and delexicalized transfer, e.g., McDonald et al.
+(2011). Others have tried to augment delexical-
+ized transfer models with bilingual word repre-
+sentations (T¨ackstr¨om et al., 2013; Xiao and Guo,
+2014).
+In cross-lingual POS tagging, mostly annotation
+projection has been explored (Fossum and Abney,
+2005; Das and Petrov, 2011), since all features in
+POS tagging models are typically lexical. How-
+ever, using bilingual word representations was re-
+cently explored as an alternative to projection-
+based approaches (Gouws and Søgaard, 2015).
+The major drawback of using bi-lexical repre-
+sentations is that it limits us to using a single
+source language. T¨ackstr¨om et al. (2013) ob-
+tained significant improvements using bilingual
+word clusters over a single source delexicalized
+transfer model, for example, but even better re-
+sults were obtained with delexicalized transfer in
+McDonald et al. (2011) by simply using several
+source languages.
+This paper introduces a simple method for ob-
+taining truly inter-lingual word representations in
+order to train models with lexical features on sev-
+eral source languages at the same time. Briefly
+put, we represent words by their occurrence in
+clusters of Wikipedia articles linking to the same
+concept. Our representations are competitive with
+</bodyText>
+<page confidence="0.852238">
+1713
+</page>
+<note confidence="0.972633">
+Proceedings of the 53rd Annual Meeting of the Association for Computational Linguistics
+and the 7th International Joint Conference on Natural Language Processing, pages 1713–1722,
+Beijing, China, July 26-31, 2015. c�2015 Association for Computational Linguistics
+</note>
+<bodyText confidence="0.999897615384616">
+state-of-the-art neural net word embeddings when
+using only a single source language, but also en-
+able us to exploit the availability of resources in
+multiple languages. This also makes it possible to
+explore multi-source transfer for POS tagging. We
+evaluate the method across POS tagging and de-
+pendency parsing datasets in four languages in the
+Google Universal Treebanks v. 1.0 (see §3.2.1),
+as well as two document classification datasets
+and four word alignment problems using a hand-
+aligned text. Finally, we also directly compare our
+results to Xiao and Guo (2014) on parsing data for
+four languages from CoNLL 2006 and 2007.
+</bodyText>
+<sectionHeader confidence="0.858844" genericHeader="introduction">
+Contribution
+</sectionHeader>
+<listItem confidence="0.890680615384616">
+• We present a novel approach to cross-lingual
+word representations with several advantages
+over existing methods: (a) It does not require
+training neural networks, (b) it does not rely
+on the availability of parallel data between
+source and target language, and (c) it enables
+multi-source transfer with lexical representa-
+tions.
+• We present an evaluation of our inter-lingual
+word representations, based on inverted in-
+dexing, across four tasks: document classi-
+fication, POS tagging, dependency parsing,
+and word alignment, comparing our repre-
+</listItem>
+<bodyText confidence="0.910243285714286">
+sentations to two state-of-the-art neural net
+word embeddings. For the 17 datasets, for
+which we can make this comparison, our sys-
+tem is better than these embedding models
+on 14 datasets. The word representations
+are made publicly available at https://
+bitbucket.org/lowlands/
+</bodyText>
+<sectionHeader confidence="0.903342" genericHeader="method">
+2 Distributional word representations
+</sectionHeader>
+<bodyText confidence="0.995919947368421">
+Most NLP models rely on lexical features. En-
+coding the presence of words leads to high-
+dimensional and sparse models. Also, simple bag-
+of-words models fail to capture the relatedness of
+words. In many tasks, synonymous words should
+be treated alike, but their bag-of-words representa-
+tions are as different as those of dog and therefore.
+Distributional word representations are sup-
+posed to capture distributional similarities be-
+tween words. Intuitively, we want similar words to
+have similar representations. Known approaches
+focus on different kinds of similarity, some more
+syntactic, some more semantic. The representa-
+tions are typically either clusters of distribution-
+ally similar words, e.g., Brown et al. (1992), or
+vector representations. In this paper, we focus
+on vector representations. In vector-based ap-
+proaches, similar representations are vectors close
+in some multi-dimensional space.
+</bodyText>
+<subsectionHeader confidence="0.951022">
+2.1 Count-based and prediction-based
+representations
+</subsectionHeader>
+<bodyText confidence="0.999945266666667">
+There are, briefly put, two approaches to inducing
+vector-based distributional word representations
+from large corpora: count-based and prediction-
+based approaches (Baroni et al., 2014). Count-
+based approaches represent words by their co-
+occurrences. Dimensionality reduction is typically
+performed on a raw or weighted co-occurrence
+matrix using methods such as singular value de-
+composition (SVD), a method for maximizing the
+variance in a dataset in few dimensions. In our
+inverted indexing, we use raw co-occurrence data.
+Prediction-based methods use discriminative
+learning techniques to learn how to predict words
+from their context, or vice versa. They rely on
+a neural network architecture, and once the net-
+work converges, they use word representations
+from a middle layer as their distributional repre-
+sentations. Since the network learns to predict
+contexts from this representation, words occurring
+in the same contexts will get similar representa-
+tions. In §2.1.2, we briefly introduce the skip-
+gram and CBOW models (Mikolov et al., 2013;
+Collobert and Weston, 2008).
+Baroni et al. (2014) argue in favor of prediction-
+based representations, but provide little explana-
+tion why prediction-based representations should
+be better. One key finding, however, is that
+prediction-based methods tend to be more robust
+than count-based methods, and one reason for this
+seems to be better regularization.
+</bodyText>
+<subsectionHeader confidence="0.964134">
+2.1.1 Monolingual representations
+</subsectionHeader>
+<bodyText confidence="0.9688636">
+Count-based representations rely on co-
+occurrence information in the form of binary
+matrices, raw counts, or point-wise mutual in-
+formation (PMI). The PMI between two words
+is
+</bodyText>
+<listItem confidence="0.497329166666667">
+wi)
+and PMI representations associate a word wi with
+a vector of its PMIs with all other words wj. Di-
+mensionality reduction is typically performed us-
+ing SVD. We will refer to two prediction-based
+approaches to learning word vectors, below: the
+</listItem>
+<equation confidence="0.99897">
+P(wi  |wj)
+P(wi; wj) = log
+P(
+</equation>
+<page confidence="0.661576">
+1714
+</page>
+<table confidence="0.145198225806452">
+KLEMENTIEV CHANDAR INVERTED
+es
+coche (’car’, NOUN)
+expressed (’expressed’, VERB)
+tel6fono (’phone’, NOUN)
+drbol (’tree’, NOUN)
+escribi6 (’wrote’, VERB)
+amarillo (’yellow’, ADJ)
+approximately beyond upgrading car bicycle cars driving car cars
+1.61 55.8 month-to-month reiterates reiterating confirming exists defining example
+alexandra davison creditor phone telephone e-mail phones phone telecommunication
+tree market-oriented assassinate tree bread wooden tree trees grows
+wrote alleges testified wrote paul palace wrote inspired inspiration
+yellow louisiana 1911 crane grabs outfit colors yellow oohs
+de
+auto (’car’, NOUN) car cars camaro
+ausgedr¨uckt (’expressed’, VERB) adjective decimal imperative
+fr
+voiture (’car’, NOUN) mercedes-benz cars quickest
+exprim8 (’expressed’, VERB) simultaneously instead possible
+t6l6phone (’phone’, NOUN) phone create allowing
+arbre (’tree’, NOUN) tree trees grows
+6crit (’wrote’, VERB) published writers books
+jaune (’yellow’, ADJ) classification yellow stages
+sv
+bil (’car’, NOUN) cars car automobiles
+uttryckte (’expressed’, VERB) rejected threatening unacceptable
+telefon (’phone’, NOUN) telephones telephone share
+tr¨ad (’tree’, NOUN) trees tree trunks
+skrev (’wrote’, VERB) death wrote biography
+gul (’yellow’, ADJ) greenish bluish colored
+</table>
+<tableCaption confidence="0.953753">
+Table 1: Three nearest neighbors in the English training data of six words occurring in the Spanish test
+</tableCaption>
+<bodyText confidence="0.987703785714286">
+data, in the embeddings used in our experiments. Only 2/6 words were in the German data.
+skip-gram model and CBOW. The two models
+both rely on three level architectures with input,
+output and a middle layer for intermediate tar-
+get word representations. The major difference
+is that skip-gram uses the target word as input
+and the context as output, whereas the CBOW
+model does it the other way around. Learning goes
+by back-propagation, and random target words
+are used as negative examples. Levy and Gold-
+berg (2014) show that prediction-based represen-
+tations obtained with the skip-gram model can be
+related to count-based ones obtained with PMI.
+They argue that which is best, varies across tasks.
+</bodyText>
+<subsectionHeader confidence="0.891998">
+2.1.2 Bilingual representations
+</subsectionHeader>
+<bodyText confidence="0.999969930232558">
+Klementiev et al. (2012) learn distinct embedding
+models for the source and target languages, but
+while learning to minimize the sum of the two
+models’ losses, they jointly learn a regularizing in-
+teraction matrix, enforcing word pairs aligned in
+parallel text to have similar representations. Note
+that Klementiev et al. (2012) rely on word-aligned
+parallel text, and thereby on a large-coverage soft
+mapping of source words to target words. Other
+approaches rely on small coverage dictionaries
+with hard 1:1 mappings between words. Klemen-
+tiev et al. (2012) do not use skip-gram or CBOW,
+but the language model presented in Bengio et
+al. (2003).
+Chandar et al. (2014) also rely on sentence-
+aligned parallel text, but do not make use of word
+alignments. They begin with bag-of-words repre-
+sentations of source and target sentences. They
+then use an auto-encoder architecture. Auto-
+encoders for document classification typically try
+to reconstruct bag-of-words input vectors at the
+output layer, using back-propagation, passing the
+representation through a smaller middle layer.
+This layer then provides a dimensionality reduc-
+tion. Chandar et al. (2014) instead replace the out-
+put layer with the target language bag-of-words
+reconstruction. In their final set-up, they simul-
+taneously minimize the loss of a source-source, a
+target-target, a source-target, and a target-source
+auto-encoder, which corresponds to training a sin-
+gle auto-encoder with randomly chosen instances
+from source-target pairs. The bilingual word vec-
+tors can now be read off the auto-encoder’s middle
+layer.
+Xiao and Guo (2014) use a CBOW model and
+random target words as negative examples. The
+trick they introduce to learn bilingual embeddings,
+relies on a bilingual dictionary, in their case ob-
+tained from Wiktionary. They only use the unam-
+biguous translation pairs for the source and target
+languages in question and simply force translation
+equivalents to have the same representation. This
+corresponds to replacing words from unambigu-
+</bodyText>
+<page confidence="0.942345">
+1715
+</page>
+<bodyText confidence="0.999942904761905">
+ous translation pairs with a unique dummy sym-
+bol.
+Gouws and Søgaard (2015) present a much sim-
+pler approach to learning prediction-based bilin-
+gual representations. They assume a list of source-
+target pivot word pairs that should obtain simi-
+lar representations, i.e., translations or words with
+similar representations in some knowledge base.
+They then present a generative model for con-
+structing a mixed language corpus by randomly
+selecting sentences from source and target cor-
+pora, and randomly replacing pivot words with
+their equivalent in the other language. They show
+that running the CBOW model on such a mixed
+corpus suffices to learn competitive bilingual em-
+beddings. Like Xiao and Guo (2014), Gouws and
+Søgaard (2015) only use unambiguous translation
+pairs.
+There has, to the best of our knowledge, been no
+previous work on count-based approaches to bilin-
+gual representations.
+</bodyText>
+<subsectionHeader confidence="0.987743">
+2.2 Inverted indexing
+</subsectionHeader>
+<bodyText confidence="0.999993159090909">
+In this paper, we introduce a new count-based
+approach, INVERTED, to obtaining cross-lingual
+word representations using inverted indexing,
+comparing it with bilingual word representations
+learned using discriminative techniques. The main
+advantage of this approach, apart for its simplic-
+ity, is that it provides truly inter-lingual represen-
+tations.
+Our idea is simple. Wikipedia is a cross-lingual,
+crowd-sourced encyclopedia with more than 35
+million articles written in different languages. At
+the time of writing, Wikipedia contains more than
+10,000 articles in 129 languages. 52 languages
+had more than 100,000 articles. Several articles
+are written on the same topic, but in different lan-
+guages, and these articles all link to the same node
+in the Wikipedia ontology, the same Wikipedia
+concept. If for a set of languages, we identify
+the common subset of Wikipedia concepts, we can
+thus describe each concept by the set of terms used
+in the corresponding articles. Each term set will
+include terms from each of the different languages.
+We can now present a word by the corre-
+sponding row in the inverted indexing of this
+concept-to-term set matrix. Instead of repre-
+senting a Wikipedia concept by the terms used
+across languages to describe it, we describe a
+word by the Wikipedia concepts it is used to de-
+scribe. Note that because of the cross-lingual
+concepts, this vector representation is by defini-
+tion cross-lingual. So, for example, if the word
+glasses is used in the English Wikipedia article on
+Harry Potter, and the English Wikipedia article on
+Google, and the word Brille occurs in the corre-
+sponding German ones, the two words are likely
+to get similar representations.
+In our experiments, we use the common sub-
+set of available German, English, French, Span-
+ish, and Swedish Wikipedia dumps.1 We leave out
+words occurring in more than 5000 documents and
+perform dimensionality reduction using stochas-
+tic, two-pass, rank-reduced SVD - specifically, the
+latent semantic indexing implementation in Gen-
+sim using default parameters.2
+</bodyText>
+<subsectionHeader confidence="0.989939">
+2.3 Baseline embeddings
+</subsectionHeader>
+<bodyText confidence="0.999975666666667">
+We use the word embedding models of Klemen-
+tiev et al. (2012)3 (KLEMENTIEV), and Chandar
+et al. (2014) (CHANDAR) as baselines in the ex-
+periments below. We also ran some of our exper-
+iments with the embeddings provided by Gouws
+and Søgaard (2015), but results were very similar
+to Chandar et al. (2014). We compare the near-
+est cross-language neighbors in the various rep-
+resentations in Table 1. Specifically, we selected
+five words from the Spanish test data and searched
+for its three nearest neighbors in KLEMENTIEV,
+CHANDAR and INVERTED. The nearest neighbors
+are presented left to right. We note that CHANDAR
+and INVERTED seem to contain less noise. KLE-
+MENTIEV is the only model that relies on word-
+alignments. Whether the noise originates from
+alignments, or just model differences, is unclear
+to us.
+</bodyText>
+<subsectionHeader confidence="0.9170195">
+2.4 Parameters of the word representation
+models
+</subsectionHeader>
+<bodyText confidence="0.999953777777778">
+For KLEMENTIEV and CHANDAR, we rely on em-
+beddings provided by the authors. The only pa-
+rameter in inverted indexing is the fixed dimen-
+sionality in SVD. Our baseline models use 40 di-
+mensions. In document classification, we also
+use 40 dimensions, but for POS tagging and de-
+pendency parsing, we tune the dimensionality pa-
+rameter δ ∈ {40, 80,160} on Spanish develop-
+ment data when possible. For document clas-
+</bodyText>
+<footnote confidence="0.9996715">
+1https://sites.google.com/site/rmyeid/
+projects/polyglot
+2http://radimrehurek.com/gensim/
+3http://klementiev.org/data/distrib/
+</footnote>
+<page confidence="0.832961">
+1716
+</page>
+<table confidence="0.999966045454546">
+TRAIN TEST TOKEN COVERAGE
+lang data points tokens data points tokens KLEMENTIEV CHANDAR INVERTED
+RCV – DOCUMENT CLASSIFICATION
+en 10000 – – – 0.314 0.314 0.779
+de – – 4998 – 0.132 0.132 0.347
+AMAZON – DOCUMENT CLASSIFICATION
+en 6000 – – – 0.314 0.314 0.779
+de – – 6000 – 0.132 0.132 0.347
+GOOGLE UNIVERSAL TREEBANKS – POS TAGGING &amp; DEPENDENCY PARSING
+en 39.8k 950k 2.4k 56.7k – – –
+de 2.2k 30.4k 1.0k 16.3k 0.886 0.884 0.587
+es 3.3k 94k 0.3k 8.3k 0.916 0.916 0.528
+fr 3.3k 74.9k 0.3k 6.9k 0.888 0.888 0.540
+sv 4.4k 66.6k 1.2k 20.3k n/a n/a 0.679
+CONLL 07 – DEPENDENCY PARSING
+en 18.6 447k – – – – –
+es – – 206 5.7k 0.841 0.841 0.455
+de – – 357 5.7k 0.616 0.612 0.294
+sv – – 389 5.7k n/a n/a 0.561
+EUROPARL – WORD ALIGNMENT
+en – – 100 – 0.370 0.370 0.370
+es – – 100 – 0.533 0.533 0.533
+</table>
+<tableCaption confidence="0.921422">
+Table 2: Characteristics of the data sets. Embeddings coverage (token-level) for KLEMENTIEV, CHAN-
+DAR and INVERTED on the test sets. We use the common vocabulary on WORD ALIGNMENT.
+</tableCaption>
+<bodyText confidence="0.99967775">
+sification and word alignment, we fix the num-
+ber of dimensions to 40. For both our base-
+lines and systems, we also tune a scaling fac-
+tor Q ∈ {1.0, 0.1, 0.01, 0.001} for POS tagging
+and dependency parsing, using the scaling method
+from Turian et al. (2010), also used in Gouws and
+Søgaard (2015). We do not scale our embeddings
+for document classification or word alignment.
+</bodyText>
+<sectionHeader confidence="0.999801" genericHeader="method">
+3 Experiments
+</sectionHeader>
+<bodyText confidence="0.568844">
+The data set characteristics are found in Table 2.3.
+</bodyText>
+<subsectionHeader confidence="0.997087">
+3.1 Document classification
+</subsectionHeader>
+<bodyText confidence="0.99981175">
+Data Our first document classification task is topic
+classification on the cross-lingual multi-domain
+sentiment analysis dataset AMAZON in Pretten-
+hofer and Stein (2010).4 We represent each docu-
+ment by the average of the representations of those
+words that we find both in the documents and in
+our embeddings. Rather than classifying reviews
+by sentiment, we classify by topic, trying to dis-
+criminate between book reviews, music reviews
+and DVD reviews, as a three-way classification
+problem, training on English and testing on Ger-
+man. Unlike in the other tasks below, we always
+</bodyText>
+<footnote confidence="0.814065">
+4http://www.webis.de/research/corpora/
+</footnote>
+<bodyText confidence="0.998764368421053">
+use unscaled word representations, since these are
+our only features. All word representations have
+40 dimensions.
+The other document classification task is a four-
+way classification problem distinguishing between
+four topics in RCV corpus.5 See Klementiev et al.
+(2012) for details. We use exactly the same set-up
+as for AMAZON.
+Baselines We use the default parameters of the im-
+plementation of logistic regression in Sklearn as
+our baseline.6 The feature representation is the av-
+erage embedding of non-stopwords in KLEMEN-
+TIEV, resp., CHANDAR. Out-of-vocabulary words
+do not affect the feature representation of the doc-
+uments.
+System For our system, we replace the above neu-
+ral net word embeddings with INVERTED repre-
+sentations. Again, out-of-vocabulary words do not
+affect the feature representation of the documents.
+</bodyText>
+<subsectionHeader confidence="0.998203">
+3.2 POS tagging
+</subsectionHeader>
+<bodyText confidence="0.984104">
+Data We use the coarse-grained part-of-speech an-
+notations in the Google Universal Treebanks v. 1.0
+</bodyText>
+<footnote confidence="0.9999475">
+5http://www.ml4nlp.de/code-and-data
+6http://scikit-learn.org/stable/
+</footnote>
+<page confidence="0.996024">
+1717
+</page>
+<bodyText confidence="0.999784838709677">
+(McDonald et al., 2013).7 Out of the languages in
+this set of treebanks, we focus on five languages
+(de, en, es, fr, sv), with English only used as train-
+ing data. Those are all treebanks of significant
+size, but more importantly, we have baseline em-
+beddings for four of these languages, as well as tag
+dictionaries (Li et al., 2012) needed for the POS
+tagging experiments.
+Baselines One baseline method is a type-
+constrained structured perceptron with only orto-
+graphic features, which are expected to transfer
+across languages. The type constraints come from
+Wiktionary, a crowd-sourced tag dictionary.8 Type
+constraints from Wiktionary were first used by Li
+et al. (2012), but note that their set-up is unsu-
+pervised learning. T¨ackstr¨om et al. (2013) also
+used type constraints in a supervised set-up. Our
+learning algorithm is the structured perceptron al-
+gorithm originally proposed by Collins (2002). In
+our POS tagging experiments, we always do 10
+passes over the data. We also present two other
+baselines, where we augment the feature repre-
+sentation with different embeddings for the target
+word, KLEMENTIEV and CHANDAR. With all the
+embeddings in POS tagging, we assign a mean
+vector to out-of-vocabulary words.
+System For our system, we simply augment the
+delexicalized POS tagger with the INVERTED dis-
+tributional representation of the current word. The
+best parameter setting on Spanish development
+data was Q = 0.01, 6 = 160.
+</bodyText>
+<subsectionHeader confidence="0.998812">
+3.3 Dependency parsing
+</subsectionHeader>
+<bodyText confidence="0.9999821875">
+Data We use the same treebanks from the Google
+Universal Treebanks v. 1.0 as used in our POS tag-
+ging experiments. We again use the Spanish de-
+velopment data for parameter tuning. For compat-
+ibility with Xiao and Guo (2014), we also present
+results on CoNLL 2006 and 2007 treebanks for
+languages for which we had baseline and system
+word representations (de, es, sv). Our parameter
+settings for these experiments were the same as
+those tuned on the Spanish development data from
+the Google Universal Treebanks v. 1.0.
+Baselines The most obvious baseline in our exper-
+iments is delexicalized transfer (DELEX) (McDon-
+ald et al., 2011; Søgaard, 2011). This baseline sys-
+tem simply learns models without lexical features.
+We use a modified version of the first-order Mate
+</bodyText>
+<footnote confidence="0.978172666666667">
+7http://code.google.com/p/uni-dep-tb/
+8https://code.google.com/p/
+wikily-supervised-pos-tagger/
+</footnote>
+<bodyText confidence="0.999661033333333">
+parser (Bohnet, 2010) that also takes continuous-
+valued embeddings as input an disregards features
+that include lexical items.
+For our embeddings baselines, we augment the
+feature space by adding embedding vectors for
+head h and dependent d. We experimented with
+different versions of combining embedding vec-
+tors, from firing separate h and d per-dimension
+features (Bansal et al., 2014) to combining their
+information. We found that combining the em-
+beddings of h and d is effective and consistently
+use the absolute difference between the embed-
+ding vectors, since that worked better than addi-
+tion and multiplication on development data.
+Delexicalized transfer (DELEX) uses three (3)
+iterations over the data in both the single-source
+and the multi-source set-up, a parameter set on
+the Spanish development data. The remaining pa-
+rameters were obtained by averaging over perfor-
+mance with different embeddings on the Spanish
+development data, obtaining: Q = 0.005, 6 =
+20, i = 3, and absolute difference for vector com-
+bination. With all the embeddings in dependency
+parsing, we assign a POS-specific mean vector to
+out-of-vocabulary words, i.e., the mean of vectors
+for words with the input word’s POS.
+System We use the same parameters as those used
+for our baseline systems. In the single-source set-
+up, we use absolute difference for combining vec-
+tors, while addition in the multi-source set-up.
+</bodyText>
+<subsectionHeader confidence="0.996342">
+3.4 Word alignment
+</subsectionHeader>
+<bodyText confidence="0.9998465625">
+Data We use the manually word-aligned English-
+Spanish Europarl data from Graca et al. (2008).
+The dataset contains 100 sentences. The annota-
+tors annotated whether word alignments were cer-
+tain or possible, and we present results with all
+word alignments and with only the certain ones.
+See Graca et al. (2008) for details.
+Baselines For word alignment, we simply align
+every aligned word in the gold data, for which we
+have a word embedding, to its (Euclidean) nearest
+neighbor in the target sentence. We evaluate this
+strategy by its precision (P@1).
+System We compare INVERTED with KLEMEN-
+TIEV and CHANDAR. To ensure a fair comparison,
+we use the subset of words covered by all three
+embeddings.
+</bodyText>
+<page confidence="0.997346">
+1718
+</page>
+<tableCaption confidence="0.960912333333333">
+Table 4: POS tagging (accuracies), K12: KLEMENTIEV, C14: CHANDAR. Parameters tuned on devel-
+opment data: Q = 0.01, δ = 160. Iterations not tuned (i = 10). Averages do not include Swedish, for
+comparability.
+</tableCaption>
+<table confidence="0.992295105263158">
+de es fr sv av-sv
+EN→TARGET
+MULTI-SOURCE→TARGET
+INVERTED SVD 80.10 84.69 49.68 78.72 70.66
+80.20 73.16 47.69
+74.85 83.03 48.24
+81.18 82.12 49.68
+67.02
+-
+68.71
+-
+78.72 70.99
+K12
+C14
+EMBEDS
+INVERTED SVD
+Dataset KLEMENTIEV CHANDAR INVERTED
+AMAZON 0.32 0.36 0.49
+RCV 0.75 0.90 0.55
+</table>
+<tableCaption confidence="0.997277">
+Table 3: Document classification results (Fl-
+</tableCaption>
+<equation confidence="0.81171175">
+scores)
+UAS
+de es sv
+EN→TARGET
+</equation>
+<bodyText confidence="0.816013">
+- 44.78 47.07 56.75
+- 46.24 52.05 57.79
+</bodyText>
+<equation confidence="0.478816">
+K12 44.77 47.31 -
+C14 44.32 47.56
+INVERTED - 45.01 47.45 56.15
+XIAO - 49.54 55.72 61.88
+</equation>
+<tableCaption confidence="0.762874">
+Table 6: Dependency parsing for CoNLL
+2006/2007 datasets. Parameters same as on the
+Google Universal Treebanks.
+</tableCaption>
+<sectionHeader confidence="0.999872" genericHeader="evaluation">
+4 Results
+</sectionHeader>
+<subsectionHeader confidence="0.999788">
+4.1 Document classification
+</subsectionHeader>
+<bodyText confidence="0.99960225">
+Our document classification results in Table 3 are
+mixed, but we note that both Klementiev et al.
+(2012) and Chandar et al. (2014) developed their
+methods using development data from the RCV
+corpus. It is therefore not surprising that they
+obtain good results on this data. On AMAZON,
+INVERTED is superior to both KLEMENTIEV and
+CHANDAR.
+</bodyText>
+<subsectionHeader confidence="0.994561">
+4.2 POS tagging
+</subsectionHeader>
+<bodyText confidence="0.999688555555556">
+In POS tagging, INVERTED leads to signifi-
+cant improvements over using KLEMENTIEV and
+CHANDAR. See Table 4 for results. Somewhat
+surprisingly, we see no general gain from using
+multiple source languages. This is very different
+from what has been observed in dependency pars-
+ing (McDonald et al., 2011), but may be explained
+by treebank sizes, language similarity, or the noise
+introduced by the word representations.
+</bodyText>
+<subsectionHeader confidence="0.999219">
+4.3 Dependency parsing
+</subsectionHeader>
+<bodyText confidence="0.999784947368421">
+In dependency parsing, distributional word rep-
+resentations do not lead to significant improve-
+ments, but while KLEMENTIEV and CHANDAR
+hurt performance, the INVERTED representations
+lead to small improvements on some languages.
+The fact that improvements are primarily seen on
+Spanish suggest that our approach is parameter-
+sensitive. This is in line with previous ob-
+servations that count-based methods are more
+parameter-sensitive than prediction-based ones
+(Baroni et al., 2014).
+For comparability with Xiao and Guo (2014),
+we also did experiments with the CoNLL 2006
+and CoNLL 2007 datasets for which we had
+embeddings (Table 6). Again, we see little effects
+from using the word representations, and we also
+see that our baseline model is weaker than the one
+in Xiao and Guo (2014) (DELEX-XIAO). See §5
+for further discussion.
+</bodyText>
+<subsectionHeader confidence="0.999239">
+4.4 Word alignment
+</subsectionHeader>
+<bodyText confidence="0.998508125">
+The word alignment results are presented in Ta-
+ble 7. On the certain alignments, we see an ac-
+curacy of more than 50% with INVERTED in one
+case. KLEMENTIEV and CHANDAR have the ad-
+vantage of having been trained on the English-
+Spanish Europarl data, but nevertheless we see
+consistent improvements with INVERTED over
+their off-the-shelf embeddings.
+</bodyText>
+<figure confidence="0.639854130434783">
+DELEX
+DELEX-XIAO
+EMBEDS
+1719
+de UAS sv de LAS sv
+es fr es fr
+EN→TARGET
+56.26 62.11 64.30 66.61 48.24 53.01 54.98 56.93
+56.47 61.92 61.51 - 48.26 52.88 51.76 -
+56.19 61.97 62.95 - 48.11 52.97 53.90 -
+56.18 61.71 63.81 66.54 48.82 53.04 54.81 57.18
+MULTI-SOURCE→TARGET
+56.80 63.21 66.00 67.49 49.32 54.77 56.53 57.86
+56.56 64.03 66.22 67.32 48.82 55.03 56.79 57.70
+DELEX -
+K12
+C14
+EMBEDS
+INVERTED -
+-
+DELEX
+-
+INVERTED
+</figure>
+<tableCaption confidence="0.990102">
+Table 5: Dependency parsing results on the Universal Treebanks (unlabeled and labeled attachment
+scores). Parameters tuned on development data: Q = 0.005, δ = 20, i = 3.
+</tableCaption>
+<table confidence="0.9992246">
+KLEMENTIEV CHANDAR INVERTED
+EN-ES (S+P) 0.20 0.24 0.25
+ES-EN (S+P) 0.35 0.32 0.41
+EN-ES (S) 0.20 0.25 0.25
+ES-EN (S) 0.38 0.39 0.53
+</table>
+<tableCaption confidence="0.999309">
+Table 7: Word alignment results (P@1). S=sure (certain) alignments. P=possible alignments.
+</tableCaption>
+<sectionHeader confidence="0.999939" genericHeader="related work">
+5 Related Work
+</sectionHeader>
+<bodyText confidence="0.999793160714286">
+As noted in §1, there has been some work on learn-
+ing word representations for cross-lingual parsing
+lately. T¨ackstr¨om et al. (2013) presented a bilin-
+gual clustering algorithm and used the word clus-
+ters to augment a delexicalized transfer baseline.
+Bansal et al. (2014), in the context of monolingual
+dependency parsing, investigate continuous word
+representation for dependency parsing in a mono-
+lingual cross-domain setup and compare them to
+word clusters. However, to make the embeddings
+work, they had to i) bucket real values and perform
+hierarchical clustering on them, ending up with
+word clusters very similar to those of T¨ackstr¨om
+et al. (2013); ii) use syntactic context to estimate
+embeddings. In the cross-lingual setting, syntactic
+context is not available for the target language, but
+doing clustering on top of inverted indexing is an
+interesting option we did not explore in this paper.
+Xiao and Guo (2014) is, to the best of our
+knowledge, the only parser using bilingual em-
+beddings for unsupervised cross-lingual parsing.
+They evaluate their models on CoNLL 2006 and
+CoNLL 2007, and we compare our results to
+theirs in §4. They obtain much better relative
+improvements on dependency parsing that we do
+- comparable to those we observe in document
+classification and POS tagging. It is not clear to
+us what is the explanation for this improvement.
+The approach relies on a bilingual dictionary
+as in Klementiev et al. (2012) and Gouws and
+Søgaard (2015), but none of these embeddings
+led to improvements. Unfortunately, we did not
+have the code or embeddings of Xiao and Guo
+(2014). One possible explanation is that they use
+the embeddings in a very different way in the
+parser. They use the MSTParser. Unfortunately,
+they do not say exactly how they combine the
+embeddings with their baseline feature model.
+The idea of using inverted indexing in
+Wikipedia for modelling language is not entirely
+new either. In cross-lingual information retrieval,
+this technique, sometimes referred to as explicit
+semantic analysis, has been used to measure
+source and target language document relatedness
+(Potthast et al., 2008; Sorg and Cimiano, 2008).
+Gabrilovich and Markovitch (2009) also use this
+technique to model documents, and they evaluate
+their method on text categorization and on com-
+puting the degree of semantic relatedness between
+text fragments. See also M¨uller and Gurevych
+(2009) for an application of explicit semantic anal-
+ysis to modelling documents. This line of work
+is very different from ours, and to the best of
+our knowledge, we are the first to propose to use
+inverted indexing of Wikipedia for cross-lingual
+word representations.
+</bodyText>
+<page confidence="0.986093">
+1720
+</page>
+<sectionHeader confidence="0.999445" genericHeader="conclusions">
+6 Conclusions
+</sectionHeader>
+<bodyText confidence="0.999981714285714">
+We presented a simple, scalable approach to ob-
+taining cross-lingual word representations that en-
+ables multi-source learning. We compared these
+representations to two state-of-the-art approaches
+to neural net word embeddings across four tasks
+and 17 datasets, obtaining better results than both
+approaches in 14/17 of these cases.
+</bodyText>
+<sectionHeader confidence="0.999186" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.999952494505494">
+Mohit Bansal, Kevin Gimpel, and Karen Livescu.
+2014. Tailoring continuous word representations for
+dependency parsing. In ACL.
+Marco Baroni, Georgiana Dinu, and Germ´an
+Kruszewski. 2014. Don’t count, predict! a
+systematic comparison of context-counting vs.
+context-predicting semantic vectors. In ACL.
+Yoshua Bengio, R´ejean Ducharme, Pascal Vincent, and
+Christian Janvin. 2003. A neural probabilistic lan-
+guage model. The Journal of Machine Learning Re-
+search, 3:1137–1155.
+Bernd Bohnet. 2010. Top accuracy and fast depen-
+dency parsing is not a contradiction. In COLING.
+Peter F Brown, Peter V Desouza, Robert L Mercer,
+Vincent J Della Pietra, and Jenifer C Lai. 1992.
+Class-based n-gram models of natural language.
+Computational linguistics, 18(4):467–479.
+Sarath Chandar, Stanislas Lauly, Hugo Larochelle,
+Mitesh Khapra, Balaraman Ravindran, Vikas C
+Raykar, and Amrita Saha. 2014. An autoencoder
+approach to learning bilingual word representations.
+In NIPS.
+Michael Collins. 2002. Discriminative Training Meth-
+ods for Hidden Markov Models: Theory and Exper-
+iments with Perceptron Algorithms. In EMNLP.
+Ronan Collobert and Jason Weston. 2008. A unified
+architecture for natural language processing: Deep
+neural networks with multitask learning. In ICML.
+Dipanjan Das and Slav Petrov. 2011. Unsupervised
+part-of-speech tagging with bilingual graph-based
+projections. In ACL.
+Victoria Fossum and Steven Abney. 2005. Automati-
+cally inducing a part-of-speech tagger by projecting
+from multiple source languages across aligned cor-
+pora. In IJCNLP.
+Evgeniy Gabrilovich and Shaul Markovitch. 2009.
+Wikipedia-based semantic interpretation for natural
+language processing. Journal of Artificial Intelli-
+gence Research, pages 443–498.
+Stephan Gouws and Anders Søgaard. 2015. Sim-
+ple task-specific bilingual word embeddings. In
+NAACL.
+Joao Graca, Joana Pardal, Luisa Coheur, and Dia-
+mantino Caseiro. 2008. Building a golden collec-
+tion of parallel multi-language word alignments. In
+LREC.
+Rebecca Hwa, Philip Resnik, Amy Weinberg, Clara
+Cabezas, and Okan Kolak. 2005. Bootstrapping
+parsers via syntactic projection across parallel texts.
+Natural Language Engineering, 11(3):311–325.
+Alexandre Klementiev, Ivan Titov, and Binod Bhat-
+tarai. 2012. Inducing crosslingual distributed rep-
+resentations of words. In COLING.
+Omer Levy and Yoav Goldberg. 2014. Dependency-
+based word embeddings. In ACL.
+Shen Li, Jo˜ao Grac¸a, and Ben Taskar. 2012. Wiki-ly
+supervised part-of-speech tagging. In EMNLP.
+Ryan McDonald, Slav Petrov, and Keith Hall. 2011.
+Multi-source transfer of delexicalized dependency
+parsers. In EMNLP.
+Ryan McDonald, Joakim Nivre, Yvonne Quirmbach-
+Brundage, Yoav Goldberg, Dipanjan Das, Kuz-
+man Ganchev, Keith Hall, Slav Petrov, Hao
+Zhang, Oscar T¨ackstr¨om, Claudia Bedini, N´uria
+Bertomeu Castell´o, and Jungmee Lee. 2013. Uni-
+versal dependency annotation for multilingual pars-
+ing. In ACL.
+Tomas Mikolov, Ilya Sutskever, Kai Chen, Gregory
+Corrado, and Jeffrey Dean. 2013. Distributed rep-
+resentations of words and phrases and their compo-
+sitionality. In NIPS.
+Christof M¨uller and Iryna Gurevych. 2009. A study
+on the semantic relatedness of query and document
+terms in information retrieval. In EMNLP.
+Martin Potthast, Benno Stein, and Maik Anderka.
+2008. A wikipedia-based multilingual retrieval
+model. In Advances in Information Retrieval.
+Peter Prettenhofer and Benno Stein. 2010. Cross-
+language text classification using structural corre-
+spondence learning. In ACL.
+Anders Søgaard. 2011. Datapoint selection for cross-
+language adaptation of dependency parsers. In Pro-
+ceedings of ACL.
+Philipp Sorg and Philipp Cimiano. 2008. Cross-
+lingual information retrieval with explicit seman-
+tic analysis. In Working Notes for the CLEF 2008
+Workshop.
+Oscar T¨ackstr¨om, Dipanjan Das, Slav Petrov, Ryan
+McDonald, and Joakim Nivre. 2013. Token and
+type constraints for cross-lingual part-of-speech tag-
+ging. TACL, 1:1–12.
+</reference>
+<page confidence="0.810009">
+1721
+</page>
+<reference confidence="0.999152555555556">
+Joseph Turian, Lev Ratinov, and Yoshua Bengio. 2010.
+Word representations: a simple and general method
+for semi-supervised learning. In ACL.
+Min Xiao and Yuhong Guo. 2014. Distributed word
+representation learning for cross-lingual dependency
+parsing. In CoNLL.
+Daniel Zeman and Philip Resnik. 2008. Cross-
+language parser adaptation between related lan-
+guages. In IJCNLP.
+</reference>
+<page confidence="0.99331">
+1722
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.291486">
+<title confidence="0.996529">Inverted indexing for cross-lingual NLP</title>
+<author confidence="0.992687">H´ector Martinez</author>
+<affiliation confidence="0.523161">Bernd</affiliation>
+<address confidence="0.597884">for Language Technology, University of Copenhagen, Denmark London, United Kingdom</address>
+<email confidence="0.989813">soegaard@hum.ku.dk</email>
+<abstract confidence="0.994166933333333">We present a novel, count-based approach to obtaining inter-lingual word representations based on inverted indexing of Wikipedia. We present experiments applying these representations to 17 datasets in document classification, POS tagging, dependency parsing, and word alignment. Our approach has the advantage that it is simple, computationally efficient and almost parameter-free, and, more importantly, it enables multi-source crosslingual learning. In 14/17 cases, we improve over using state-of-the-art bilingual embeddings.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>Mohit Bansal</author>
+<author>Kevin Gimpel</author>
+<author>Karen Livescu</author>
+</authors>
+<title>Tailoring continuous word representations for dependency parsing.</title>
+<date>2014</date>
+<booktitle>In ACL.</booktitle>
+<contexts>
+<context position="22337" citStr="Bansal et al., 2014" startWordPosition="3406" endWordPosition="3409">11; Søgaard, 2011). This baseline system simply learns models without lexical features. We use a modified version of the first-order Mate 7http://code.google.com/p/uni-dep-tb/ 8https://code.google.com/p/ wikily-supervised-pos-tagger/ parser (Bohnet, 2010) that also takes continuousvalued embeddings as input an disregards features that include lexical items. For our embeddings baselines, we augment the feature space by adding embedding vectors for head h and dependent d. We experimented with different versions of combining embedding vectors, from firing separate h and d per-dimension features (Bansal et al., 2014) to combining their information. We found that combining the embeddings of h and d is effective and consistently use the absolute difference between the embedding vectors, since that worked better than addition and multiplication on development data. Delexicalized transfer (DELEX) uses three (3) iterations over the data in both the single-source and the multi-source set-up, a parameter set on the Spanish development data. The remaining parameters were obtained by averaging over performance with different embeddings on the Spanish development data, obtaining: Q = 0.005, 6 = 20, i = 3, and absol</context>
+<context position="27978" citStr="Bansal et al. (2014)" startWordPosition="4325" endWordPosition="4328">anks (unlabeled and labeled attachment scores). Parameters tuned on development data: Q = 0.005, δ = 20, i = 3. KLEMENTIEV CHANDAR INVERTED EN-ES (S+P) 0.20 0.24 0.25 ES-EN (S+P) 0.35 0.32 0.41 EN-ES (S) 0.20 0.25 0.25 ES-EN (S) 0.38 0.39 0.53 Table 7: Word alignment results (P@1). S=sure (certain) alignments. P=possible alignments. 5 Related Work As noted in §1, there has been some work on learning word representations for cross-lingual parsing lately. T¨ackstr¨om et al. (2013) presented a bilingual clustering algorithm and used the word clusters to augment a delexicalized transfer baseline. Bansal et al. (2014), in the context of monolingual dependency parsing, investigate continuous word representation for dependency parsing in a monolingual cross-domain setup and compare them to word clusters. However, to make the embeddings work, they had to i) bucket real values and perform hierarchical clustering on them, ending up with word clusters very similar to those of T¨ackstr¨om et al. (2013); ii) use syntactic context to estimate embeddings. In the cross-lingual setting, syntactic context is not available for the target language, but doing clustering on top of inverted indexing is an interesting option</context>
+</contexts>
+<marker>Bansal, Gimpel, Livescu, 2014</marker>
+<rawString>Mohit Bansal, Kevin Gimpel, and Karen Livescu. 2014. Tailoring continuous word representations for dependency parsing. In ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Marco Baroni</author>
+<author>Georgiana Dinu</author>
+<author>Germ´an Kruszewski</author>
+</authors>
+<title>Don’t count, predict! a systematic comparison of context-counting vs. context-predicting semantic vectors.</title>
+<date>2014</date>
+<booktitle>In ACL.</booktitle>
+<contexts>
+<context position="6388" citStr="Baroni et al., 2014" startWordPosition="924" endWordPosition="927">proaches focus on different kinds of similarity, some more syntactic, some more semantic. The representations are typically either clusters of distributionally similar words, e.g., Brown et al. (1992), or vector representations. In this paper, we focus on vector representations. In vector-based approaches, similar representations are vectors close in some multi-dimensional space. 2.1 Count-based and prediction-based representations There are, briefly put, two approaches to inducing vector-based distributional word representations from large corpora: count-based and predictionbased approaches (Baroni et al., 2014). Countbased approaches represent words by their cooccurrences. Dimensionality reduction is typically performed on a raw or weighted co-occurrence matrix using methods such as singular value decomposition (SVD), a method for maximizing the variance in a dataset in few dimensions. In our inverted indexing, we use raw co-occurrence data. Prediction-based methods use discriminative learning techniques to learn how to predict words from their context, or vice versa. They rely on a neural network architecture, and once the network converges, they use word representations from a middle layer as thei</context>
+<context position="26171" citStr="Baroni et al., 2014" startWordPosition="4021" endWordPosition="4024">011), but may be explained by treebank sizes, language similarity, or the noise introduced by the word representations. 4.3 Dependency parsing In dependency parsing, distributional word representations do not lead to significant improvements, but while KLEMENTIEV and CHANDAR hurt performance, the INVERTED representations lead to small improvements on some languages. The fact that improvements are primarily seen on Spanish suggest that our approach is parametersensitive. This is in line with previous observations that count-based methods are more parameter-sensitive than prediction-based ones (Baroni et al., 2014). For comparability with Xiao and Guo (2014), we also did experiments with the CoNLL 2006 and CoNLL 2007 datasets for which we had embeddings (Table 6). Again, we see little effects from using the word representations, and we also see that our baseline model is weaker than the one in Xiao and Guo (2014) (DELEX-XIAO). See §5 for further discussion. 4.4 Word alignment The word alignment results are presented in Table 7. On the certain alignments, we see an accuracy of more than 50% with INVERTED in one case. KLEMENTIEV and CHANDAR have the advantage of having been trained on the EnglishSpanish E</context>
+</contexts>
+<marker>Baroni, Dinu, Kruszewski, 2014</marker>
+<rawString>Marco Baroni, Georgiana Dinu, and Germ´an Kruszewski. 2014. Don’t count, predict! a systematic comparison of context-counting vs. context-predicting semantic vectors. In ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yoshua Bengio</author>
+<author>R´ejean Ducharme</author>
+<author>Pascal Vincent</author>
+<author>Christian Janvin</author>
+</authors>
+<title>A neural probabilistic language model.</title>
+<date>2003</date>
+<journal>The Journal of Machine Learning Research,</journal>
+<pages>3--1137</pages>
+<contexts>
+<context position="10852" citStr="Bengio et al. (2003)" startWordPosition="1588" endWordPosition="1591"> learn distinct embedding models for the source and target languages, but while learning to minimize the sum of the two models’ losses, they jointly learn a regularizing interaction matrix, enforcing word pairs aligned in parallel text to have similar representations. Note that Klementiev et al. (2012) rely on word-aligned parallel text, and thereby on a large-coverage soft mapping of source words to target words. Other approaches rely on small coverage dictionaries with hard 1:1 mappings between words. Klementiev et al. (2012) do not use skip-gram or CBOW, but the language model presented in Bengio et al. (2003). Chandar et al. (2014) also rely on sentencealigned parallel text, but do not make use of word alignments. They begin with bag-of-words representations of source and target sentences. They then use an auto-encoder architecture. Autoencoders for document classification typically try to reconstruct bag-of-words input vectors at the output layer, using back-propagation, passing the representation through a smaller middle layer. This layer then provides a dimensionality reduction. Chandar et al. (2014) instead replace the output layer with the target language bag-of-words reconstruction. In their</context>
+</contexts>
+<marker>Bengio, Ducharme, Vincent, Janvin, 2003</marker>
+<rawString>Yoshua Bengio, R´ejean Ducharme, Pascal Vincent, and Christian Janvin. 2003. A neural probabilistic language model. The Journal of Machine Learning Research, 3:1137–1155.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Bernd Bohnet</author>
+</authors>
+<title>Top accuracy and fast dependency parsing is not a contradiction.</title>
+<date>2010</date>
+<booktitle>In COLING.</booktitle>
+<contexts>
+<context position="21972" citStr="Bohnet, 2010" startWordPosition="3352" endWordPosition="3353">07 treebanks for languages for which we had baseline and system word representations (de, es, sv). Our parameter settings for these experiments were the same as those tuned on the Spanish development data from the Google Universal Treebanks v. 1.0. Baselines The most obvious baseline in our experiments is delexicalized transfer (DELEX) (McDonald et al., 2011; Søgaard, 2011). This baseline system simply learns models without lexical features. We use a modified version of the first-order Mate 7http://code.google.com/p/uni-dep-tb/ 8https://code.google.com/p/ wikily-supervised-pos-tagger/ parser (Bohnet, 2010) that also takes continuousvalued embeddings as input an disregards features that include lexical items. For our embeddings baselines, we augment the feature space by adding embedding vectors for head h and dependent d. We experimented with different versions of combining embedding vectors, from firing separate h and d per-dimension features (Bansal et al., 2014) to combining their information. We found that combining the embeddings of h and d is effective and consistently use the absolute difference between the embedding vectors, since that worked better than addition and multiplication on de</context>
+</contexts>
+<marker>Bohnet, 2010</marker>
+<rawString>Bernd Bohnet. 2010. Top accuracy and fast dependency parsing is not a contradiction. In COLING.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Peter F Brown</author>
+<author>Peter V Desouza</author>
+<author>Robert L Mercer</author>
+<author>Vincent J Della Pietra</author>
+<author>Jenifer C Lai</author>
+</authors>
+<title>Class-based n-gram models of natural language.</title>
+<date>1992</date>
+<journal>Computational linguistics,</journal>
+<volume>18</volume>
+<issue>4</issue>
+<contexts>
+<context position="5968" citStr="Brown et al. (1992)" startWordPosition="871" endWordPosition="874">al and sparse models. Also, simple bagof-words models fail to capture the relatedness of words. In many tasks, synonymous words should be treated alike, but their bag-of-words representations are as different as those of dog and therefore. Distributional word representations are supposed to capture distributional similarities between words. Intuitively, we want similar words to have similar representations. Known approaches focus on different kinds of similarity, some more syntactic, some more semantic. The representations are typically either clusters of distributionally similar words, e.g., Brown et al. (1992), or vector representations. In this paper, we focus on vector representations. In vector-based approaches, similar representations are vectors close in some multi-dimensional space. 2.1 Count-based and prediction-based representations There are, briefly put, two approaches to inducing vector-based distributional word representations from large corpora: count-based and predictionbased approaches (Baroni et al., 2014). Countbased approaches represent words by their cooccurrences. Dimensionality reduction is typically performed on a raw or weighted co-occurrence matrix using methods such as sing</context>
+</contexts>
+<marker>Brown, Desouza, Mercer, Pietra, Lai, 1992</marker>
+<rawString>Peter F Brown, Peter V Desouza, Robert L Mercer, Vincent J Della Pietra, and Jenifer C Lai. 1992. Class-based n-gram models of natural language. Computational linguistics, 18(4):467–479.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Sarath Chandar</author>
+<author>Stanislas Lauly</author>
+<author>Hugo Larochelle</author>
+<author>Mitesh Khapra</author>
+<author>Balaraman Ravindran</author>
+<author>Vikas C Raykar</author>
+<author>Amrita Saha</author>
+</authors>
+<title>An autoencoder approach to learning bilingual word representations.</title>
+<date>2014</date>
+<booktitle>In NIPS.</booktitle>
+<contexts>
+<context position="10875" citStr="Chandar et al. (2014)" startWordPosition="1592" endWordPosition="1595">ing models for the source and target languages, but while learning to minimize the sum of the two models’ losses, they jointly learn a regularizing interaction matrix, enforcing word pairs aligned in parallel text to have similar representations. Note that Klementiev et al. (2012) rely on word-aligned parallel text, and thereby on a large-coverage soft mapping of source words to target words. Other approaches rely on small coverage dictionaries with hard 1:1 mappings between words. Klementiev et al. (2012) do not use skip-gram or CBOW, but the language model presented in Bengio et al. (2003). Chandar et al. (2014) also rely on sentencealigned parallel text, but do not make use of word alignments. They begin with bag-of-words representations of source and target sentences. They then use an auto-encoder architecture. Autoencoders for document classification typically try to reconstruct bag-of-words input vectors at the output layer, using back-propagation, passing the representation through a smaller middle layer. This layer then provides a dimensionality reduction. Chandar et al. (2014) instead replace the output layer with the target language bag-of-words reconstruction. In their final set-up, they sim</context>
+<context position="15293" citStr="Chandar et al. (2014)" startWordPosition="2278" endWordPosition="2281"> article on Google, and the word Brille occurs in the corresponding German ones, the two words are likely to get similar representations. In our experiments, we use the common subset of available German, English, French, Spanish, and Swedish Wikipedia dumps.1 We leave out words occurring in more than 5000 documents and perform dimensionality reduction using stochastic, two-pass, rank-reduced SVD - specifically, the latent semantic indexing implementation in Gensim using default parameters.2 2.3 Baseline embeddings We use the word embedding models of Klementiev et al. (2012)3 (KLEMENTIEV), and Chandar et al. (2014) (CHANDAR) as baselines in the experiments below. We also ran some of our experiments with the embeddings provided by Gouws and Søgaard (2015), but results were very similar to Chandar et al. (2014). We compare the nearest cross-language neighbors in the various representations in Table 1. Specifically, we selected five words from the Spanish test data and searched for its three nearest neighbors in KLEMENTIEV, CHANDAR and INVERTED. The nearest neighbors are presented left to right. We note that CHANDAR and INVERTED seem to contain less noise. KLEMENTIEV is the only model that relies on wordal</context>
+<context position="25032" citStr="Chandar et al. (2014)" startWordPosition="3849" endWordPosition="3852">9.68 67.02 - 68.71 - 78.72 70.99 K12 C14 EMBEDS INVERTED SVD Dataset KLEMENTIEV CHANDAR INVERTED AMAZON 0.32 0.36 0.49 RCV 0.75 0.90 0.55 Table 3: Document classification results (Flscores) UAS de es sv EN→TARGET - 44.78 47.07 56.75 - 46.24 52.05 57.79 K12 44.77 47.31 - C14 44.32 47.56 INVERTED - 45.01 47.45 56.15 XIAO - 49.54 55.72 61.88 Table 6: Dependency parsing for CoNLL 2006/2007 datasets. Parameters same as on the Google Universal Treebanks. 4 Results 4.1 Document classification Our document classification results in Table 3 are mixed, but we note that both Klementiev et al. (2012) and Chandar et al. (2014) developed their methods using development data from the RCV corpus. It is therefore not surprising that they obtain good results on this data. On AMAZON, INVERTED is superior to both KLEMENTIEV and CHANDAR. 4.2 POS tagging In POS tagging, INVERTED leads to significant improvements over using KLEMENTIEV and CHANDAR. See Table 4 for results. Somewhat surprisingly, we see no general gain from using multiple source languages. This is very different from what has been observed in dependency parsing (McDonald et al., 2011), but may be explained by treebank sizes, language similarity, or the noise i</context>
+</contexts>
+<marker>Chandar, Lauly, Larochelle, Khapra, Ravindran, Raykar, Saha, 2014</marker>
+<rawString>Sarath Chandar, Stanislas Lauly, Hugo Larochelle, Mitesh Khapra, Balaraman Ravindran, Vikas C Raykar, and Amrita Saha. 2014. An autoencoder approach to learning bilingual word representations. In NIPS.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Michael Collins</author>
+</authors>
+<title>Discriminative Training Methods for Hidden Markov Models: Theory and Experiments with Perceptron Algorithms.</title>
+<date>2002</date>
+<booktitle>In EMNLP.</booktitle>
+<contexts>
+<context position="20537" citStr="Collins (2002)" startWordPosition="3129" endWordPosition="3130">s well as tag dictionaries (Li et al., 2012) needed for the POS tagging experiments. Baselines One baseline method is a typeconstrained structured perceptron with only ortographic features, which are expected to transfer across languages. The type constraints come from Wiktionary, a crowd-sourced tag dictionary.8 Type constraints from Wiktionary were first used by Li et al. (2012), but note that their set-up is unsupervised learning. T¨ackstr¨om et al. (2013) also used type constraints in a supervised set-up. Our learning algorithm is the structured perceptron algorithm originally proposed by Collins (2002). In our POS tagging experiments, we always do 10 passes over the data. We also present two other baselines, where we augment the feature representation with different embeddings for the target word, KLEMENTIEV and CHANDAR. With all the embeddings in POS tagging, we assign a mean vector to out-of-vocabulary words. System For our system, we simply augment the delexicalized POS tagger with the INVERTED distributional representation of the current word. The best parameter setting on Spanish development data was Q = 0.01, 6 = 160. 3.3 Dependency parsing Data We use the same treebanks from the Goog</context>
+</contexts>
+<marker>Collins, 2002</marker>
+<rawString>Michael Collins. 2002. Discriminative Training Methods for Hidden Markov Models: Theory and Experiments with Perceptron Algorithms. In EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ronan Collobert</author>
+<author>Jason Weston</author>
+</authors>
+<title>A unified architecture for natural language processing: Deep neural networks with multitask learning.</title>
+<date>2008</date>
+<booktitle>In ICML.</booktitle>
+<contexts>
+<context position="7275" citStr="Collobert and Weston, 2008" startWordPosition="1059" endWordPosition="1062">t in few dimensions. In our inverted indexing, we use raw co-occurrence data. Prediction-based methods use discriminative learning techniques to learn how to predict words from their context, or vice versa. They rely on a neural network architecture, and once the network converges, they use word representations from a middle layer as their distributional representations. Since the network learns to predict contexts from this representation, words occurring in the same contexts will get similar representations. In §2.1.2, we briefly introduce the skipgram and CBOW models (Mikolov et al., 2013; Collobert and Weston, 2008). Baroni et al. (2014) argue in favor of predictionbased representations, but provide little explanation why prediction-based representations should be better. One key finding, however, is that prediction-based methods tend to be more robust than count-based methods, and one reason for this seems to be better regularization. 2.1.1 Monolingual representations Count-based representations rely on cooccurrence information in the form of binary matrices, raw counts, or point-wise mutual information (PMI). The PMI between two words is wi) and PMI representations associate a word wi with a vector of </context>
+</contexts>
+<marker>Collobert, Weston, 2008</marker>
+<rawString>Ronan Collobert and Jason Weston. 2008. A unified architecture for natural language processing: Deep neural networks with multitask learning. In ICML.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Dipanjan Das</author>
+<author>Slav Petrov</author>
+</authors>
+<title>Unsupervised part-of-speech tagging with bilingual graph-based projections.</title>
+<date>2011</date>
+<booktitle>In ACL.</booktitle>
+<contexts>
+<context position="2533" citStr="Das and Petrov, 2011" startWordPosition="354" endWordPosition="357"> the target language. Delexicalized transfer works particularly well when resources from several source languages are used for training; learning from multiple other languages prevents over-fitting to the peculiarities of the source language. Some authors have also combined annotation projection and delexicalized transfer, e.g., McDonald et al. (2011). Others have tried to augment delexicalized transfer models with bilingual word representations (T¨ackstr¨om et al., 2013; Xiao and Guo, 2014). In cross-lingual POS tagging, mostly annotation projection has been explored (Fossum and Abney, 2005; Das and Petrov, 2011), since all features in POS tagging models are typically lexical. However, using bilingual word representations was recently explored as an alternative to projectionbased approaches (Gouws and Søgaard, 2015). The major drawback of using bi-lexical representations is that it limits us to using a single source language. T¨ackstr¨om et al. (2013) obtained significant improvements using bilingual word clusters over a single source delexicalized transfer model, for example, but even better results were obtained with delexicalized transfer in McDonald et al. (2011) by simply using several source lan</context>
+</contexts>
+<marker>Das, Petrov, 2011</marker>
+<rawString>Dipanjan Das and Slav Petrov. 2011. Unsupervised part-of-speech tagging with bilingual graph-based projections. In ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Victoria Fossum</author>
+<author>Steven Abney</author>
+</authors>
+<title>Automatically inducing a part-of-speech tagger by projecting from multiple source languages across aligned corpora. In IJCNLP.</title>
+<date>2005</date>
+<contexts>
+<context position="2510" citStr="Fossum and Abney, 2005" startWordPosition="350" endWordPosition="353">reliable POS tagging for the target language. Delexicalized transfer works particularly well when resources from several source languages are used for training; learning from multiple other languages prevents over-fitting to the peculiarities of the source language. Some authors have also combined annotation projection and delexicalized transfer, e.g., McDonald et al. (2011). Others have tried to augment delexicalized transfer models with bilingual word representations (T¨ackstr¨om et al., 2013; Xiao and Guo, 2014). In cross-lingual POS tagging, mostly annotation projection has been explored (Fossum and Abney, 2005; Das and Petrov, 2011), since all features in POS tagging models are typically lexical. However, using bilingual word representations was recently explored as an alternative to projectionbased approaches (Gouws and Søgaard, 2015). The major drawback of using bi-lexical representations is that it limits us to using a single source language. T¨ackstr¨om et al. (2013) obtained significant improvements using bilingual word clusters over a single source delexicalized transfer model, for example, but even better results were obtained with delexicalized transfer in McDonald et al. (2011) by simply u</context>
+</contexts>
+<marker>Fossum, Abney, 2005</marker>
+<rawString>Victoria Fossum and Steven Abney. 2005. Automatically inducing a part-of-speech tagger by projecting from multiple source languages across aligned corpora. In IJCNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Evgeniy Gabrilovich</author>
+<author>Shaul Markovitch</author>
+</authors>
+<title>Wikipedia-based semantic interpretation for natural language processing.</title>
+<date>2009</date>
+<journal>Journal of Artificial Intelligence Research,</journal>
+<pages>443--498</pages>
+<contexts>
+<context position="29900" citStr="Gabrilovich and Markovitch (2009)" startWordPosition="4630" endWordPosition="4633">code or embeddings of Xiao and Guo (2014). One possible explanation is that they use the embeddings in a very different way in the parser. They use the MSTParser. Unfortunately, they do not say exactly how they combine the embeddings with their baseline feature model. The idea of using inverted indexing in Wikipedia for modelling language is not entirely new either. In cross-lingual information retrieval, this technique, sometimes referred to as explicit semantic analysis, has been used to measure source and target language document relatedness (Potthast et al., 2008; Sorg and Cimiano, 2008). Gabrilovich and Markovitch (2009) also use this technique to model documents, and they evaluate their method on text categorization and on computing the degree of semantic relatedness between text fragments. See also M¨uller and Gurevych (2009) for an application of explicit semantic analysis to modelling documents. This line of work is very different from ours, and to the best of our knowledge, we are the first to propose to use inverted indexing of Wikipedia for cross-lingual word representations. 1720 6 Conclusions We presented a simple, scalable approach to obtaining cross-lingual word representations that enables multi-s</context>
+</contexts>
+<marker>Gabrilovich, Markovitch, 2009</marker>
+<rawString>Evgeniy Gabrilovich and Shaul Markovitch. 2009. Wikipedia-based semantic interpretation for natural language processing. Journal of Artificial Intelligence Research, pages 443–498.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Stephan Gouws</author>
+<author>Anders Søgaard</author>
+</authors>
+<title>Simple task-specific bilingual word embeddings.</title>
+<date>2015</date>
+<booktitle>In NAACL.</booktitle>
+<contexts>
+<context position="2740" citStr="Gouws and Søgaard, 2015" startWordPosition="385" endWordPosition="388"> peculiarities of the source language. Some authors have also combined annotation projection and delexicalized transfer, e.g., McDonald et al. (2011). Others have tried to augment delexicalized transfer models with bilingual word representations (T¨ackstr¨om et al., 2013; Xiao and Guo, 2014). In cross-lingual POS tagging, mostly annotation projection has been explored (Fossum and Abney, 2005; Das and Petrov, 2011), since all features in POS tagging models are typically lexical. However, using bilingual word representations was recently explored as an alternative to projectionbased approaches (Gouws and Søgaard, 2015). The major drawback of using bi-lexical representations is that it limits us to using a single source language. T¨ackstr¨om et al. (2013) obtained significant improvements using bilingual word clusters over a single source delexicalized transfer model, for example, but even better results were obtained with delexicalized transfer in McDonald et al. (2011) by simply using several source languages. This paper introduces a simple method for obtaining truly inter-lingual word representations in order to train models with lexical features on several source languages at the same time. Briefly put, </context>
+<context position="12293" citStr="Gouws and Søgaard (2015)" startWordPosition="1806" endWordPosition="1809">tances from source-target pairs. The bilingual word vectors can now be read off the auto-encoder’s middle layer. Xiao and Guo (2014) use a CBOW model and random target words as negative examples. The trick they introduce to learn bilingual embeddings, relies on a bilingual dictionary, in their case obtained from Wiktionary. They only use the unambiguous translation pairs for the source and target languages in question and simply force translation equivalents to have the same representation. This corresponds to replacing words from unambigu1715 ous translation pairs with a unique dummy symbol. Gouws and Søgaard (2015) present a much simpler approach to learning prediction-based bilingual representations. They assume a list of sourcetarget pivot word pairs that should obtain similar representations, i.e., translations or words with similar representations in some knowledge base. They then present a generative model for constructing a mixed language corpus by randomly selecting sentences from source and target corpora, and randomly replacing pivot words with their equivalent in the other language. They show that running the CBOW model on such a mixed corpus suffices to learn competitive bilingual embeddings.</context>
+<context position="15435" citStr="Gouws and Søgaard (2015)" startWordPosition="2303" endWordPosition="2306">n our experiments, we use the common subset of available German, English, French, Spanish, and Swedish Wikipedia dumps.1 We leave out words occurring in more than 5000 documents and perform dimensionality reduction using stochastic, two-pass, rank-reduced SVD - specifically, the latent semantic indexing implementation in Gensim using default parameters.2 2.3 Baseline embeddings We use the word embedding models of Klementiev et al. (2012)3 (KLEMENTIEV), and Chandar et al. (2014) (CHANDAR) as baselines in the experiments below. We also ran some of our experiments with the embeddings provided by Gouws and Søgaard (2015), but results were very similar to Chandar et al. (2014). We compare the nearest cross-language neighbors in the various representations in Table 1. Specifically, we selected five words from the Spanish test data and searched for its three nearest neighbors in KLEMENTIEV, CHANDAR and INVERTED. The nearest neighbors are presented left to right. We note that CHANDAR and INVERTED seem to contain less noise. KLEMENTIEV is the only model that relies on wordalignments. Whether the noise originates from alignments, or just model differences, is unclear to us. 2.4 Parameters of the word representation</context>
+<context position="17836" citStr="Gouws and Søgaard (2015)" startWordPosition="2719" endWordPosition="2722">e – – 357 5.7k 0.616 0.612 0.294 sv – – 389 5.7k n/a n/a 0.561 EUROPARL – WORD ALIGNMENT en – – 100 – 0.370 0.370 0.370 es – – 100 – 0.533 0.533 0.533 Table 2: Characteristics of the data sets. Embeddings coverage (token-level) for KLEMENTIEV, CHANDAR and INVERTED on the test sets. We use the common vocabulary on WORD ALIGNMENT. sification and word alignment, we fix the number of dimensions to 40. For both our baselines and systems, we also tune a scaling factor Q ∈ {1.0, 0.1, 0.01, 0.001} for POS tagging and dependency parsing, using the scaling method from Turian et al. (2010), also used in Gouws and Søgaard (2015). We do not scale our embeddings for document classification or word alignment. 3 Experiments The data set characteristics are found in Table 2.3. 3.1 Document classification Data Our first document classification task is topic classification on the cross-lingual multi-domain sentiment analysis dataset AMAZON in Prettenhofer and Stein (2010).4 We represent each document by the average of the representations of those words that we find both in the documents and in our embeddings. Rather than classifying reviews by sentiment, we classify by topic, trying to discriminate between book reviews, mus</context>
+<context position="29180" citStr="Gouws and Søgaard (2015)" startWordPosition="4519" endWordPosition="4522"> an interesting option we did not explore in this paper. Xiao and Guo (2014) is, to the best of our knowledge, the only parser using bilingual embeddings for unsupervised cross-lingual parsing. They evaluate their models on CoNLL 2006 and CoNLL 2007, and we compare our results to theirs in §4. They obtain much better relative improvements on dependency parsing that we do - comparable to those we observe in document classification and POS tagging. It is not clear to us what is the explanation for this improvement. The approach relies on a bilingual dictionary as in Klementiev et al. (2012) and Gouws and Søgaard (2015), but none of these embeddings led to improvements. Unfortunately, we did not have the code or embeddings of Xiao and Guo (2014). One possible explanation is that they use the embeddings in a very different way in the parser. They use the MSTParser. Unfortunately, they do not say exactly how they combine the embeddings with their baseline feature model. The idea of using inverted indexing in Wikipedia for modelling language is not entirely new either. In cross-lingual information retrieval, this technique, sometimes referred to as explicit semantic analysis, has been used to measure source and</context>
+</contexts>
+<marker>Gouws, Søgaard, 2015</marker>
+<rawString>Stephan Gouws and Anders Søgaard. 2015. Simple task-specific bilingual word embeddings. In NAACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Joao Graca</author>
+<author>Joana Pardal</author>
+<author>Luisa Coheur</author>
+<author>Diamantino Caseiro</author>
+</authors>
+<title>Building a golden collection of parallel multi-language word alignments.</title>
+<date>2008</date>
+<booktitle>In LREC.</booktitle>
+<contexts>
+<context position="23456" citStr="Graca et al. (2008)" startWordPosition="3586" endWordPosition="3589">different embeddings on the Spanish development data, obtaining: Q = 0.005, 6 = 20, i = 3, and absolute difference for vector combination. With all the embeddings in dependency parsing, we assign a POS-specific mean vector to out-of-vocabulary words, i.e., the mean of vectors for words with the input word’s POS. System We use the same parameters as those used for our baseline systems. In the single-source setup, we use absolute difference for combining vectors, while addition in the multi-source set-up. 3.4 Word alignment Data We use the manually word-aligned EnglishSpanish Europarl data from Graca et al. (2008). The dataset contains 100 sentences. The annotators annotated whether word alignments were certain or possible, and we present results with all word alignments and with only the certain ones. See Graca et al. (2008) for details. Baselines For word alignment, we simply align every aligned word in the gold data, for which we have a word embedding, to its (Euclidean) nearest neighbor in the target sentence. We evaluate this strategy by its precision (P@1). System We compare INVERTED with KLEMENTIEV and CHANDAR. To ensure a fair comparison, we use the subset of words covered by all three embeddin</context>
+</contexts>
+<marker>Graca, Pardal, Coheur, Caseiro, 2008</marker>
+<rawString>Joao Graca, Joana Pardal, Luisa Coheur, and Diamantino Caseiro. 2008. Building a golden collection of parallel multi-language word alignments. In LREC.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Rebecca Hwa</author>
+<author>Philip Resnik</author>
+<author>Amy Weinberg</author>
+<author>Clara Cabezas</author>
+<author>Okan Kolak</author>
+</authors>
+<title>Bootstrapping parsers via syntactic projection across parallel texts.</title>
+<date>2005</date>
+<journal>Natural Language Engineering,</journal>
+<volume>11</volume>
+<issue>3</issue>
+<contexts>
+<context position="1520" citStr="Hwa et al., 2005" startWordPosition="206" endWordPosition="209">guages. Consequently, transferring linguistic resources or knowledge from one language to another has been identified as an important research problem. Most work on cross-lingual transfer has used English as the source language. There are two reasons for this; namely, the availability of English resources and the availability of parallel data for (and translations between) English and most other languages. In cross-lingual syntactic parsing, for example, two approaches to cross-lingual learning have been explored, namely annotation projection and delexicalized transfer. Annotation projection (Hwa et al., 2005) uses word-alignments in human translations to project predicted sourceside analyses to the target language, producing a noisy syntactically annotated resource for the target language. On the other hand, delexicalized transfer (Zeman and Resnik, 2008; McDonald et al., 2011; Søgaard, 2011) simply removes lexical features from mono-lingual parsing models, but assumes reliable POS tagging for the target language. Delexicalized transfer works particularly well when resources from several source languages are used for training; learning from multiple other languages prevents over-fitting to the pec</context>
+</contexts>
+<marker>Hwa, Resnik, Weinberg, Cabezas, Kolak, 2005</marker>
+<rawString>Rebecca Hwa, Philip Resnik, Amy Weinberg, Clara Cabezas, and Okan Kolak. 2005. Bootstrapping parsers via syntactic projection across parallel texts. Natural Language Engineering, 11(3):311–325.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Alexandre Klementiev</author>
+<author>Ivan Titov</author>
+<author>Binod Bhattarai</author>
+</authors>
+<title>Inducing crosslingual distributed representations of words.</title>
+<date>2012</date>
+<booktitle>In COLING.</booktitle>
+<contexts>
+<context position="10232" citStr="Klementiev et al. (2012)" startWordPosition="1489" endWordPosition="1492">th rely on three level architectures with input, output and a middle layer for intermediate target word representations. The major difference is that skip-gram uses the target word as input and the context as output, whereas the CBOW model does it the other way around. Learning goes by back-propagation, and random target words are used as negative examples. Levy and Goldberg (2014) show that prediction-based representations obtained with the skip-gram model can be related to count-based ones obtained with PMI. They argue that which is best, varies across tasks. 2.1.2 Bilingual representations Klementiev et al. (2012) learn distinct embedding models for the source and target languages, but while learning to minimize the sum of the two models’ losses, they jointly learn a regularizing interaction matrix, enforcing word pairs aligned in parallel text to have similar representations. Note that Klementiev et al. (2012) rely on word-aligned parallel text, and thereby on a large-coverage soft mapping of source words to target words. Other approaches rely on small coverage dictionaries with hard 1:1 mappings between words. Klementiev et al. (2012) do not use skip-gram or CBOW, but the language model presented in </context>
+<context position="15252" citStr="Klementiev et al. (2012)" startWordPosition="2271" endWordPosition="2275">e on Harry Potter, and the English Wikipedia article on Google, and the word Brille occurs in the corresponding German ones, the two words are likely to get similar representations. In our experiments, we use the common subset of available German, English, French, Spanish, and Swedish Wikipedia dumps.1 We leave out words occurring in more than 5000 documents and perform dimensionality reduction using stochastic, two-pass, rank-reduced SVD - specifically, the latent semantic indexing implementation in Gensim using default parameters.2 2.3 Baseline embeddings We use the word embedding models of Klementiev et al. (2012)3 (KLEMENTIEV), and Chandar et al. (2014) (CHANDAR) as baselines in the experiments below. We also ran some of our experiments with the embeddings provided by Gouws and Søgaard (2015), but results were very similar to Chandar et al. (2014). We compare the nearest cross-language neighbors in the various representations in Table 1. Specifically, we selected five words from the Spanish test data and searched for its three nearest neighbors in KLEMENTIEV, CHANDAR and INVERTED. The nearest neighbors are presented left to right. We note that CHANDAR and INVERTED seem to contain less noise. KLEMENTIE</context>
+<context position="18897" citStr="Klementiev et al. (2012)" startWordPosition="2876" endWordPosition="2879">d both in the documents and in our embeddings. Rather than classifying reviews by sentiment, we classify by topic, trying to discriminate between book reviews, music reviews and DVD reviews, as a three-way classification problem, training on English and testing on German. Unlike in the other tasks below, we always 4http://www.webis.de/research/corpora/ use unscaled word representations, since these are our only features. All word representations have 40 dimensions. The other document classification task is a fourway classification problem distinguishing between four topics in RCV corpus.5 See Klementiev et al. (2012) for details. We use exactly the same set-up as for AMAZON. Baselines We use the default parameters of the implementation of logistic regression in Sklearn as our baseline.6 The feature representation is the average embedding of non-stopwords in KLEMENTIEV, resp., CHANDAR. Out-of-vocabulary words do not affect the feature representation of the documents. System For our system, we replace the above neural net word embeddings with INVERTED representations. Again, out-of-vocabulary words do not affect the feature representation of the documents. 3.2 POS tagging Data We use the coarse-grained part</context>
+<context position="25006" citStr="Klementiev et al. (2012)" startWordPosition="3844" endWordPosition="3847">.85 83.03 48.24 81.18 82.12 49.68 67.02 - 68.71 - 78.72 70.99 K12 C14 EMBEDS INVERTED SVD Dataset KLEMENTIEV CHANDAR INVERTED AMAZON 0.32 0.36 0.49 RCV 0.75 0.90 0.55 Table 3: Document classification results (Flscores) UAS de es sv EN→TARGET - 44.78 47.07 56.75 - 46.24 52.05 57.79 K12 44.77 47.31 - C14 44.32 47.56 INVERTED - 45.01 47.45 56.15 XIAO - 49.54 55.72 61.88 Table 6: Dependency parsing for CoNLL 2006/2007 datasets. Parameters same as on the Google Universal Treebanks. 4 Results 4.1 Document classification Our document classification results in Table 3 are mixed, but we note that both Klementiev et al. (2012) and Chandar et al. (2014) developed their methods using development data from the RCV corpus. It is therefore not surprising that they obtain good results on this data. On AMAZON, INVERTED is superior to both KLEMENTIEV and CHANDAR. 4.2 POS tagging In POS tagging, INVERTED leads to significant improvements over using KLEMENTIEV and CHANDAR. See Table 4 for results. Somewhat surprisingly, we see no general gain from using multiple source languages. This is very different from what has been observed in dependency parsing (McDonald et al., 2011), but may be explained by treebank sizes, language </context>
+<context position="29151" citStr="Klementiev et al. (2012)" startWordPosition="4514" endWordPosition="4517">n top of inverted indexing is an interesting option we did not explore in this paper. Xiao and Guo (2014) is, to the best of our knowledge, the only parser using bilingual embeddings for unsupervised cross-lingual parsing. They evaluate their models on CoNLL 2006 and CoNLL 2007, and we compare our results to theirs in §4. They obtain much better relative improvements on dependency parsing that we do - comparable to those we observe in document classification and POS tagging. It is not clear to us what is the explanation for this improvement. The approach relies on a bilingual dictionary as in Klementiev et al. (2012) and Gouws and Søgaard (2015), but none of these embeddings led to improvements. Unfortunately, we did not have the code or embeddings of Xiao and Guo (2014). One possible explanation is that they use the embeddings in a very different way in the parser. They use the MSTParser. Unfortunately, they do not say exactly how they combine the embeddings with their baseline feature model. The idea of using inverted indexing in Wikipedia for modelling language is not entirely new either. In cross-lingual information retrieval, this technique, sometimes referred to as explicit semantic analysis, has be</context>
+</contexts>
+<marker>Klementiev, Titov, Bhattarai, 2012</marker>
+<rawString>Alexandre Klementiev, Ivan Titov, and Binod Bhattarai. 2012. Inducing crosslingual distributed representations of words. In COLING.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Omer Levy</author>
+<author>Yoav Goldberg</author>
+</authors>
+<title>Dependencybased word embeddings.</title>
+<date>2014</date>
+<booktitle>In ACL.</booktitle>
+<contexts>
+<context position="9992" citStr="Levy and Goldberg (2014)" startWordPosition="1453" endWordPosition="1457">ed Table 1: Three nearest neighbors in the English training data of six words occurring in the Spanish test data, in the embeddings used in our experiments. Only 2/6 words were in the German data. skip-gram model and CBOW. The two models both rely on three level architectures with input, output and a middle layer for intermediate target word representations. The major difference is that skip-gram uses the target word as input and the context as output, whereas the CBOW model does it the other way around. Learning goes by back-propagation, and random target words are used as negative examples. Levy and Goldberg (2014) show that prediction-based representations obtained with the skip-gram model can be related to count-based ones obtained with PMI. They argue that which is best, varies across tasks. 2.1.2 Bilingual representations Klementiev et al. (2012) learn distinct embedding models for the source and target languages, but while learning to minimize the sum of the two models’ losses, they jointly learn a regularizing interaction matrix, enforcing word pairs aligned in parallel text to have similar representations. Note that Klementiev et al. (2012) rely on word-aligned parallel text, and thereby on a lar</context>
+</contexts>
+<marker>Levy, Goldberg, 2014</marker>
+<rawString>Omer Levy and Yoav Goldberg. 2014. Dependencybased word embeddings. In ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Shen Li</author>
+<author>Jo˜ao Grac¸a</author>
+<author>Ben Taskar</author>
+</authors>
+<title>Wiki-ly supervised part-of-speech tagging.</title>
+<date>2012</date>
+<booktitle>In EMNLP.</booktitle>
+<marker>Li, Grac¸a, Taskar, 2012</marker>
+<rawString>Shen Li, Jo˜ao Grac¸a, and Ben Taskar. 2012. Wiki-ly supervised part-of-speech tagging. In EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ryan McDonald</author>
+<author>Slav Petrov</author>
+<author>Keith Hall</author>
+</authors>
+<title>Multi-source transfer of delexicalized dependency parsers.</title>
+<date>2011</date>
+<booktitle>In EMNLP.</booktitle>
+<contexts>
+<context position="1793" citStr="McDonald et al., 2011" startWordPosition="246" endWordPosition="249">the availability of English resources and the availability of parallel data for (and translations between) English and most other languages. In cross-lingual syntactic parsing, for example, two approaches to cross-lingual learning have been explored, namely annotation projection and delexicalized transfer. Annotation projection (Hwa et al., 2005) uses word-alignments in human translations to project predicted sourceside analyses to the target language, producing a noisy syntactically annotated resource for the target language. On the other hand, delexicalized transfer (Zeman and Resnik, 2008; McDonald et al., 2011; Søgaard, 2011) simply removes lexical features from mono-lingual parsing models, but assumes reliable POS tagging for the target language. Delexicalized transfer works particularly well when resources from several source languages are used for training; learning from multiple other languages prevents over-fitting to the peculiarities of the source language. Some authors have also combined annotation projection and delexicalized transfer, e.g., McDonald et al. (2011). Others have tried to augment delexicalized transfer models with bilingual word representations (T¨ackstr¨om et al., 2013; Xiao</context>
+<context position="3098" citStr="McDonald et al. (2011)" startWordPosition="440" endWordPosition="443">n explored (Fossum and Abney, 2005; Das and Petrov, 2011), since all features in POS tagging models are typically lexical. However, using bilingual word representations was recently explored as an alternative to projectionbased approaches (Gouws and Søgaard, 2015). The major drawback of using bi-lexical representations is that it limits us to using a single source language. T¨ackstr¨om et al. (2013) obtained significant improvements using bilingual word clusters over a single source delexicalized transfer model, for example, but even better results were obtained with delexicalized transfer in McDonald et al. (2011) by simply using several source languages. This paper introduces a simple method for obtaining truly inter-lingual word representations in order to train models with lexical features on several source languages at the same time. Briefly put, we represent words by their occurrence in clusters of Wikipedia articles linking to the same concept. Our representations are competitive with 1713 Proceedings of the 53rd Annual Meeting of the Association for Computational Linguistics and the 7th International Joint Conference on Natural Language Processing, pages 1713–1722, Beijing, China, July 26-31, 20</context>
+<context position="21719" citStr="McDonald et al., 2011" startWordPosition="3322" endWordPosition="3326">We use the same treebanks from the Google Universal Treebanks v. 1.0 as used in our POS tagging experiments. We again use the Spanish development data for parameter tuning. For compatibility with Xiao and Guo (2014), we also present results on CoNLL 2006 and 2007 treebanks for languages for which we had baseline and system word representations (de, es, sv). Our parameter settings for these experiments were the same as those tuned on the Spanish development data from the Google Universal Treebanks v. 1.0. Baselines The most obvious baseline in our experiments is delexicalized transfer (DELEX) (McDonald et al., 2011; Søgaard, 2011). This baseline system simply learns models without lexical features. We use a modified version of the first-order Mate 7http://code.google.com/p/uni-dep-tb/ 8https://code.google.com/p/ wikily-supervised-pos-tagger/ parser (Bohnet, 2010) that also takes continuousvalued embeddings as input an disregards features that include lexical items. For our embeddings baselines, we augment the feature space by adding embedding vectors for head h and dependent d. We experimented with different versions of combining embedding vectors, from firing separate h and d per-dimension features (Ba</context>
+<context position="25555" citStr="McDonald et al., 2011" startWordPosition="3933" endWordPosition="3936">ults in Table 3 are mixed, but we note that both Klementiev et al. (2012) and Chandar et al. (2014) developed their methods using development data from the RCV corpus. It is therefore not surprising that they obtain good results on this data. On AMAZON, INVERTED is superior to both KLEMENTIEV and CHANDAR. 4.2 POS tagging In POS tagging, INVERTED leads to significant improvements over using KLEMENTIEV and CHANDAR. See Table 4 for results. Somewhat surprisingly, we see no general gain from using multiple source languages. This is very different from what has been observed in dependency parsing (McDonald et al., 2011), but may be explained by treebank sizes, language similarity, or the noise introduced by the word representations. 4.3 Dependency parsing In dependency parsing, distributional word representations do not lead to significant improvements, but while KLEMENTIEV and CHANDAR hurt performance, the INVERTED representations lead to small improvements on some languages. The fact that improvements are primarily seen on Spanish suggest that our approach is parametersensitive. This is in line with previous observations that count-based methods are more parameter-sensitive than prediction-based ones (Baro</context>
+</contexts>
+<marker>McDonald, Petrov, Hall, 2011</marker>
+<rawString>Ryan McDonald, Slav Petrov, and Keith Hall. 2011. Multi-source transfer of delexicalized dependency parsers. In EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ryan McDonald</author>
+<author>Joakim Nivre</author>
+</authors>
+<title>Yvonne QuirmbachBrundage, Yoav Goldberg, Dipanjan Das, Kuzman Ganchev, Keith Hall, Slav Petrov, Hao Zhang,</title>
+<date>2013</date>
+<journal>Oscar T¨ackstr¨om, Claudia Bedini, N´uria Bertomeu Castell´o, and</journal>
+<booktitle>In ACL.</booktitle>
+<marker>McDonald, Nivre, 2013</marker>
+<rawString>Ryan McDonald, Joakim Nivre, Yvonne QuirmbachBrundage, Yoav Goldberg, Dipanjan Das, Kuzman Ganchev, Keith Hall, Slav Petrov, Hao Zhang, Oscar T¨ackstr¨om, Claudia Bedini, N´uria Bertomeu Castell´o, and Jungmee Lee. 2013. Universal dependency annotation for multilingual parsing. In ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Tomas Mikolov</author>
+<author>Ilya Sutskever</author>
+<author>Kai Chen</author>
+<author>Gregory Corrado</author>
+<author>Jeffrey Dean</author>
+</authors>
+<title>Distributed representations of words and phrases and their compositionality.</title>
+<date>2013</date>
+<booktitle>In NIPS.</booktitle>
+<contexts>
+<context position="7246" citStr="Mikolov et al., 2013" startWordPosition="1055" endWordPosition="1058">e variance in a dataset in few dimensions. In our inverted indexing, we use raw co-occurrence data. Prediction-based methods use discriminative learning techniques to learn how to predict words from their context, or vice versa. They rely on a neural network architecture, and once the network converges, they use word representations from a middle layer as their distributional representations. Since the network learns to predict contexts from this representation, words occurring in the same contexts will get similar representations. In §2.1.2, we briefly introduce the skipgram and CBOW models (Mikolov et al., 2013; Collobert and Weston, 2008). Baroni et al. (2014) argue in favor of predictionbased representations, but provide little explanation why prediction-based representations should be better. One key finding, however, is that prediction-based methods tend to be more robust than count-based methods, and one reason for this seems to be better regularization. 2.1.1 Monolingual representations Count-based representations rely on cooccurrence information in the form of binary matrices, raw counts, or point-wise mutual information (PMI). The PMI between two words is wi) and PMI representations associat</context>
+</contexts>
+<marker>Mikolov, Sutskever, Chen, Corrado, Dean, 2013</marker>
+<rawString>Tomas Mikolov, Ilya Sutskever, Kai Chen, Gregory Corrado, and Jeffrey Dean. 2013. Distributed representations of words and phrases and their compositionality. In NIPS.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Christof M¨uller</author>
+<author>Iryna Gurevych</author>
+</authors>
+<title>A study on the semantic relatedness of query and document terms in information retrieval.</title>
+<date>2009</date>
+<booktitle>In EMNLP.</booktitle>
+<marker>M¨uller, Gurevych, 2009</marker>
+<rawString>Christof M¨uller and Iryna Gurevych. 2009. A study on the semantic relatedness of query and document terms in information retrieval. In EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Martin Potthast</author>
+<author>Benno Stein</author>
+<author>Maik Anderka</author>
+</authors>
+<title>A wikipedia-based multilingual retrieval model.</title>
+<date>2008</date>
+<booktitle>In Advances in Information Retrieval.</booktitle>
+<contexts>
+<context position="29840" citStr="Potthast et al., 2008" startWordPosition="4622" endWordPosition="4625">mprovements. Unfortunately, we did not have the code or embeddings of Xiao and Guo (2014). One possible explanation is that they use the embeddings in a very different way in the parser. They use the MSTParser. Unfortunately, they do not say exactly how they combine the embeddings with their baseline feature model. The idea of using inverted indexing in Wikipedia for modelling language is not entirely new either. In cross-lingual information retrieval, this technique, sometimes referred to as explicit semantic analysis, has been used to measure source and target language document relatedness (Potthast et al., 2008; Sorg and Cimiano, 2008). Gabrilovich and Markovitch (2009) also use this technique to model documents, and they evaluate their method on text categorization and on computing the degree of semantic relatedness between text fragments. See also M¨uller and Gurevych (2009) for an application of explicit semantic analysis to modelling documents. This line of work is very different from ours, and to the best of our knowledge, we are the first to propose to use inverted indexing of Wikipedia for cross-lingual word representations. 1720 6 Conclusions We presented a simple, scalable approach to obtai</context>
+</contexts>
+<marker>Potthast, Stein, Anderka, 2008</marker>
+<rawString>Martin Potthast, Benno Stein, and Maik Anderka. 2008. A wikipedia-based multilingual retrieval model. In Advances in Information Retrieval.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Peter Prettenhofer</author>
+<author>Benno Stein</author>
+</authors>
+<title>Crosslanguage text classification using structural correspondence learning.</title>
+<date>2010</date>
+<booktitle>In ACL.</booktitle>
+<contexts>
+<context position="18179" citStr="Prettenhofer and Stein (2010)" startWordPosition="2767" endWordPosition="2771">ion and word alignment, we fix the number of dimensions to 40. For both our baselines and systems, we also tune a scaling factor Q ∈ {1.0, 0.1, 0.01, 0.001} for POS tagging and dependency parsing, using the scaling method from Turian et al. (2010), also used in Gouws and Søgaard (2015). We do not scale our embeddings for document classification or word alignment. 3 Experiments The data set characteristics are found in Table 2.3. 3.1 Document classification Data Our first document classification task is topic classification on the cross-lingual multi-domain sentiment analysis dataset AMAZON in Prettenhofer and Stein (2010).4 We represent each document by the average of the representations of those words that we find both in the documents and in our embeddings. Rather than classifying reviews by sentiment, we classify by topic, trying to discriminate between book reviews, music reviews and DVD reviews, as a three-way classification problem, training on English and testing on German. Unlike in the other tasks below, we always 4http://www.webis.de/research/corpora/ use unscaled word representations, since these are our only features. All word representations have 40 dimensions. The other document classification ta</context>
+</contexts>
+<marker>Prettenhofer, Stein, 2010</marker>
+<rawString>Peter Prettenhofer and Benno Stein. 2010. Crosslanguage text classification using structural correspondence learning. In ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Anders Søgaard</author>
+</authors>
+<title>Datapoint selection for crosslanguage adaptation of dependency parsers.</title>
+<date>2011</date>
+<booktitle>In Proceedings of ACL.</booktitle>
+<contexts>
+<context position="1809" citStr="Søgaard, 2011" startWordPosition="250" endWordPosition="251">lish resources and the availability of parallel data for (and translations between) English and most other languages. In cross-lingual syntactic parsing, for example, two approaches to cross-lingual learning have been explored, namely annotation projection and delexicalized transfer. Annotation projection (Hwa et al., 2005) uses word-alignments in human translations to project predicted sourceside analyses to the target language, producing a noisy syntactically annotated resource for the target language. On the other hand, delexicalized transfer (Zeman and Resnik, 2008; McDonald et al., 2011; Søgaard, 2011) simply removes lexical features from mono-lingual parsing models, but assumes reliable POS tagging for the target language. Delexicalized transfer works particularly well when resources from several source languages are used for training; learning from multiple other languages prevents over-fitting to the peculiarities of the source language. Some authors have also combined annotation projection and delexicalized transfer, e.g., McDonald et al. (2011). Others have tried to augment delexicalized transfer models with bilingual word representations (T¨ackstr¨om et al., 2013; Xiao and Guo, 2014).</context>
+<context position="21735" citStr="Søgaard, 2011" startWordPosition="3327" endWordPosition="3328">ks from the Google Universal Treebanks v. 1.0 as used in our POS tagging experiments. We again use the Spanish development data for parameter tuning. For compatibility with Xiao and Guo (2014), we also present results on CoNLL 2006 and 2007 treebanks for languages for which we had baseline and system word representations (de, es, sv). Our parameter settings for these experiments were the same as those tuned on the Spanish development data from the Google Universal Treebanks v. 1.0. Baselines The most obvious baseline in our experiments is delexicalized transfer (DELEX) (McDonald et al., 2011; Søgaard, 2011). This baseline system simply learns models without lexical features. We use a modified version of the first-order Mate 7http://code.google.com/p/uni-dep-tb/ 8https://code.google.com/p/ wikily-supervised-pos-tagger/ parser (Bohnet, 2010) that also takes continuousvalued embeddings as input an disregards features that include lexical items. For our embeddings baselines, we augment the feature space by adding embedding vectors for head h and dependent d. We experimented with different versions of combining embedding vectors, from firing separate h and d per-dimension features (Bansal et al., 201</context>
+</contexts>
+<marker>Søgaard, 2011</marker>
+<rawString>Anders Søgaard. 2011. Datapoint selection for crosslanguage adaptation of dependency parsers. In Proceedings of ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Philipp Sorg</author>
+<author>Philipp Cimiano</author>
+</authors>
+<title>Crosslingual information retrieval with explicit semantic analysis.</title>
+<date>2008</date>
+<booktitle>In Working Notes for the CLEF</booktitle>
+<note>Workshop.</note>
+<contexts>
+<context position="29865" citStr="Sorg and Cimiano, 2008" startWordPosition="4626" endWordPosition="4629">ely, we did not have the code or embeddings of Xiao and Guo (2014). One possible explanation is that they use the embeddings in a very different way in the parser. They use the MSTParser. Unfortunately, they do not say exactly how they combine the embeddings with their baseline feature model. The idea of using inverted indexing in Wikipedia for modelling language is not entirely new either. In cross-lingual information retrieval, this technique, sometimes referred to as explicit semantic analysis, has been used to measure source and target language document relatedness (Potthast et al., 2008; Sorg and Cimiano, 2008). Gabrilovich and Markovitch (2009) also use this technique to model documents, and they evaluate their method on text categorization and on computing the degree of semantic relatedness between text fragments. See also M¨uller and Gurevych (2009) for an application of explicit semantic analysis to modelling documents. This line of work is very different from ours, and to the best of our knowledge, we are the first to propose to use inverted indexing of Wikipedia for cross-lingual word representations. 1720 6 Conclusions We presented a simple, scalable approach to obtaining cross-lingual word r</context>
+</contexts>
+<marker>Sorg, Cimiano, 2008</marker>
+<rawString>Philipp Sorg and Philipp Cimiano. 2008. Crosslingual information retrieval with explicit semantic analysis. In Working Notes for the CLEF 2008 Workshop.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Oscar T¨ackstr¨om</author>
+<author>Dipanjan Das</author>
+<author>Slav Petrov</author>
+<author>Ryan McDonald</author>
+<author>Joakim Nivre</author>
+</authors>
+<title>Token and type constraints for cross-lingual part-of-speech tagging.</title>
+<date>2013</date>
+<tech>TACL,</tech>
+<pages>1--1</pages>
+<marker>T¨ackstr¨om, Das, Petrov, McDonald, Nivre, 2013</marker>
+<rawString>Oscar T¨ackstr¨om, Dipanjan Das, Slav Petrov, Ryan McDonald, and Joakim Nivre. 2013. Token and type constraints for cross-lingual part-of-speech tagging. TACL, 1:1–12.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Joseph Turian</author>
+<author>Lev Ratinov</author>
+<author>Yoshua Bengio</author>
+</authors>
+<title>Word representations: a simple and general method for semi-supervised learning.</title>
+<date>2010</date>
+<booktitle>In ACL.</booktitle>
+<contexts>
+<context position="17797" citStr="Turian et al. (2010)" startWordPosition="2712" endWordPosition="2715">es – – 206 5.7k 0.841 0.841 0.455 de – – 357 5.7k 0.616 0.612 0.294 sv – – 389 5.7k n/a n/a 0.561 EUROPARL – WORD ALIGNMENT en – – 100 – 0.370 0.370 0.370 es – – 100 – 0.533 0.533 0.533 Table 2: Characteristics of the data sets. Embeddings coverage (token-level) for KLEMENTIEV, CHANDAR and INVERTED on the test sets. We use the common vocabulary on WORD ALIGNMENT. sification and word alignment, we fix the number of dimensions to 40. For both our baselines and systems, we also tune a scaling factor Q ∈ {1.0, 0.1, 0.01, 0.001} for POS tagging and dependency parsing, using the scaling method from Turian et al. (2010), also used in Gouws and Søgaard (2015). We do not scale our embeddings for document classification or word alignment. 3 Experiments The data set characteristics are found in Table 2.3. 3.1 Document classification Data Our first document classification task is topic classification on the cross-lingual multi-domain sentiment analysis dataset AMAZON in Prettenhofer and Stein (2010).4 We represent each document by the average of the representations of those words that we find both in the documents and in our embeddings. Rather than classifying reviews by sentiment, we classify by topic, trying to</context>
+</contexts>
+<marker>Turian, Ratinov, Bengio, 2010</marker>
+<rawString>Joseph Turian, Lev Ratinov, and Yoshua Bengio. 2010. Word representations: a simple and general method for semi-supervised learning. In ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Min Xiao</author>
+<author>Yuhong Guo</author>
+</authors>
+<title>Distributed word representation learning for cross-lingual dependency parsing.</title>
+<date>2014</date>
+<booktitle>In CoNLL.</booktitle>
+<contexts>
+<context position="2408" citStr="Xiao and Guo, 2014" startWordPosition="336" endWordPosition="339">2011; Søgaard, 2011) simply removes lexical features from mono-lingual parsing models, but assumes reliable POS tagging for the target language. Delexicalized transfer works particularly well when resources from several source languages are used for training; learning from multiple other languages prevents over-fitting to the peculiarities of the source language. Some authors have also combined annotation projection and delexicalized transfer, e.g., McDonald et al. (2011). Others have tried to augment delexicalized transfer models with bilingual word representations (T¨ackstr¨om et al., 2013; Xiao and Guo, 2014). In cross-lingual POS tagging, mostly annotation projection has been explored (Fossum and Abney, 2005; Das and Petrov, 2011), since all features in POS tagging models are typically lexical. However, using bilingual word representations was recently explored as an alternative to projectionbased approaches (Gouws and Søgaard, 2015). The major drawback of using bi-lexical representations is that it limits us to using a single source language. T¨ackstr¨om et al. (2013) obtained significant improvements using bilingual word clusters over a single source delexicalized transfer model, for example, b</context>
+<context position="4320" citStr="Xiao and Guo (2014)" startWordPosition="625" endWordPosition="628"> c�2015 Association for Computational Linguistics state-of-the-art neural net word embeddings when using only a single source language, but also enable us to exploit the availability of resources in multiple languages. This also makes it possible to explore multi-source transfer for POS tagging. We evaluate the method across POS tagging and dependency parsing datasets in four languages in the Google Universal Treebanks v. 1.0 (see §3.2.1), as well as two document classification datasets and four word alignment problems using a handaligned text. Finally, we also directly compare our results to Xiao and Guo (2014) on parsing data for four languages from CoNLL 2006 and 2007. Contribution • We present a novel approach to cross-lingual word representations with several advantages over existing methods: (a) It does not require training neural networks, (b) it does not rely on the availability of parallel data between source and target language, and (c) it enables multi-source transfer with lexical representations. • We present an evaluation of our inter-lingual word representations, based on inverted indexing, across four tasks: document classification, POS tagging, dependency parsing, and word alignment, </context>
+<context position="11801" citStr="Xiao and Guo (2014)" startWordPosition="1728" endWordPosition="1731">he output layer, using back-propagation, passing the representation through a smaller middle layer. This layer then provides a dimensionality reduction. Chandar et al. (2014) instead replace the output layer with the target language bag-of-words reconstruction. In their final set-up, they simultaneously minimize the loss of a source-source, a target-target, a source-target, and a target-source auto-encoder, which corresponds to training a single auto-encoder with randomly chosen instances from source-target pairs. The bilingual word vectors can now be read off the auto-encoder’s middle layer. Xiao and Guo (2014) use a CBOW model and random target words as negative examples. The trick they introduce to learn bilingual embeddings, relies on a bilingual dictionary, in their case obtained from Wiktionary. They only use the unambiguous translation pairs for the source and target languages in question and simply force translation equivalents to have the same representation. This corresponds to replacing words from unambigu1715 ous translation pairs with a unique dummy symbol. Gouws and Søgaard (2015) present a much simpler approach to learning prediction-based bilingual representations. They assume a list </context>
+<context position="21313" citStr="Xiao and Guo (2014)" startWordPosition="3257" endWordPosition="3260"> different embeddings for the target word, KLEMENTIEV and CHANDAR. With all the embeddings in POS tagging, we assign a mean vector to out-of-vocabulary words. System For our system, we simply augment the delexicalized POS tagger with the INVERTED distributional representation of the current word. The best parameter setting on Spanish development data was Q = 0.01, 6 = 160. 3.3 Dependency parsing Data We use the same treebanks from the Google Universal Treebanks v. 1.0 as used in our POS tagging experiments. We again use the Spanish development data for parameter tuning. For compatibility with Xiao and Guo (2014), we also present results on CoNLL 2006 and 2007 treebanks for languages for which we had baseline and system word representations (de, es, sv). Our parameter settings for these experiments were the same as those tuned on the Spanish development data from the Google Universal Treebanks v. 1.0. Baselines The most obvious baseline in our experiments is delexicalized transfer (DELEX) (McDonald et al., 2011; Søgaard, 2011). This baseline system simply learns models without lexical features. We use a modified version of the first-order Mate 7http://code.google.com/p/uni-dep-tb/ 8https://code.google</context>
+<context position="26215" citStr="Xiao and Guo (2014)" startWordPosition="4028" endWordPosition="4031"> language similarity, or the noise introduced by the word representations. 4.3 Dependency parsing In dependency parsing, distributional word representations do not lead to significant improvements, but while KLEMENTIEV and CHANDAR hurt performance, the INVERTED representations lead to small improvements on some languages. The fact that improvements are primarily seen on Spanish suggest that our approach is parametersensitive. This is in line with previous observations that count-based methods are more parameter-sensitive than prediction-based ones (Baroni et al., 2014). For comparability with Xiao and Guo (2014), we also did experiments with the CoNLL 2006 and CoNLL 2007 datasets for which we had embeddings (Table 6). Again, we see little effects from using the word representations, and we also see that our baseline model is weaker than the one in Xiao and Guo (2014) (DELEX-XIAO). See §5 for further discussion. 4.4 Word alignment The word alignment results are presented in Table 7. On the certain alignments, we see an accuracy of more than 50% with INVERTED in one case. KLEMENTIEV and CHANDAR have the advantage of having been trained on the EnglishSpanish Europarl data, but nevertheless we see consis</context>
+<context position="28632" citStr="Xiao and Guo (2014)" startWordPosition="4427" endWordPosition="4430">endency parsing, investigate continuous word representation for dependency parsing in a monolingual cross-domain setup and compare them to word clusters. However, to make the embeddings work, they had to i) bucket real values and perform hierarchical clustering on them, ending up with word clusters very similar to those of T¨ackstr¨om et al. (2013); ii) use syntactic context to estimate embeddings. In the cross-lingual setting, syntactic context is not available for the target language, but doing clustering on top of inverted indexing is an interesting option we did not explore in this paper. Xiao and Guo (2014) is, to the best of our knowledge, the only parser using bilingual embeddings for unsupervised cross-lingual parsing. They evaluate their models on CoNLL 2006 and CoNLL 2007, and we compare our results to theirs in §4. They obtain much better relative improvements on dependency parsing that we do - comparable to those we observe in document classification and POS tagging. It is not clear to us what is the explanation for this improvement. The approach relies on a bilingual dictionary as in Klementiev et al. (2012) and Gouws and Søgaard (2015), but none of these embeddings led to improvements. </context>
+</contexts>
+<marker>Xiao, Guo, 2014</marker>
+<rawString>Min Xiao and Yuhong Guo. 2014. Distributed word representation learning for cross-lingual dependency parsing. In CoNLL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Daniel Zeman</author>
+<author>Philip Resnik</author>
+</authors>
+<title>Crosslanguage parser adaptation between related languages.</title>
+<date>2008</date>
+<booktitle>In IJCNLP.</booktitle>
+<contexts>
+<context position="1770" citStr="Zeman and Resnik, 2008" startWordPosition="242" endWordPosition="245">asons for this; namely, the availability of English resources and the availability of parallel data for (and translations between) English and most other languages. In cross-lingual syntactic parsing, for example, two approaches to cross-lingual learning have been explored, namely annotation projection and delexicalized transfer. Annotation projection (Hwa et al., 2005) uses word-alignments in human translations to project predicted sourceside analyses to the target language, producing a noisy syntactically annotated resource for the target language. On the other hand, delexicalized transfer (Zeman and Resnik, 2008; McDonald et al., 2011; Søgaard, 2011) simply removes lexical features from mono-lingual parsing models, but assumes reliable POS tagging for the target language. Delexicalized transfer works particularly well when resources from several source languages are used for training; learning from multiple other languages prevents over-fitting to the peculiarities of the source language. Some authors have also combined annotation projection and delexicalized transfer, e.g., McDonald et al. (2011). Others have tried to augment delexicalized transfer models with bilingual word representations (T¨ackst</context>
+</contexts>
+<marker>Zeman, Resnik, 2008</marker>
+<rawString>Daniel Zeman and Philip Resnik. 2008. Crosslanguage parser adaptation between related languages. In IJCNLP.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

@@ -1,0 +1,1109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.001493">
+<title confidence="0.976528">
+Stochastic Contextual Edit Distance and Probabilistic FSTs
+</title>
+<author confidence="0.996117">
+Ryan Cotterell and Nanyun Peng and Jason Eisner
+</author>
+<affiliation confidence="0.9992">
+Department of Computer Science, Johns Hopkins University
+</affiliation>
+<email confidence="0.993688">
+{ryan.cotterell,npeng1,jason}@cs.jhu.edu
+</email>
+<sectionHeader confidence="0.984639" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.999837428571429">
+String similarity is most often measured
+by weighted or unweighted edit distance
+d(x, y). Ristad and Yianilos (1998) de-
+fined stochastic edit distance—a probabil-
+ity distribution p(y  |x) whose parame-
+ters can be trained from data. We general-
+ize this so that the probability of choosing
+each edit operation can depend on contex-
+tual features. We show how to construct
+and train a probabilistic finite-state trans-
+ducer that computes our stochastic con-
+textual edit distance. To illustrate the im-
+provement from conditioning on context,
+we model typos found in social media text.
+</bodyText>
+<sectionHeader confidence="0.998427" genericHeader="keywords">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.999965310344828">
+Many problems in natural language processing
+can be viewed as stochastically mapping one
+string to another: e.g., transliteration, pronuncia-
+tion modeling, phonology, morphology, spelling
+correction, and text normalization. Ristad and
+Yianilos (1998) describe how to train the param-
+eters of a stochastic editing process that moves
+through the input string x from left to right, trans-
+forming it into the output string y. In this paper we
+generalize this process so that the edit probabilities
+are conditioned on input and output context.
+We further show how to model the conditional
+distribution p(y  |x) as a probabilistic finite-state
+transducer (PFST), which can be easily combined
+with other transducers or grammars for particu-
+lar applications. We contrast our probabilistic
+transducers with the more general framework of
+weighted finite-state transducers (WFST), explain-
+ing why our restriction provides computational ad-
+vantages when reasoning about unknown strings.
+Constructing the finite-state transducer is tricky,
+so we give the explicit construction for use by oth-
+ers. We describe how to train its parameters when
+the contextual edit probabilities are given by a log-
+linear model. We provide a library for training
+both PFSTs and WFSTs that works with OpenFST
+(Allauzen et al., 2007), and we illustrate its use
+with simple experiments on typos, which demon-
+strate the benefit of context.
+</bodyText>
+<sectionHeader confidence="0.96725" genericHeader="introduction">
+2 Stochastic Contextual Edit Distance
+</sectionHeader>
+<bodyText confidence="0.986295153846154">
+Our goal is to define a family of probability distri-
+butions pθ(y  |x), where x E E∗x and y E E∗yite alphabet are
+input and output strings over fins Ex
+and Ey, and 0 is a parameter vector.
+Let xi denote the ith character of x. If i &lt; 1 or
+i &gt; |x|, then xi is the distinguished symbol BOS
+or EOS (“beginning/end of string”). Let xi:j denote
+the (j − i)-character substring xi+1xi+2 • • • xj.
+Consider a stochastic edit process that reads in-
+put string x while writing output string y. Having
+read the prefix x0:i and written the prefix y0:j, the
+process must stochastically choose one of the fol-
+lowing 2|Ey |+ 1 edit operations:
+</bodyText>
+<listItem confidence="0.905436166666667">
+• DELETE: Read xi+1 but write nothing.
+• INSERT(t) for some t E Ey: Write yj+1 = t
+without reading anything.
+• SUBST(t) for some t E Ey: Read xi+1 and
+write yj+1 = t. Note that the traditional
+COPY operation is obtained as SUBST(xi+1).
+</listItem>
+<bodyText confidence="0.999635428571428">
+In the special case where xi+1 = EOS, the choices
+are instead INSERT(t) and HALT (where the latter
+may be viewed as copying the EOS symbol).
+The probability of each edit operation depends
+on 0 and is conditioned on the left input context
+C1 = x(i_N1):i, the right input context C2 =
+xi:(i+N2) , and the left output context C3 =
+y(j_N3):j, where the constants N1, N2, N3 &gt; 0
+specify the model’s context window sizes.1 Note
+that the probability cannot be conditioned on right
+output context because those characters have not
+yet been chosen. Ordinary stochastic edit dis-
+tance (Ristad and Yianilos, 1998) is simply the
+case (N1, N2, N3) = (0, 1, 0), while Bouchard-
+Cˆot´e et al. (2007) used roughly (1, 2, 0).
+Now pθ(y  |x) is the probability that this pro-
+cess will write y as it reads a given x. This is the
+total probability (given x) of all latent edit oper-
+ation sequences that write y. In general there are
+exponentially many such sequences, each imply-
+ing a different alignment of y to x.
+</bodyText>
+<footnote confidence="0.972346333333333">
+1If N2 = 0, so that we do not condition on xi+1, we must
+still condition on whether xi+1 = EOS (a single bit). We
+gloss over special handling for N2 = 0; but it is in our code.
+</footnote>
+<page confidence="0.97889">
+625
+</page>
+<bodyText confidence="0.952301">
+Proceedings of the 52nd Annual Meeting of the Association for Computational Linguistics (Short Papers), pages 625–630,
+Baltimore, Maryland, USA, June 23-25 2014. c�2014 Association for Computational Linguistics
+This model is reminiscent of conditional mod-
+els in MT that perform stepwise generation of one
+string or structure from another—e.g., string align-
+ment models with contextual features (Cherry and
+Lin, 2003; Liu et al., 2005; Dyer et al., 2013), or
+tree transducers (Knight and Graehl, 2005).
+</bodyText>
+<sectionHeader confidence="0.963247" genericHeader="method">
+3 Probabilistic FSTs
+</sectionHeader>
+<bodyText confidence="0.999603941176471">
+We will construct a probabilistic finite-state
+transducer (PFST) that compactly models pθ(y |
+x) for all (x, y) pairs.2 Then various computa-
+tions with this distribution can be reduced to stan-
+dard finite-state computations that efficiently em-
+ploy dynamic programming over the structure of
+the PFST, and the PFST can be easily combined
+with other finite-state distributions and functions
+(Mohri, 1997; Eisner, 2001).
+A PFST is a two-tape generalization of the well-
+known nondeterministic finite-state acceptor. It
+is a finite directed multigraph where each arc is
+labeled with an input in Ex ∪ {c}, an output in
+Ey∪{c}, and a probability in [0, 1]. (c is the empty
+string.) Each state (i.e., vertex) has a halt proba-
+bility in [0, 1], and there is a single initial state qI.
+Each path from qI to a final state qF has
+</bodyText>
+<listItem confidence="0.9844498">
+• an input string x, given by the concatenation
+of its arcs’ input labels;
+• an output string y, given similarly;
+• a probability, given by the product of its arcs’
+probabilities and the halt probability of qF.
+</listItem>
+<bodyText confidence="0.997002818181818">
+We define p(y  |x) as the total probability of all
+paths having input x and output y. In our applica-
+tion, a PFST path corresponds to an edit sequence
+that reads x and writes y. The path’s probability is
+the probability of that edit sequence given x.
+We must take care to ensure that for any x ∈ E∗x,
+the total probability of all paths accepting x is 1,
+so that pθ(y  |x) is truly a conditional probability
+distribution. This is guaranteed by the following
+sufficient conditions (we omit the proof for space),
+which do not seem to appear in previous literature:
+</bodyText>
+<listItem confidence="0.839731">
+• For each state q and each symbol b ∈ Ex, the
+arcs from q with input label b or c must have
+total probability of 1. (These are the available
+choices if the next input character is x.)
+</listItem>
+<bodyText confidence="0.867507333333333">
+2Several authors have given recipes for finite-state trans-
+ducers that perform a single contextual edit operation (Kaplan
+and Kay, 1994; Mohri and Sproat, 1996; Gerdemann and van
+Noord, 1999). Such “rewrite rules” can be individually more
+expressive than our simple edit operations of section 2; but it
+is unclear how to train a cascade of them to model p(y I x).
+</bodyText>
+<listItem confidence="0.9599266">
+• For each state q, the halt action and the arcs
+from q with input label c must have total
+probability of 1. (These are the available
+choices if there is no next input character.)
+• Every state q must be co-accessible, i.e., there
+must be a path of probability &gt; 0 from q to
+some qF. (Otherwise, the PFST could lose
+some probability mass to infinite paths. The
+canonical case of this involves an loop q → q
+with input label c and probability 1.)
+</listItem>
+<bodyText confidence="0.999943142857143">
+We take the first two conditions to be part of the
+definition of a PFST. The final condition requires
+our PFST to be “tight” in the same sense as a
+PCFG (Chi and Geman, 1998), although the tight-
+ness conditions for a PCFG are more complex.
+In section 7, we discuss the costs and benefits of
+PFSTs relative to other options.
+</bodyText>
+<sectionHeader confidence="0.991912" genericHeader="method">
+4 The Contextual Edit PFST
+</sectionHeader>
+<bodyText confidence="0.99981135483871">
+We now define a PFST topology that concisely
+captures the contextual edit process of section 2.
+We are given the alphabets Ex, Ey and the context
+window sizes N1, N2, N3 ≥ 0.
+For each possible context triple C =
+(C1, C2, C3) as defined in section 2, we construct
+an edit state qC whose outgoing arcs correspond
+to the possible edit operations in that context.
+One might expect that the SUBST(t) edit oper-
+ation that reads s = xi+1 and writes t = yj+1
+would correspond to an arc with s, t as its input
+and output labels. However, we give a more effi-
+cient design where in the course of reaching qC,
+the PFST has already read s and indeed the en-
+tire right input context C2 = xi:(i+N2). So our
+PFST’s input and output actions are “out of sync”:
+its read head is N2 characters ahead of its write
+head. When the edit process of section 2 has read
+x0:i and written y0:j, our PFST implementation
+will actually have read x0:(i+N2) and written y0:j.
+This design eliminates the need for nondeter-
+ministic guessing (of the right context xi:(i+N2)) to
+determine the edit probability. The PFST’s state is
+fully determined by the characters that it has read
+and written so far. This makes left-to-right com-
+position in section 5 efficient.
+A fragment of our construction is illustrated in
+Figure 1. An edit state qC has the following out-
+going edit arcs, each of which corresponds to an
+edit operation that replaces some s ∈ Ex ∪ {c}
+with some t ∈ Ey ∪ {c}:
+</bodyText>
+<page confidence="0.997934">
+626
+</page>
+<figureCaption confidence="0.9519112">
+Figure 1: A fragment of a PFST with N1 = 1, N2 = 2, N3 =
+1. Edit states are shaded. A state qC is drawn with left and
+right input contexts C1, C2 in the left and right upper quad-
+rants, and left output context C3 in the left lower quadrant.
+Each arc is labeled with input:output / probability.
+</figureCaption>
+<listItem confidence="0.9844835">
+• A single arc with probability p(DELETE  |C)
+(here s = (C2)1, t = c)
+• For each t E Ey, an arc with probability
+p(INSERT(t)  |C) (here s = E)
+• For each t E Ey, an arc with probability
+p(SUBST(t)  |C) (here s = (C2)1)
+</listItem>
+<bodyText confidence="0.999104692307692">
+Each edit arc is labeled with input c (because s
+has already been read) and output t. The arc leads
+from qC to qC,, a state that moves s and t into
+the left contexts: C&apos;1 = suffix(C1s, N1), C&apos;2 =
+suffix(C2, N2 − |s|), C3 = suffix(C3t, N3).
+Section 2 mentions that the end of x requires
+special handling. An edit state qC whose C2 =
+EOSN2 only has outgoing INSERT(t) arcs, and has
+a halt probability of p(HALT  |C). The halt proba-
+bility at all other states is 0.
+We must also build some non-edit states of the
+form qC where |C2 |&lt; N2. Such a state does not
+have the full N2 characters of lookahead that are
+needed to determine the conditional probability of
+an edit. Its outgoing arcs deterministically read
+a new character into the right input context. For
+each s E Ex, we have an arc of probability 1 from
+qC to qC, where C&apos; = (C1, C2s, C3), labeled with
+input s and output c. Following such arcs from qC
+will reach an edit state after N2 − |C2 |steps.
+The initial state qI with I = (BOSN1, E, BOSN3)
+is a non-edit state. Other non-edit states are con-
+structed only when they are reachable from an-
+other state. In particular, a DELETE or SUBST arc
+always transitions to a non-edit state, since it con-
+sumes one of the lookahead characters.
+</bodyText>
+<sectionHeader confidence="0.989726" genericHeader="method">
+5 Computational Complexity
+</sectionHeader>
+<bodyText confidence="0.998431833333333">
+We summarize some useful facts without proof.
+For fixed alphabets Ex and Ey, our final
+PFST, T, has O(|Ex|N1+N2|Ey|N3) states and
+O(|Ex|N1+N2|Ey|N3+1) arcs. Composing this T
+with deterministic FSAs takes time linear in the
+size of the result, using a left-to-right, on-the-fly
+implementation of the composition operator o.
+Given strings x and y, we can compute pθ(y |
+x) as the total probability of all paths in x o T o y.
+This acyclic weighted FST has O(|x |• |y|) states
+and arcs. It takes only O(|x|•|y|) time to construct
+it and sum up its paths by dynamic programming,
+just as in other edit distance algorithms.
+Given only x, taking the output language of
+x o T yields the full distribution pθ(y  |x)
+as a cyclic PFSA with O(|x |• EN3
+y ) states and
+O(|x |• EN3+1
+y ) arcs. Finding its most probable
+path (i.e., most probable aligned y) takes time
+O(|arcs |log |states|), while computing every arc’s
+expected number of traversals under p(y  |x) takes
+time O(|arcs |• |states|).3
+pθ(y  |x) may be used as a noisy channel
+model. Given a language model p(x) repre-
+sented as a PFSA X, X o T gives p(x, y) for all
+x, y. In the case of an n-gram language model
+with n &lt; N1 + N2, this composition is effi-
+cient: it merely reweights the arcs of T. We
+use Bayes’ Theorem to reconstruct x from ob-
+</bodyText>
+<equation confidence="0.97670525">
+served y: X o T o y gives p(x, y) (proportional
+to p(x  |y)) for each x. This weighted FSA has
+O(EN1+N2 � |y|) states and arcs.
+x
+</equation>
+<sectionHeader confidence="0.970316" genericHeader="method">
+6 Parameterization and Training
+</sectionHeader>
+<bodyText confidence="0.994640714285714">
+While the parameters θ could be trained via var-
+ious objective functions, it is particularly effi-
+cient to compute the gradient of conditional log-
+likelihood, Ek log pθ(yk  |xk), given a sample
+of pairs (xk, yk). This is a non-convex objective
+function because of the latent x-to-y alignments:
+we do not observe which path transduced xk to yk.
+Recall from section 5 that these possible paths are
+represented by the small weighted FSA xk oT oyk.
+Now, a path’s probability is defined by multiply-
+ing the contextual probabilities of edit operations
+e. As suggested by Berg-Kirkpatrick et al. (2010),
+we model these steps using a conditional log-
+linear model, pθ (e  |C) def 1 exp (θ • ~f(C, e)) .
+3Speedups: In both runtimes, a factor of |x |can be elimi-
+nated from |states |by first decomposing x ◦ T into its O(|x|)
+strongly connected components. And the |states |factor in the
+second runtime is unnecessary in practice, as just the first few
+iterations of conjugate gradient are enough to achieve good
+approximate convergence when solving the sparse linear sys-
+tem that defines the forward probabilities in the cyclic PFSA.
+</bodyText>
+<figure confidence="0.9766775625">
+a b
+x
+b
+c
+x
+c
+a ba
+x
+a bc
+z
+insert x
+b
+c
+ε:x /
+p(INSERT(x)  |(a,bc,x) )
+y
+</figure>
+<page confidence="0.988984">
+627
+</page>
+<bodyText confidence="0.981477458333333">
+To increase logpo(yk  |xk), we must raise the
+probability of the edits e that were used to trans-
+duce xk to yk, relative to competing edits from the
+same contexts C. This means raising θ · f(C, e)
+and/or lowering ZC. Thus, log po(yk  |xk) de-
+pends only on the probabilities of edit arcs in T
+that appear in xk ◦ T ◦ yk, and the competing edit
+arcs from the same edit states qC.
+The gradient ∇o log po(yk  |xk) takes the form
+where c(C, e) is the expected number of times that
+e was chosen in context C given (xk, yk). (That
+can be found by the forward-backward algorithm
+on xk ◦ T ◦ yk.) So the gradient adds up the differ-
+ences between observed and expected feature vec-
+tors at contexts C, where contexts are weighted by
+how many times they were likely encountered.
+In practice, it is efficient to hold the counts
+c(C, e) constant over several gradient steps, since
+this amortizes the work of computing them. This
+can be viewed as a generalized EM algorithm that
+imputes the hidden paths (giving c) at the “E” step
+and improves their probability at the “M” step.
+Algorithm 1 provides the training pseudocode.
+Algorithm 1 Training a PFST To by EM.
+</bodyText>
+<listItem confidence="0.984721470588235">
+1: while not converged do
+2: reset all counts to 0 &gt; begin the “E step”
+3: fork ← 1 to K do &gt; loop over training data
+4: M = xk ◦ Tθ ◦ yk &gt; small acyclic WFST
+5: α� = FORWARD-ALGORITHM(M)
+6: β�= BACKWARD-ALGORITHM(M)
+7: for arc A ∈ M, from state q → q&apos; do
+8: if A was derived from an arc in Tθ
+representing edit e, from edit state qC, then
+9: c(C, e) += αq · prob(A) · βq /βqI
+10: B ← L-BFGS(B, EVAL, max iters=5) &gt; the “M step”
+11: function EVAL(B) &gt; objective function &amp; its gradient
+12: F ← 0; ∇F ← 0
+13: for context C such that (∃e)c(C, e) &gt; 0 do
+14: count ← 0; expected ← 0; ZC ← 0
+15: for possible edits e in context C do
+16: F += c(C, e) · (B · �f(C, e))
+</listItem>
+<bodyText confidence="0.995392682926829">
+ping this requirement gives a weighted FST
+(WFST), whose path weights w(x, y) can be glob-
+ally normalized (divided by a constant Zx) to ob-
+tain probabilities p(y  |x). WFST models of con-
+textual edits were studied by Dreyer et al. (2008).
+PFSTs and WFSTs are respectively related to
+MEMMs (McCallum et al., 2000) and CRFs (Laf-
+ferty et al., 2001). They gain added power from
+hidden states and c transitions (although to permit
+a finite-state encoding, they condition on x in a
+more restricted way than MEMMs and CRFs).
+WFSTs are likely to beat PFSTs as linguistic
+models,4 just as CRFs beat MEMMs (Klein and
+Manning, 2002). A WFST’s advantage is that the
+probability of an edit can be indirectly affected by
+the weights of other edits at a distance. Also, one
+could construct WFSTs where an edit’s weight di-
+rectly considers local right output context C4.
+So why are we interested in PFSTs? Because
+they do not require computing a separate normal-
+izing contant Zx for every x. This makes it com-
+putationally tractable to use them in settings where
+x is uncertain because it is unobserved, partially
+observed (e.g., lacks syllable boundaries), or nois-
+ily observed. E.g., at the end of section 5, X rep-
+resented an uncertain x. So unlike WFSTs, PFSTs
+are usable as the conditional distributions in noisy
+channel models, channel cascades, and Bayesian
+networks. In future we plan to measure their mod-
+eling disadvantage and attempt to mitigate it.
+PFSTs are also more efficient to train under con-
+ditional likelihood. It is faster to compute the gra-
+dient (and fewer steps seem to be required in prac-
+tice), since we only have to raise the probabilities
+of arcs in xk ◦ T ◦ yk relative to competing arcs
+in xk ◦ T. We visit at most |xk |· |yk |· |Ey |arcs.
+By contrast, training a WFST must raise the prob-
+ability of the paths in xk ◦ T ◦ yk relative to the
+infinitely many competing paths in xk ◦ T. This
+requires summing around cycles in xk ◦ T, and re-
+quires visiting all of its |xk |· |Ey|N3+1 arcs.
+</bodyText>
+<figure confidence="0.445671888888889">
+C,e e&apos;
+� J:
+c(C, e) �f(C, e) − po(e&apos;  |C) �f(C, e&apos;)
+17: ∇F += c(C, e) · f(C, e)
+18: count += c(C, e) 8 Experiments
+19: expected += exp(B · f(C,e)) · f(C,e)
+20: ZC += exp(B · �f(C, e))
+21: F -= count·log ZC; ∇F -= count·expected/ZC
+22: return (F, ∇F)
+</figure>
+<sectionHeader confidence="0.806287" genericHeader="method">
+7 PFSTs versus WFSTs
+</sectionHeader>
+<bodyText confidence="0.998226">
+Our PFST model of p(y  |x) enforces a normal-
+ized probability distribution at each state. Drop-
+To demonstrate the utility of contextual edit trans-
+ducers, we examine spelling errors in social me-
+dia data. Models of spelling errors are useful in
+a variety of settings including spelling correction
+itself and phylogenetic models of string variation
+</bodyText>
+<footnote confidence="0.999107333333333">
+4WFSTs can also use a simpler topology (Dreyer et al.,
+2008) while retaining determinism, since edits can be scored
+“in retrospect” after they have passed into the left context.
+</footnote>
+<page confidence="0.992123">
+628
+</page>
+<figure confidence="0.999544304347826">
+Mean Log-Likelihood
+Backoff
+Topology
+FALSE
+TRUE
+T010
+T020
+T110
+T111 2
+Mean Expected Edit Distance
+6
+5
+3
+Backoff
+Topology
+FALSE
+TRUE
+T010
+T020
+T110
+T111
+2000 4000 6000 2000 4000 6000
+# Training Examples # Training Examples
+</figure>
+<figureCaption confidence="0.730299">
+Figure 2: (a) Mean log p(y I x) for held-out test examples. (b) Mean expected edit distance (similarly).
+(Mays et al., 1991; Church and Gale, 1991; Ku-
+kich, 1992; Andrews et al., 2014).
+</figureCaption>
+<bodyText confidence="0.999876375">
+To eliminate experimental confounds, we use
+no dictionary or language model as one would in
+practice, but directly evaluate our ability to model
+p(correct  |misspelled). Consider (xk, yk) =
+(feeel, feel). Our model defines p(y  |xk) for all y.
+Our training objective (section 6) tries to make this
+large for y = yk. A contextual edit model learns
+here that e H c is more likely in the context of ee.
+We report on test data how much probability
+mass lands on the true yk. We also report how
+much mass lands “near” yk, by measuring the ex-
+pected edit distance of the predicted y to the truth.
+Expected edit distance is defined as Ey pg(y |
+xk)d(y, yk) where d(y, yk) is the Levenshtein dis-
+tance between two strings. It can be computed us-
+ing standard finite-state algorithms (Mohri, 2003).
+</bodyText>
+<subsectionHeader confidence="0.935227">
+8.1 Data
+</subsectionHeader>
+<bodyText confidence="0.999980555555556">
+We use an annotated corpus (Aramaki, 2010) of
+50000 misspelled words x from tweets along with
+their corrections y. All examples have d(x, y) = 1
+though we do not exploit this fact. We randomly
+selected 6000 training pairs and 100 test pairs. We
+regularized the objective by adding λ·||θ||22, where
+for each training condition, we chose λ by coarse
+grid search to maximize the conditional likelihood
+of 100 additional development pairs.
+</bodyText>
+<subsectionHeader confidence="0.999463">
+8.2 Context Windows and Edit Features
+</subsectionHeader>
+<bodyText confidence="0.993027391304348">
+We considered four different settings for the con-
+text window sizes (N1, N2, N3): (0,1,0)=stochas-
+tic edit distance, (1,1,0), (0,2,0), and (1,1,1).
+Our log-linear edit model (section 6) includes
+a dedicated indicator feature for each contextual
+edit (C, e), allowing us to fit any conditional dis-
+tribution p(e  |C). In our “backoff” setting, each
+(C, e) also has 13 binary backoff features that it
+shares with other (C0, e0). So we have a total of 14
+feature templates, which generate over a million
+features in our largest model. The shared features
+let us learn that certain properties of a contextual
+edit tend to raise or lower its probability (and the
+regularizer encourages such generalization).
+Each contextual edit (C, e) can be character-
+ized as a 5-tuple (s, t, C1, C02, C3): it replaces
+s E Σx U {E} with t E Σy U {E} when s falls be-
+tween C1 and C02 (so C2 = sC02) and t is preceded
+by C3. Then each of the 14 features of (C, e) in-
+dicates that a particular subset of this 5-tuple has a
+particular value. The subset always includes s, t,
+or both. It never includes C1 or C02 without s, and
+never includes C3 without t.
+</bodyText>
+<sectionHeader confidence="0.685665" genericHeader="evaluation">
+8.3 Results
+</sectionHeader>
+<bodyText confidence="0.998615666666667">
+Figures 2a and 2b show the learning curves. We
+see that both metrics improve with more training
+data; with more context; and with backoff. With
+backoff, all of the contextual edit models substan-
+tially beat ordinary stochastic edit distance, and
+their advantage grows with training size.
+</bodyText>
+<sectionHeader confidence="0.994742" genericHeader="conclusions">
+9 Conclusion
+</sectionHeader>
+<bodyText confidence="0.999680538461539">
+We have presented a trainable, featurizable model
+of contextual edit distance. Our main contribu-
+tion is an efficient encoding of such a model as
+a tight PFST—that is, a WFST that is guaranteed
+to directly define conditional string probabilities
+without need for further normalization. We are re-
+leasing OpenFST-compatible code that can train
+both PFSTs and WFSTs (Cotterell and Renduch-
+intala, 2014). We formally defined PFSTs, de-
+scribed their speed advantage at training time, and
+noted that they are crucial in settings where the in-
+put string is unknown. In future, we plan to deploy
+our PFSTs in such settings.
+</bodyText>
+<page confidence="0.998678">
+629
+</page>
+<sectionHeader confidence="0.982735" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.999754873563219">
+Cyril Allauzen, Michael Riley, Johan Schalkwyk, Wo-
+jciech Skut, and Mehryar Mohri. 2007. OpenFst: A
+general and efficient weighted finite-state transducer
+library. In Implementation and Application of Au-
+tomata, pages 11–23. Springer.
+Nicholas Andrews, Jason Eisner, and Mark Dredze.
+2014. Robust entity clustering via phylogenetic in-
+ference. In Proceedings of ACL.
+Eiji Aramaki. 2010. Typo corpus. Available at http:
+//luululu.com/tweet/#cr,January.
+Taylor Berg-Kirkpatrick, Alexandre Bouchard-Cˆot´e,
+John DeNero, and Dan Klein. 2010. Painless un-
+supervised learning with features. In Proceedings of
+HLT-NAACL, pages 582–590.
+Alexandre Bouchard-Cˆot´e, Percy Liang, Thomas L.
+Griffiths, and Dan Klein. 2007. A probabilistic ap-
+proach to language change. In NIPS.
+Colin Cherry and Dekang Lin. 2003. A probability
+model to improve word alignment. In Proceedings
+of ACL, pages 88–95.
+Zhiyi Chi and Stuart Geman. 1998. Estimation
+of probabilistic context-free grammars. Computa-
+tional Linguistics, 24(2):299–305.
+Kenneth W. Church and William A. Gale. 1991. Prob-
+ability scoring for spelling correction. Statistics and
+Computing, 1(2):93–103.
+Ryan Cotterell and Adithya Renduchintala. 2014.
+brezel: A library for training FSTs. Technical re-
+port, Johns Hopkins University.
+Markus Dreyer, Jason R. Smith, and Jason Eisner.
+2008. Latent-variable modeling of string transduc-
+tions with finite-state methods. In Proceedings of
+EMNLP, EMNLP ’08, pages 1080–1089.
+Chris Dyer, Victor Chahuneau, and Noah A. Smith.
+2013. A simple, fast, and effective reparameteriza-
+tion of IBM Model 2. In Proceedings of NAACL-
+HLT, pages 644–648.
+Jason Eisner. 2001. Expectation semirings: Flexible
+EM for learning finite-state transducers. In Proceed-
+ings of the ESSLLI Workshop on Finite-State Meth-
+ods in NLP.
+Dale Gerdemann and Gertjan van Noord. 1999. Trans-
+ducers from rewrite rules with backreferences. In
+Proceedings of EACL.
+Ronald M. Kaplan and Martin Kay. 1994. Regu-
+lar models of phonological rule systems. Compu-
+tational Linguistics, 20(3):331–378.
+Dan Klein and Christopher D. Manning. 2002. Condi-
+tional structure versus conditional estimation in NLP
+models. In Proceedings of EMNLP, pages 9–16.
+Kevin Knight and Jonathan Graehl. 2005. An
+overview of probabilistic tree transducers for natural
+language processing. In Proc. of the Sixth Interna-
+tional Conference on Intelligent Text Processing and
+Computational Linguistics (CICLing).
+Karen Kukich. 1992. Techniques for automatically
+correcting words in text. ACM Computing Surveys
+(CSUR), 24(4):377–439.
+John Lafferty, Andrew McCallum, and Fernando
+Pereira. 2001. Conditional random fields: Prob-
+abilistic models for segmenting and labeling se-
+quence data. In Proceedings of the International
+Conference on Machine Learning.
+Yang Liu, Qun Liu, and Shouxun Lin. 2005. Log-
+linear models for word alignment. In Proceedings
+ofACL, pages 459–466.
+Eric Mays, Fred J. Damerau, and Robert L. Mercer.
+1991. Context based spelling correction. Informa-
+tion Processing &amp; Management, 27(5):517–522.
+Andrew McCallum, Dayne Freitag, and Fernando
+Pereira. 2000. Maximum entropy Markov mod-
+els for information extraction and segmentation. In
+Proceedings of ICML.
+Mehryar Mohri and Richard Sproat. 1996. An efficient
+compiler for weighted rewrite rules. In Proceedings
+ofACL, pages 231–238.
+Mehryar Mohri. 1997. Finite-state transducers in lan-
+guage and speech processing. Computational Lin-
+guistics, 23(2):269–311.
+Mehryar Mohri. 2003. Edit-distance of weighted au-
+tomata: General definitions and algorithms. Inter-
+national Journal of Foundations of Computer Sci-
+ence, 14(06):957–982.
+Eric Sven Ristad and Peter N. Yianilos. 1998. Learn-
+ing string edit distance. IEEE Transactions on Pat-
+tern Analysis and Machine Intelligence, 20(5):522–
+532.
+</reference>
+<page confidence="0.997556">
+630
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.960939">
+<title confidence="0.999535">Stochastic Contextual Edit Distance and Probabilistic FSTs</title>
+<author confidence="0.999524">Cotterell Peng Eisner</author>
+<affiliation confidence="0.999978">Department of Computer Science, Johns Hopkins University</affiliation>
+<abstract confidence="0.997342466666667">String similarity is most often measured by weighted or unweighted edit distance and Yianilos (1998) dedistance—a probabildistribution parameters can be trained from data. We generalize this so that the probability of choosing each edit operation can depend on contextual features. We show how to construct and train a probabilistic finite-state transducer that computes our stochastic contextual edit distance. To illustrate the improvement from conditioning on context, we model typos found in social media text.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>Cyril Allauzen</author>
+<author>Michael Riley</author>
+<author>Johan Schalkwyk</author>
+<author>Wojciech Skut</author>
+<author>Mehryar Mohri</author>
+</authors>
+<title>OpenFst: A general and efficient weighted finite-state transducer library.</title>
+<date>2007</date>
+<booktitle>In Implementation and Application of Automata,</booktitle>
+<pages>11--23</pages>
+<publisher>Springer.</publisher>
+<contexts>
+<context position="2089" citStr="Allauzen et al., 2007" startWordPosition="310" endWordPosition="313">asily combined with other transducers or grammars for particular applications. We contrast our probabilistic transducers with the more general framework of weighted finite-state transducers (WFST), explaining why our restriction provides computational advantages when reasoning about unknown strings. Constructing the finite-state transducer is tricky, so we give the explicit construction for use by others. We describe how to train its parameters when the contextual edit probabilities are given by a loglinear model. We provide a library for training both PFSTs and WFSTs that works with OpenFST (Allauzen et al., 2007), and we illustrate its use with simple experiments on typos, which demonstrate the benefit of context. 2 Stochastic Contextual Edit Distance Our goal is to define a family of probability distributions pθ(y |x), where x E E∗x and y E E∗yite alphabet are input and output strings over fins Ex and Ey, and 0 is a parameter vector. Let xi denote the ith character of x. If i &lt; 1 or i &gt; |x|, then xi is the distinguished symbol BOS or EOS (“beginning/end of string”). Let xi:j denote the (j − i)-character substring xi+1xi+2 • • • xj. Consider a stochastic edit process that reads input string x while wr</context>
+</contexts>
+<marker>Allauzen, Riley, Schalkwyk, Skut, Mohri, 2007</marker>
+<rawString>Cyril Allauzen, Michael Riley, Johan Schalkwyk, Wojciech Skut, and Mehryar Mohri. 2007. OpenFst: A general and efficient weighted finite-state transducer library. In Implementation and Application of Automata, pages 11–23. Springer.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Nicholas Andrews</author>
+<author>Jason Eisner</author>
+<author>Mark Dredze</author>
+</authors>
+<title>Robust entity clustering via phylogenetic inference.</title>
+<date>2014</date>
+<booktitle>In Proceedings of ACL.</booktitle>
+<contexts>
+<context position="18554" citStr="Andrews et al., 2014" startWordPosition="3364" endWordPosition="3367">enetic models of string variation 4WFSTs can also use a simpler topology (Dreyer et al., 2008) while retaining determinism, since edits can be scored “in retrospect” after they have passed into the left context. 628 Mean Log-Likelihood Backoff Topology FALSE TRUE T010 T020 T110 T111 2 Mean Expected Edit Distance 6 5 3 Backoff Topology FALSE TRUE T010 T020 T110 T111 2000 4000 6000 2000 4000 6000 # Training Examples # Training Examples Figure 2: (a) Mean log p(y I x) for held-out test examples. (b) Mean expected edit distance (similarly). (Mays et al., 1991; Church and Gale, 1991; Kukich, 1992; Andrews et al., 2014). To eliminate experimental confounds, we use no dictionary or language model as one would in practice, but directly evaluate our ability to model p(correct |misspelled). Consider (xk, yk) = (feeel, feel). Our model defines p(y |xk) for all y. Our training objective (section 6) tries to make this large for y = yk. A contextual edit model learns here that e H c is more likely in the context of ee. We report on test data how much probability mass lands on the true yk. We also report how much mass lands “near” yk, by measuring the expected edit distance of the predicted y to the truth. Expected e</context>
+</contexts>
+<marker>Andrews, Eisner, Dredze, 2014</marker>
+<rawString>Nicholas Andrews, Jason Eisner, and Mark Dredze. 2014. Robust entity clustering via phylogenetic inference. In Proceedings of ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Eiji Aramaki</author>
+</authors>
+<title>Typo corpus. Available at http: //luululu.com/tweet/#cr,January.</title>
+<date>2010</date>
+<contexts>
+<context position="19391" citStr="Aramaki, 2010" startWordPosition="3516" endWordPosition="3517"> p(y |xk) for all y. Our training objective (section 6) tries to make this large for y = yk. A contextual edit model learns here that e H c is more likely in the context of ee. We report on test data how much probability mass lands on the true yk. We also report how much mass lands “near” yk, by measuring the expected edit distance of the predicted y to the truth. Expected edit distance is defined as Ey pg(y | xk)d(y, yk) where d(y, yk) is the Levenshtein distance between two strings. It can be computed using standard finite-state algorithms (Mohri, 2003). 8.1 Data We use an annotated corpus (Aramaki, 2010) of 50000 misspelled words x from tweets along with their corrections y. All examples have d(x, y) = 1 though we do not exploit this fact. We randomly selected 6000 training pairs and 100 test pairs. We regularized the objective by adding λ·||θ||22, where for each training condition, we chose λ by coarse grid search to maximize the conditional likelihood of 100 additional development pairs. 8.2 Context Windows and Edit Features We considered four different settings for the context window sizes (N1, N2, N3): (0,1,0)=stochastic edit distance, (1,1,0), (0,2,0), and (1,1,1). Our log-linear edit mo</context>
+</contexts>
+<marker>Aramaki, 2010</marker>
+<rawString>Eiji Aramaki. 2010. Typo corpus. Available at http: //luululu.com/tweet/#cr,January.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Taylor Berg-Kirkpatrick</author>
+<author>Alexandre Bouchard-Cˆot´e</author>
+<author>John DeNero</author>
+<author>Dan Klein</author>
+</authors>
+<title>Painless unsupervised learning with features.</title>
+<date>2010</date>
+<booktitle>In Proceedings of HLT-NAACL,</booktitle>
+<pages>582--590</pages>
+<marker>Berg-Kirkpatrick, Bouchard-Cˆot´e, DeNero, Klein, 2010</marker>
+<rawString>Taylor Berg-Kirkpatrick, Alexandre Bouchard-Cˆot´e, John DeNero, and Dan Klein. 2010. Painless unsupervised learning with features. In Proceedings of HLT-NAACL, pages 582–590.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Alexandre Bouchard-Cˆot´e</author>
+<author>Percy Liang</author>
+<author>Thomas L Griffiths</author>
+<author>Dan Klein</author>
+</authors>
+<title>A probabilistic approach to language change.</title>
+<date>2007</date>
+<booktitle>In NIPS.</booktitle>
+<marker>Bouchard-Cˆot´e, Liang, Griffiths, Klein, 2007</marker>
+<rawString>Alexandre Bouchard-Cˆot´e, Percy Liang, Thomas L. Griffiths, and Dan Klein. 2007. A probabilistic approach to language change. In NIPS.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Colin Cherry</author>
+<author>Dekang Lin</author>
+</authors>
+<title>A probability model to improve word alignment.</title>
+<date>2003</date>
+<booktitle>In Proceedings of ACL,</booktitle>
+<pages>88--95</pages>
+<contexts>
+<context position="4675" citStr="Cherry and Lin, 2003" startWordPosition="776" endWordPosition="779">ent alignment of y to x. 1If N2 = 0, so that we do not condition on xi+1, we must still condition on whether xi+1 = EOS (a single bit). We gloss over special handling for N2 = 0; but it is in our code. 625 Proceedings of the 52nd Annual Meeting of the Association for Computational Linguistics (Short Papers), pages 625–630, Baltimore, Maryland, USA, June 23-25 2014. c�2014 Association for Computational Linguistics This model is reminiscent of conditional models in MT that perform stepwise generation of one string or structure from another—e.g., string alignment models with contextual features (Cherry and Lin, 2003; Liu et al., 2005; Dyer et al., 2013), or tree transducers (Knight and Graehl, 2005). 3 Probabilistic FSTs We will construct a probabilistic finite-state transducer (PFST) that compactly models pθ(y | x) for all (x, y) pairs.2 Then various computations with this distribution can be reduced to standard finite-state computations that efficiently employ dynamic programming over the structure of the PFST, and the PFST can be easily combined with other finite-state distributions and functions (Mohri, 1997; Eisner, 2001). A PFST is a two-tape generalization of the wellknown nondeterministic finite-</context>
+</contexts>
+<marker>Cherry, Lin, 2003</marker>
+<rawString>Colin Cherry and Dekang Lin. 2003. A probability model to improve word alignment. In Proceedings of ACL, pages 88–95.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Zhiyi Chi</author>
+<author>Stuart Geman</author>
+</authors>
+<title>Estimation of probabilistic context-free grammars.</title>
+<date>1998</date>
+<journal>Computational Linguistics,</journal>
+<volume>24</volume>
+<issue>2</issue>
+<contexts>
+<context position="7534" citStr="Chi and Geman, 1998" startWordPosition="1294" endWordPosition="1297">• For each state q, the halt action and the arcs from q with input label c must have total probability of 1. (These are the available choices if there is no next input character.) • Every state q must be co-accessible, i.e., there must be a path of probability &gt; 0 from q to some qF. (Otherwise, the PFST could lose some probability mass to infinite paths. The canonical case of this involves an loop q → q with input label c and probability 1.) We take the first two conditions to be part of the definition of a PFST. The final condition requires our PFST to be “tight” in the same sense as a PCFG (Chi and Geman, 1998), although the tightness conditions for a PCFG are more complex. In section 7, we discuss the costs and benefits of PFSTs relative to other options. 4 The Contextual Edit PFST We now define a PFST topology that concisely captures the contextual edit process of section 2. We are given the alphabets Ex, Ey and the context window sizes N1, N2, N3 ≥ 0. For each possible context triple C = (C1, C2, C3) as defined in section 2, we construct an edit state qC whose outgoing arcs correspond to the possible edit operations in that context. One might expect that the SUBST(t) edit operation that reads s =</context>
+</contexts>
+<marker>Chi, Geman, 1998</marker>
+<rawString>Zhiyi Chi and Stuart Geman. 1998. Estimation of probabilistic context-free grammars. Computational Linguistics, 24(2):299–305.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Kenneth W Church</author>
+<author>William A Gale</author>
+</authors>
+<title>Probability scoring for spelling correction.</title>
+<date>1991</date>
+<journal>Statistics and Computing,</journal>
+<volume>1</volume>
+<issue>2</issue>
+<contexts>
+<context position="18517" citStr="Church and Gale, 1991" startWordPosition="3357" endWordPosition="3360">spelling correction itself and phylogenetic models of string variation 4WFSTs can also use a simpler topology (Dreyer et al., 2008) while retaining determinism, since edits can be scored “in retrospect” after they have passed into the left context. 628 Mean Log-Likelihood Backoff Topology FALSE TRUE T010 T020 T110 T111 2 Mean Expected Edit Distance 6 5 3 Backoff Topology FALSE TRUE T010 T020 T110 T111 2000 4000 6000 2000 4000 6000 # Training Examples # Training Examples Figure 2: (a) Mean log p(y I x) for held-out test examples. (b) Mean expected edit distance (similarly). (Mays et al., 1991; Church and Gale, 1991; Kukich, 1992; Andrews et al., 2014). To eliminate experimental confounds, we use no dictionary or language model as one would in practice, but directly evaluate our ability to model p(correct |misspelled). Consider (xk, yk) = (feeel, feel). Our model defines p(y |xk) for all y. Our training objective (section 6) tries to make this large for y = yk. A contextual edit model learns here that e H c is more likely in the context of ee. We report on test data how much probability mass lands on the true yk. We also report how much mass lands “near” yk, by measuring the expected edit distance of the</context>
+</contexts>
+<marker>Church, Gale, 1991</marker>
+<rawString>Kenneth W. Church and William A. Gale. 1991. Probability scoring for spelling correction. Statistics and Computing, 1(2):93–103.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ryan Cotterell</author>
+<author>Adithya Renduchintala</author>
+</authors>
+<title>brezel: A library for training FSTs.</title>
+<date>2014</date>
+<tech>Technical report,</tech>
+<institution>Johns Hopkins University.</institution>
+<marker>Cotterell, Renduchintala, 2014</marker>
+<rawString>Ryan Cotterell and Adithya Renduchintala. 2014. brezel: A library for training FSTs. Technical report, Johns Hopkins University.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Markus Dreyer</author>
+<author>Jason R Smith</author>
+<author>Jason Eisner</author>
+</authors>
+<title>Latent-variable modeling of string transductions with finite-state methods.</title>
+<date>2008</date>
+<booktitle>In Proceedings of EMNLP, EMNLP ’08,</booktitle>
+<pages>1080--1089</pages>
+<contexts>
+<context position="15601" citStr="Dreyer et al. (2008)" startWordPosition="2832" endWordPosition="2835"> from an arc in Tθ representing edit e, from edit state qC, then 9: c(C, e) += αq · prob(A) · βq /βqI 10: B ← L-BFGS(B, EVAL, max iters=5) &gt; the “M step” 11: function EVAL(B) &gt; objective function &amp; its gradient 12: F ← 0; ∇F ← 0 13: for context C such that (∃e)c(C, e) &gt; 0 do 14: count ← 0; expected ← 0; ZC ← 0 15: for possible edits e in context C do 16: F += c(C, e) · (B · �f(C, e)) ping this requirement gives a weighted FST (WFST), whose path weights w(x, y) can be globally normalized (divided by a constant Zx) to obtain probabilities p(y |x). WFST models of contextual edits were studied by Dreyer et al. (2008). PFSTs and WFSTs are respectively related to MEMMs (McCallum et al., 2000) and CRFs (Lafferty et al., 2001). They gain added power from hidden states and c transitions (although to permit a finite-state encoding, they condition on x in a more restricted way than MEMMs and CRFs). WFSTs are likely to beat PFSTs as linguistic models,4 just as CRFs beat MEMMs (Klein and Manning, 2002). A WFST’s advantage is that the probability of an edit can be indirectly affected by the weights of other edits at a distance. Also, one could construct WFSTs where an edit’s weight directly considers local right ou</context>
+<context position="18027" citStr="Dreyer et al., 2008" startWordPosition="3274" endWordPosition="3277">: ∇F += c(C, e) · f(C, e) 18: count += c(C, e) 8 Experiments 19: expected += exp(B · f(C,e)) · f(C,e) 20: ZC += exp(B · �f(C, e)) 21: F -= count·log ZC; ∇F -= count·expected/ZC 22: return (F, ∇F) 7 PFSTs versus WFSTs Our PFST model of p(y |x) enforces a normalized probability distribution at each state. DropTo demonstrate the utility of contextual edit transducers, we examine spelling errors in social media data. Models of spelling errors are useful in a variety of settings including spelling correction itself and phylogenetic models of string variation 4WFSTs can also use a simpler topology (Dreyer et al., 2008) while retaining determinism, since edits can be scored “in retrospect” after they have passed into the left context. 628 Mean Log-Likelihood Backoff Topology FALSE TRUE T010 T020 T110 T111 2 Mean Expected Edit Distance 6 5 3 Backoff Topology FALSE TRUE T010 T020 T110 T111 2000 4000 6000 2000 4000 6000 # Training Examples # Training Examples Figure 2: (a) Mean log p(y I x) for held-out test examples. (b) Mean expected edit distance (similarly). (Mays et al., 1991; Church and Gale, 1991; Kukich, 1992; Andrews et al., 2014). To eliminate experimental confounds, we use no dictionary or language m</context>
+</contexts>
+<marker>Dreyer, Smith, Eisner, 2008</marker>
+<rawString>Markus Dreyer, Jason R. Smith, and Jason Eisner. 2008. Latent-variable modeling of string transductions with finite-state methods. In Proceedings of EMNLP, EMNLP ’08, pages 1080–1089.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Chris Dyer</author>
+<author>Victor Chahuneau</author>
+<author>Noah A Smith</author>
+</authors>
+<title>A simple, fast, and effective reparameterization of IBM Model 2.</title>
+<date>2013</date>
+<booktitle>In Proceedings of NAACLHLT,</booktitle>
+<pages>644--648</pages>
+<contexts>
+<context position="4713" citStr="Dyer et al., 2013" startWordPosition="784" endWordPosition="787">that we do not condition on xi+1, we must still condition on whether xi+1 = EOS (a single bit). We gloss over special handling for N2 = 0; but it is in our code. 625 Proceedings of the 52nd Annual Meeting of the Association for Computational Linguistics (Short Papers), pages 625–630, Baltimore, Maryland, USA, June 23-25 2014. c�2014 Association for Computational Linguistics This model is reminiscent of conditional models in MT that perform stepwise generation of one string or structure from another—e.g., string alignment models with contextual features (Cherry and Lin, 2003; Liu et al., 2005; Dyer et al., 2013), or tree transducers (Knight and Graehl, 2005). 3 Probabilistic FSTs We will construct a probabilistic finite-state transducer (PFST) that compactly models pθ(y | x) for all (x, y) pairs.2 Then various computations with this distribution can be reduced to standard finite-state computations that efficiently employ dynamic programming over the structure of the PFST, and the PFST can be easily combined with other finite-state distributions and functions (Mohri, 1997; Eisner, 2001). A PFST is a two-tape generalization of the wellknown nondeterministic finite-state acceptor. It is a finite directe</context>
+</contexts>
+<marker>Dyer, Chahuneau, Smith, 2013</marker>
+<rawString>Chris Dyer, Victor Chahuneau, and Noah A. Smith. 2013. A simple, fast, and effective reparameterization of IBM Model 2. In Proceedings of NAACLHLT, pages 644–648.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jason Eisner</author>
+</authors>
+<title>Expectation semirings: Flexible EM for learning finite-state transducers.</title>
+<date>2001</date>
+<booktitle>In Proceedings of the ESSLLI Workshop on Finite-State Methods in NLP.</booktitle>
+<contexts>
+<context position="5196" citStr="Eisner, 2001" startWordPosition="859" endWordPosition="860">re from another—e.g., string alignment models with contextual features (Cherry and Lin, 2003; Liu et al., 2005; Dyer et al., 2013), or tree transducers (Knight and Graehl, 2005). 3 Probabilistic FSTs We will construct a probabilistic finite-state transducer (PFST) that compactly models pθ(y | x) for all (x, y) pairs.2 Then various computations with this distribution can be reduced to standard finite-state computations that efficiently employ dynamic programming over the structure of the PFST, and the PFST can be easily combined with other finite-state distributions and functions (Mohri, 1997; Eisner, 2001). A PFST is a two-tape generalization of the wellknown nondeterministic finite-state acceptor. It is a finite directed multigraph where each arc is labeled with an input in Ex ∪ {c}, an output in Ey∪{c}, and a probability in [0, 1]. (c is the empty string.) Each state (i.e., vertex) has a halt probability in [0, 1], and there is a single initial state qI. Each path from qI to a final state qF has • an input string x, given by the concatenation of its arcs’ input labels; • an output string y, given similarly; • a probability, given by the product of its arcs’ probabilities and the halt probabil</context>
+</contexts>
+<marker>Eisner, 2001</marker>
+<rawString>Jason Eisner. 2001. Expectation semirings: Flexible EM for learning finite-state transducers. In Proceedings of the ESSLLI Workshop on Finite-State Methods in NLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Dale Gerdemann</author>
+<author>Gertjan van Noord</author>
+</authors>
+<title>Transducers from rewrite rules with backreferences.</title>
+<date>1999</date>
+<booktitle>In Proceedings of EACL.</booktitle>
+<marker>Gerdemann, van Noord, 1999</marker>
+<rawString>Dale Gerdemann and Gertjan van Noord. 1999. Transducers from rewrite rules with backreferences. In Proceedings of EACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ronald M Kaplan</author>
+<author>Martin Kay</author>
+</authors>
+<title>Regular models of phonological rule systems.</title>
+<date>1994</date>
+<journal>Computational Linguistics,</journal>
+<volume>20</volume>
+<issue>3</issue>
+<contexts>
+<context position="6685" citStr="Kaplan and Kay, 1994" startWordPosition="1132" endWordPosition="1135">ake care to ensure that for any x ∈ E∗x, the total probability of all paths accepting x is 1, so that pθ(y |x) is truly a conditional probability distribution. This is guaranteed by the following sufficient conditions (we omit the proof for space), which do not seem to appear in previous literature: • For each state q and each symbol b ∈ Ex, the arcs from q with input label b or c must have total probability of 1. (These are the available choices if the next input character is x.) 2Several authors have given recipes for finite-state transducers that perform a single contextual edit operation (Kaplan and Kay, 1994; Mohri and Sproat, 1996; Gerdemann and van Noord, 1999). Such “rewrite rules” can be individually more expressive than our simple edit operations of section 2; but it is unclear how to train a cascade of them to model p(y I x). • For each state q, the halt action and the arcs from q with input label c must have total probability of 1. (These are the available choices if there is no next input character.) • Every state q must be co-accessible, i.e., there must be a path of probability &gt; 0 from q to some qF. (Otherwise, the PFST could lose some probability mass to infinite paths. The canonical </context>
+</contexts>
+<marker>Kaplan, Kay, 1994</marker>
+<rawString>Ronald M. Kaplan and Martin Kay. 1994. Regular models of phonological rule systems. Computational Linguistics, 20(3):331–378.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Dan Klein</author>
+<author>Christopher D Manning</author>
+</authors>
+<title>Conditional structure versus conditional estimation in NLP models.</title>
+<date>2002</date>
+<booktitle>In Proceedings of EMNLP,</booktitle>
+<pages>9--16</pages>
+<contexts>
+<context position="15985" citStr="Klein and Manning, 2002" startWordPosition="2898" endWordPosition="2901">C, e)) ping this requirement gives a weighted FST (WFST), whose path weights w(x, y) can be globally normalized (divided by a constant Zx) to obtain probabilities p(y |x). WFST models of contextual edits were studied by Dreyer et al. (2008). PFSTs and WFSTs are respectively related to MEMMs (McCallum et al., 2000) and CRFs (Lafferty et al., 2001). They gain added power from hidden states and c transitions (although to permit a finite-state encoding, they condition on x in a more restricted way than MEMMs and CRFs). WFSTs are likely to beat PFSTs as linguistic models,4 just as CRFs beat MEMMs (Klein and Manning, 2002). A WFST’s advantage is that the probability of an edit can be indirectly affected by the weights of other edits at a distance. Also, one could construct WFSTs where an edit’s weight directly considers local right output context C4. So why are we interested in PFSTs? Because they do not require computing a separate normalizing contant Zx for every x. This makes it computationally tractable to use them in settings where x is uncertain because it is unobserved, partially observed (e.g., lacks syllable boundaries), or noisily observed. E.g., at the end of section 5, X represented an uncertain x. </context>
+</contexts>
+<marker>Klein, Manning, 2002</marker>
+<rawString>Dan Klein and Christopher D. Manning. 2002. Conditional structure versus conditional estimation in NLP models. In Proceedings of EMNLP, pages 9–16.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Kevin Knight</author>
+<author>Jonathan Graehl</author>
+</authors>
+<title>An overview of probabilistic tree transducers for natural language processing.</title>
+<date>2005</date>
+<booktitle>In Proc. of the Sixth International Conference on Intelligent Text Processing and Computational Linguistics (CICLing).</booktitle>
+<contexts>
+<context position="4760" citStr="Knight and Graehl, 2005" startWordPosition="791" endWordPosition="794"> still condition on whether xi+1 = EOS (a single bit). We gloss over special handling for N2 = 0; but it is in our code. 625 Proceedings of the 52nd Annual Meeting of the Association for Computational Linguistics (Short Papers), pages 625–630, Baltimore, Maryland, USA, June 23-25 2014. c�2014 Association for Computational Linguistics This model is reminiscent of conditional models in MT that perform stepwise generation of one string or structure from another—e.g., string alignment models with contextual features (Cherry and Lin, 2003; Liu et al., 2005; Dyer et al., 2013), or tree transducers (Knight and Graehl, 2005). 3 Probabilistic FSTs We will construct a probabilistic finite-state transducer (PFST) that compactly models pθ(y | x) for all (x, y) pairs.2 Then various computations with this distribution can be reduced to standard finite-state computations that efficiently employ dynamic programming over the structure of the PFST, and the PFST can be easily combined with other finite-state distributions and functions (Mohri, 1997; Eisner, 2001). A PFST is a two-tape generalization of the wellknown nondeterministic finite-state acceptor. It is a finite directed multigraph where each arc is labeled with an </context>
+</contexts>
+<marker>Knight, Graehl, 2005</marker>
+<rawString>Kevin Knight and Jonathan Graehl. 2005. An overview of probabilistic tree transducers for natural language processing. In Proc. of the Sixth International Conference on Intelligent Text Processing and Computational Linguistics (CICLing).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Karen Kukich</author>
+</authors>
+<title>Techniques for automatically correcting words in text.</title>
+<date>1992</date>
+<journal>ACM Computing Surveys (CSUR),</journal>
+<volume>24</volume>
+<issue>4</issue>
+<contexts>
+<context position="18531" citStr="Kukich, 1992" startWordPosition="3361" endWordPosition="3363">elf and phylogenetic models of string variation 4WFSTs can also use a simpler topology (Dreyer et al., 2008) while retaining determinism, since edits can be scored “in retrospect” after they have passed into the left context. 628 Mean Log-Likelihood Backoff Topology FALSE TRUE T010 T020 T110 T111 2 Mean Expected Edit Distance 6 5 3 Backoff Topology FALSE TRUE T010 T020 T110 T111 2000 4000 6000 2000 4000 6000 # Training Examples # Training Examples Figure 2: (a) Mean log p(y I x) for held-out test examples. (b) Mean expected edit distance (similarly). (Mays et al., 1991; Church and Gale, 1991; Kukich, 1992; Andrews et al., 2014). To eliminate experimental confounds, we use no dictionary or language model as one would in practice, but directly evaluate our ability to model p(correct |misspelled). Consider (xk, yk) = (feeel, feel). Our model defines p(y |xk) for all y. Our training objective (section 6) tries to make this large for y = yk. A contextual edit model learns here that e H c is more likely in the context of ee. We report on test data how much probability mass lands on the true yk. We also report how much mass lands “near” yk, by measuring the expected edit distance of the predicted y t</context>
+</contexts>
+<marker>Kukich, 1992</marker>
+<rawString>Karen Kukich. 1992. Techniques for automatically correcting words in text. ACM Computing Surveys (CSUR), 24(4):377–439.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>John Lafferty</author>
+<author>Andrew McCallum</author>
+<author>Fernando Pereira</author>
+</authors>
+<title>Conditional random fields: Probabilistic models for segmenting and labeling sequence data.</title>
+<date>2001</date>
+<booktitle>In Proceedings of the International Conference on Machine Learning.</booktitle>
+<contexts>
+<context position="15709" citStr="Lafferty et al., 2001" startWordPosition="2850" endWordPosition="2854">B ← L-BFGS(B, EVAL, max iters=5) &gt; the “M step” 11: function EVAL(B) &gt; objective function &amp; its gradient 12: F ← 0; ∇F ← 0 13: for context C such that (∃e)c(C, e) &gt; 0 do 14: count ← 0; expected ← 0; ZC ← 0 15: for possible edits e in context C do 16: F += c(C, e) · (B · �f(C, e)) ping this requirement gives a weighted FST (WFST), whose path weights w(x, y) can be globally normalized (divided by a constant Zx) to obtain probabilities p(y |x). WFST models of contextual edits were studied by Dreyer et al. (2008). PFSTs and WFSTs are respectively related to MEMMs (McCallum et al., 2000) and CRFs (Lafferty et al., 2001). They gain added power from hidden states and c transitions (although to permit a finite-state encoding, they condition on x in a more restricted way than MEMMs and CRFs). WFSTs are likely to beat PFSTs as linguistic models,4 just as CRFs beat MEMMs (Klein and Manning, 2002). A WFST’s advantage is that the probability of an edit can be indirectly affected by the weights of other edits at a distance. Also, one could construct WFSTs where an edit’s weight directly considers local right output context C4. So why are we interested in PFSTs? Because they do not require computing a separate normali</context>
+</contexts>
+<marker>Lafferty, McCallum, Pereira, 2001</marker>
+<rawString>John Lafferty, Andrew McCallum, and Fernando Pereira. 2001. Conditional random fields: Probabilistic models for segmenting and labeling sequence data. In Proceedings of the International Conference on Machine Learning.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yang Liu</author>
+<author>Qun Liu</author>
+<author>Shouxun Lin</author>
+</authors>
+<title>Loglinear models for word alignment.</title>
+<date>2005</date>
+<booktitle>In Proceedings ofACL,</booktitle>
+<pages>459--466</pages>
+<contexts>
+<context position="4693" citStr="Liu et al., 2005" startWordPosition="780" endWordPosition="783">x. 1If N2 = 0, so that we do not condition on xi+1, we must still condition on whether xi+1 = EOS (a single bit). We gloss over special handling for N2 = 0; but it is in our code. 625 Proceedings of the 52nd Annual Meeting of the Association for Computational Linguistics (Short Papers), pages 625–630, Baltimore, Maryland, USA, June 23-25 2014. c�2014 Association for Computational Linguistics This model is reminiscent of conditional models in MT that perform stepwise generation of one string or structure from another—e.g., string alignment models with contextual features (Cherry and Lin, 2003; Liu et al., 2005; Dyer et al., 2013), or tree transducers (Knight and Graehl, 2005). 3 Probabilistic FSTs We will construct a probabilistic finite-state transducer (PFST) that compactly models pθ(y | x) for all (x, y) pairs.2 Then various computations with this distribution can be reduced to standard finite-state computations that efficiently employ dynamic programming over the structure of the PFST, and the PFST can be easily combined with other finite-state distributions and functions (Mohri, 1997; Eisner, 2001). A PFST is a two-tape generalization of the wellknown nondeterministic finite-state acceptor. It</context>
+</contexts>
+<marker>Liu, Liu, Lin, 2005</marker>
+<rawString>Yang Liu, Qun Liu, and Shouxun Lin. 2005. Loglinear models for word alignment. In Proceedings ofACL, pages 459–466.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Eric Mays</author>
+<author>Fred J Damerau</author>
+<author>Robert L Mercer</author>
+</authors>
+<title>Context based spelling correction.</title>
+<date>1991</date>
+<journal>Information Processing &amp; Management,</journal>
+<volume>27</volume>
+<issue>5</issue>
+<contexts>
+<context position="18494" citStr="Mays et al., 1991" startWordPosition="3353" endWordPosition="3356">settings including spelling correction itself and phylogenetic models of string variation 4WFSTs can also use a simpler topology (Dreyer et al., 2008) while retaining determinism, since edits can be scored “in retrospect” after they have passed into the left context. 628 Mean Log-Likelihood Backoff Topology FALSE TRUE T010 T020 T110 T111 2 Mean Expected Edit Distance 6 5 3 Backoff Topology FALSE TRUE T010 T020 T110 T111 2000 4000 6000 2000 4000 6000 # Training Examples # Training Examples Figure 2: (a) Mean log p(y I x) for held-out test examples. (b) Mean expected edit distance (similarly). (Mays et al., 1991; Church and Gale, 1991; Kukich, 1992; Andrews et al., 2014). To eliminate experimental confounds, we use no dictionary or language model as one would in practice, but directly evaluate our ability to model p(correct |misspelled). Consider (xk, yk) = (feeel, feel). Our model defines p(y |xk) for all y. Our training objective (section 6) tries to make this large for y = yk. A contextual edit model learns here that e H c is more likely in the context of ee. We report on test data how much probability mass lands on the true yk. We also report how much mass lands “near” yk, by measuring the expect</context>
+</contexts>
+<marker>Mays, Damerau, Mercer, 1991</marker>
+<rawString>Eric Mays, Fred J. Damerau, and Robert L. Mercer. 1991. Context based spelling correction. Information Processing &amp; Management, 27(5):517–522.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Andrew McCallum</author>
+<author>Dayne Freitag</author>
+<author>Fernando Pereira</author>
+</authors>
+<title>Maximum entropy Markov models for information extraction and segmentation.</title>
+<date>2000</date>
+<booktitle>In Proceedings of ICML.</booktitle>
+<contexts>
+<context position="15676" citStr="McCallum et al., 2000" startWordPosition="2844" endWordPosition="2847">e) += αq · prob(A) · βq /βqI 10: B ← L-BFGS(B, EVAL, max iters=5) &gt; the “M step” 11: function EVAL(B) &gt; objective function &amp; its gradient 12: F ← 0; ∇F ← 0 13: for context C such that (∃e)c(C, e) &gt; 0 do 14: count ← 0; expected ← 0; ZC ← 0 15: for possible edits e in context C do 16: F += c(C, e) · (B · �f(C, e)) ping this requirement gives a weighted FST (WFST), whose path weights w(x, y) can be globally normalized (divided by a constant Zx) to obtain probabilities p(y |x). WFST models of contextual edits were studied by Dreyer et al. (2008). PFSTs and WFSTs are respectively related to MEMMs (McCallum et al., 2000) and CRFs (Lafferty et al., 2001). They gain added power from hidden states and c transitions (although to permit a finite-state encoding, they condition on x in a more restricted way than MEMMs and CRFs). WFSTs are likely to beat PFSTs as linguistic models,4 just as CRFs beat MEMMs (Klein and Manning, 2002). A WFST’s advantage is that the probability of an edit can be indirectly affected by the weights of other edits at a distance. Also, one could construct WFSTs where an edit’s weight directly considers local right output context C4. So why are we interested in PFSTs? Because they do not req</context>
+</contexts>
+<marker>McCallum, Freitag, Pereira, 2000</marker>
+<rawString>Andrew McCallum, Dayne Freitag, and Fernando Pereira. 2000. Maximum entropy Markov models for information extraction and segmentation. In Proceedings of ICML.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Mehryar Mohri</author>
+<author>Richard Sproat</author>
+</authors>
+<title>An efficient compiler for weighted rewrite rules.</title>
+<date>1996</date>
+<booktitle>In Proceedings ofACL,</booktitle>
+<pages>231--238</pages>
+<contexts>
+<context position="6709" citStr="Mohri and Sproat, 1996" startWordPosition="1136" endWordPosition="1139">t for any x ∈ E∗x, the total probability of all paths accepting x is 1, so that pθ(y |x) is truly a conditional probability distribution. This is guaranteed by the following sufficient conditions (we omit the proof for space), which do not seem to appear in previous literature: • For each state q and each symbol b ∈ Ex, the arcs from q with input label b or c must have total probability of 1. (These are the available choices if the next input character is x.) 2Several authors have given recipes for finite-state transducers that perform a single contextual edit operation (Kaplan and Kay, 1994; Mohri and Sproat, 1996; Gerdemann and van Noord, 1999). Such “rewrite rules” can be individually more expressive than our simple edit operations of section 2; but it is unclear how to train a cascade of them to model p(y I x). • For each state q, the halt action and the arcs from q with input label c must have total probability of 1. (These are the available choices if there is no next input character.) • Every state q must be co-accessible, i.e., there must be a path of probability &gt; 0 from q to some qF. (Otherwise, the PFST could lose some probability mass to infinite paths. The canonical case of this involves an</context>
+</contexts>
+<marker>Mohri, Sproat, 1996</marker>
+<rawString>Mehryar Mohri and Richard Sproat. 1996. An efficient compiler for weighted rewrite rules. In Proceedings ofACL, pages 231–238.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Mehryar Mohri</author>
+</authors>
+<title>Finite-state transducers in language and speech processing.</title>
+<date>1997</date>
+<journal>Computational Linguistics,</journal>
+<volume>23</volume>
+<issue>2</issue>
+<contexts>
+<context position="5181" citStr="Mohri, 1997" startWordPosition="857" endWordPosition="858">ng or structure from another—e.g., string alignment models with contextual features (Cherry and Lin, 2003; Liu et al., 2005; Dyer et al., 2013), or tree transducers (Knight and Graehl, 2005). 3 Probabilistic FSTs We will construct a probabilistic finite-state transducer (PFST) that compactly models pθ(y | x) for all (x, y) pairs.2 Then various computations with this distribution can be reduced to standard finite-state computations that efficiently employ dynamic programming over the structure of the PFST, and the PFST can be easily combined with other finite-state distributions and functions (Mohri, 1997; Eisner, 2001). A PFST is a two-tape generalization of the wellknown nondeterministic finite-state acceptor. It is a finite directed multigraph where each arc is labeled with an input in Ex ∪ {c}, an output in Ey∪{c}, and a probability in [0, 1]. (c is the empty string.) Each state (i.e., vertex) has a halt probability in [0, 1], and there is a single initial state qI. Each path from qI to a final state qF has • an input string x, given by the concatenation of its arcs’ input labels; • an output string y, given similarly; • a probability, given by the product of its arcs’ probabilities and th</context>
+</contexts>
+<marker>Mohri, 1997</marker>
+<rawString>Mehryar Mohri. 1997. Finite-state transducers in language and speech processing. Computational Linguistics, 23(2):269–311.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Mehryar Mohri</author>
+</authors>
+<title>Edit-distance of weighted automata: General definitions and algorithms.</title>
+<date>2003</date>
+<journal>International Journal of Foundations of Computer Science,</journal>
+<volume>14</volume>
+<issue>06</issue>
+<contexts>
+<context position="19338" citStr="Mohri, 2003" startWordPosition="3507" endWordPosition="3508">onsider (xk, yk) = (feeel, feel). Our model defines p(y |xk) for all y. Our training objective (section 6) tries to make this large for y = yk. A contextual edit model learns here that e H c is more likely in the context of ee. We report on test data how much probability mass lands on the true yk. We also report how much mass lands “near” yk, by measuring the expected edit distance of the predicted y to the truth. Expected edit distance is defined as Ey pg(y | xk)d(y, yk) where d(y, yk) is the Levenshtein distance between two strings. It can be computed using standard finite-state algorithms (Mohri, 2003). 8.1 Data We use an annotated corpus (Aramaki, 2010) of 50000 misspelled words x from tweets along with their corrections y. All examples have d(x, y) = 1 though we do not exploit this fact. We randomly selected 6000 training pairs and 100 test pairs. We regularized the objective by adding λ·||θ||22, where for each training condition, we chose λ by coarse grid search to maximize the conditional likelihood of 100 additional development pairs. 8.2 Context Windows and Edit Features We considered four different settings for the context window sizes (N1, N2, N3): (0,1,0)=stochastic edit distance, </context>
+</contexts>
+<marker>Mohri, 2003</marker>
+<rawString>Mehryar Mohri. 2003. Edit-distance of weighted automata: General definitions and algorithms. International Journal of Foundations of Computer Science, 14(06):957–982.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Eric Sven Ristad</author>
+<author>Peter N Yianilos</author>
+</authors>
+<title>Learning string edit distance.</title>
+<date>1998</date>
+<journal>IEEE Transactions on Pattern Analysis and Machine Intelligence,</journal>
+<volume>20</volume>
+<issue>5</issue>
+<pages>532</pages>
+<contexts>
+<context position="1049" citStr="Ristad and Yianilos (1998)" startWordPosition="146" endWordPosition="149">trained from data. We generalize this so that the probability of choosing each edit operation can depend on contextual features. We show how to construct and train a probabilistic finite-state transducer that computes our stochastic contextual edit distance. To illustrate the improvement from conditioning on context, we model typos found in social media text. 1 Introduction Many problems in natural language processing can be viewed as stochastically mapping one string to another: e.g., transliteration, pronunciation modeling, phonology, morphology, spelling correction, and text normalization. Ristad and Yianilos (1998) describe how to train the parameters of a stochastic editing process that moves through the input string x from left to right, transforming it into the output string y. In this paper we generalize this process so that the edit probabilities are conditioned on input and output context. We further show how to model the conditional distribution p(y |x) as a probabilistic finite-state transducer (PFST), which can be easily combined with other transducers or grammars for particular applications. We contrast our probabilistic transducers with the more general framework of weighted finite-state tran</context>
+<context position="3693" citStr="Ristad and Yianilos, 1998" startWordPosition="601" endWordPosition="604">obtained as SUBST(xi+1). In the special case where xi+1 = EOS, the choices are instead INSERT(t) and HALT (where the latter may be viewed as copying the EOS symbol). The probability of each edit operation depends on 0 and is conditioned on the left input context C1 = x(i_N1):i, the right input context C2 = xi:(i+N2) , and the left output context C3 = y(j_N3):j, where the constants N1, N2, N3 &gt; 0 specify the model’s context window sizes.1 Note that the probability cannot be conditioned on right output context because those characters have not yet been chosen. Ordinary stochastic edit distance (Ristad and Yianilos, 1998) is simply the case (N1, N2, N3) = (0, 1, 0), while BouchardCˆot´e et al. (2007) used roughly (1, 2, 0). Now pθ(y |x) is the probability that this process will write y as it reads a given x. This is the total probability (given x) of all latent edit operation sequences that write y. In general there are exponentially many such sequences, each implying a different alignment of y to x. 1If N2 = 0, so that we do not condition on xi+1, we must still condition on whether xi+1 = EOS (a single bit). We gloss over special handling for N2 = 0; but it is in our code. 625 Proceedings of the 52nd Annual M</context>
+</contexts>
+<marker>Ristad, Yianilos, 1998</marker>
+<rawString>Eric Sven Ristad and Peter N. Yianilos. 1998. Learning string edit distance. IEEE Transactions on Pattern Analysis and Machine Intelligence, 20(5):522– 532.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

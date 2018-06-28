@@ -1,0 +1,2082 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.000001">
+<title confidence="0.999444">
+Dynamically Shaping the Reordering Search Space
+of Phrase-Based Statistical Machine Translation
+</title>
+<author confidence="0.788569">
+Arianna Bisazza and Marcello Federico
+</author>
+<affiliation confidence="0.636647">
+Fondazione Bruno Kessler
+Trento, Italy
+</affiliation>
+<email confidence="0.994986">
+{bisazza,federico}@fbk.eu
+</email>
+<sectionHeader confidence="0.998588" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.99923675">
+Defining the reordering search space is a cru-
+cial issue in phrase-based SMT between dis-
+tant languages. In fact, the optimal trade-
+off between accuracy and complexity of de-
+coding is nowadays reached by harshly lim-
+iting the input permutation space. We pro-
+pose a method to dynamically shape such
+space and, thus, capture long-range word
+movements without hurting translation qual-
+ity nor decoding time. The space defined
+by loose reordering constraints is dynamically
+pruned through a binary classifier that predicts
+whether a given input word should be trans-
+lated right after another. The integration of
+this model into a phrase-based decoder im-
+proves a strong Arabic-English baseline al-
+ready including state-of-the-art early distor-
+tion cost (Moore and Quirk, 2007) and hierar-
+chical phrase orientation models (Galley and
+Manning, 2008). Significant improvements in
+the reordering of verbs are achieved by a sys-
+tem that is notably faster than the baseline,
+while BLEU and METEOR remain stable, or
+even increase, at a very high distortion limit.
+</bodyText>
+<sectionHeader confidence="0.999471" genericHeader="keywords">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.999759875">
+Word order differences are among the most impor-
+tant factors determining the performance of statisti-
+cal machine translation (SMT) on a given language
+pair (Birch et al., 2009). This is particularly true in
+the framework of phrase-based SMT (PSMT) (Zens
+et al., 2002; Koehn et al., 2003; Och and Ney, 2002),
+an approach that remains highly competitive despite
+the recent advances of the tree-based approaches.
+During the PSMT decoding process, the output
+sentence is built from left to right, while the input
+sentence positions can be covered in different or-
+ders. Thus, reordering in PSMT can be viewed as
+the problem of choosing the input permutation that
+leads to the highest-scoring output sentence. Due to
+efficiency reasons, however, the input permutation
+space cannot be fully explored, and is therefore lim-
+ited with hard reordering constraints.
+Although many solutions have been proposed to
+explicitly model word reordering during decoding,
+PSMT still largely fails to handle long-range word
+movements in language pairs with different syntac-
+tic structures1. We believe this is mostly not due to
+deficiencies of the existing reordering models, but
+rather to a very coarse definition of the reorder-
+ing search space. Indeed, the existing reordering
+constraints are rather simple and typically based on
+word-to-word distances. Moreover, they are uni-
+form throughout the input sentence and insensitive
+to the actual words being translated. Relaxing this
+kind of constraints means dramatically increasing
+the size of the search space and making the reorder-
+ing model’s task extremely complex. As a result,
+even in language pairs where long reordering is reg-
+ularly observed, PSMT quality degrades when long
+word movements are allowed to the decoder.
+We address this problem by training a binary
+classifier to predict whether a given input position
+should be translated right after another, given the
+words at those positions and their contexts. When
+this model is integrated into the decoder, its predic-
+</bodyText>
+<footnote confidence="0.907869">
+1For empirical evidence, see for instance (Birch et al., 2009;
+Galley and Manning, 2008; Bisazza and Federico, 2012).
+</footnote>
+<page confidence="0.968011">
+327
+</page>
+<bodyText confidence="0.948427208333333">
+Transactions of the Association for Computational Linguistics, 1 (2013) 327–340. Action Editor: Philipp Koehn.
+Submitted 1/2013; Revised 5/2013; Published 7/2013. c�2013 Association for Computational Linguistics.
+tions can be used not only as an additional feature
+function, but also as an early indication of whether
+or not a given reordering path should be further ex-
+plored. More specifically, at each hypothesis ex-
+pansion, we consider the set of input positions that
+are reachable according to the usual reordering con-
+straints, and prune it based only on the reorder-
+ing model score. Then, the hypothesis can be ex-
+panded normally by covering the non-pruned posi-
+tions. This technique makes it possible to dynami-
+cally shape the search space while decoding with a
+very high distortion limit, which can improve trans-
+lation quality and efficiency at the same time.
+The remainder of the paper is organized as fol-
+lows. After an overview of the relevant literature,
+we describe in detail our word reordering model. In
+the following section, we introduce early pruning of
+reordering steps as a way to dynamically shape the
+input permutation space. Finally, we present an em-
+pirical analysis of our approach, including intrinsic
+evaluation of the model and SMT experiments on a
+well-known Arabic-English news translation task.
+</bodyText>
+<sectionHeader confidence="0.998539" genericHeader="introduction">
+2 Previous Work
+</sectionHeader>
+<bodyText confidence="0.999965785714286">
+In this paper, we focus on methods that guide the
+reordering search during the phrase-based decoding
+process. See for instance (Costa-juss`a and Fonol-
+losa, 2009) for a review of pre- and post-reordering
+approaches that are not treated here.
+Assuming a one-to-one correspondence between
+source and target phrases, reordering in PSMT can
+be viewed as the problem of searching through a set
+of permutations of the input sentence. Thus, two
+sub-problems arise: defining the set of allowed per-
+mutations (reordering constraints) and scoring the
+allowed permutations according to some likelihood
+criterion (reordering model). We begin with the lat-
+ter, returning to the constraints later in this section.
+</bodyText>
+<subsectionHeader confidence="0.989238">
+2.1 Reordering modeling
+</subsectionHeader>
+<bodyText confidence="0.9999755">
+In its original formulation, the PSMT approach
+includes a basic reordering model, called distor-
+tion cost, that exponentially penalizes longer jumps
+among consecutively translated phrases (
+</bodyText>
+<equation confidence="0.665108">
+fi) − end(�fi−1) − 11
+</equation>
+<bodyText confidence="0.998948326086957">
+A number of more sophisticated solutions have
+been proposed to explicitly model word reorder-
+ing during decoding. These can mostly be grouped
+into three families: phrase orientation models, jump
+models and source decoding sequence models.
+Phrase orientation models (Tillmann, 2004;
+Koehn et al., 2005; Zens and Ney, 2006; Galley and
+Manning, 2008), also known as lexicalized reorder-
+ing models, predict the orientation of a phrase with
+respect to the last translated one, by classifying it
+as monotone, swap or discontinuous. These mod-
+els have proven very useful for short and medium-
+range reordering and are among the most widely
+used in PSMT. However, their coarse classification
+of reordering steps makes them unsuitable to predict
+long-range reorderings.
+Jump models (Al-Onaizan and Papineni, 2006;
+Green et al., 2010; Yahyaei and Monz, 2010) predict
+the direction and length of a jump to perform after
+a given input word2. Both these works achieve their
+best Arabic-English results within a rather small DL:
+namely, 8 in (Al-Onaizan and Papineni, 2006) and
+5 in (Green et al., 2010), thus failing to capture the
+rare but crucial long reorderings that were their main
+motivation. A drawback of this approach is that
+long jumps are typically penalized because of their
+low frequency compared to short jumps. This strong
+bias is undesirable, given that we are especially in-
+terested in detecting probable long reorderings.
+Source decoding sequence models predict which
+input word is likely to be translated at a given state
+of decoding. For instance, reordered source lan-
+guage models (Feng et al., 2010) are smoothed n-
+gram models trained on a corpus of source sentences
+reordered to match the target word order. When inte-
+grated into the SMT system, they assign a probabil-
+ity to each newly translated word given the n-1 pre-
+viously translated words. Finally, source word pair
+reordering models (Visweswariah et al., 2011) esti-
+mate, for each pair of input words i and j, the cost
+of translating j right after i given various features of
+i, j and their respective contexts. Differently from
+reordered source LMs, these models are discrimina-
+tive and can profit from richer feature sets. At the
+same time, they do not employ decoding history-
+based features, which allows for more effective hy-
+</bodyText>
+<footnote confidence="0.8193415">
+2In this paper, input (or source) word denotes the word at a
+given position of the input sentence, rather than a word type.
+</footnote>
+<equation confidence="0.902087333333333">
+fi):
+�fi−1�
+d( �fi−1� A) = −|start(
+</equation>
+<page confidence="0.984082">
+328
+</page>
+<bodyText confidence="0.996114">
+pothesis recombination. The model we are going to
+present belongs to this last sub-group, which we find
+especially suitable to predict long reorderings.
+</bodyText>
+<subsectionHeader confidence="0.999778">
+2.2 Reordering constraints
+</subsectionHeader>
+<bodyText confidence="0.99935725">
+The reordering constraint originally included in the
+PSMT framework and implemented in our reference
+toolkit, Moses (Koehn et al., 2007), is called dis-
+tortion limit (DL). This consists in allowing the de-
+coder to skip, or jump, at most k words from the last
+translated phrase to the next one. More precisely, the
+limit is imposed on the distortion D between consec-
+utively translated phrases (
+</bodyText>
+<equation confidence="0.9977725">
+!!! � DL
+�fi) = !!!start( �fi) − end( �fi−1) − 1
+</equation>
+<bodyText confidence="0.999956489361702">
+Limiting the input permutation space is necessary
+for beam-search PSMT decoders to function in lin-
+ear time. Reordering constraints are also important
+for translation quality because the existing models
+are typically not discriminative enough to guide the
+search over very large sets of reordering hypotheses.
+Despite their crucial effects on the complexity of
+reordering modeling, though, reordering constraints
+have drawn less attention in the literature. The ex-
+isting reordering constraints are typically based on
+word-to-word distances – IBM (Berger et al., 1996)
+and DL (Koehn et al., 2007) – or on permutation pat-
+terns – ITG (Wu, 1997). Both kinds of constraints
+are uniform throughout the input sentence, and in-
+sensitive to the word being translated and to its con-
+text. This results in a very coarse definition of the
+reordering search space, which is problematic in lan-
+guage pairs with different syntactic structures.
+To address this problem, Yahyaei and Monz
+(2010) present a technique to dynamically set the
+DL: they train a classifier to predict the most prob-
+able jump length after each input word, and use the
+predicted value as the DL after that position. Un-
+fortunately, this method can generate inconsistent
+constraints leading to decoding dead-ends. As a so-
+lution, the dynamic DL is relaxed when needed to
+reach the first uncovered position. Translation im-
+provements are reported only on a small-scale task
+with short sentences (BTEC), over a baseline that in-
+cludes a very simple reordering model. In our work
+we develop this idea further and use a reordering
+model to predict which specific input words, rather
+than input intervals, are likely be translated next.
+Moreover, our solution is not affected by the con-
+straint inconsistency problem (see Sect. 4).
+In another related work, Bisazza and Federico
+(2012) generate likely reorderings of the input sen-
+tence by means of language-specific fuzzy rules
+based on shallow syntax. Long jumps are then sug-
+gested to the PSMT decoder by reducing the distor-
+tion cost for specific pairs of input words. In com-
+parison to the dynamic DL, that is a much finer way
+to define the reordering space, leading to consistent
+improvements of both translation quality and effi-
+ciency over a strong baseline. However, the need of
+specific reordering rules makes the method harder to
+apply to new language pairs.
+</bodyText>
+<sectionHeader confidence="0.992927" genericHeader="method">
+3 The WaW reordering model
+</sectionHeader>
+<bodyText confidence="0.999977833333333">
+We model reordering as the problem of deciding
+whether a given input word should be translated
+after another (Word-after-Word). This formulation
+is particularly suitable to help the decoder decide
+whether a reordering path is promising enough to
+be further explored. Moreover, when translating a
+sentence, choosing the next source word to translate
+appears as a more natural problem than guessing
+how much to the left or to the right we should
+move from the current source position. The WaW
+reordering model addresses a binary decision task
+through the following maximum-entropy classifier:
+</bodyText>
+<equation confidence="0.799519">
+P(Ri,j=Y Jf1 , i, j) =
+</equation>
+<bodyText confidence="0.996351133333333">
+exp[&amp;quot;m Amhm(fl , i, j, Ri,j=Y )]
+&amp;quot;Y , exp[&amp;quot;m Amhm(fl , i, j, Ri,j=Y&apos;)]
+where f1 is a source sentence of J words, hm are
+feature functions and am the corresponding feature
+weights. The outcome Y can be either 1 or 0, with
+Ri,j=1 meaning that the word at position j is trans-
+lated right after the word at position i.
+Our WaW reordering model is strongly related to
+that of Visweswariah et al. (2011) – hereby called
+Travelling Salesman Problem (TSP) model – with
+few important differences: (i) we do not include
+in the features any explicit indication of the jump
+length, in order to avoid the bias on short jumps;
+(ii) they train a linear model with MIRA (Cram-
+mer and Singer, 2003) by minimizing the number
+</bodyText>
+<equation confidence="0.888706333333333">
+fi):
+�fi−1,
+D( �fi−1,
+</equation>
+<page confidence="0.989678">
+329
+</page>
+<bodyText confidence="0.9999584">
+of input words that get placed after the wrong po-
+sition, while we use a maximum-entropy classifier
+trained by maximum-likelihood; (iii) they use an
+off-the shelf TSP solver to find the best source sen-
+tence permutation and apply it as pre-processing to
+training and test data. By contrast, we integrate the
+maximum-entropy classifier directly into the SMT
+decoder and let all its other models (phrase orien-
+tation, translation, target LM etc.) contribute to the
+final reordering decision.
+</bodyText>
+<subsectionHeader confidence="0.988993">
+3.1 Features
+</subsectionHeader>
+<bodyText confidence="0.999347294117647">
+Like the TSP model (Visweswariah et al., 2011),
+the WaW model builds on binary features similar
+to those typically employed for dependency parsing
+(McDonald et al., 2005): namely, combinations of
+surface forms or POS tags of the words i and j and
+their context. Our feature templates are presented in
+Table 1. The main novelties with respect to the TSP
+model are the mixed word-POS templates (rows 16-
+17) and the shallow syntax features. In particular, we
+use the chunk types of i, j and their context (18-19),
+as well as the chunk head words of i and j (20). Fi-
+nally we add a feature to indicate whether the words
+i and j belong to the same chunk (21). The jump
+orientation – forward/backward – is included in the
+features that represent the words comprised between
+i and j (rows 6, 7, 14, 15). No explicit indication of
+the jump length is included in any feature.
+</bodyText>
+<subsectionHeader confidence="0.999929">
+3.2 Training data
+</subsectionHeader>
+<bodyText confidence="0.964610823529412">
+To generate training data for the classifier, we first
+extract reference reorderings from a word-aligned
+parallel corpus. Given a parallel sentence, differ-
+ent heuristics may be used to convert arbitrary word
+alignments to a source permutation (Birch et al.,
+2010; Feng et al., 2010; Visweswariah et al., 2011).
+Similarly to this last work, we compute for each
+source word fi the mean ai of the target positions
+aligned to fi, then sort the source words according
+to this value.3 As a difference, though, we do not
+discard unaligned words but assign them the mean
+3Using the mean of the aligned indices makes the gener-
+ation of reference permutations more robust to alignment er-
+rors. Admittedly, this heuristic does not handle well the case of
+source words that are correctly aligned to non-consecutive tar-
+get words. However, this phenomenon is also not captured by
+standard PSMT models, who only learn continuous phrases.
+</bodyText>
+<figure confidence="0.974542956521739">
+i−2 i−1 i i+1 b j−1 j j+1
+1 w w
+2 w w w
+3 w w w w
+4 w w w w
+5 w w w w
+6 w w w
+7 wall w w
+8 p p
+9 p p p
+10 p p p p
+11 p p p p
+12 p p p p
+13 p p p p p p
+14 p p p
+15 pall p p
+16 w p
+17 p w
+18 c c
+19 c c c c c c
+20 h h
+21 belong to same chunk(i, j)?
+w: word identity, p: POS tag, c: chunk type, h: chunk head
+</figure>
+<tableCaption confidence="0.971689">
+Table 1: Feature templates used to learn whether a source
+</tableCaption>
+<bodyText confidence="0.979136538461538">
+position j is to be translated right after i. Positions com-
+prised between i and j are denoted by b and generate two
+feature templates: one for each position (6 and 14) and
+one for the concatentation of them all (7 and 15).
+of their neighbouring words’ alignment means, so
+that a complete permutation of the source sentence
+(σ) is obtained. Table 2(a) illustrates this procedure.
+Given the reference permutation, we then gener-
+ate positive and negative training samples by simu-
+lating the decoding process. We traverse the source
+positions in the order defined by σ, keeping track of
+the positions that have already been covered and, for
+each t : 1 &lt; t &lt; J, generate:
+</bodyText>
+<listItem confidence="0.94369">
+• one positive sample (RQt,at+1=1) for the
+source position that comes right after it,
+• a negative sample (RQt,,t=0) for each source
+position in {u : σt−δ+1 &lt; u &lt; σt+δ+1 ∧
+u =� σt+1} that has not yet been translated.
+</listItem>
+<bodyText confidence="0.9997514">
+Here, the sampling window δ serves to control the
+size of the training data and the proportion between
+positive and negative samples. Its value naturally
+correlates with the DL used in decoding. The gener-
+ation of training samples is illustrated by Table 2(b).
+</bodyText>
+<page confidence="0.984931">
+330
+</page>
+<bodyText confidence="0.93376535">
+(a) Converting word alignments to a permutation:
+source words are sorted by their target alignments
+mean a. The unaligned word “D” is assigned the
+mean of its neighbouring words’ a values (2 +
+5)/2 = 3.5 :
+(b) Generating binary samples by simulating the
+decoding process: shaded rounds represent cov-
+ered positions, while dashed arrows represent
+negative samples:
+W. In details, this is done by converting the phrase-
+internal word alignment4 to a source permutation, in
+just the same way it was done to produce the model’s
+training examples. Thus, the global score is inde-
+pendent from phrase segmentation, and normalized
+across outputs of different lengths: that is, the proba-
+bility of any complete hypothesis decomposes into J
+factors, where J is the length of the input sentence.
+The WaW reordering model is fully compatible
+with, and complementary to the lexicalized reorder-
+ing (phrase orientation) models included in Moses.
+</bodyText>
+<figureCaption confidence="0.7852482">
+Figure 1: Integrating the binary word reordering model
+into a phrase-based decoder: when a new phrase is
+covered (dashed boxes), the model returns the log-
+probability of translating its words in the order defined
+by the phrase-internal word alignment.
+</figureCaption>
+<tableCaption confidence="0.944579">
+Table 2: The classifier’s training data generation process.
+</tableCaption>
+<subsectionHeader confidence="0.991666">
+3.3 Integration into phrase-based decoding
+</subsectionHeader>
+<bodyText confidence="0.999969956521739">
+Rather than using the new reordering model for
+data pre-processing as done by (Visweswariah et al.,
+2011), we directly integrate it into the PSMT de-
+coder Moses (Koehn et al., 2007).
+Two main computation phases are required by the
+WaW model: (i) at system initialization time, all fea-
+ture weights are loaded into memory, and (ii) before
+translating each new sentence, features are extracted
+from it and model probabilities are pre-computed
+for each pair of source positions (i, j) such that
+j − i − 11 G DL. Note that this efficient solution
+is possible because our model does not employ de-
+coding history-based features, like the word that was
+translated before the last one, or like the previous
+jump legth. This is an important difference with re-
+spect to the reordered source LM proposed by Feng
+et al. (2010), which requires inclusion of the last n
+translated words in the decoder state.
+Fig. 1 illustrates the scoring process: when a par-
+tial translation hypothesis W is expanded by cover-
+ing a new source phrase f, the model returns the
+log-probability of translating the words of f in that
+particular order, just after the last translated word of
+</bodyText>
+<sectionHeader confidence="0.907964" genericHeader="method">
+4 Early pruning of reordering steps
+</sectionHeader>
+<bodyText confidence="0.930018611111111">
+We now explain how the WaW reordering model can
+be used to dynamically refine the input permutation
+space. This method is not dependent on the particu-
+lar classifier described in this paper, but can in prin-
+ciple work with any device estimating the probabil-
+ity of translating a given input word after another.
+The method consists of querying the reordering
+model at the time of hypothesis expansion, and fil-
+tering out hypotheses solely based on their reorder-
+ing score. The rationale is to avoid costly hypoth-
+esis expansions for those source positions that the
+reordering model considers very unlikely to be cov-
+ered at a given point of decoding. In practice, this
+works as follows:
+• at each hypothesis expansion, we first enumer-
+ate the set of uncovered input positions that
+are reachable within a fixed DL, and query the
+WaW reordering model for each of them5;
+</bodyText>
+<footnote confidence="0.61656575">
+4Phrase-internal alignments are provided in the phrase table.
+5The score used to prune a new word range f is the log prob-
+ability of translating the first aligned word of f right after the
+last translated word of the current hypothesis. See also Sect. 3.3.
+</footnote>
+<page confidence="0.995404">
+331
+</page>
+<bodyText confidence="0.986376631578948">
+• only based on the WaW score, we apply his-
+togram and threshold pruning to this set and
+proceed to expand the non-pruned positions.
+Furthermore, it is possible to ensure that local re-
+orderings are always allowed, by setting a so-called
+non-prunable-zone of width V around the last cov-
+ered input position.6
+According to how the DL, pruning parameters,
+and V are set, we can actually aim at different tar-
+gets: with a low DL, loose pruning parameters, and
+V=0 we can try to speed up search without sacrific-
+ing much translation quality. With a high DL, strict
+pruning parameters, and a medium V, we ensure that
+the standard medium-range reordering space is ex-
+plored, as well as those few long jumps that are
+promising according to the reordering model. In our
+experiments, we explore this second option with the
+setting DL=18 and V=5.
+The underlying idea is similar to that of early
+pruning proposed by Moore and Quirk (2007),
+which consisted in discarding possible extensions of
+a partial hypothesis based on their estimated score
+before computing the exact language model score.
+Our technique too has the effect of introducing ad-
+ditional points at which the search space is pruned.
+However, while theirs was mainly an optimization
+technique meant to avoid useless LM queries, we in-
+stead aim at refining the search space by exploiting
+the fact that some SMT models are more important
+than others at different stages of the translation pro-
+cess. Our approach actually involves a continuous
+alternation of two processes: during hypothesis ex-
+pansion the reordering score is combined with all
+other scores, while during early pruning some re-
+ordering decisions are taken only based on the re-
+ordering score. In this way, we try to combine the
+benefits of fully integrated reordering models with
+those of monolingual pre-ordering methods.
+</bodyText>
+<sectionHeader confidence="0.999475" genericHeader="evaluation">
+5 Evaluation
+</sectionHeader>
+<bodyText confidence="0.99349106122449">
+We test our approach on an Arabic-English news
+translation task where sentences are typically long
+and complex. In this language pair, long reorder-
+ing errors mostly concern verbs, as all of Subject-
+Verb-Object (SVO), VSO and, more rarerly, VOS
+6See Bisazza (2013) for technical details on the integration
+of word-level pruning with phrase-level hypothesis expansion.
+constructions are attested in modern written Ara-
+bic. This issue is well known in the SMT field and
+was addressed by several recent works, with deep
+or shallow parsing-based techniques (Green et al.,
+2009; Carpuat et al., 2012; Andreas et al., 2011;
+Bisazza et al., 2012). We question whether our ap-
+proach – which is not conceived to solve this spe-
+cific problem, nor requires manual rules to predict
+verb reordering – will succeed in improving long re-
+ordering in a fully data-driven way.
+As SMT training data, we use all the in-domain
+parallel data provided for the NIST-MT09 evalua-
+tion for a total of 986K sentence pairs (31M English
+words).7 The target LM used to run the main se-
+ries of experiments is trained on the English side of
+all available NIST-MT09 parallel data, UN included
+(147M words). In the large-scale experiments, the
+LM training data also include the sections of the En-
+glish Gigaword that best fit to the development data
+in terms of perplexity: namely, the Agence France-
+Presse, Xinhua News Agency and Associated Press
+Worldstream sections (2130M words in total).
+For development and test, we use the newswire
+sections of the NIST benchmarks: dev06-nw, eval08-
+nw, eval09-nw consisting of 1033, 813, 586 sen-
+tences respectively. Each set includes 4 reference
+translations and the average sentence length is 33
+words. To focus the evaluation on problematic re-
+ordering, we also consider a subset of eval09-nw
+containing only sentences where the Arabic main
+verb is placed before the subject (vs-09: 299 sent.).8
+As pre-processing, we apply standard tokeniza-
+tion to the English data, while the Arabic data is
+segmented with AMIRA (Diab et al., 2004) accord-
+ing to the ATB scheme9. The same tool also pro-
+duces POS tagging and shallow syntax annotation.
+7The in-domain parallel data includes all the provided cor-
+pora except the UN proceedings, and the non-newswire parts of
+the small GALE-Y1-Q4 corpus (that is 9K sentences of audio
+transcripts and web data). As reported by Green et al. (2010)
+the removal of UN data does not affect baseline performances
+on the news benchmarks.
+</bodyText>
+<footnote confidence="0.97325725">
+8Automatically detected by means of shallow syntax rules.
+9The Arabic Treebank tokenization scheme isolates con-
+junctions w+ and f+, prepositions l+, k+, b+, future marker
+s+, pronominal suffixes, but not the article Al+.
+</footnote>
+<page confidence="0.986307">
+332
+</page>
+<subsectionHeader confidence="0.91275">
+5.1 Reordering model intrinsic evaluation
+</subsectionHeader>
+<bodyText confidence="0.999984448275862">
+Before proceeding to the SMT experiments, we
+evaluate the performance of the WaW reorder-
+ing model in isolation. All the tested configura-
+tions are trained with the freely available MegaM
+Toolkit10, implementing the conjugate gradient
+method (Hestenes and Stiefel, 1952), in maximum
+100 iterations. Training samples are generated
+within a sampling window of width 5=10, from a
+subset (30K sentences) of the parallel data described
+above, resulting in 8M training word pairs11. Test
+samples are generated from TIDES-MT04 (1324 sen-
+tences, 370K samples with 5=10), one of the corpora
+included in our SMT training data. Features with
+less than 20 occurrences are ignored.
+Classification accuracy. Table 3 presents preci-
+sion, recall, and F-score achieved by different fea-
+ture subsets, where W stands for word-based, P for
+POS-based and C for chunk-based feature templates.
+We can see that all feature types contribute to im-
+prove the classifier’s performance. The word-based
+model achieves the highest precision but a very low
+recall, while the POS-based has much more bal-
+anced scores. A better performance overall is ob-
+tained by combining word-, POS- and mixed word-
+POS-based features (62.6% F-score). Finally, the
+addition of chunk-based features yields a further im-
+provement of about 1 point, reaching 63.8% F-score.
+Given these results, we decide to use the W,P,C
+model for the rest of the evaluation.
+</bodyText>
+<table confidence="0.9995044">
+Features (templates) P R F
+W [1-7] 73.1 16.4 26.8
+P [8-15] 69.5 54.8 61.3
+W,P [1-17] 70.2 56.5 62.6
+W,P,C [1-21] 70.6 58.1 63.8
+</table>
+<tableCaption confidence="0.764005">
+Table 3: Classification accuracy of the WaW reordering
+model on TIDES-MT04, using different feature subsets.
+The template numbers refer to the rows of Table 1.
+</tableCaption>
+<bodyText confidence="0.998271">
+Ranking accuracy. A more important aspect to
+evaluate for our application is how well our model’s
+scores can rank a typical set of reordering options.
+In fact, the WaW model is not meant to be used as
+</bodyText>
+<footnote confidence="0.9272622">
+10http://www.cs.utah.edu/˜hal/megam/ (Daum´e III, 2004).
+11This is the maximum number of samples manageable by
+MegaM. However, even scaling from 4M to 8M was only
+slightly helpful in our experiments. In the future we plan to test
+other learning approaches that scale better to large data sets.
+</footnote>
+<bodyText confidence="0.999651818181818">
+a stand-alone classifier, but as one of several SMT
+feature functions. Moreover, for early reordering
+pruning to be effective, it is especially important that
+the correct reordering option be ranked in the top n
+among those available at the time of a given hypoth-
+esis expansion. In order to measure this, we simulate
+the decoding process by traversing the source words
+in target order and, for each of them, we examine
+the ranking of all words that may be translated next
+(i. e. the uncovered positions within a given DL).
+We check how often the correct jump was ranked
+first (Top-1) or at most third (Top-3). We also com-
+pute the latter score on long reorderings only (Top-
+3-long): i. e. backward jumps with distortion D&gt;7
+and forward jumps with D&gt;6. In Table 4, results
+are compared with the ranking produced by standard
+distortion, which always favors shorter jumps. Two
+conditions are considered: DL=10 corresponding to
+the sampling window 5 used to produce the training
+data, and DL=18 that is the maximum distortion of
+jumps that will be considered in our early-pruning
+SMT experiment.
+</bodyText>
+<table confidence="0.999536">
+Model DL DL-err Top-1 Top-3 Top-3-long
+back forw.
+Distortion 10 2.4 61.8 79.6 50.7 66.0
+18 0.8 62.0 80.0 18.9 52.3
+WaW 10 2.4 71.2 91.2 76.4 69.3
+18 0.8 71.2 91.8 68.0 51.8
+</table>
+<tableCaption confidence="0.7947852">
+Table 4: Word-to-word jump ranking accuracy (%) of
+standard distortion and WaW reordering model, in dif-
+ferent DL conditions. DL-err is the percentage of correct
+jumps beyond DL. The test set consists of 40K reordering
+decisions: one for each source word in TIDES-MT04.
+</tableCaption>
+<bodyText confidence="0.999964571428571">
+We can see that, in terms of overall accuracies, the
+WaW reordering model outperforms standard distor-
+tion by a large margin (about 10% absolute). This
+is an important result, considering that the jump
+length, strongly correlating with the jump likeli-
+hood, is not directly known to our model. As re-
+gards the DL, the higher limit naturally results in a
+lower DL-error rate (percentage of correct jumps be-
+yond DL): namely 0.8% instead of 2.4%. However,
+jump prediction becomes much harder: Top-3 accu-
+racy of long jumps by distortion drops from 50.7%
+to 18.9% (backward) and from 66.0% to 52.3% (for-
+ward). Our model is remarkably robust to this effect
+on backward jumps, where it achieves 68.0% accu-
+</bodyText>
+<page confidence="0.998507">
+333
+</page>
+<bodyText confidence="0.999973875">
+racy. Due to the syntactic characteristics of Arabic
+and English, the typical long reordering pattern con-
+sists in (i) skipping a clause-initial Arabic verb, (ii)
+covering a long subject, then finally (iii) jumping
+back to translate the verb and (iv) jumping forward
+to continue translating the rest of the sentence (see
+Fig. 3 for an example).12 Deciding when to jump
+back to cover the verb (iii) is the hardest part of
+this process, and that is precisely where our model
+seems more helpful, while distortion always prefers
+to proceed monotonically achieving a very low ac-
+curacy of 18.9%. In the case of long forward jumps
+(iv), instead, distortion is advantaged as the correct
+choice typically corresponds to translating the first
+uncovered position, that is the shortest jump avail-
+able from the last translated word. Even here, our
+model achieves an accuracy of 51.8%, only slightly
+lower than that of distortion (52.3%).
+In summary, the WaW reordering model signifi-
+cantly outperforms distortion in the ranking of long
+jumps. In the large majority of cases, it is able to
+rank a correct long jump in the top 3 reordering op-
+tions, which suggests that it can be effectively used
+for early reordering pruning.
+</bodyText>
+<subsectionHeader confidence="0.997684">
+5.2 SMT experimental setup
+</subsectionHeader>
+<bodyText confidence="0.9998405">
+Our SMT systems are built with the Moses toolkit,
+while word alignment is produced by the Berke-
+ley Aligner (Liang et al., 2006). The baseline de-
+coder includes a phrase translation model, a lexi-
+calized reordering model, a 6-gram target language
+model, distortion cost, word and phrase penalties.
+More specifically, the baseline reordering model is a
+hierarchical phrase orientation model (Tillmann,
+2004; Koehn et al., 2005; Galley and Manning,
+2008) trained on all the available parallel data. This
+variant was shown to outperform the default word-
+based on an Arabic-English task. To make our base-
+line even more competitive, we apply early distor-
+tion cost, as proposed by Moore and Quirk (2007).
+This function has the same value as the standard one
+over a complete translation hypothesis, but it antic-
+ipates the gradual accumulation of the cost, mak-
+ing hypotheses of the same length more compara-
+ble to one another. Note that this option has no ef-
+12Clearly, we would expect different figures from testing the
+model on another language pair like German-English, where the
+verb is often postponed in the source with respect to the target.
+fect on the distortion limit, but only on the distor-
+tion cost feature function. As proposed by Johnson
+et al. (2007), statistically improbable phrase pairs
+are removed from the translation model. The lan-
+guage models are estimated by the IRSTLM toolkit
+(Federico et al., 2008) with modified Kneser-Ney
+smoothing (Chen and Goodman, 1999).
+Feature weights are optimized by minimum
+BLEU-error training (Och, 2003) on dev06-nw. To
+reduce the effects of the optimizer instability, we
+tune each configuration four times and use the av-
+erage of the resulting weight vectors to translate the
+test sets, as suggested by Cettolo et al. (2011).
+Finally, eval08-nw is used to select the early prun-
+ing parameters for the last experiment, while eval09-
+nw is always reserved as blind test.
+</bodyText>
+<subsectionHeader confidence="0.974715">
+5.3 Evaluation metrics
+</subsectionHeader>
+<bodyText confidence="0.9999511">
+We evaluate global translation quality with BLEU
+(Papineni et al., 2002) and METEOR (Banerjee and
+Lavie, 2005). These metrics, though, are only in-
+directly sensitive to word order, and especially un-
+likely to capture improvements at the level of long-
+range reordering. For this reason, we also com-
+pute the Kendall Reordering Score or KRS (Birch
+et al., 2010) which is a positive score based on the
+Kendall’s Tau distance between the source-output
+permutation π and the source-reference permuta-
+</bodyText>
+<equation confidence="0.995967">
+tions σ:
+,/
+KRS(π, σ) = (1 − K(π, σ)) · BP
+K(π, σ) = i E�i d(a, i)
+2n(n − 1)
+� _ 1 if πi &lt; πj and σi &gt; σj
+d(2, �) — 0 otherwise
+</equation>
+<bodyText confidence="0.999963">
+where BP is a sentence-level brevity penalty, similar
+to that of BLEU. The KRS is robust to lexical choice
+because it performs no comparison between output
+and reference words, but only between the positions
+of their translations. Besides, it was shown to corre-
+late strongly with human judgements of fluency.
+Our work specifically addresses long-range re-
+ordering phenomena in language pairs where these
+are quite rare, although crucial for preserving the
+source text meaning. Hence, an improvement at this
+level may not be detected by the general-purpose
+metrics. We then develop a KRS variant that is only
+</bodyText>
+<page confidence="0.99788">
+334
+</page>
+<bodyText confidence="0.999819333333333">
+sensitive to the positioning of specific input words.
+Assuming that each input word fi is assigned a
+weight Ai, the formula above is modified as follows:
+</bodyText>
+<equation confidence="0.661175">
+� Ai+Aj if 7ri &lt; 7rj and ui &gt; uj
+d�(i,�) � 0 otherwise
+</equation>
+<bodyText confidence="0.999968833333333">
+A similar element-weighted version of Kendall Tau
+was proposed by Kumar and Vassilvitskii (2010) to
+evaluate document rankings in information retrieval.
+Because long reordering errors in Arabic-English
+mostly affect verbs, we set the weights to 1 for verbs
+and 0 for all other words to only capture verb re-
+ordering errors, and call the resulting metric KRS-V.
+The source-reference word alignments needed to
+compute the reordering scores are generated by the
+Berkeley Aligner previously trained on the training
+data. Source-output word alignments are instead ob-
+tained from the decoder’s trace.
+</bodyText>
+<subsectionHeader confidence="0.74229">
+5.4 Results and discussion
+</subsectionHeader>
+<bodyText confidence="0.994101">
+To motivate the choice of our baseline setup (early
+distortion cost and DL=8), we first compare the per-
+formance of standard and early distortion costs un-
+der various DL conditions.
+</bodyText>
+<table confidence="0.958639222222222">
+!&amp;quot;#&amp; !&amp;quot;#$
+!&amp;quot;#&amp;&apos; ()
+!&amp;quot;#$
+!&amp;quot;#() !&amp;quot;#($
+early
+standard
+!&amp;quot;#($
+43.1 43.6 44.1 44.6 45.1
+-&amp;quot;./
+</table>
+<figureCaption confidence="0.954045333333333">
+Figure 2: Standard vs early distortion cost results on
+eval08-nw under different distortion limits (DL), using
+the medium-size LM. Best scores are on top-right corner.
+</figureCaption>
+<bodyText confidence="0.999924254901961">
+As shown in Fig. 2, most results are close to each
+other in terms of BLEU and KRS, but early distor-
+tion consistently outperforms the standard one (sta-
+tistically significant). The most striking difference
+appears at a very high distortion limit (18), where
+standard distortion scores drop by more than 1 BLEU
+point and almost 7 KRS points! Early distortion is
+much more robust (only -1 KRS when going from
+DL=8 to DL=18), which makes our baseline system
+especially strong at the level of reordering.
+Table 5 presents the results obtained by integrat-
+ing the WaW reordering model as an additional
+feature function, and by applying early reordering
+pruning. The upper part of the table refers to the
+medium-scale evaluation, while the lower part refers
+to the large-scale evaluation. In each part, statis-
+tical significance is computed against the baseline
+[B] by approximate randomization as in (Riezler and
+Maxwell, 2005). Run times are obtained by an Intel
+Xeon X5650 processor on the first 500 sentences of
+eval08-nw, and exclude loading time of all models.
+Medium-scale evaluation. Integrating the WaW
+model as an additional feature function results in
+small but consistent improvements in all DL condi-
+tions, which shows that this type of model conveys
+information that is missing from the state-of-the-art
+reordering models. As regards efficiency, the new
+model makes decoding time increase by 8%.
+Among the DL settings considered, DL=8 is con-
+firmed as the optimal one – with or without WaW
+model. Raising the DL to 18 with no special prun-
+ing has a negative impact on both translation quality
+and efficiency. The effect is especially visible on the
+reordering scores: that is, from 84.7 to 83.9 KRS and
+from 86.2 to 85.8 KRS-V on eval09-nw. Run times
+are almost doubled: from 87 to 164 and from 94 to
+178 ms/word, that is a 89% increase.
+We then proceed to the last experiment where the
+reordering space is dynamically pruned based on
+the WaW model score. As explained in Sect. 4, a
+non-prunable-zone of width V=5 is set around the
+last covered position. To set the early pruning pa-
+rameters, we perform a grid search over the values
+(1, 2, 3, 4, 5) for histogram and (0.5, 0.25, 0.1) for
+relative threshold, and select the values that achieve
+the best BLEU and KRS on eval08-nw, namely 3 (his-
+togram) and 0.1 (threshold). The resulting configu-
+ration is then re-optimized by MERT on dev06-nw.
+This setting implies that, at a given point of decod-
+ing where i is the last covered position, a new word
+can be translated only if:
+</bodyText>
+<listItem confidence="0.94222375">
+• it lies within a DL of 5 from i, or
+• it lies within a DL of 18 from i and its WaW
+reordering score is among the top 3 and at least
+equal to 1/10 of the best score (in linear space).
+</listItem>
+<bodyText confidence="0.9466045">
+As shown in Table 5, early pruning achieves the
+best results overall: despite the high DL, we report
+</bodyText>
+<figure confidence="0.994524666666667">
+83.5
+82.5
+81.5
+KRS 80.5
+79.5
+78.5
+77.5
+76.5
+75.5
+</figure>
+<page confidence="0.995245">
+335
+</page>
+<table confidence="0.997917533333333">
+DL Reo.models eval08-nw eval09-nw vs-09 ms/
+word
+bleu met krs krs-V bleu met krs krs-V krs-V
+Using the medium-size LM (147M English tokens):
+5 hier.lexreo, early disto 44.7 35.1• 83.0• 84.7• 50.3° 38.1 84.6 85.9 84.7 59
++ WaW model 44.8 35.1 83.7 85.4 51.0• 38.3• 85.1• 86.6° 85.5• 64
+8 hier.lexreo, early disto[B] 44.8 35.2 83.4 85.6 50.6 38.1 84.7 86.2 84.8 87
++ WaW model 45.0 35.2 83.7° 85.9 51.1• 38.3• 85.1• 86.8• 85.8• 94
+hier.lexreo, early disto 44.7 34.9• 82.4• 84.9• 50.3 38.0° 83.9• 85.8° 84.3° 164
+18 + WaW model 44.8 35.2 82.7• 85.5 51.0° 38.3• 84.2° 86.2 85.2 178
++ early reo.pruning(V=5) 45.0 35.3 83.7° 86.3• 50.9 38.3• 84.9 87.0• 86.2• 68
+Using the large interpolated LM (2130M English tokens) and double beam-size:
+8 hier.lexreo, early disto[B] 46.3 35.0 83.2 85.0 51.6 38.3 84.5 85.8 84.5 2579
+18 hier.lexreo, early disto 45.9° 34.9• 81.7• 84.1• 51.4 38.1• 83.0• 84.6• 83.1• 5462
++WaW+reo.pruning(V=5) 46.3 35.2 83.4 85.7• 52.8• 38.6• 84.6 86.6• 85.5• 1588
+</table>
+<tableCaption confidence="0.93327825">
+Table 5: Effects of WaW reordering modeling and early reordering pruning on translation quality, measured with
+% BLEU, METEOR, and Kendall Reordering Score: regular (KRS) and verb-specific (KRS-V). Statistically significant
+differences with respect to the baseline [B] are marked with •• at the p &lt; .05 level and °° at the p &lt; .10 level.
+Decoding time is measured in milliseconds per input word.
+</tableCaption>
+<bodyText confidence="0.999878407407408">
+no loss in BLEU, METEOR and KRS, but we actually
+see several improvements. In particular, the gains on
+the blind test eval09-nw are +0.3 BLEU, +0.2 ME-
+TEOR and +0.2 KRS (only METEOR is significant).
+While these gains are admittedly small, we recall
+that our techniques affect rare and isolated events
+which can hardly emerge from the general-purpose
+evaluation metrics. Moreover, to our knowledge,
+this is the first time that a PSMT system is shown to
+maintain a good performance on this language pair
+while admitting very long-range reorderings.
+Finally and more importantly, the reordering of
+verbs improves significantly on both generic tests
+and on the VS- sentence subset (vs-09): namely, in
+the latter, we achieve a notable gain of 1.4 KRS-V.
+Efficiency is also largely improved by our early
+reordering pruning technique: decoding time is re-
+duced to 68 ms/word, corresponding to a 22%
+speed-up over the baseline.
+Large-scale evaluation. We also investigate
+whether our methods can be useful in a scenario
+where efficiency is less important and more data
+is available for training. To this end, we build a
+very large LM by interpolating the main LM with
+three other LMs trained on different Gigaword sec-
+tions (see Sect. 5). Moreover, we relax the decoder’s
+beam size from the default value of 200 to 400 hy-
+potheses, to reduce the risk of search errors and ob-
+tain the best possible baseline performance.
+By comparing the large-scale with the medium-
+scale baseline in Table 5, we note that the addition
+of LM data is especially beneficial for BLEU (+1.5
+on eval08-nw and +1.0 on eval09-nw), but not as
+much for the other metrics, which challenges the
+commonly held idea that more data always improves
+translation quality.
+Here too, relaxing the DL without special pruning
+hurts not only efficiency but also translation qual-
+ity: all the scores decrease considerably, showing
+that even the stronger LM is not sufficient to guide
+search through a very large reordering search space.
+As for our enhanced system, it achieves simi-
+lar gains as in the medium-scale scenario: that is,
+BLEU and METEOR are preserved or slightly im-
+proved despite the very high DL, while all the re-
+ordering scores increase. In particular, we report sta-
+tistically significant improvements in the reordering
+of verbs, which is where the impact of our method is
+expected to concentrate (+0.7, +0.8 and +1.0 KRS-V
+on eval08-nw, eval09-nw and vs-09, respectively).
+These results confirm the usefulness of our
+method not only as an optimization technique, but
+also as a way to improve translation quality on top
+of a very strong baseline.
+</bodyText>
+<page confidence="0.996146">
+336
+</page>
+<figure confidence="0.165182454545455">
+!!! &amp;quot;#$!%&amp; ( ),+ -. /0$%&amp; &amp;-1!21+ +03* +045(67!8 +9#+77!5 :65 &amp;-3*;24&lt;5( &amp;-73!045( &amp;-=&gt;?@A( 0B*+CD EF(23*
+SRC verb subj. obj. compl.
+ywASl sfyr Almmlkp AlErbyp AlsEwdyp ldY lbnAn EbdAlEzyz xwjp tHrk -h fy AtjAh ...
+continues ambassador Kingdom Arabian Saudi to Lebanon Abdulaziz Khawja move his indirection
+REF The Kingdom of Saudi Arabia ’s ambassador to Lebanon Abdulaziz Khawja continues his moves towards ...
+BASE continue to Saudi Arabian ambassador to Lebanon, Abdulaziz Khwja its move in the direction of ...
+NEW The Kingdom of Saudi Arabia ’s ambassador to Lebanon, Abdulaziz Khwja continue its move in the direction of ...
+;#7*$G ( H(+0&amp;B5( )I( E4 J&lt;K 65# L+ M#NL &amp;-O01 P5 )*QR#7*&lt;5( S! &amp;7=@A( TU*V3W XY. #8; #?7*+,
+SRC adv. verb obj. subj. compl.
+fymA dEA -hm r}ys Almktb AlsyAsy l- Hrkp HmAs xAld m$El AlY AltzAm AlHyAd
+meanwhile called them head bureau political of movement Hamas Khaled Mashal to necessity neutrality
+</figure>
+<figureCaption confidence="0.64808">
+REF Meanwhile, the Head of the Political Bureau of the Hamas movement, Khaled Mashal, called upon them to remain neutral
+BASE The called them, head of Hamas’ political bureau, Khalid Mashal, to remain neutral
+NEW The head of Hamas’ political bureau, Khalid Mashal, called on them to remain neutral
+Figure 3: Long reordering examples showing improvements over the baseline system (BASE) when the DL is raised to
+18 and early pruning based on WaW reordering scores is enabled (NEW).
+</figureCaption>
+<bodyText confidence="0.99977425">
+Long jumps statistics and examples. To better
+understand the behavior of the early-pruning system,
+we extract phrase-to-phrase jump statistics from the
+decoder log file. We find that 132 jumps beyond the
+non-prunable zone (D&gt;5) were performed to trans-
+late the 586 sentences of eval09-nw; 38 out of these
+were longer than 8 and mostly concentrated on the
+VS- sentence subset (27 jumps D&gt;8 performed in
+vs-09).13 This and the higher reordering scores sug-
+gest that long jumps are mainly carried out to cor-
+rectly reorder clause-inital verbs over long subjects.
+Fig. 3 shows two Arabic sentences taken from
+eval09-nw, that were erroneuously reordered by the
+baseline system. The system including the WaW
+model and early reordering pruning, instead, pro-
+duced the correct translation. The first sentence is
+a typical example of VSO order with a long subject:
+while the baseline system left the verb in its Ara-
+bic position, producing an incomprehensible trans-
+lation, the new system placed it rightly between the
+English subject and object. This reordering involved
+two long jumps: one with D=9 backward and one
+with D=8 forward.
+The second sentence displays another, less com-
+mon, Arabic construction: namely VOS, with a per-
+sonal pronoun object. In this case, a backward jump
+with D=10 and a forward jump with D=8 were nec-
+essary to achieve the correct reordering.
+</bodyText>
+<footnote confidence="0.608304">
+13Statistics computed on the medium-LM system.
+</footnote>
+<sectionHeader confidence="0.999607" genericHeader="conclusions">
+6 Conclusions
+</sectionHeader>
+<bodyText confidence="0.999974">
+We have trained a discriminative model to predict
+likely reordering steps in a way that is complemen-
+tary to state-of-the-art PSMT reordering models. We
+have effectively integrated it into a PSMT decoder as
+additional feature, ensuring that its total score over a
+complete translation hypothesis is consistent across
+different phrase segmentations. Lastly, we have pro-
+posed early reordering pruning as a novel method
+to dynamically shape the input reordering space and
+capture long-range reordering phenomena that are
+often critical when translating between languages
+with different syntactic structures.
+Evaluated on a popular Arabic-English news
+translation task against a strong baseline, our ap-
+proach leads to similar or even higher BLEU, ME-
+TEOR and KRS scores at a very high distortion limit
+(18), which is by itself an important achievement.
+At the same time, the reordering of verbs, measured
+with a novel version of the KRS, is consistently im-
+proved, while decoding gets significantly faster. The
+improvements are also confirmed when a very large
+LM is used and the decoder’s beam size is dou-
+bled, which shows that our method reduces not only
+search errors but also model errors even when base-
+line models are very strong.
+Word reordering is probably the most difficult as-
+pect of SMT and an important factor of both its qual-
+ity and efficiency. Given its strong interaction with
+the other aspects of SMT, it appears natural to solve
+</bodyText>
+<page confidence="0.994258">
+337
+</page>
+<bodyText confidence="0.999918666666667">
+word reordering during decoding, rather than before
+or after it. To date, however, this objective was only
+partially achieved. We believe there is a promising
+way to go between fully-integrated reordering mod-
+els and monolingual pre-ordering methods. This
+work has started to explore it.
+</bodyText>
+<sectionHeader confidence="0.910088" genericHeader="acknowledgments">
+Aknowledgments
+</sectionHeader>
+<bodyText confidence="0.9623935">
+This work was partially funded by the European
+Union FP7 grant agreement 287658 (EU-BRIDGE).
+</bodyText>
+<sectionHeader confidence="0.998604" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.999240714285714">
+Yaser Al-Onaizan and Kishore Papineni. 2006. Distor-
+tion models for statistical machine translation. In Pro-
+ceedings of the 21st International Conference on Com-
+putational Linguistics and 44th Annual Meeting of
+the Association for Computational Linguistics, pages
+529–536, Sydney, Australia, July.
+Jacob Andreas, Nizar Habash, and Owen Rambow. 2011.
+Fuzzy syntactic reordering for phrase-based statistical
+machine translation. In Proceedings of the Sixth Work-
+shop on Statistical Machine Translation, pages 227–
+236, Edinburgh, Scotland, July.
+Satanjeev Banerjee and Alon Lavie. 2005. METEOR:
+An automatic metric for MT evaluation with improved
+correlation with human judgments. In Proceedings of
+the ACL Workshop on Intrinsic and Extrinsic Evalu-
+ation Measures for Machine Translation and/or Sum-
+marization, pages 65–72, Ann Arbor, Michigan, June.
+A. L. Berger, P. F. Brown, S. A. Della Pietra, V. J. Della
+Pietra, J. R. Gillett, A. S. Kehler, and R. L. Mercer.
+1996. Language translation apparatus and method of
+using context-based translation models. United States
+Patent, No. 5510981, Apr.
+Alexandra Birch, Phil Blunsom, and Miles Osborne.
+2009. A quantitative analysis of reordering phenom-
+ena. In StatMT ’09: Proceedings of the Fourth Work-
+shop on Statistical Machine Translation, pages 197–
+205, Morristown, NJ, USA.
+Alexandra Birch, Miles Osborne, and Phil Blunsom.
+2010. Metrics for MT evaluation: evaluating reorder-
+ing. Machine Translation, 24(1):15–26.
+Arianna Bisazza and Marcello Federico. 2012. Modi-
+fied distortion matrices for phrase-based statistical ma-
+chine translation. In Proceedings of the 50th Annual
+Meeting of the Association for Computational Linguis-
+tics (Volume 1: Long Papers), pages 478–487, Jeju Is-
+land, Korea, July.
+Arianna Bisazza, Daniele Pighin, and Marcello Fed-
+erico. 2012. Chunk-lattices for verb reordering in
+Arabic-English statistical machine translation. Ma-
+chine Translation, Special Issue on MT for Arabic,
+26(1-2):85–103.
+Arianna Bisazza. 2013. Linguistically Motivated Re-
+ordering Modeling for Phrase-Based Statistical Ma-
+chine Translation. Ph.D. thesis, University of Trento.
+http://eprints-phd.biblio.unitn.it/1019/.
+Marine Carpuat, Yuval Marton, and Nizar Habash. 2012.
+Improved Arabic-to-English statistical machine trans-
+lation by reordering post-verbal subjects for word
+alignment. Machine Translation, Special Issue on MT
+for Arabic, 26(1-2):105–120.
+Mauro Cettolo, Nicola Bertoldi, and Marcello Federico.
+2011. Methods for smoothing the optimizer instability
+in SMT. In MT Summit XIII: the Thirteenth Machine
+Translation Summit, pages 32–39, Xiamen, China.
+Stanley F. Chen and Joshua Goodman. 1999. An empiri-
+cal study of smoothing techniques for language model-
+ing. Computer Speech and Language, 4(13):359–393.
+Marta R. Costa-juss`a and Jos´e A. R. Fonollosa. 2009.
+State-of-the-art word reordering approaches in statisti-
+cal machine translation: A survey. IEICE TRANSAC-
+TIONS on Information and Systems, E92-D(11):2179–
+2185.
+Koby Crammer and Yoram Singer. 2003. Ultraconser-
+vative online algorithms for multiclass problems. J.
+Mach. Learn. Res., 3:951–991, March.
+Hal Daum´e III. 2004. Notes on CG and LM-BFGS op-
+timization of logistic regression. Paper available at
+http://pub.hal3.name, implementation avail-
+able at http://hal3.name/megam.
+Mona Diab, Kadri Hacioglu, and Daniel Jurafsky. 2004.
+Automatic Tagging of Arabic Text: From Raw Text to
+Base Phrase Chunks. In Daniel Marcu Susan Dumais
+and Salim Roukos, editors, HLT-NAACL 2004: Short
+Papers, pages 149–152, Boston, Massachusetts, USA.
+Marcello Federico, Nicola Bertoldi, and Mauro Cettolo.
+2008. IRSTLM: an Open Source Toolkit for Handling
+Large Scale Language Models. In Proceedings of In-
+terspeech, pages 1618–1621, Melbourne, Australia.
+Minwei Feng, Arne Mauser, and Hermann Ney. 2010.
+A source-side decoding sequence model for statisti-
+cal machine translation. In Conference of the Associa-
+tion for Machine Translation in the Americas (AMTA),
+Denver, Colorado, USA.
+Michel Galley and Christopher D. Manning. 2008. A
+simple and effective hierarchical phrase reordering
+model. In EMNLP ’08: Proceedings of the Confer-
+ence on Empirical Methods in Natural Language Pro-
+cessing, pages 848–856, Morristown, NJ, USA.
+Spence Green, Conal Sathi, and Christopher D. Man-
+ning. 2009. NP subject detection in verb-initial Ara-
+bic clauses. In Proceedings of the Third Workshop
+</reference>
+<page confidence="0.98468">
+338
+</page>
+<reference confidence="0.999709273584906">
+on Computational Approaches to Arabic Script-based
+Languages (CAASL3), Ottawa, Canada.
+Spence Green, Michel Galley, and Christopher D. Man-
+ning. 2010. Improved models of distortion cost for
+statistical machine translation. In Human Language
+Technologies: The 2010 Annual Conference of the
+North American Chapter of the Association for Com-
+putational Linguistics (NAACL), pages 867–875, Los
+Angeles, California.
+Magnus R. Hestenes and Eduard Stiefel. 1952. Meth-
+ods of conjugate gradients for solving linear systems.
+Journal of Research of the National Bureau of Stan-
+dards, 49(6):409–436.
+H. Johnson, J. Martin, G. Foster, and R. Kuhn. 2007. Im-
+proving translation quality by discarding most of the
+phrasetable. In In Proceedings of EMNLP-CoNLL 07,
+pages 967–975.
+Philipp Koehn, Franz Josef Och, and Daniel Marcu.
+2003. Statistical phrase-based translation. In Proceed-
+ings of HLT-NAACL 2003, pages 127–133, Edmonton,
+Canada.
+Philipp Koehn, Amittai Axelrod, Alexandra Birch
+Mayne, Chris Callison-Burch, Miles Osborne, and
+David Talbot. 2005. Edinburgh system description
+for the 2005 IWSLT speech translation evaluation. In
+Proc. of the International Workshop on Spoken Lan-
+guage Translation, October.
+P. Koehn, H. Hoang, A. Birch, C. Callison-Burch,
+M. Federico, N. Bertoldi, B. Cowan, W. Shen,
+C. Moran, R. Zens, C. Dyer, O. Bojar, A. Constantin,
+and E. Herbst. 2007. Moses: Open Source Toolkit
+for Statistical Machine Translation. In Proceedings of
+the 45th Annual Meeting of the Association for Com-
+putational Linguistics Companion Volume Proceed-
+ings of the Demo and Poster Sessions, pages 177–180,
+Prague, Czech Republic.
+Ravi Kumar and Sergei Vassilvitskii. 2010. General-
+ized distances between rankings. In Proceedings of
+the 19th international conference on World Wide Web,
+pages 571–580, New York, NY, USA. ACM.
+Percy Liang, Ben Taskar, and Dan Klein. 2006. Align-
+ment by agreement. In Proceedings of the Human
+Language Technology Conference of the NAACL, Main
+Conference, pages 104–111, New York City, USA,
+June.
+Ryan McDonald, Fernando Pereira, Kiril Ribarov, and
+Jan Hajiˇc. 2005. Non-projective dependency parsing
+using spanning tree algorithms. In Proceedings of the
+conference on Human Language Technology and Em-
+pirical Methods in Natural Language Processing, HLT
+’05, pages 523–530, Stroudsburg, PA, USA.
+Robert C. Moore and Chris Quirk. 2007. Faster beam-
+search decoding for phrasal statistical machine transla-
+tion. In In Proceedings of MT Summit XI, pages 321–
+327, Copenhagen, Denmark.
+F. Och and H. Ney. 2002. Discriminative training
+and maximum entropy models for statistical machine
+translation. In Proceedings of the 40th Annual Meet-
+ing of the Association for Computational Linguistics
+(ACL), pages 295–302, Philadelhpia, PA.
+Franz Josef Och. 2003. Minimum Error Rate Training
+in Statistical Machine Translation. In Erhard Hinrichs
+and Dan Roth, editors, Proceedings of the 41st Annual
+Meeting of the Association for Computational Linguis-
+tics, pages 160–167.
+Kishore Papineni, Salim Roukos, Todd Ward, and Wei-
+Jing Zhu. 2002. BLEU: a method for automatic eval-
+uation of machine translation. In Proceedings of the
+40th Annual Meeting of the Association of Compu-
+tational Linguistics (ACL), pages 311–318, Philadel-
+phia, PA.
+Stefan Riezler and John T. Maxwell. 2005. On some
+pitfalls in automatic evaluation and significance test-
+ing for MT. In Proceedings of the ACL Workshop on
+Intrinsic and Extrinsic Evaluation Measures for Ma-
+chine Translation and/or Summarization, pages 57–
+64, Ann Arbor, Michigan, June.
+Christoph Tillmann. 2004. A Unigram Orientation
+Model for Statistical Machine Translation. In Pro-
+ceedings of the Joint Conference on Human Language
+Technologies and the Annual Meeting of the North
+American Chapter of the Association of Computa-
+tional Linguistics (HLT-NAACL).
+Karthik Visweswariah, Rajakrishnan Rajkumar, Ankur
+Gandhe, Ananthakrishnan Ramanathan, and Jiri
+Navratil. 2011. A word reordering model for im-
+proved machine translation. In Proceedings of the
+2011 Conference on Empirical Methods in Natu-
+ral Language Processing, pages 486–496, Edinburgh,
+Scotland, UK., July.
+Dekai Wu. 1997. Stochastic inversion transduction
+grammars and bilingual parsing of parallel corpora.
+Computational Linguistics, 23(3):377–403.
+Sirvan Yahyaei and Christof Monz. 2010. Dynamic dis-
+tortion in a discriminative reordering model for sta-
+tistical machine translation. In International Work-
+shop on Spoken Language Translation (IWSLT), Paris,
+France.
+Richard Zens and Hermann Ney. 2006. Discriminative
+reordering models for statistical machine translation.
+In Proceedings on the Workshop on Statistical Ma-
+chine Translation, pages 55–63, New York City, June.
+R. Zens, F. J. Och, and H. Ney. 2002. Phrase-based sta-
+tistical machine translation. In 25th German Confer-
+ence on Artificial Intelligence (KI2002), pages 18–32,
+Aachen, Germany. Springer Verlag.
+</reference>
+<page confidence="0.999363">
+339
+340
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.285404">
+<title confidence="0.9986065">Dynamically Shaping the Reordering Search of Phrase-Based Statistical Machine Translation</title>
+<author confidence="0.6873815">Bisazza Fondazione Bruno</author>
+<affiliation confidence="0.647668">Trento,</affiliation>
+<abstract confidence="0.99777572">Defining the reordering search space is a crucial issue in phrase-based SMT between distant languages. In fact, the optimal tradeoff between accuracy and complexity of decoding is nowadays reached by harshly limiting the input permutation space. We propose a method to dynamically shape such space and, thus, capture long-range word movements without hurting translation quality nor decoding time. The space defined by loose reordering constraints is dynamically pruned through a binary classifier that predicts whether a given input word should be translated right after another. The integration of this model into a phrase-based decoder improves a strong Arabic-English baseline already including state-of-the-art early distortion cost (Moore and Quirk, 2007) and hierarchical phrase orientation models (Galley and Manning, 2008). Significant improvements in the reordering of verbs are achieved by a system that is notably faster than the baseline, stable, or even increase, at a very high distortion limit.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>Yaser Al-Onaizan</author>
+<author>Kishore Papineni</author>
+</authors>
+<title>Distortion models for statistical machine translation.</title>
+<date>2006</date>
+<booktitle>In Proceedings of the 21st International Conference on Computational Linguistics and 44th Annual Meeting of the Association for Computational Linguistics,</booktitle>
+<pages>529--536</pages>
+<location>Sydney, Australia,</location>
+<contexts>
+<context position="6448" citStr="Al-Onaizan and Papineni, 2006" startWordPosition="991" endWordPosition="994">orientation models, jump models and source decoding sequence models. Phrase orientation models (Tillmann, 2004; Koehn et al., 2005; Zens and Ney, 2006; Galley and Manning, 2008), also known as lexicalized reordering models, predict the orientation of a phrase with respect to the last translated one, by classifying it as monotone, swap or discontinuous. These models have proven very useful for short and mediumrange reordering and are among the most widely used in PSMT. However, their coarse classification of reordering steps makes them unsuitable to predict long-range reorderings. Jump models (Al-Onaizan and Papineni, 2006; Green et al., 2010; Yahyaei and Monz, 2010) predict the direction and length of a jump to perform after a given input word2. Both these works achieve their best Arabic-English results within a rather small DL: namely, 8 in (Al-Onaizan and Papineni, 2006) and 5 in (Green et al., 2010), thus failing to capture the rare but crucial long reorderings that were their main motivation. A drawback of this approach is that long jumps are typically penalized because of their low frequency compared to short jumps. This strong bias is undesirable, given that we are especially interested in detecting prob</context>
+</contexts>
+<marker>Al-Onaizan, Papineni, 2006</marker>
+<rawString>Yaser Al-Onaizan and Kishore Papineni. 2006. Distortion models for statistical machine translation. In Proceedings of the 21st International Conference on Computational Linguistics and 44th Annual Meeting of the Association for Computational Linguistics, pages 529–536, Sydney, Australia, July.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jacob Andreas</author>
+<author>Nizar Habash</author>
+<author>Owen Rambow</author>
+</authors>
+<title>Fuzzy syntactic reordering for phrase-based statistical machine translation.</title>
+<date>2011</date>
+<booktitle>In Proceedings of the Sixth Workshop on Statistical Machine Translation,</booktitle>
+<pages>227--236</pages>
+<location>Edinburgh, Scotland,</location>
+<contexts>
+<context position="22299" citStr="Andreas et al., 2011" startWordPosition="3710" endWordPosition="3713">uation We test our approach on an Arabic-English news translation task where sentences are typically long and complex. In this language pair, long reordering errors mostly concern verbs, as all of SubjectVerb-Object (SVO), VSO and, more rarerly, VOS 6See Bisazza (2013) for technical details on the integration of word-level pruning with phrase-level hypothesis expansion. constructions are attested in modern written Arabic. This issue is well known in the SMT field and was addressed by several recent works, with deep or shallow parsing-based techniques (Green et al., 2009; Carpuat et al., 2012; Andreas et al., 2011; Bisazza et al., 2012). We question whether our approach – which is not conceived to solve this specific problem, nor requires manual rules to predict verb reordering – will succeed in improving long reordering in a fully data-driven way. As SMT training data, we use all the in-domain parallel data provided for the NIST-MT09 evaluation for a total of 986K sentence pairs (31M English words).7 The target LM used to run the main series of experiments is trained on the English side of all available NIST-MT09 parallel data, UN included (147M words). In the large-scale experiments, the LM training </context>
+</contexts>
+<marker>Andreas, Habash, Rambow, 2011</marker>
+<rawString>Jacob Andreas, Nizar Habash, and Owen Rambow. 2011. Fuzzy syntactic reordering for phrase-based statistical machine translation. In Proceedings of the Sixth Workshop on Statistical Machine Translation, pages 227– 236, Edinburgh, Scotland, July.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Satanjeev Banerjee</author>
+<author>Alon Lavie</author>
+</authors>
+<title>METEOR: An automatic metric for MT evaluation with improved correlation with human judgments.</title>
+<date>2005</date>
+<booktitle>In Proceedings of the ACL Workshop on Intrinsic and Extrinsic Evaluation Measures for Machine Translation and/or Summarization,</booktitle>
+<pages>65--72</pages>
+<location>Ann Arbor, Michigan,</location>
+<contexts>
+<context position="32261" citStr="Banerjee and Lavie, 2005" startWordPosition="5325" endWordPosition="5328">odified Kneser-Ney smoothing (Chen and Goodman, 1999). Feature weights are optimized by minimum BLEU-error training (Och, 2003) on dev06-nw. To reduce the effects of the optimizer instability, we tune each configuration four times and use the average of the resulting weight vectors to translate the test sets, as suggested by Cettolo et al. (2011). Finally, eval08-nw is used to select the early pruning parameters for the last experiment, while eval09- nw is always reserved as blind test. 5.3 Evaluation metrics We evaluate global translation quality with BLEU (Papineni et al., 2002) and METEOR (Banerjee and Lavie, 2005). These metrics, though, are only indirectly sensitive to word order, and especially unlikely to capture improvements at the level of longrange reordering. For this reason, we also compute the Kendall Reordering Score or KRS (Birch et al., 2010) which is a positive score based on the Kendall’s Tau distance between the source-output permutation π and the source-reference permutations σ: ,/ KRS(π, σ) = (1 − K(π, σ)) · BP K(π, σ) = i E�i d(a, i) 2n(n − 1) � _ 1 if πi &lt; πj and σi &gt; σj d(2, �) — 0 otherwise where BP is a sentence-level brevity penalty, similar to that of BLEU. The KRS is robust to </context>
+</contexts>
+<marker>Banerjee, Lavie, 2005</marker>
+<rawString>Satanjeev Banerjee and Alon Lavie. 2005. METEOR: An automatic metric for MT evaluation with improved correlation with human judgments. In Proceedings of the ACL Workshop on Intrinsic and Extrinsic Evaluation Measures for Machine Translation and/or Summarization, pages 65–72, Ann Arbor, Michigan, June.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>A L Berger</author>
+<author>P F Brown</author>
+<author>S A Della Pietra</author>
+<author>V J Della Pietra</author>
+<author>J R Gillett</author>
+<author>A S Kehler</author>
+<author>R L Mercer</author>
+</authors>
+<title>Language translation apparatus and method of using context-based translation models.</title>
+<date>1996</date>
+<tech>United States Patent, No. 5510981,</tech>
+<contexts>
+<context position="9284" citStr="Berger et al., 1996" startWordPosition="1458" endWordPosition="1461">es ( !!! � DL �fi) = !!!start( �fi) − end( �fi−1) − 1 Limiting the input permutation space is necessary for beam-search PSMT decoders to function in linear time. Reordering constraints are also important for translation quality because the existing models are typically not discriminative enough to guide the search over very large sets of reordering hypotheses. Despite their crucial effects on the complexity of reordering modeling, though, reordering constraints have drawn less attention in the literature. The existing reordering constraints are typically based on word-to-word distances – IBM (Berger et al., 1996) and DL (Koehn et al., 2007) – or on permutation patterns – ITG (Wu, 1997). Both kinds of constraints are uniform throughout the input sentence, and insensitive to the word being translated and to its context. This results in a very coarse definition of the reordering search space, which is problematic in language pairs with different syntactic structures. To address this problem, Yahyaei and Monz (2010) present a technique to dynamically set the DL: they train a classifier to predict the most probable jump length after each input word, and use the predicted value as the DL after that position</context>
+</contexts>
+<marker>Berger, Brown, Pietra, Pietra, Gillett, Kehler, Mercer, 1996</marker>
+<rawString>A. L. Berger, P. F. Brown, S. A. Della Pietra, V. J. Della Pietra, J. R. Gillett, A. S. Kehler, and R. L. Mercer. 1996. Language translation apparatus and method of using context-based translation models. United States Patent, No. 5510981, Apr.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Alexandra Birch</author>
+<author>Phil Blunsom</author>
+<author>Miles Osborne</author>
+</authors>
+<title>A quantitative analysis of reordering phenomena.</title>
+<date>2009</date>
+<booktitle>In StatMT ’09: Proceedings of the Fourth Workshop on Statistical Machine Translation,</booktitle>
+<pages>197--205</pages>
+<location>Morristown, NJ, USA.</location>
+<contexts>
+<context position="1437" citStr="Birch et al., 2009" startWordPosition="214" endWordPosition="217"> into a phrase-based decoder improves a strong Arabic-English baseline already including state-of-the-art early distortion cost (Moore and Quirk, 2007) and hierarchical phrase orientation models (Galley and Manning, 2008). Significant improvements in the reordering of verbs are achieved by a system that is notably faster than the baseline, while BLEU and METEOR remain stable, or even increase, at a very high distortion limit. 1 Introduction Word order differences are among the most important factors determining the performance of statistical machine translation (SMT) on a given language pair (Birch et al., 2009). This is particularly true in the framework of phrase-based SMT (PSMT) (Zens et al., 2002; Koehn et al., 2003; Och and Ney, 2002), an approach that remains highly competitive despite the recent advances of the tree-based approaches. During the PSMT decoding process, the output sentence is built from left to right, while the input sentence positions can be covered in different orders. Thus, reordering in PSMT can be viewed as the problem of choosing the input permutation that leads to the highest-scoring output sentence. Due to efficiency reasons, however, the input permutation space cannot be</context>
+<context position="3323" citStr="Birch et al., 2009" startWordPosition="509" endWordPosition="512">axing this kind of constraints means dramatically increasing the size of the search space and making the reordering model’s task extremely complex. As a result, even in language pairs where long reordering is regularly observed, PSMT quality degrades when long word movements are allowed to the decoder. We address this problem by training a binary classifier to predict whether a given input position should be translated right after another, given the words at those positions and their contexts. When this model is integrated into the decoder, its predic1For empirical evidence, see for instance (Birch et al., 2009; Galley and Manning, 2008; Bisazza and Federico, 2012). 327 Transactions of the Association for Computational Linguistics, 1 (2013) 327–340. Action Editor: Philipp Koehn. Submitted 1/2013; Revised 5/2013; Published 7/2013. c�2013 Association for Computational Linguistics. tions can be used not only as an additional feature function, but also as an early indication of whether or not a given reordering path should be further explored. More specifically, at each hypothesis expansion, we consider the set of input positions that are reachable according to the usual reordering constraints, and prun</context>
+</contexts>
+<marker>Birch, Blunsom, Osborne, 2009</marker>
+<rawString>Alexandra Birch, Phil Blunsom, and Miles Osborne. 2009. A quantitative analysis of reordering phenomena. In StatMT ’09: Proceedings of the Fourth Workshop on Statistical Machine Translation, pages 197– 205, Morristown, NJ, USA.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Alexandra Birch</author>
+<author>Miles Osborne</author>
+<author>Phil Blunsom</author>
+</authors>
+<title>Metrics for MT evaluation: evaluating reordering.</title>
+<date>2010</date>
+<journal>Machine Translation,</journal>
+<volume>24</volume>
+<issue>1</issue>
+<contexts>
+<context position="14092" citStr="Birch et al., 2010" startWordPosition="2274" endWordPosition="2277">unk head words of i and j (20). Finally we add a feature to indicate whether the words i and j belong to the same chunk (21). The jump orientation – forward/backward – is included in the features that represent the words comprised between i and j (rows 6, 7, 14, 15). No explicit indication of the jump length is included in any feature. 3.2 Training data To generate training data for the classifier, we first extract reference reorderings from a word-aligned parallel corpus. Given a parallel sentence, different heuristics may be used to convert arbitrary word alignments to a source permutation (Birch et al., 2010; Feng et al., 2010; Visweswariah et al., 2011). Similarly to this last work, we compute for each source word fi the mean ai of the target positions aligned to fi, then sort the source words according to this value.3 As a difference, though, we do not discard unaligned words but assign them the mean 3Using the mean of the aligned indices makes the generation of reference permutations more robust to alignment errors. Admittedly, this heuristic does not handle well the case of source words that are correctly aligned to non-consecutive target words. However, this phenomenon is also not captured b</context>
+<context position="32506" citStr="Birch et al., 2010" startWordPosition="5367" endWordPosition="5370">of the resulting weight vectors to translate the test sets, as suggested by Cettolo et al. (2011). Finally, eval08-nw is used to select the early pruning parameters for the last experiment, while eval09- nw is always reserved as blind test. 5.3 Evaluation metrics We evaluate global translation quality with BLEU (Papineni et al., 2002) and METEOR (Banerjee and Lavie, 2005). These metrics, though, are only indirectly sensitive to word order, and especially unlikely to capture improvements at the level of longrange reordering. For this reason, we also compute the Kendall Reordering Score or KRS (Birch et al., 2010) which is a positive score based on the Kendall’s Tau distance between the source-output permutation π and the source-reference permutations σ: ,/ KRS(π, σ) = (1 − K(π, σ)) · BP K(π, σ) = i E�i d(a, i) 2n(n − 1) � _ 1 if πi &lt; πj and σi &gt; σj d(2, �) — 0 otherwise where BP is a sentence-level brevity penalty, similar to that of BLEU. The KRS is robust to lexical choice because it performs no comparison between output and reference words, but only between the positions of their translations. Besides, it was shown to correlate strongly with human judgements of fluency. Our work specifically addres</context>
+</contexts>
+<marker>Birch, Osborne, Blunsom, 2010</marker>
+<rawString>Alexandra Birch, Miles Osborne, and Phil Blunsom. 2010. Metrics for MT evaluation: evaluating reordering. Machine Translation, 24(1):15–26.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Arianna Bisazza</author>
+<author>Marcello Federico</author>
+</authors>
+<title>Modified distortion matrices for phrase-based statistical machine translation.</title>
+<date>2012</date>
+<booktitle>In Proceedings of the 50th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers),</booktitle>
+<pages>478--487</pages>
+<location>Jeju Island, Korea,</location>
+<contexts>
+<context position="3378" citStr="Bisazza and Federico, 2012" startWordPosition="517" endWordPosition="520">lly increasing the size of the search space and making the reordering model’s task extremely complex. As a result, even in language pairs where long reordering is regularly observed, PSMT quality degrades when long word movements are allowed to the decoder. We address this problem by training a binary classifier to predict whether a given input position should be translated right after another, given the words at those positions and their contexts. When this model is integrated into the decoder, its predic1For empirical evidence, see for instance (Birch et al., 2009; Galley and Manning, 2008; Bisazza and Federico, 2012). 327 Transactions of the Association for Computational Linguistics, 1 (2013) 327–340. Action Editor: Philipp Koehn. Submitted 1/2013; Revised 5/2013; Published 7/2013. c�2013 Association for Computational Linguistics. tions can be used not only as an additional feature function, but also as an early indication of whether or not a given reordering path should be further explored. More specifically, at each hypothesis expansion, we consider the set of input positions that are reachable according to the usual reordering constraints, and prune it based only on the reordering model score. Then, th</context>
+<context position="10543" citStr="Bisazza and Federico (2012)" startWordPosition="1668" endWordPosition="1671"> generate inconsistent constraints leading to decoding dead-ends. As a solution, the dynamic DL is relaxed when needed to reach the first uncovered position. Translation improvements are reported only on a small-scale task with short sentences (BTEC), over a baseline that includes a very simple reordering model. In our work we develop this idea further and use a reordering model to predict which specific input words, rather than input intervals, are likely be translated next. Moreover, our solution is not affected by the constraint inconsistency problem (see Sect. 4). In another related work, Bisazza and Federico (2012) generate likely reorderings of the input sentence by means of language-specific fuzzy rules based on shallow syntax. Long jumps are then suggested to the PSMT decoder by reducing the distortion cost for specific pairs of input words. In comparison to the dynamic DL, that is a much finer way to define the reordering space, leading to consistent improvements of both translation quality and efficiency over a strong baseline. However, the need of specific reordering rules makes the method harder to apply to new language pairs. 3 The WaW reordering model We model reordering as the problem of decid</context>
+</contexts>
+<marker>Bisazza, Federico, 2012</marker>
+<rawString>Arianna Bisazza and Marcello Federico. 2012. Modified distortion matrices for phrase-based statistical machine translation. In Proceedings of the 50th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 478–487, Jeju Island, Korea, July.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Arianna Bisazza</author>
+<author>Daniele Pighin</author>
+<author>Marcello Federico</author>
+</authors>
+<title>Chunk-lattices for verb reordering in Arabic-English statistical machine translation.</title>
+<date>2012</date>
+<journal>Machine Translation, Special Issue on MT for Arabic,</journal>
+<pages>26--1</pages>
+<contexts>
+<context position="22322" citStr="Bisazza et al., 2012" startWordPosition="3714" endWordPosition="3717">roach on an Arabic-English news translation task where sentences are typically long and complex. In this language pair, long reordering errors mostly concern verbs, as all of SubjectVerb-Object (SVO), VSO and, more rarerly, VOS 6See Bisazza (2013) for technical details on the integration of word-level pruning with phrase-level hypothesis expansion. constructions are attested in modern written Arabic. This issue is well known in the SMT field and was addressed by several recent works, with deep or shallow parsing-based techniques (Green et al., 2009; Carpuat et al., 2012; Andreas et al., 2011; Bisazza et al., 2012). We question whether our approach – which is not conceived to solve this specific problem, nor requires manual rules to predict verb reordering – will succeed in improving long reordering in a fully data-driven way. As SMT training data, we use all the in-domain parallel data provided for the NIST-MT09 evaluation for a total of 986K sentence pairs (31M English words).7 The target LM used to run the main series of experiments is trained on the English side of all available NIST-MT09 parallel data, UN included (147M words). In the large-scale experiments, the LM training data also include the s</context>
+</contexts>
+<marker>Bisazza, Pighin, Federico, 2012</marker>
+<rawString>Arianna Bisazza, Daniele Pighin, and Marcello Federico. 2012. Chunk-lattices for verb reordering in Arabic-English statistical machine translation. Machine Translation, Special Issue on MT for Arabic, 26(1-2):85–103.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Arianna Bisazza</author>
+</authors>
+<title>Linguistically Motivated Reordering Modeling for Phrase-Based Statistical Machine Translation.</title>
+<date>2013</date>
+<tech>Ph.D. thesis,</tech>
+<institution>University of Trento.</institution>
+<note>http://eprints-phd.biblio.unitn.it/1019/.</note>
+<contexts>
+<context position="21948" citStr="Bisazza (2013)" startWordPosition="3657" endWordPosition="3658">rnation of two processes: during hypothesis expansion the reordering score is combined with all other scores, while during early pruning some reordering decisions are taken only based on the reordering score. In this way, we try to combine the benefits of fully integrated reordering models with those of monolingual pre-ordering methods. 5 Evaluation We test our approach on an Arabic-English news translation task where sentences are typically long and complex. In this language pair, long reordering errors mostly concern verbs, as all of SubjectVerb-Object (SVO), VSO and, more rarerly, VOS 6See Bisazza (2013) for technical details on the integration of word-level pruning with phrase-level hypothesis expansion. constructions are attested in modern written Arabic. This issue is well known in the SMT field and was addressed by several recent works, with deep or shallow parsing-based techniques (Green et al., 2009; Carpuat et al., 2012; Andreas et al., 2011; Bisazza et al., 2012). We question whether our approach – which is not conceived to solve this specific problem, nor requires manual rules to predict verb reordering – will succeed in improving long reordering in a fully data-driven way. As SMT tr</context>
+</contexts>
+<marker>Bisazza, 2013</marker>
+<rawString>Arianna Bisazza. 2013. Linguistically Motivated Reordering Modeling for Phrase-Based Statistical Machine Translation. Ph.D. thesis, University of Trento. http://eprints-phd.biblio.unitn.it/1019/.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Marine Carpuat</author>
+<author>Yuval Marton</author>
+<author>Nizar Habash</author>
+</authors>
+<title>Improved Arabic-to-English statistical machine translation by reordering post-verbal subjects for word alignment.</title>
+<date>2012</date>
+<journal>Machine Translation, Special Issue on MT for Arabic,</journal>
+<pages>26--1</pages>
+<contexts>
+<context position="22277" citStr="Carpuat et al., 2012" startWordPosition="3706" endWordPosition="3709">dering methods. 5 Evaluation We test our approach on an Arabic-English news translation task where sentences are typically long and complex. In this language pair, long reordering errors mostly concern verbs, as all of SubjectVerb-Object (SVO), VSO and, more rarerly, VOS 6See Bisazza (2013) for technical details on the integration of word-level pruning with phrase-level hypothesis expansion. constructions are attested in modern written Arabic. This issue is well known in the SMT field and was addressed by several recent works, with deep or shallow parsing-based techniques (Green et al., 2009; Carpuat et al., 2012; Andreas et al., 2011; Bisazza et al., 2012). We question whether our approach – which is not conceived to solve this specific problem, nor requires manual rules to predict verb reordering – will succeed in improving long reordering in a fully data-driven way. As SMT training data, we use all the in-domain parallel data provided for the NIST-MT09 evaluation for a total of 986K sentence pairs (31M English words).7 The target LM used to run the main series of experiments is trained on the English side of all available NIST-MT09 parallel data, UN included (147M words). In the large-scale experim</context>
+</contexts>
+<marker>Carpuat, Marton, Habash, 2012</marker>
+<rawString>Marine Carpuat, Yuval Marton, and Nizar Habash. 2012. Improved Arabic-to-English statistical machine translation by reordering post-verbal subjects for word alignment. Machine Translation, Special Issue on MT for Arabic, 26(1-2):105–120.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Mauro Cettolo</author>
+<author>Nicola Bertoldi</author>
+<author>Marcello Federico</author>
+</authors>
+<title>Methods for smoothing the optimizer instability in SMT.</title>
+<date>2011</date>
+<booktitle>In MT Summit XIII: the Thirteenth Machine Translation Summit,</booktitle>
+<pages>32--39</pages>
+<location>Xiamen, China.</location>
+<contexts>
+<context position="31984" citStr="Cettolo et al. (2011)" startWordPosition="5281" endWordPosition="5284">he distortion limit, but only on the distortion cost feature function. As proposed by Johnson et al. (2007), statistically improbable phrase pairs are removed from the translation model. The language models are estimated by the IRSTLM toolkit (Federico et al., 2008) with modified Kneser-Ney smoothing (Chen and Goodman, 1999). Feature weights are optimized by minimum BLEU-error training (Och, 2003) on dev06-nw. To reduce the effects of the optimizer instability, we tune each configuration four times and use the average of the resulting weight vectors to translate the test sets, as suggested by Cettolo et al. (2011). Finally, eval08-nw is used to select the early pruning parameters for the last experiment, while eval09- nw is always reserved as blind test. 5.3 Evaluation metrics We evaluate global translation quality with BLEU (Papineni et al., 2002) and METEOR (Banerjee and Lavie, 2005). These metrics, though, are only indirectly sensitive to word order, and especially unlikely to capture improvements at the level of longrange reordering. For this reason, we also compute the Kendall Reordering Score or KRS (Birch et al., 2010) which is a positive score based on the Kendall’s Tau distance between the sou</context>
+</contexts>
+<marker>Cettolo, Bertoldi, Federico, 2011</marker>
+<rawString>Mauro Cettolo, Nicola Bertoldi, and Marcello Federico. 2011. Methods for smoothing the optimizer instability in SMT. In MT Summit XIII: the Thirteenth Machine Translation Summit, pages 32–39, Xiamen, China.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Stanley F Chen</author>
+<author>Joshua Goodman</author>
+</authors>
+<title>An empirical study of smoothing techniques for language modeling.</title>
+<date>1999</date>
+<journal>Computer Speech and Language,</journal>
+<volume>4</volume>
+<issue>13</issue>
+<contexts>
+<context position="31689" citStr="Chen and Goodman, 1999" startWordPosition="5233" endWordPosition="5236">king hypotheses of the same length more comparable to one another. Note that this option has no ef12Clearly, we would expect different figures from testing the model on another language pair like German-English, where the verb is often postponed in the source with respect to the target. fect on the distortion limit, but only on the distortion cost feature function. As proposed by Johnson et al. (2007), statistically improbable phrase pairs are removed from the translation model. The language models are estimated by the IRSTLM toolkit (Federico et al., 2008) with modified Kneser-Ney smoothing (Chen and Goodman, 1999). Feature weights are optimized by minimum BLEU-error training (Och, 2003) on dev06-nw. To reduce the effects of the optimizer instability, we tune each configuration four times and use the average of the resulting weight vectors to translate the test sets, as suggested by Cettolo et al. (2011). Finally, eval08-nw is used to select the early pruning parameters for the last experiment, while eval09- nw is always reserved as blind test. 5.3 Evaluation metrics We evaluate global translation quality with BLEU (Papineni et al., 2002) and METEOR (Banerjee and Lavie, 2005). These metrics, though, are</context>
+</contexts>
+<marker>Chen, Goodman, 1999</marker>
+<rawString>Stanley F. Chen and Joshua Goodman. 1999. An empirical study of smoothing techniques for language modeling. Computer Speech and Language, 4(13):359–393.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Marta R Costa-juss`a</author>
+<author>Jos´e A R Fonollosa</author>
+</authors>
+<title>State-of-the-art word reordering approaches in statistical machine translation: A survey.</title>
+<date>2009</date>
+<journal>IEICE TRANSACTIONS on Information and Systems,</journal>
+<volume>92</volume>
+<pages>2185</pages>
+<marker>Costa-juss`a, Fonollosa, 2009</marker>
+<rawString>Marta R. Costa-juss`a and Jos´e A. R. Fonollosa. 2009. State-of-the-art word reordering approaches in statistical machine translation: A survey. IEICE TRANSACTIONS on Information and Systems, E92-D(11):2179– 2185.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Koby Crammer</author>
+<author>Yoram Singer</author>
+</authors>
+<title>Ultraconservative online algorithms for multiclass problems.</title>
+<date>2003</date>
+<journal>J. Mach. Learn. Res.,</journal>
+<volume>3</volume>
+<contexts>
+<context position="12393" citStr="Crammer and Singer, 2003" startWordPosition="1985" endWordPosition="1989"> i, j, Ri,j=Y&apos;)] where f1 is a source sentence of J words, hm are feature functions and am the corresponding feature weights. The outcome Y can be either 1 or 0, with Ri,j=1 meaning that the word at position j is translated right after the word at position i. Our WaW reordering model is strongly related to that of Visweswariah et al. (2011) – hereby called Travelling Salesman Problem (TSP) model – with few important differences: (i) we do not include in the features any explicit indication of the jump length, in order to avoid the bias on short jumps; (ii) they train a linear model with MIRA (Crammer and Singer, 2003) by minimizing the number fi): �fi−1, D( �fi−1, 329 of input words that get placed after the wrong position, while we use a maximum-entropy classifier trained by maximum-likelihood; (iii) they use an off-the shelf TSP solver to find the best source sentence permutation and apply it as pre-processing to training and test data. By contrast, we integrate the maximum-entropy classifier directly into the SMT decoder and let all its other models (phrase orientation, translation, target LM etc.) contribute to the final reordering decision. 3.1 Features Like the TSP model (Visweswariah et al., 2011), </context>
+</contexts>
+<marker>Crammer, Singer, 2003</marker>
+<rawString>Koby Crammer and Yoram Singer. 2003. Ultraconservative online algorithms for multiclass problems. J. Mach. Learn. Res., 3:951–991, March.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Hal Daum´e</author>
+</authors>
+<title>Notes on CG and LM-BFGS optimization of logistic regression. Paper available at http://pub.hal3.name, implementation available at http://hal3.name/megam.</title>
+<date>2004</date>
+<marker>Daum´e, 2004</marker>
+<rawString>Hal Daum´e III. 2004. Notes on CG and LM-BFGS optimization of logistic regression. Paper available at http://pub.hal3.name, implementation available at http://hal3.name/megam.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Mona Diab</author>
+<author>Kadri Hacioglu</author>
+<author>Daniel Jurafsky</author>
+</authors>
+<title>Automatic Tagging of Arabic Text: From Raw Text to Base Phrase Chunks.</title>
+<date>2004</date>
+<booktitle>In Daniel Marcu Susan Dumais and Salim Roukos, editors, HLT-NAACL 2004: Short Papers,</booktitle>
+<pages>149--152</pages>
+<location>Boston, Massachusetts, USA.</location>
+<contexts>
+<context position="23715" citStr="Diab et al., 2004" startWordPosition="3945" endWordPosition="3948">eam sections (2130M words in total). For development and test, we use the newswire sections of the NIST benchmarks: dev06-nw, eval08- nw, eval09-nw consisting of 1033, 813, 586 sentences respectively. Each set includes 4 reference translations and the average sentence length is 33 words. To focus the evaluation on problematic reordering, we also consider a subset of eval09-nw containing only sentences where the Arabic main verb is placed before the subject (vs-09: 299 sent.).8 As pre-processing, we apply standard tokenization to the English data, while the Arabic data is segmented with AMIRA (Diab et al., 2004) according to the ATB scheme9. The same tool also produces POS tagging and shallow syntax annotation. 7The in-domain parallel data includes all the provided corpora except the UN proceedings, and the non-newswire parts of the small GALE-Y1-Q4 corpus (that is 9K sentences of audio transcripts and web data). As reported by Green et al. (2010) the removal of UN data does not affect baseline performances on the news benchmarks. 8Automatically detected by means of shallow syntax rules. 9The Arabic Treebank tokenization scheme isolates conjunctions w+ and f+, prepositions l+, k+, b+, future marker s</context>
+</contexts>
+<marker>Diab, Hacioglu, Jurafsky, 2004</marker>
+<rawString>Mona Diab, Kadri Hacioglu, and Daniel Jurafsky. 2004. Automatic Tagging of Arabic Text: From Raw Text to Base Phrase Chunks. In Daniel Marcu Susan Dumais and Salim Roukos, editors, HLT-NAACL 2004: Short Papers, pages 149–152, Boston, Massachusetts, USA.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Marcello Federico</author>
+<author>Nicola Bertoldi</author>
+<author>Mauro Cettolo</author>
+</authors>
+<title>IRSTLM: an Open Source Toolkit for Handling Large Scale Language Models.</title>
+<date>2008</date>
+<booktitle>In Proceedings of Interspeech,</booktitle>
+<pages>1618--1621</pages>
+<location>Melbourne, Australia.</location>
+<contexts>
+<context position="31629" citStr="Federico et al., 2008" startWordPosition="5225" endWordPosition="5228">but it anticipates the gradual accumulation of the cost, making hypotheses of the same length more comparable to one another. Note that this option has no ef12Clearly, we would expect different figures from testing the model on another language pair like German-English, where the verb is often postponed in the source with respect to the target. fect on the distortion limit, but only on the distortion cost feature function. As proposed by Johnson et al. (2007), statistically improbable phrase pairs are removed from the translation model. The language models are estimated by the IRSTLM toolkit (Federico et al., 2008) with modified Kneser-Ney smoothing (Chen and Goodman, 1999). Feature weights are optimized by minimum BLEU-error training (Och, 2003) on dev06-nw. To reduce the effects of the optimizer instability, we tune each configuration four times and use the average of the resulting weight vectors to translate the test sets, as suggested by Cettolo et al. (2011). Finally, eval08-nw is used to select the early pruning parameters for the last experiment, while eval09- nw is always reserved as blind test. 5.3 Evaluation metrics We evaluate global translation quality with BLEU (Papineni et al., 2002) and M</context>
+</contexts>
+<marker>Federico, Bertoldi, Cettolo, 2008</marker>
+<rawString>Marcello Federico, Nicola Bertoldi, and Mauro Cettolo. 2008. IRSTLM: an Open Source Toolkit for Handling Large Scale Language Models. In Proceedings of Interspeech, pages 1618–1621, Melbourne, Australia.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Minwei Feng</author>
+<author>Arne Mauser</author>
+<author>Hermann Ney</author>
+</authors>
+<title>A source-side decoding sequence model for statistical machine translation.</title>
+<date>2010</date>
+<booktitle>In Conference of the Association for Machine Translation in the Americas (AMTA),</booktitle>
+<location>Denver, Colorado, USA.</location>
+<contexts>
+<context position="7251" citStr="Feng et al., 2010" startWordPosition="1124" endWordPosition="1127"> within a rather small DL: namely, 8 in (Al-Onaizan and Papineni, 2006) and 5 in (Green et al., 2010), thus failing to capture the rare but crucial long reorderings that were their main motivation. A drawback of this approach is that long jumps are typically penalized because of their low frequency compared to short jumps. This strong bias is undesirable, given that we are especially interested in detecting probable long reorderings. Source decoding sequence models predict which input word is likely to be translated at a given state of decoding. For instance, reordered source language models (Feng et al., 2010) are smoothed ngram models trained on a corpus of source sentences reordered to match the target word order. When integrated into the SMT system, they assign a probability to each newly translated word given the n-1 previously translated words. Finally, source word pair reordering models (Visweswariah et al., 2011) estimate, for each pair of input words i and j, the cost of translating j right after i given various features of i, j and their respective contexts. Differently from reordered source LMs, these models are discriminative and can profit from richer feature sets. At the same time, the</context>
+<context position="14111" citStr="Feng et al., 2010" startWordPosition="2278" endWordPosition="2281">and j (20). Finally we add a feature to indicate whether the words i and j belong to the same chunk (21). The jump orientation – forward/backward – is included in the features that represent the words comprised between i and j (rows 6, 7, 14, 15). No explicit indication of the jump length is included in any feature. 3.2 Training data To generate training data for the classifier, we first extract reference reorderings from a word-aligned parallel corpus. Given a parallel sentence, different heuristics may be used to convert arbitrary word alignments to a source permutation (Birch et al., 2010; Feng et al., 2010; Visweswariah et al., 2011). Similarly to this last work, we compute for each source word fi the mean ai of the target positions aligned to fi, then sort the source words according to this value.3 As a difference, though, we do not discard unaligned words but assign them the mean 3Using the mean of the aligned indices makes the generation of reference permutations more robust to alignment errors. Admittedly, this heuristic does not handle well the case of source words that are correctly aligned to non-consecutive target words. However, this phenomenon is also not captured by standard PSMT mod</context>
+<context position="18350" citStr="Feng et al. (2010)" startWordPosition="3050" endWordPosition="3053">omputation phases are required by the WaW model: (i) at system initialization time, all feature weights are loaded into memory, and (ii) before translating each new sentence, features are extracted from it and model probabilities are pre-computed for each pair of source positions (i, j) such that j − i − 11 G DL. Note that this efficient solution is possible because our model does not employ decoding history-based features, like the word that was translated before the last one, or like the previous jump legth. This is an important difference with respect to the reordered source LM proposed by Feng et al. (2010), which requires inclusion of the last n translated words in the decoder state. Fig. 1 illustrates the scoring process: when a partial translation hypothesis W is expanded by covering a new source phrase f, the model returns the log-probability of translating the words of f in that particular order, just after the last translated word of 4 Early pruning of reordering steps We now explain how the WaW reordering model can be used to dynamically refine the input permutation space. This method is not dependent on the particular classifier described in this paper, but can in principle work with any</context>
+</contexts>
+<marker>Feng, Mauser, Ney, 2010</marker>
+<rawString>Minwei Feng, Arne Mauser, and Hermann Ney. 2010. A source-side decoding sequence model for statistical machine translation. In Conference of the Association for Machine Translation in the Americas (AMTA), Denver, Colorado, USA.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Michel Galley</author>
+<author>Christopher D Manning</author>
+</authors>
+<title>A simple and effective hierarchical phrase reordering model.</title>
+<date>2008</date>
+<booktitle>In EMNLP ’08: Proceedings of the Conference on Empirical Methods in Natural Language Processing,</booktitle>
+<pages>848--856</pages>
+<location>Morristown, NJ, USA.</location>
+<contexts>
+<context position="1039" citStr="Galley and Manning, 2008" startWordPosition="149" endWordPosition="152">y limiting the input permutation space. We propose a method to dynamically shape such space and, thus, capture long-range word movements without hurting translation quality nor decoding time. The space defined by loose reordering constraints is dynamically pruned through a binary classifier that predicts whether a given input word should be translated right after another. The integration of this model into a phrase-based decoder improves a strong Arabic-English baseline already including state-of-the-art early distortion cost (Moore and Quirk, 2007) and hierarchical phrase orientation models (Galley and Manning, 2008). Significant improvements in the reordering of verbs are achieved by a system that is notably faster than the baseline, while BLEU and METEOR remain stable, or even increase, at a very high distortion limit. 1 Introduction Word order differences are among the most important factors determining the performance of statistical machine translation (SMT) on a given language pair (Birch et al., 2009). This is particularly true in the framework of phrase-based SMT (PSMT) (Zens et al., 2002; Koehn et al., 2003; Och and Ney, 2002), an approach that remains highly competitive despite the recent advance</context>
+<context position="3349" citStr="Galley and Manning, 2008" startWordPosition="513" endWordPosition="516">onstraints means dramatically increasing the size of the search space and making the reordering model’s task extremely complex. As a result, even in language pairs where long reordering is regularly observed, PSMT quality degrades when long word movements are allowed to the decoder. We address this problem by training a binary classifier to predict whether a given input position should be translated right after another, given the words at those positions and their contexts. When this model is integrated into the decoder, its predic1For empirical evidence, see for instance (Birch et al., 2009; Galley and Manning, 2008; Bisazza and Federico, 2012). 327 Transactions of the Association for Computational Linguistics, 1 (2013) 327–340. Action Editor: Philipp Koehn. Submitted 1/2013; Revised 5/2013; Published 7/2013. c�2013 Association for Computational Linguistics. tions can be used not only as an additional feature function, but also as an early indication of whether or not a given reordering path should be further explored. More specifically, at each hypothesis expansion, we consider the set of input positions that are reachable according to the usual reordering constraints, and prune it based only on the reo</context>
+<context position="5996" citStr="Galley and Manning, 2008" startWordPosition="921" endWordPosition="924">g to the constraints later in this section. 2.1 Reordering modeling In its original formulation, the PSMT approach includes a basic reordering model, called distortion cost, that exponentially penalizes longer jumps among consecutively translated phrases ( fi) − end(�fi−1) − 11 A number of more sophisticated solutions have been proposed to explicitly model word reordering during decoding. These can mostly be grouped into three families: phrase orientation models, jump models and source decoding sequence models. Phrase orientation models (Tillmann, 2004; Koehn et al., 2005; Zens and Ney, 2006; Galley and Manning, 2008), also known as lexicalized reordering models, predict the orientation of a phrase with respect to the last translated one, by classifying it as monotone, swap or discontinuous. These models have proven very useful for short and mediumrange reordering and are among the most widely used in PSMT. However, their coarse classification of reordering steps makes them unsuitable to predict long-range reorderings. Jump models (Al-Onaizan and Papineni, 2006; Green et al., 2010; Yahyaei and Monz, 2010) predict the direction and length of a jump to perform after a given input word2. Both these works achi</context>
+<context position="30668" citStr="Galley and Manning, 2008" startWordPosition="5063" endWordPosition="5066">it is able to rank a correct long jump in the top 3 reordering options, which suggests that it can be effectively used for early reordering pruning. 5.2 SMT experimental setup Our SMT systems are built with the Moses toolkit, while word alignment is produced by the Berkeley Aligner (Liang et al., 2006). The baseline decoder includes a phrase translation model, a lexicalized reordering model, a 6-gram target language model, distortion cost, word and phrase penalties. More specifically, the baseline reordering model is a hierarchical phrase orientation model (Tillmann, 2004; Koehn et al., 2005; Galley and Manning, 2008) trained on all the available parallel data. This variant was shown to outperform the default wordbased on an Arabic-English task. To make our baseline even more competitive, we apply early distortion cost, as proposed by Moore and Quirk (2007). This function has the same value as the standard one over a complete translation hypothesis, but it anticipates the gradual accumulation of the cost, making hypotheses of the same length more comparable to one another. Note that this option has no ef12Clearly, we would expect different figures from testing the model on another language pair like German</context>
+</contexts>
+<marker>Galley, Manning, 2008</marker>
+<rawString>Michel Galley and Christopher D. Manning. 2008. A simple and effective hierarchical phrase reordering model. In EMNLP ’08: Proceedings of the Conference on Empirical Methods in Natural Language Processing, pages 848–856, Morristown, NJ, USA.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Spence Green</author>
+<author>Conal Sathi</author>
+<author>Christopher D Manning</author>
+</authors>
+<title>NP subject detection in verb-initial Arabic clauses.</title>
+<date>2009</date>
+<booktitle>In Proceedings of the Third Workshop on Computational Approaches to Arabic Script-based Languages (CAASL3),</booktitle>
+<location>Ottawa, Canada.</location>
+<contexts>
+<context position="22255" citStr="Green et al., 2009" startWordPosition="3702" endWordPosition="3705">f monolingual pre-ordering methods. 5 Evaluation We test our approach on an Arabic-English news translation task where sentences are typically long and complex. In this language pair, long reordering errors mostly concern verbs, as all of SubjectVerb-Object (SVO), VSO and, more rarerly, VOS 6See Bisazza (2013) for technical details on the integration of word-level pruning with phrase-level hypothesis expansion. constructions are attested in modern written Arabic. This issue is well known in the SMT field and was addressed by several recent works, with deep or shallow parsing-based techniques (Green et al., 2009; Carpuat et al., 2012; Andreas et al., 2011; Bisazza et al., 2012). We question whether our approach – which is not conceived to solve this specific problem, nor requires manual rules to predict verb reordering – will succeed in improving long reordering in a fully data-driven way. As SMT training data, we use all the in-domain parallel data provided for the NIST-MT09 evaluation for a total of 986K sentence pairs (31M English words).7 The target LM used to run the main series of experiments is trained on the English side of all available NIST-MT09 parallel data, UN included (147M words). In t</context>
+</contexts>
+<marker>Green, Sathi, Manning, 2009</marker>
+<rawString>Spence Green, Conal Sathi, and Christopher D. Manning. 2009. NP subject detection in verb-initial Arabic clauses. In Proceedings of the Third Workshop on Computational Approaches to Arabic Script-based Languages (CAASL3), Ottawa, Canada.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Spence Green</author>
+<author>Michel Galley</author>
+<author>Christopher D Manning</author>
+</authors>
+<title>Improved models of distortion cost for statistical machine translation.</title>
+<date>2010</date>
+<booktitle>In Human Language Technologies: The 2010 Annual Conference of the North American Chapter of the Association for Computational Linguistics (NAACL),</booktitle>
+<pages>867--875</pages>
+<location>Los Angeles, California.</location>
+<contexts>
+<context position="6468" citStr="Green et al., 2010" startWordPosition="995" endWordPosition="998"> and source decoding sequence models. Phrase orientation models (Tillmann, 2004; Koehn et al., 2005; Zens and Ney, 2006; Galley and Manning, 2008), also known as lexicalized reordering models, predict the orientation of a phrase with respect to the last translated one, by classifying it as monotone, swap or discontinuous. These models have proven very useful for short and mediumrange reordering and are among the most widely used in PSMT. However, their coarse classification of reordering steps makes them unsuitable to predict long-range reorderings. Jump models (Al-Onaizan and Papineni, 2006; Green et al., 2010; Yahyaei and Monz, 2010) predict the direction and length of a jump to perform after a given input word2. Both these works achieve their best Arabic-English results within a rather small DL: namely, 8 in (Al-Onaizan and Papineni, 2006) and 5 in (Green et al., 2010), thus failing to capture the rare but crucial long reorderings that were their main motivation. A drawback of this approach is that long jumps are typically penalized because of their low frequency compared to short jumps. This strong bias is undesirable, given that we are especially interested in detecting probable long reordering</context>
+<context position="24057" citStr="Green et al. (2010)" startWordPosition="4003" endWordPosition="4006">e also consider a subset of eval09-nw containing only sentences where the Arabic main verb is placed before the subject (vs-09: 299 sent.).8 As pre-processing, we apply standard tokenization to the English data, while the Arabic data is segmented with AMIRA (Diab et al., 2004) according to the ATB scheme9. The same tool also produces POS tagging and shallow syntax annotation. 7The in-domain parallel data includes all the provided corpora except the UN proceedings, and the non-newswire parts of the small GALE-Y1-Q4 corpus (that is 9K sentences of audio transcripts and web data). As reported by Green et al. (2010) the removal of UN data does not affect baseline performances on the news benchmarks. 8Automatically detected by means of shallow syntax rules. 9The Arabic Treebank tokenization scheme isolates conjunctions w+ and f+, prepositions l+, k+, b+, future marker s+, pronominal suffixes, but not the article Al+. 332 5.1 Reordering model intrinsic evaluation Before proceeding to the SMT experiments, we evaluate the performance of the WaW reordering model in isolation. All the tested configurations are trained with the freely available MegaM Toolkit10, implementing the conjugate gradient method (Hesten</context>
+</contexts>
+<marker>Green, Galley, Manning, 2010</marker>
+<rawString>Spence Green, Michel Galley, and Christopher D. Manning. 2010. Improved models of distortion cost for statistical machine translation. In Human Language Technologies: The 2010 Annual Conference of the North American Chapter of the Association for Computational Linguistics (NAACL), pages 867–875, Los Angeles, California.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Magnus R Hestenes</author>
+<author>Eduard Stiefel</author>
+</authors>
+<title>Methods of conjugate gradients for solving linear systems.</title>
+<date>1952</date>
+<journal>Journal of Research of the National Bureau of Standards,</journal>
+<volume>49</volume>
+<issue>6</issue>
+<contexts>
+<context position="24678" citStr="Hestenes and Stiefel, 1952" startWordPosition="4096" endWordPosition="4099">(2010) the removal of UN data does not affect baseline performances on the news benchmarks. 8Automatically detected by means of shallow syntax rules. 9The Arabic Treebank tokenization scheme isolates conjunctions w+ and f+, prepositions l+, k+, b+, future marker s+, pronominal suffixes, but not the article Al+. 332 5.1 Reordering model intrinsic evaluation Before proceeding to the SMT experiments, we evaluate the performance of the WaW reordering model in isolation. All the tested configurations are trained with the freely available MegaM Toolkit10, implementing the conjugate gradient method (Hestenes and Stiefel, 1952), in maximum 100 iterations. Training samples are generated within a sampling window of width 5=10, from a subset (30K sentences) of the parallel data described above, resulting in 8M training word pairs11. Test samples are generated from TIDES-MT04 (1324 sentences, 370K samples with 5=10), one of the corpora included in our SMT training data. Features with less than 20 occurrences are ignored. Classification accuracy. Table 3 presents precision, recall, and F-score achieved by different feature subsets, where W stands for word-based, P for POS-based and C for chunk-based feature templates. We</context>
+</contexts>
+<marker>Hestenes, Stiefel, 1952</marker>
+<rawString>Magnus R. Hestenes and Eduard Stiefel. 1952. Methods of conjugate gradients for solving linear systems. Journal of Research of the National Bureau of Standards, 49(6):409–436.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>H Johnson</author>
+<author>J Martin</author>
+<author>G Foster</author>
+<author>R Kuhn</author>
+</authors>
+<title>Improving translation quality by discarding most of the phrasetable. In</title>
+<date>2007</date>
+<booktitle>In Proceedings of EMNLP-CoNLL 07,</booktitle>
+<pages>967--975</pages>
+<contexts>
+<context position="31470" citStr="Johnson et al. (2007)" startWordPosition="5201" endWordPosition="5204">ly early distortion cost, as proposed by Moore and Quirk (2007). This function has the same value as the standard one over a complete translation hypothesis, but it anticipates the gradual accumulation of the cost, making hypotheses of the same length more comparable to one another. Note that this option has no ef12Clearly, we would expect different figures from testing the model on another language pair like German-English, where the verb is often postponed in the source with respect to the target. fect on the distortion limit, but only on the distortion cost feature function. As proposed by Johnson et al. (2007), statistically improbable phrase pairs are removed from the translation model. The language models are estimated by the IRSTLM toolkit (Federico et al., 2008) with modified Kneser-Ney smoothing (Chen and Goodman, 1999). Feature weights are optimized by minimum BLEU-error training (Och, 2003) on dev06-nw. To reduce the effects of the optimizer instability, we tune each configuration four times and use the average of the resulting weight vectors to translate the test sets, as suggested by Cettolo et al. (2011). Finally, eval08-nw is used to select the early pruning parameters for the last exper</context>
+</contexts>
+<marker>Johnson, Martin, Foster, Kuhn, 2007</marker>
+<rawString>H. Johnson, J. Martin, G. Foster, and R. Kuhn. 2007. Improving translation quality by discarding most of the phrasetable. In In Proceedings of EMNLP-CoNLL 07, pages 967–975.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Philipp Koehn</author>
+<author>Franz Josef Och</author>
+<author>Daniel Marcu</author>
+</authors>
+<title>Statistical phrase-based translation.</title>
+<date>2003</date>
+<booktitle>In Proceedings of HLT-NAACL 2003,</booktitle>
+<pages>127--133</pages>
+<location>Edmonton, Canada.</location>
+<contexts>
+<context position="1547" citStr="Koehn et al., 2003" startWordPosition="233" endWordPosition="236"> distortion cost (Moore and Quirk, 2007) and hierarchical phrase orientation models (Galley and Manning, 2008). Significant improvements in the reordering of verbs are achieved by a system that is notably faster than the baseline, while BLEU and METEOR remain stable, or even increase, at a very high distortion limit. 1 Introduction Word order differences are among the most important factors determining the performance of statistical machine translation (SMT) on a given language pair (Birch et al., 2009). This is particularly true in the framework of phrase-based SMT (PSMT) (Zens et al., 2002; Koehn et al., 2003; Och and Ney, 2002), an approach that remains highly competitive despite the recent advances of the tree-based approaches. During the PSMT decoding process, the output sentence is built from left to right, while the input sentence positions can be covered in different orders. Thus, reordering in PSMT can be viewed as the problem of choosing the input permutation that leads to the highest-scoring output sentence. Due to efficiency reasons, however, the input permutation space cannot be fully explored, and is therefore limited with hard reordering constraints. Although many solutions have been </context>
+</contexts>
+<marker>Koehn, Och, Marcu, 2003</marker>
+<rawString>Philipp Koehn, Franz Josef Och, and Daniel Marcu. 2003. Statistical phrase-based translation. In Proceedings of HLT-NAACL 2003, pages 127–133, Edmonton, Canada.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Philipp Koehn</author>
+<author>Amittai Axelrod</author>
+<author>Alexandra Birch Mayne</author>
+<author>Chris Callison-Burch</author>
+<author>Miles Osborne</author>
+<author>David Talbot</author>
+</authors>
+<title>Edinburgh system description for the 2005 IWSLT speech translation evaluation.</title>
+<date>2005</date>
+<booktitle>In Proc. of the International Workshop on Spoken Language Translation,</booktitle>
+<contexts>
+<context position="5949" citStr="Koehn et al., 2005" startWordPosition="913" endWordPosition="916">del). We begin with the latter, returning to the constraints later in this section. 2.1 Reordering modeling In its original formulation, the PSMT approach includes a basic reordering model, called distortion cost, that exponentially penalizes longer jumps among consecutively translated phrases ( fi) − end(�fi−1) − 11 A number of more sophisticated solutions have been proposed to explicitly model word reordering during decoding. These can mostly be grouped into three families: phrase orientation models, jump models and source decoding sequence models. Phrase orientation models (Tillmann, 2004; Koehn et al., 2005; Zens and Ney, 2006; Galley and Manning, 2008), also known as lexicalized reordering models, predict the orientation of a phrase with respect to the last translated one, by classifying it as monotone, swap or discontinuous. These models have proven very useful for short and mediumrange reordering and are among the most widely used in PSMT. However, their coarse classification of reordering steps makes them unsuitable to predict long-range reorderings. Jump models (Al-Onaizan and Papineni, 2006; Green et al., 2010; Yahyaei and Monz, 2010) predict the direction and length of a jump to perform a</context>
+<context position="30641" citStr="Koehn et al., 2005" startWordPosition="5059" endWordPosition="5062"> majority of cases, it is able to rank a correct long jump in the top 3 reordering options, which suggests that it can be effectively used for early reordering pruning. 5.2 SMT experimental setup Our SMT systems are built with the Moses toolkit, while word alignment is produced by the Berkeley Aligner (Liang et al., 2006). The baseline decoder includes a phrase translation model, a lexicalized reordering model, a 6-gram target language model, distortion cost, word and phrase penalties. More specifically, the baseline reordering model is a hierarchical phrase orientation model (Tillmann, 2004; Koehn et al., 2005; Galley and Manning, 2008) trained on all the available parallel data. This variant was shown to outperform the default wordbased on an Arabic-English task. To make our baseline even more competitive, we apply early distortion cost, as proposed by Moore and Quirk (2007). This function has the same value as the standard one over a complete translation hypothesis, but it anticipates the gradual accumulation of the cost, making hypotheses of the same length more comparable to one another. Note that this option has no ef12Clearly, we would expect different figures from testing the model on anothe</context>
+</contexts>
+<marker>Koehn, Axelrod, Mayne, Callison-Burch, Osborne, Talbot, 2005</marker>
+<rawString>Philipp Koehn, Amittai Axelrod, Alexandra Birch Mayne, Chris Callison-Burch, Miles Osborne, and David Talbot. 2005. Edinburgh system description for the 2005 IWSLT speech translation evaluation. In Proc. of the International Workshop on Spoken Language Translation, October.</rawString>
+</citation>
+<citation valid="false">
+<authors>
+<author>P Koehn</author>
+<author>H Hoang</author>
+<author>A Birch</author>
+<author>C Callison-Burch</author>
+<author>M Federico</author>
+<author>N Bertoldi</author>
+<author>B Cowan</author>
+<author>W Shen</author>
+<author>C Moran</author>
+<author>R Zens</author>
+<author>C Dyer</author>
+<author>O Bojar</author>
+<author>A Constantin</author>
+<author>E Herbst</author>
+</authors>
+<title>Moses: Open Source Toolkit for Statistical Machine Translation.</title>
+<date>2007</date>
+<booktitle>In Proceedings of the 45th Annual Meeting of the Association for Computational Linguistics Companion Volume Proceedings of the Demo and Poster Sessions,</booktitle>
+<pages>177--180</pages>
+<location>Prague, Czech Republic.</location>
+<contexts>
+<context position="8413" citStr="Koehn et al., 2007" startWordPosition="1318" endWordPosition="1321">an profit from richer feature sets. At the same time, they do not employ decoding historybased features, which allows for more effective hy2In this paper, input (or source) word denotes the word at a given position of the input sentence, rather than a word type. fi): �fi−1� d( �fi−1� A) = −|start( 328 pothesis recombination. The model we are going to present belongs to this last sub-group, which we find especially suitable to predict long reorderings. 2.2 Reordering constraints The reordering constraint originally included in the PSMT framework and implemented in our reference toolkit, Moses (Koehn et al., 2007), is called distortion limit (DL). This consists in allowing the decoder to skip, or jump, at most k words from the last translated phrase to the next one. More precisely, the limit is imposed on the distortion D between consecutively translated phrases ( !!! � DL �fi) = !!!start( �fi) − end( �fi−1) − 1 Limiting the input permutation space is necessary for beam-search PSMT decoders to function in linear time. Reordering constraints are also important for translation quality because the existing models are typically not discriminative enough to guide the search over very large sets of reorderin</context>
+<context position="17720" citStr="Koehn et al., 2007" startWordPosition="2941" endWordPosition="2944">mentary to the lexicalized reordering (phrase orientation) models included in Moses. Figure 1: Integrating the binary word reordering model into a phrase-based decoder: when a new phrase is covered (dashed boxes), the model returns the logprobability of translating its words in the order defined by the phrase-internal word alignment. Table 2: The classifier’s training data generation process. 3.3 Integration into phrase-based decoding Rather than using the new reordering model for data pre-processing as done by (Visweswariah et al., 2011), we directly integrate it into the PSMT decoder Moses (Koehn et al., 2007). Two main computation phases are required by the WaW model: (i) at system initialization time, all feature weights are loaded into memory, and (ii) before translating each new sentence, features are extracted from it and model probabilities are pre-computed for each pair of source positions (i, j) such that j − i − 11 G DL. Note that this efficient solution is possible because our model does not employ decoding history-based features, like the word that was translated before the last one, or like the previous jump legth. This is an important difference with respect to the reordered source LM </context>
+</contexts>
+<marker>Koehn, Hoang, Birch, Callison-Burch, Federico, Bertoldi, Cowan, Shen, Moran, Zens, Dyer, Bojar, Constantin, Herbst, 2007</marker>
+<rawString>P. Koehn, H. Hoang, A. Birch, C. Callison-Burch, M. Federico, N. Bertoldi, B. Cowan, W. Shen, C. Moran, R. Zens, C. Dyer, O. Bojar, A. Constantin, and E. Herbst. 2007. Moses: Open Source Toolkit for Statistical Machine Translation. In Proceedings of the 45th Annual Meeting of the Association for Computational Linguistics Companion Volume Proceedings of the Demo and Poster Sessions, pages 177–180, Prague, Czech Republic.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ravi Kumar</author>
+<author>Sergei Vassilvitskii</author>
+</authors>
+<title>Generalized distances between rankings.</title>
+<date>2010</date>
+<booktitle>In Proceedings of the 19th international conference on World Wide Web,</booktitle>
+<pages>571--580</pages>
+<publisher>ACM.</publisher>
+<location>New York, NY, USA.</location>
+<contexts>
+<context position="33685" citStr="Kumar and Vassilvitskii (2010)" startWordPosition="5577" endWordPosition="5580">judgements of fluency. Our work specifically addresses long-range reordering phenomena in language pairs where these are quite rare, although crucial for preserving the source text meaning. Hence, an improvement at this level may not be detected by the general-purpose metrics. We then develop a KRS variant that is only 334 sensitive to the positioning of specific input words. Assuming that each input word fi is assigned a weight Ai, the formula above is modified as follows: � Ai+Aj if 7ri &lt; 7rj and ui &gt; uj d�(i,�) � 0 otherwise A similar element-weighted version of Kendall Tau was proposed by Kumar and Vassilvitskii (2010) to evaluate document rankings in information retrieval. Because long reordering errors in Arabic-English mostly affect verbs, we set the weights to 1 for verbs and 0 for all other words to only capture verb reordering errors, and call the resulting metric KRS-V. The source-reference word alignments needed to compute the reordering scores are generated by the Berkeley Aligner previously trained on the training data. Source-output word alignments are instead obtained from the decoder’s trace. 5.4 Results and discussion To motivate the choice of our baseline setup (early distortion cost and DL=8</context>
+</contexts>
+<marker>Kumar, Vassilvitskii, 2010</marker>
+<rawString>Ravi Kumar and Sergei Vassilvitskii. 2010. Generalized distances between rankings. In Proceedings of the 19th international conference on World Wide Web, pages 571–580, New York, NY, USA. ACM.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Percy Liang</author>
+<author>Ben Taskar</author>
+<author>Dan Klein</author>
+</authors>
+<title>Alignment by agreement.</title>
+<date>2006</date>
+<booktitle>In Proceedings of the Human Language Technology Conference of the NAACL, Main Conference,</booktitle>
+<pages>104--111</pages>
+<location>New York City, USA,</location>
+<contexts>
+<context position="30346" citStr="Liang et al., 2006" startWordPosition="5016" endWordPosition="5019">sition, that is the shortest jump available from the last translated word. Even here, our model achieves an accuracy of 51.8%, only slightly lower than that of distortion (52.3%). In summary, the WaW reordering model significantly outperforms distortion in the ranking of long jumps. In the large majority of cases, it is able to rank a correct long jump in the top 3 reordering options, which suggests that it can be effectively used for early reordering pruning. 5.2 SMT experimental setup Our SMT systems are built with the Moses toolkit, while word alignment is produced by the Berkeley Aligner (Liang et al., 2006). The baseline decoder includes a phrase translation model, a lexicalized reordering model, a 6-gram target language model, distortion cost, word and phrase penalties. More specifically, the baseline reordering model is a hierarchical phrase orientation model (Tillmann, 2004; Koehn et al., 2005; Galley and Manning, 2008) trained on all the available parallel data. This variant was shown to outperform the default wordbased on an Arabic-English task. To make our baseline even more competitive, we apply early distortion cost, as proposed by Moore and Quirk (2007). This function has the same value</context>
+</contexts>
+<marker>Liang, Taskar, Klein, 2006</marker>
+<rawString>Percy Liang, Ben Taskar, and Dan Klein. 2006. Alignment by agreement. In Proceedings of the Human Language Technology Conference of the NAACL, Main Conference, pages 104–111, New York City, USA, June.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ryan McDonald</author>
+<author>Fernando Pereira</author>
+<author>Kiril Ribarov</author>
+<author>Jan Hajiˇc</author>
+</authors>
+<title>Non-projective dependency parsing using spanning tree algorithms.</title>
+<date>2005</date>
+<booktitle>In Proceedings of the conference on Human Language Technology and Empirical Methods in Natural Language Processing, HLT ’05,</booktitle>
+<pages>523--530</pages>
+<location>Stroudsburg, PA, USA.</location>
+<marker>McDonald, Pereira, Ribarov, Hajiˇc, 2005</marker>
+<rawString>Ryan McDonald, Fernando Pereira, Kiril Ribarov, and Jan Hajiˇc. 2005. Non-projective dependency parsing using spanning tree algorithms. In Proceedings of the conference on Human Language Technology and Empirical Methods in Natural Language Processing, HLT ’05, pages 523–530, Stroudsburg, PA, USA.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Robert C Moore</author>
+<author>Chris Quirk</author>
+</authors>
+<title>Faster beamsearch decoding for phrasal statistical machine translation. In</title>
+<date>2007</date>
+<booktitle>In Proceedings of MT Summit XI,</booktitle>
+<pages>321--327</pages>
+<location>Copenhagen, Denmark.</location>
+<contexts>
+<context position="969" citStr="Moore and Quirk, 2007" startWordPosition="139" endWordPosition="142">n accuracy and complexity of decoding is nowadays reached by harshly limiting the input permutation space. We propose a method to dynamically shape such space and, thus, capture long-range word movements without hurting translation quality nor decoding time. The space defined by loose reordering constraints is dynamically pruned through a binary classifier that predicts whether a given input word should be translated right after another. The integration of this model into a phrase-based decoder improves a strong Arabic-English baseline already including state-of-the-art early distortion cost (Moore and Quirk, 2007) and hierarchical phrase orientation models (Galley and Manning, 2008). Significant improvements in the reordering of verbs are achieved by a system that is notably faster than the baseline, while BLEU and METEOR remain stable, or even increase, at a very high distortion limit. 1 Introduction Word order differences are among the most important factors determining the performance of statistical machine translation (SMT) on a given language pair (Birch et al., 2009). This is particularly true in the framework of phrase-based SMT (PSMT) (Zens et al., 2002; Koehn et al., 2003; Och and Ney, 2002), </context>
+<context position="20766" citStr="Moore and Quirk (2007)" startWordPosition="3467" endWordPosition="3470">tion.6 According to how the DL, pruning parameters, and V are set, we can actually aim at different targets: with a low DL, loose pruning parameters, and V=0 we can try to speed up search without sacrificing much translation quality. With a high DL, strict pruning parameters, and a medium V, we ensure that the standard medium-range reordering space is explored, as well as those few long jumps that are promising according to the reordering model. In our experiments, we explore this second option with the setting DL=18 and V=5. The underlying idea is similar to that of early pruning proposed by Moore and Quirk (2007), which consisted in discarding possible extensions of a partial hypothesis based on their estimated score before computing the exact language model score. Our technique too has the effect of introducing additional points at which the search space is pruned. However, while theirs was mainly an optimization technique meant to avoid useless LM queries, we instead aim at refining the search space by exploiting the fact that some SMT models are more important than others at different stages of the translation process. Our approach actually involves a continuous alternation of two processes: during</context>
+<context position="30912" citStr="Moore and Quirk (2007)" startWordPosition="5105" endWordPosition="5108">is produced by the Berkeley Aligner (Liang et al., 2006). The baseline decoder includes a phrase translation model, a lexicalized reordering model, a 6-gram target language model, distortion cost, word and phrase penalties. More specifically, the baseline reordering model is a hierarchical phrase orientation model (Tillmann, 2004; Koehn et al., 2005; Galley and Manning, 2008) trained on all the available parallel data. This variant was shown to outperform the default wordbased on an Arabic-English task. To make our baseline even more competitive, we apply early distortion cost, as proposed by Moore and Quirk (2007). This function has the same value as the standard one over a complete translation hypothesis, but it anticipates the gradual accumulation of the cost, making hypotheses of the same length more comparable to one another. Note that this option has no ef12Clearly, we would expect different figures from testing the model on another language pair like German-English, where the verb is often postponed in the source with respect to the target. fect on the distortion limit, but only on the distortion cost feature function. As proposed by Johnson et al. (2007), statistically improbable phrase pairs ar</context>
+</contexts>
+<marker>Moore, Quirk, 2007</marker>
+<rawString>Robert C. Moore and Chris Quirk. 2007. Faster beamsearch decoding for phrasal statistical machine translation. In In Proceedings of MT Summit XI, pages 321– 327, Copenhagen, Denmark.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>F Och</author>
+<author>H Ney</author>
+</authors>
+<title>Discriminative training and maximum entropy models for statistical machine translation.</title>
+<date>2002</date>
+<booktitle>In Proceedings of the 40th Annual Meeting of the Association for Computational Linguistics (ACL),</booktitle>
+<pages>295--302</pages>
+<location>Philadelhpia, PA.</location>
+<contexts>
+<context position="1567" citStr="Och and Ney, 2002" startWordPosition="237" endWordPosition="240">ore and Quirk, 2007) and hierarchical phrase orientation models (Galley and Manning, 2008). Significant improvements in the reordering of verbs are achieved by a system that is notably faster than the baseline, while BLEU and METEOR remain stable, or even increase, at a very high distortion limit. 1 Introduction Word order differences are among the most important factors determining the performance of statistical machine translation (SMT) on a given language pair (Birch et al., 2009). This is particularly true in the framework of phrase-based SMT (PSMT) (Zens et al., 2002; Koehn et al., 2003; Och and Ney, 2002), an approach that remains highly competitive despite the recent advances of the tree-based approaches. During the PSMT decoding process, the output sentence is built from left to right, while the input sentence positions can be covered in different orders. Thus, reordering in PSMT can be viewed as the problem of choosing the input permutation that leads to the highest-scoring output sentence. Due to efficiency reasons, however, the input permutation space cannot be fully explored, and is therefore limited with hard reordering constraints. Although many solutions have been proposed to explicit</context>
+</contexts>
+<marker>Och, Ney, 2002</marker>
+<rawString>F. Och and H. Ney. 2002. Discriminative training and maximum entropy models for statistical machine translation. In Proceedings of the 40th Annual Meeting of the Association for Computational Linguistics (ACL), pages 295–302, Philadelhpia, PA.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Franz Josef Och</author>
+</authors>
+<title>Minimum Error Rate Training in Statistical Machine Translation.</title>
+<date>2003</date>
+<booktitle>Proceedings of the 41st Annual Meeting of the Association for Computational Linguistics,</booktitle>
+<pages>160--167</pages>
+<editor>In Erhard Hinrichs and Dan Roth, editors,</editor>
+<contexts>
+<context position="31763" citStr="Och, 2003" startWordPosition="5245" endWordPosition="5246">n has no ef12Clearly, we would expect different figures from testing the model on another language pair like German-English, where the verb is often postponed in the source with respect to the target. fect on the distortion limit, but only on the distortion cost feature function. As proposed by Johnson et al. (2007), statistically improbable phrase pairs are removed from the translation model. The language models are estimated by the IRSTLM toolkit (Federico et al., 2008) with modified Kneser-Ney smoothing (Chen and Goodman, 1999). Feature weights are optimized by minimum BLEU-error training (Och, 2003) on dev06-nw. To reduce the effects of the optimizer instability, we tune each configuration four times and use the average of the resulting weight vectors to translate the test sets, as suggested by Cettolo et al. (2011). Finally, eval08-nw is used to select the early pruning parameters for the last experiment, while eval09- nw is always reserved as blind test. 5.3 Evaluation metrics We evaluate global translation quality with BLEU (Papineni et al., 2002) and METEOR (Banerjee and Lavie, 2005). These metrics, though, are only indirectly sensitive to word order, and especially unlikely to captu</context>
+</contexts>
+<marker>Och, 2003</marker>
+<rawString>Franz Josef Och. 2003. Minimum Error Rate Training in Statistical Machine Translation. In Erhard Hinrichs and Dan Roth, editors, Proceedings of the 41st Annual Meeting of the Association for Computational Linguistics, pages 160–167.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Kishore Papineni</author>
+<author>Salim Roukos</author>
+<author>Todd Ward</author>
+<author>WeiJing Zhu</author>
+</authors>
+<title>BLEU: a method for automatic evaluation of machine translation.</title>
+<date>2002</date>
+<booktitle>In Proceedings of the 40th Annual Meeting of the Association of Computational Linguistics (ACL),</booktitle>
+<pages>311--318</pages>
+<location>Philadelphia, PA.</location>
+<contexts>
+<context position="32223" citStr="Papineni et al., 2002" startWordPosition="5319" endWordPosition="5322">lkit (Federico et al., 2008) with modified Kneser-Ney smoothing (Chen and Goodman, 1999). Feature weights are optimized by minimum BLEU-error training (Och, 2003) on dev06-nw. To reduce the effects of the optimizer instability, we tune each configuration four times and use the average of the resulting weight vectors to translate the test sets, as suggested by Cettolo et al. (2011). Finally, eval08-nw is used to select the early pruning parameters for the last experiment, while eval09- nw is always reserved as blind test. 5.3 Evaluation metrics We evaluate global translation quality with BLEU (Papineni et al., 2002) and METEOR (Banerjee and Lavie, 2005). These metrics, though, are only indirectly sensitive to word order, and especially unlikely to capture improvements at the level of longrange reordering. For this reason, we also compute the Kendall Reordering Score or KRS (Birch et al., 2010) which is a positive score based on the Kendall’s Tau distance between the source-output permutation π and the source-reference permutations σ: ,/ KRS(π, σ) = (1 − K(π, σ)) · BP K(π, σ) = i E�i d(a, i) 2n(n − 1) � _ 1 if πi &lt; πj and σi &gt; σj d(2, �) — 0 otherwise where BP is a sentence-level brevity penalty, similar </context>
+</contexts>
+<marker>Papineni, Roukos, Ward, Zhu, 2002</marker>
+<rawString>Kishore Papineni, Salim Roukos, Todd Ward, and WeiJing Zhu. 2002. BLEU: a method for automatic evaluation of machine translation. In Proceedings of the 40th Annual Meeting of the Association of Computational Linguistics (ACL), pages 311–318, Philadelphia, PA.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Stefan Riezler</author>
+<author>John T Maxwell</author>
+</authors>
+<title>On some pitfalls in automatic evaluation and significance testing for MT.</title>
+<date>2005</date>
+<booktitle>In Proceedings of the ACL Workshop on Intrinsic and Extrinsic Evaluation Measures for Machine Translation and/or Summarization,</booktitle>
+<pages>57--64</pages>
+<location>Ann Arbor, Michigan,</location>
+<contexts>
+<context position="35562" citStr="Riezler and Maxwell, 2005" startWordPosition="5878" endWordPosition="5881">ore than 1 BLEU point and almost 7 KRS points! Early distortion is much more robust (only -1 KRS when going from DL=8 to DL=18), which makes our baseline system especially strong at the level of reordering. Table 5 presents the results obtained by integrating the WaW reordering model as an additional feature function, and by applying early reordering pruning. The upper part of the table refers to the medium-scale evaluation, while the lower part refers to the large-scale evaluation. In each part, statistical significance is computed against the baseline [B] by approximate randomization as in (Riezler and Maxwell, 2005). Run times are obtained by an Intel Xeon X5650 processor on the first 500 sentences of eval08-nw, and exclude loading time of all models. Medium-scale evaluation. Integrating the WaW model as an additional feature function results in small but consistent improvements in all DL conditions, which shows that this type of model conveys information that is missing from the state-of-the-art reordering models. As regards efficiency, the new model makes decoding time increase by 8%. Among the DL settings considered, DL=8 is confirmed as the optimal one – with or without WaW model. Raising the DL to 1</context>
+</contexts>
+<marker>Riezler, Maxwell, 2005</marker>
+<rawString>Stefan Riezler and John T. Maxwell. 2005. On some pitfalls in automatic evaluation and significance testing for MT. In Proceedings of the ACL Workshop on Intrinsic and Extrinsic Evaluation Measures for Machine Translation and/or Summarization, pages 57– 64, Ann Arbor, Michigan, June.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Christoph Tillmann</author>
+</authors>
+<title>A Unigram Orientation Model for Statistical Machine Translation.</title>
+<date>2004</date>
+<booktitle>In Proceedings of the Joint Conference on Human Language Technologies and the Annual Meeting of the North American Chapter of the Association of Computational Linguistics (HLT-NAACL).</booktitle>
+<contexts>
+<context position="5929" citStr="Tillmann, 2004" startWordPosition="911" endWordPosition="912">n (reordering model). We begin with the latter, returning to the constraints later in this section. 2.1 Reordering modeling In its original formulation, the PSMT approach includes a basic reordering model, called distortion cost, that exponentially penalizes longer jumps among consecutively translated phrases ( fi) − end(�fi−1) − 11 A number of more sophisticated solutions have been proposed to explicitly model word reordering during decoding. These can mostly be grouped into three families: phrase orientation models, jump models and source decoding sequence models. Phrase orientation models (Tillmann, 2004; Koehn et al., 2005; Zens and Ney, 2006; Galley and Manning, 2008), also known as lexicalized reordering models, predict the orientation of a phrase with respect to the last translated one, by classifying it as monotone, swap or discontinuous. These models have proven very useful for short and mediumrange reordering and are among the most widely used in PSMT. However, their coarse classification of reordering steps makes them unsuitable to predict long-range reorderings. Jump models (Al-Onaizan and Papineni, 2006; Green et al., 2010; Yahyaei and Monz, 2010) predict the direction and length of</context>
+<context position="30621" citStr="Tillmann, 2004" startWordPosition="5057" endWordPosition="5058">ps. In the large majority of cases, it is able to rank a correct long jump in the top 3 reordering options, which suggests that it can be effectively used for early reordering pruning. 5.2 SMT experimental setup Our SMT systems are built with the Moses toolkit, while word alignment is produced by the Berkeley Aligner (Liang et al., 2006). The baseline decoder includes a phrase translation model, a lexicalized reordering model, a 6-gram target language model, distortion cost, word and phrase penalties. More specifically, the baseline reordering model is a hierarchical phrase orientation model (Tillmann, 2004; Koehn et al., 2005; Galley and Manning, 2008) trained on all the available parallel data. This variant was shown to outperform the default wordbased on an Arabic-English task. To make our baseline even more competitive, we apply early distortion cost, as proposed by Moore and Quirk (2007). This function has the same value as the standard one over a complete translation hypothesis, but it anticipates the gradual accumulation of the cost, making hypotheses of the same length more comparable to one another. Note that this option has no ef12Clearly, we would expect different figures from testing</context>
+</contexts>
+<marker>Tillmann, 2004</marker>
+<rawString>Christoph Tillmann. 2004. A Unigram Orientation Model for Statistical Machine Translation. In Proceedings of the Joint Conference on Human Language Technologies and the Annual Meeting of the North American Chapter of the Association of Computational Linguistics (HLT-NAACL).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Karthik Visweswariah</author>
+<author>Rajakrishnan Rajkumar</author>
+<author>Ankur Gandhe</author>
+<author>Ananthakrishnan Ramanathan</author>
+<author>Jiri Navratil</author>
+</authors>
+<title>A word reordering model for improved machine translation.</title>
+<date>2011</date>
+<booktitle>In Proceedings of the 2011 Conference on Empirical Methods in Natural Language Processing,</booktitle>
+<pages>486--496</pages>
+<location>Edinburgh, Scotland, UK.,</location>
+<contexts>
+<context position="7567" citStr="Visweswariah et al., 2011" startWordPosition="1177" endWordPosition="1180"> to short jumps. This strong bias is undesirable, given that we are especially interested in detecting probable long reorderings. Source decoding sequence models predict which input word is likely to be translated at a given state of decoding. For instance, reordered source language models (Feng et al., 2010) are smoothed ngram models trained on a corpus of source sentences reordered to match the target word order. When integrated into the SMT system, they assign a probability to each newly translated word given the n-1 previously translated words. Finally, source word pair reordering models (Visweswariah et al., 2011) estimate, for each pair of input words i and j, the cost of translating j right after i given various features of i, j and their respective contexts. Differently from reordered source LMs, these models are discriminative and can profit from richer feature sets. At the same time, they do not employ decoding historybased features, which allows for more effective hy2In this paper, input (or source) word denotes the word at a given position of the input sentence, rather than a word type. fi): �fi−1� d( �fi−1� A) = −|start( 328 pothesis recombination. The model we are going to present belongs to t</context>
+<context position="12110" citStr="Visweswariah et al. (2011)" startWordPosition="1936" endWordPosition="1939">han guessing how much to the left or to the right we should move from the current source position. The WaW reordering model addresses a binary decision task through the following maximum-entropy classifier: P(Ri,j=Y Jf1 , i, j) = exp[&amp;quot;m Amhm(fl , i, j, Ri,j=Y )] &amp;quot;Y , exp[&amp;quot;m Amhm(fl , i, j, Ri,j=Y&apos;)] where f1 is a source sentence of J words, hm are feature functions and am the corresponding feature weights. The outcome Y can be either 1 or 0, with Ri,j=1 meaning that the word at position j is translated right after the word at position i. Our WaW reordering model is strongly related to that of Visweswariah et al. (2011) – hereby called Travelling Salesman Problem (TSP) model – with few important differences: (i) we do not include in the features any explicit indication of the jump length, in order to avoid the bias on short jumps; (ii) they train a linear model with MIRA (Crammer and Singer, 2003) by minimizing the number fi): �fi−1, D( �fi−1, 329 of input words that get placed after the wrong position, while we use a maximum-entropy classifier trained by maximum-likelihood; (iii) they use an off-the shelf TSP solver to find the best source sentence permutation and apply it as pre-processing to training and </context>
+<context position="14139" citStr="Visweswariah et al., 2011" startWordPosition="2282" endWordPosition="2285"> we add a feature to indicate whether the words i and j belong to the same chunk (21). The jump orientation – forward/backward – is included in the features that represent the words comprised between i and j (rows 6, 7, 14, 15). No explicit indication of the jump length is included in any feature. 3.2 Training data To generate training data for the classifier, we first extract reference reorderings from a word-aligned parallel corpus. Given a parallel sentence, different heuristics may be used to convert arbitrary word alignments to a source permutation (Birch et al., 2010; Feng et al., 2010; Visweswariah et al., 2011). Similarly to this last work, we compute for each source word fi the mean ai of the target positions aligned to fi, then sort the source words according to this value.3 As a difference, though, we do not discard unaligned words but assign them the mean 3Using the mean of the aligned indices makes the generation of reference permutations more robust to alignment errors. Admittedly, this heuristic does not handle well the case of source words that are correctly aligned to non-consecutive target words. However, this phenomenon is also not captured by standard PSMT models, who only learn continuo</context>
+<context position="17645" citStr="Visweswariah et al., 2011" startWordPosition="2927" endWordPosition="2930"> the input sentence. The WaW reordering model is fully compatible with, and complementary to the lexicalized reordering (phrase orientation) models included in Moses. Figure 1: Integrating the binary word reordering model into a phrase-based decoder: when a new phrase is covered (dashed boxes), the model returns the logprobability of translating its words in the order defined by the phrase-internal word alignment. Table 2: The classifier’s training data generation process. 3.3 Integration into phrase-based decoding Rather than using the new reordering model for data pre-processing as done by (Visweswariah et al., 2011), we directly integrate it into the PSMT decoder Moses (Koehn et al., 2007). Two main computation phases are required by the WaW model: (i) at system initialization time, all feature weights are loaded into memory, and (ii) before translating each new sentence, features are extracted from it and model probabilities are pre-computed for each pair of source positions (i, j) such that j − i − 11 G DL. Note that this efficient solution is possible because our model does not employ decoding history-based features, like the word that was translated before the last one, or like the previous jump legt</context>
+</contexts>
+<marker>Visweswariah, Rajkumar, Gandhe, Ramanathan, Navratil, 2011</marker>
+<rawString>Karthik Visweswariah, Rajakrishnan Rajkumar, Ankur Gandhe, Ananthakrishnan Ramanathan, and Jiri Navratil. 2011. A word reordering model for improved machine translation. In Proceedings of the 2011 Conference on Empirical Methods in Natural Language Processing, pages 486–496, Edinburgh, Scotland, UK., July.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Dekai Wu</author>
+</authors>
+<title>Stochastic inversion transduction grammars and bilingual parsing of parallel corpora.</title>
+<date>1997</date>
+<journal>Computational Linguistics,</journal>
+<volume>23</volume>
+<issue>3</issue>
+<contexts>
+<context position="9358" citStr="Wu, 1997" startWordPosition="1476" endWordPosition="1477">space is necessary for beam-search PSMT decoders to function in linear time. Reordering constraints are also important for translation quality because the existing models are typically not discriminative enough to guide the search over very large sets of reordering hypotheses. Despite their crucial effects on the complexity of reordering modeling, though, reordering constraints have drawn less attention in the literature. The existing reordering constraints are typically based on word-to-word distances – IBM (Berger et al., 1996) and DL (Koehn et al., 2007) – or on permutation patterns – ITG (Wu, 1997). Both kinds of constraints are uniform throughout the input sentence, and insensitive to the word being translated and to its context. This results in a very coarse definition of the reordering search space, which is problematic in language pairs with different syntactic structures. To address this problem, Yahyaei and Monz (2010) present a technique to dynamically set the DL: they train a classifier to predict the most probable jump length after each input word, and use the predicted value as the DL after that position. Unfortunately, this method can generate inconsistent constraints leading</context>
+</contexts>
+<marker>Wu, 1997</marker>
+<rawString>Dekai Wu. 1997. Stochastic inversion transduction grammars and bilingual parsing of parallel corpora. Computational Linguistics, 23(3):377–403.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Sirvan Yahyaei</author>
+<author>Christof Monz</author>
+</authors>
+<title>Dynamic distortion in a discriminative reordering model for statistical machine translation.</title>
+<date>2010</date>
+<booktitle>In International Workshop on Spoken Language Translation (IWSLT),</booktitle>
+<location>Paris, France.</location>
+<contexts>
+<context position="6493" citStr="Yahyaei and Monz, 2010" startWordPosition="999" endWordPosition="1002"> sequence models. Phrase orientation models (Tillmann, 2004; Koehn et al., 2005; Zens and Ney, 2006; Galley and Manning, 2008), also known as lexicalized reordering models, predict the orientation of a phrase with respect to the last translated one, by classifying it as monotone, swap or discontinuous. These models have proven very useful for short and mediumrange reordering and are among the most widely used in PSMT. However, their coarse classification of reordering steps makes them unsuitable to predict long-range reorderings. Jump models (Al-Onaizan and Papineni, 2006; Green et al., 2010; Yahyaei and Monz, 2010) predict the direction and length of a jump to perform after a given input word2. Both these works achieve their best Arabic-English results within a rather small DL: namely, 8 in (Al-Onaizan and Papineni, 2006) and 5 in (Green et al., 2010), thus failing to capture the rare but crucial long reorderings that were their main motivation. A drawback of this approach is that long jumps are typically penalized because of their low frequency compared to short jumps. This strong bias is undesirable, given that we are especially interested in detecting probable long reorderings. Source decoding sequen</context>
+<context position="9691" citStr="Yahyaei and Monz (2010)" startWordPosition="1528" endWordPosition="1531">lexity of reordering modeling, though, reordering constraints have drawn less attention in the literature. The existing reordering constraints are typically based on word-to-word distances – IBM (Berger et al., 1996) and DL (Koehn et al., 2007) – or on permutation patterns – ITG (Wu, 1997). Both kinds of constraints are uniform throughout the input sentence, and insensitive to the word being translated and to its context. This results in a very coarse definition of the reordering search space, which is problematic in language pairs with different syntactic structures. To address this problem, Yahyaei and Monz (2010) present a technique to dynamically set the DL: they train a classifier to predict the most probable jump length after each input word, and use the predicted value as the DL after that position. Unfortunately, this method can generate inconsistent constraints leading to decoding dead-ends. As a solution, the dynamic DL is relaxed when needed to reach the first uncovered position. Translation improvements are reported only on a small-scale task with short sentences (BTEC), over a baseline that includes a very simple reordering model. In our work we develop this idea further and use a reordering</context>
+</contexts>
+<marker>Yahyaei, Monz, 2010</marker>
+<rawString>Sirvan Yahyaei and Christof Monz. 2010. Dynamic distortion in a discriminative reordering model for statistical machine translation. In International Workshop on Spoken Language Translation (IWSLT), Paris, France.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Richard Zens</author>
+<author>Hermann Ney</author>
+</authors>
+<title>Discriminative reordering models for statistical machine translation.</title>
+<date>2006</date>
+<booktitle>In Proceedings on the Workshop on Statistical Machine Translation,</booktitle>
+<pages>55--63</pages>
+<location>New York City,</location>
+<contexts>
+<context position="5969" citStr="Zens and Ney, 2006" startWordPosition="917" endWordPosition="920">the latter, returning to the constraints later in this section. 2.1 Reordering modeling In its original formulation, the PSMT approach includes a basic reordering model, called distortion cost, that exponentially penalizes longer jumps among consecutively translated phrases ( fi) − end(�fi−1) − 11 A number of more sophisticated solutions have been proposed to explicitly model word reordering during decoding. These can mostly be grouped into three families: phrase orientation models, jump models and source decoding sequence models. Phrase orientation models (Tillmann, 2004; Koehn et al., 2005; Zens and Ney, 2006; Galley and Manning, 2008), also known as lexicalized reordering models, predict the orientation of a phrase with respect to the last translated one, by classifying it as monotone, swap or discontinuous. These models have proven very useful for short and mediumrange reordering and are among the most widely used in PSMT. However, their coarse classification of reordering steps makes them unsuitable to predict long-range reorderings. Jump models (Al-Onaizan and Papineni, 2006; Green et al., 2010; Yahyaei and Monz, 2010) predict the direction and length of a jump to perform after a given input w</context>
+</contexts>
+<marker>Zens, Ney, 2006</marker>
+<rawString>Richard Zens and Hermann Ney. 2006. Discriminative reordering models for statistical machine translation. In Proceedings on the Workshop on Statistical Machine Translation, pages 55–63, New York City, June.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>R Zens</author>
+<author>F J Och</author>
+<author>H Ney</author>
+</authors>
+<title>Phrase-based statistical machine translation.</title>
+<date>2002</date>
+<booktitle>In 25th German Conference on Artificial Intelligence (KI2002),</booktitle>
+<pages>18--32</pages>
+<publisher>Springer Verlag.</publisher>
+<location>Aachen, Germany.</location>
+<contexts>
+<context position="1527" citStr="Zens et al., 2002" startWordPosition="229" endWordPosition="232">te-of-the-art early distortion cost (Moore and Quirk, 2007) and hierarchical phrase orientation models (Galley and Manning, 2008). Significant improvements in the reordering of verbs are achieved by a system that is notably faster than the baseline, while BLEU and METEOR remain stable, or even increase, at a very high distortion limit. 1 Introduction Word order differences are among the most important factors determining the performance of statistical machine translation (SMT) on a given language pair (Birch et al., 2009). This is particularly true in the framework of phrase-based SMT (PSMT) (Zens et al., 2002; Koehn et al., 2003; Och and Ney, 2002), an approach that remains highly competitive despite the recent advances of the tree-based approaches. During the PSMT decoding process, the output sentence is built from left to right, while the input sentence positions can be covered in different orders. Thus, reordering in PSMT can be viewed as the problem of choosing the input permutation that leads to the highest-scoring output sentence. Due to efficiency reasons, however, the input permutation space cannot be fully explored, and is therefore limited with hard reordering constraints. Although many </context>
+</contexts>
+<marker>Zens, Och, Ney, 2002</marker>
+<rawString>R. Zens, F. J. Och, and H. Ney. 2002. Phrase-based statistical machine translation. In 25th German Conference on Artificial Intelligence (KI2002), pages 18–32, Aachen, Germany. Springer Verlag.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

@@ -1,0 +1,963 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.004814">
+<title confidence="0.973916">
+Transforming trees into hedges and parsing with “hedgebank” grammars
+</title>
+<author confidence="0.912434">
+Mahsa Yarmohammadi†, Aaron Dunlop† and Brian Roark&apos;
+</author>
+<affiliation confidence="0.709849">
+†Oregon Health &amp; Science University, Portland, Oregon &apos;Google, Inc., New York
+</affiliation>
+<email confidence="0.987927">
+yarmoham@ohsu.edu, {aaron.dunlop,roarkbr}@gmail.com
+</email>
+<sectionHeader confidence="0.993739" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.9998118">
+Finite-state chunking and tagging meth-
+ods are very fast for annotating non-
+hierarchical syntactic information, and are
+often applied in applications that do not
+require full syntactic analyses. Scenar-
+ios such as incremental machine transla-
+tion may benefit from some degree of hier-
+archical syntactic analysis without requir-
+ing fully connected parses. We introduce
+hedge parsing as an approach to recover-
+ing constituents of length up to some max-
+imum span L. This approach improves ef-
+ficiency by bounding constituent size, and
+allows for efficient segmentation strategies
+prior to parsing. Unlike shallow parsing
+methods, hedge parsing yields internal hi-
+erarchical structure of phrases within its
+span bound. We present the approach and
+some initial experiments on different infer-
+ence strategies.
+</bodyText>
+<sectionHeader confidence="0.998991" genericHeader="keywords">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.999736887096774">
+Parsing full hierarchical syntactic structures is
+costly, and some NLP applications that could ben-
+efit from parses instead substitute shallow prox-
+ies such as NP chunks. Models to derive such
+non-hierarchical annotations are finite-state, so in-
+ference is very fast. Still, these partial annota-
+tions omit all but the most basic syntactic segmen-
+tation, ignoring the abundant local structure that
+could be of utility even in the absence of fully con-
+nected structures. For example, in incremental (si-
+multaneous) machine translation (Yarmohammadi
+et al., 2013), sub-sentential segments are trans-
+lated independently and sequentially, hence the
+fully-connected syntactic structure is not generally
+available. Even so, locally-connected source lan-
+guage parse structures can inform both segmen-
+tation and translation of each segment in such a
+translation scenario.
+One way to provide local hierarchical syntactic
+structures without fully connected trees is to fo-
+cus on providing full hierarchical annotations for
+structures within a local window, ignoring global
+constituents outside that window. We follow the
+XML community in naming structures of this type
+hedges (not to be confused with the rhetorical de-
+vice of the same name), due to the fact that they are
+like smaller versions of trees which occur in se-
+quences. Such structures may be of utility to var-
+ious structured inference tasks, as well as within
+a full parsing pipeline, to quickly constrain subse-
+quent inference, much as finite-state models such
+as supertagging (Bangalore and Joshi, 1999) or
+chart cell constraints (Roark and Hollingshead,
+2008; Roark et al., 2012) are used.
+In this paper, we consider the problem of hedge
+parsing, i.e., discovering every constituent of
+length up to some span L. Similar constraints
+have been used in dependency parsing (Eisner
+and Smith, 2005; Dreyer et al., 2006), where the
+use of hard constraints on the distance between
+heads and dependents is known as vine parsing.
+It is also reminiscent of so-called Semi-Markov
+models (Sarawagi and Cohen, 2004), which allow
+finite-state models to reason about segments rather
+than just tags by imposing segment length limits.
+In the XML community, trees and hedges are used
+for models of XML document instances and for
+the contents of elements (Br¨uggemann-Klein and
+Wood, 2004). As far as we know, this paper is
+the first to consider this sort of partial parsing ap-
+proach for natural language.
+We pursue this topic via tree transformation,
+whereby non-root non-terminals labeling con-
+stituents of span &gt; L in the tree are recursively
+elided and their children promoted to attach to
+their parent. In such a way, hedges are sequen-
+tially connected to the top-most non-terminal in
+the tree, as demonstrated in Figure 1. After apply-
+ing such a transform to a treebank, we can induce
+grammars and modify parsing to search as needed
+to recover just these constituents.
+In this paper, we propose several methods to
+</bodyText>
+<page confidence="0.957574">
+797
+</page>
+<bodyText confidence="0.443258">
+Proceedings of the 52nd Annual Meeting of the Association for Computational Linguistics (Short Papers), pages 797–802,
+Baltimore, Maryland, USA, June 23-25 2014. c�2014 Association for Computational Linguistics
+</bodyText>
+<figure confidence="0.460423">
+investors
+</figure>
+<figureCaption confidence="0.999146">
+Figure 1: a) Full parse tree, b) Hedge parse tree with maximum constituent span of 7 (L = 7).
+</figureCaption>
+<figure confidence="0.999635708333334">
+S
+SBAR
+NNS
+Analysts
+JJ
+are
+IN
+S
+concerned
+VP
+NP
+ADJP
+VBP
+that
+NP
+NP
+VP
+VP
+PP
+NP
+MD
+PP
+IN
+will
+VB
+ADJP
+IN NP
+remain
+JJ
+JJ
+much
+of
+the high-yield market
+NNS
+for
+treacherous
+DT JJ NN
+S
+�
+�
+Analysts
+MD
+PP
+NP
+for
+NNS
+investors
+NP VBP JJ
+are concerned
+IN
+that
+NP
+VP
+PP
+VP
+NNS
+NP
+JJ
+much
+ADJP
+JJ
+treacherous
+IN NP
+IN
+of
+DT JJ NN
+the high-yield market
+Will
+VB
+remain
+�
+�
+</figure>
+<bodyText confidence="0.999136076923077">
+parse hedge constituents and examine their accu-
+racy/efficiency tradeoffs. This is compared with
+a baseline of parsing with a typically induced
+context-free grammar and transforming the result
+via the hedge transform, which provides a ceiling
+on accuracy and a floor on efficiency. We inves-
+tigate pre-segmenting the sentences with a finite-
+state model prior to hedge parsing, and achieve
+large speedups relative to hedge parsing the whole
+string, though at a loss in accuracy due to cas-
+cading segmentation errors. In all cases, we find
+it crucial that our “hedgebank” grammars be re-
+trained to match the conditions during inference.
+</bodyText>
+<sectionHeader confidence="0.990076" genericHeader="introduction">
+2 Methods
+</sectionHeader>
+<bodyText confidence="0.999549285714286">
+In this section, we present the details of our ap-
+proach. First, we present the simple tree transform
+from a full treebank parse tree to a (root attached)
+sequence of hedges. Next, we discuss modifica-
+tions to inference and the resulting computational
+complexity gains. Finally, we discuss segmenting
+to further reduce computational complexity.
+</bodyText>
+<subsectionHeader confidence="0.995118">
+2.1 Hedge Tree Transform
+</subsectionHeader>
+<bodyText confidence="0.986163642857143">
+The hedge tree transform converts the original
+parse tree into a hedge parse tree. In the resulting
+hedge parse tree, every child of the top-most node
+spans at most L words. To transform an original
+tree to a hedge tree, we remove every non-terminal
+with span larger than L and attach its children to its
+parent. We label span length on each node by re-
+cursively summing the span lengths of each node’s
+children, with terminal items by definition having
+span 1. A second top-down pass evaluates each
+node before evaluating its children, and removes
+nodes spanning &gt; L words. For example, the span
+of the non-root S, SBAR, ADJP, and VP nodes in
+Figure 1(a) have spans between 10 and 13, hence
+are removed in the tree in Figure 1(b).
+If we apply this transform to an entire tree-
+bank, we can use the transformed trees to induce
+a PCFG for parsing. Figure 2 plots the percentage
+of constituents from the original WSJ Penn tree-
+bank (sections 2-21) retained in the transformed
+version, as we vary the maximum span length pa-
+rameter L. Over half of constituents have span 3 or
+less (which includes frequent base noun phrases);
+L = 7 covers approximately three quarters of the
+original constituents, and L = 15 over 90%. Most
+experiments in this paper will focus on L = 7,
+which is short enough to provide a large speedup
+yet still cover a large fraction of constituents.
+</bodyText>
+<subsectionHeader confidence="0.999227">
+2.2 Hedge Parsing
+</subsectionHeader>
+<bodyText confidence="0.99980125">
+As stated earlier, our brute-force baseline ap-
+proach is to parse the sentence using a full context-
+free grammar (CFG) and then hedge-transform the
+result. This method should yield a ceiling on
+</bodyText>
+<page confidence="0.964059">
+798
+</page>
+<figure confidence="0.996792533333333">
+100
+Pct. of constituents retained
+90
+80
+70
+60
+50
+W
+h
+spa
+alon
+he fl
+e
+e
+Maximum span size (L)
+</figure>
+<figureCaption confidence="0.997916">
+Figure 2: Percentage of constituents retained at various
+</figureCaption>
+<bodyText confidence="0.981153444444445">
+um p i )
+span length parameters
+hedge-parsing accuracy, as it has access to rich
+contextual information (as compared to grammars
+trained on transformed trees). Naturally, inference
+will be slow; we aim to improve efficiency upon
+this baseline while minimizing accuracy loss.
+Since we limit the span of non-terminal la-
+bels, we can constrain the search performed by the
+parser, greatly reduce the CYK processing time. In
+essence, we perform no work in chart cells span-
+ning more than L words, except for the cells along
+the periphery of the chart, which are just used to
+connect the hedges to the root. Consider the flat
+tree in Figure 1(b). For use by a CYK parsing al-
+gorithm, trees are binarized prior to grammar in-
+duction, resulting in special non-terminals created
+by binarization. Other than the symbol at the root
+of the tree, the only constituents with span length
+greater than L in the binarized tree will be labeled
+with these special binarization non-terminals. Fur-
+ther, if the binarization systematically groups the
+leftmost or the rightmost children under these new
+non-terminals (the most common strategy), then
+constituents with span greater than L will either
+begin at the first word (leftmost grouping) or end
+at the last word (rightmost), further constraining
+the number of cells in the chart requiring work.
+Complexity of parsing with a full CYK parser is
+O(n3|G|) where n is the length of input and |G |is
+the grammar size constant. In contrast, complex-
+ity of parsing with a hedge constrained CYK is re-
+duced to O((nL2 + n2)|G|). To see that this is the
+case, consider that there are O(nL) cells of span L
+or less, and each has a maximum of L midpoints,
+which accounts for the first term. Beyond these,
+there are O(n) remaining active cells with O(n)
+possible midpoints, which accounts for the second
+term. Note also that these latter cells (spanning
+&gt; L words) may be less expensive, as the set of
+possible non-terminals is reduced to only those in-
+troduced by binarization.
+It is possible to parse with a standardly induced
+n
+me.
+PCFG using.thisdsort of hedgesconstrained pars-
+ingathat only considers atsubsetgrof the chart cells,
+andespeedupshcare achieved,twhowever this is clearly
+non-optimal, sinceothepmodel ismill-suited to com-
+bining hedgesointohflat structures at the root of the
+tree.ySpacedconstraints preclude inclusion of tri-
+als with this method, buthtthepnet result is a se-
+vere degradationeiin accuracyr(tens of points of F-
+measure) versus standardbyparsing. Thus, we train
+a grammar in a matched condition, which we call
+it a hedgebank grammar. A hedgebank gram-
+mar is a fully functional PCFG which is learned
+from a hedge transformed treebank. A hedgebank
+grammar can be used with any standard parsing
+algorithm, i.e., these are not generally finite-state
+equivalent models. However, using the Berke-
+ley grammar learner (see §3), we find that hedge-
+bank grammars are typically smaller than tree-
+bank grammars, reducing the grammar constant
+and contributing to faster inference.
+A unique property of hedge constituents com-
+pared to constituents in the original parse trees
+is that they are sequentially connected to the top-
+most node. This property enables us to chunk the
+sentence into segments that correspond to com-
+plete hedges, and parse the segments indepen-
+dently (and simultaneously) instead of parsing the
+entire sentence. In section 2.3, we present our ap-
+proach to hedge segmentation.
+In all scenarios where the chart is constrained
+to search for hedges, we learn a hedgebank gram-
+mar, which is matched to the maximum length al-
+lowed by the parser. In the pre-segmentation sce-
+nario, we first decompose the hedge transformed
+treebank into its hedge segments and then learn a
+hedgebank grammar from the new corpus.
+</bodyText>
+<equation confidence="0.857806777777778">
+n
+w
+c
+m
+n
+p
+p
+a
+z
+r
+m
+o
+a
+w
+n
+m
+n
+s
+</equation>
+<subsectionHeader confidence="0.997559">
+2.3 Hedge Segmentation
+</subsectionHeader>
+<bodyText confidence="0.999560733333333">
+In this section we present our segmentation model
+which takes the input sentence and chunks it into
+appropriate segments for hedge parsing. We treat
+this as a binary classification task which decides
+if a word can begin a new hedge. We use hedge
+segmentation as a finite-state pre-processing step
+for hedge context-free parsing.
+Our task is to learn which words can begin
+(B) a hedge constituent. Given a set of labeled
+pairs (5, H) where 5 is a sentence of n words
+w1 ... wn and H is its hedge parse tree, word wb
+belongs to B if there is a hedge constituent span-
+ning wb ... we for some e &gt; b and wb belongs to B¯
+otherwise. To predict the hedge boundaries more
+accurately, we grouped consecutive unary or POS-
+</bodyText>
+<figure confidence="0.998352933333333">
+0 5 10 15 20
+t
+s
+K
+b
+h
+fi
+t
+t
+h
+i
+b
+d
+S
+t
+</figure>
+<page confidence="0.994658">
+799
+</page>
+<bodyText confidence="0.996637666666667">
+tag hedges together under a new non-terminal la-
+beled G. Unlabeled segmentation tags for the
+words in the example sentence in Figure 1(b) are:
+</bodyText>
+<equation confidence="0.993198">
+“Analysts/B are/B¯ concerned/B¯ that/B¯ much/B
+of/B¯ the/B¯ high-yield/B¯ market/B will/B
+remain/B treacherous/B for/B investors/B¯ ./B”
+</equation>
+<bodyText confidence="0.999994896551724">
+In addition to the simple unlabeled segmentation
+with B and B¯ tags, we try a labeled segmenta-
+tion with BC and ¯BC tags where C is hedge con-
+stituent type. We restrict the types to the most im-
+portant types – following the 11 chunk types an-
+notated in the CoNLL-2000 chunking task (Sang
+and Buchholz, 2000) – by replacing all other types
+with a new type OUT. Thus, “Analysts” is labeled
+BG; “much”, BNP; “will”, BVP and so on.
+To automatically predict the class of each word
+position, we train a multi-class classifier from la-
+beled training data using a discriminative linear
+model, learning the model parameters with the av-
+eraged perceptron algorithm (Collins, 2002). We
+follow Roark et al. (2012) in the features they used
+to label words as beginning or ending constituents.
+The segmenter extracts features from word and
+POS-tag input sequences and hedge-boundary tag
+output sequences. The feature set includes tri-
+grams of surrounding words, trigrams of surround-
+ing POS tags, and hedge-boundary tags of the pre-
+vious words. An additional orthographical fea-
+ture set is used to tag rare1 and unknown words.
+This feature set includes prefixes and suffixes of
+the words (up to 4 characters), and presence of
+a hyphen, digit, or an upper-case character. Re-
+ported results are for a Markov order-2 segmenter,
+which includes features with the output classes of
+the previous two words.
+</bodyText>
+<sectionHeader confidence="0.988934" genericHeader="method">
+3 Experimental Results
+</sectionHeader>
+<bodyText confidence="0.999964142857143">
+We ran all experiments on the WSJ Penn Tree-
+bank corpus (Marcus et al., 1999) using section
+2-21 for training, section 24 for development, and
+section 23 for testing. We performed exhaustive
+CYK parsing using the BUBS parser2 (Bodenstab
+et al., 2011) with Berkeley SM6 latent-variable
+grammars (Petrov and Klein, 2007) learned by the
+Berkeley grammar trainer with default settings.
+We compute accuracy from the 1-best Viterbi
+tree extracted from the chart using the standard
+EVALB script. Accuracy results are reported as
+precision, recall and F1-score, the harmonic mean
+between the two. In all trials, we evaluate accuracy
+with respect to the hedge transformed reference
+</bodyText>
+<footnote confidence="0.9999395">
+1Rare words occur less than 5 times in the training data.
+2https://code.google.com/p/bubs-parser
+</footnote>
+<table confidence="0.99867425">
+Hedge Parsing Acc/Eff
+Parser P R F1 w/s
+Full w/full CYK 88.8 89.2 89.0 2.4
+Hedgebank 87.6 84.4 86.0 25.7
+</table>
+<tableCaption confidence="0.999951">
+Table 1: Hedge parsing results on section 24 for L = 7.
+</tableCaption>
+<bodyText confidence="0.999941210526316">
+treebank, i.e., we are not penalizing the parser for
+not discovering constituents longer than the max-
+imum length. Segmentation accuracy is reported
+as an F1-score of unlabeled segment bracketing.
+We ran timing tests on an Intel 2.66GHz proces-
+sor with 3MB of cache and 2GB of memory. Note
+that segmentation time is negligible compared to
+the parsing time, hence is omitted in reported time.
+Efficiency results are reported as number of words
+parsed per second (w/s).
+Table 1 presents hedge parsing accuracy on
+the development set for the full parsing baseline,
+where the output of regular PCFG parsing is trans-
+formed to hedges and evaluated, versus parsing
+with a hedgebank grammar, with no segmenta-
+tion of the strings. We find an order of magnitude
+speedup of parsing, but at the cost of 3 percent F-
+measure absolute. Note that most of that loss is
+in recall, indicating that hedges predicted in that
+condition are nearly as reliable as in full parsing.
+Table 2 shows the results on the development
+set when segmenting prior to hedge parsing. The
+first row shows the result with no segmentation,
+the same as the last row in Table 1 for ease of ref-
+erence. The next row shows behavior with per-
+fect segmentation. The final two rows show per-
+formance with automatic segmentation, using a
+model that includes either unlabeled or labeled
+segmentation tags, as described in the last section.
+Segmentation accuracy is better for the model with
+labels, although overall that accuracy is rather low.
+We achieve nearly another order of magnitude
+speedup over hedge parsing without segmentation,
+but again at the cost of nearly 5 percent F1.
+Table 3 presents results of our best configura-
+tions on the eval set, section 23. The results show
+the same patterns as on the development set. Fi-
+nally, Figure 3 shows the speed of inference, la-
+</bodyText>
+<tableCaption confidence="0.993094">
+Table 2: Hedge segmentation and parsing results on section
+</tableCaption>
+<table confidence="0.966729071428572">
+24 for L = 7.
+Segmen- Seg Hedge Parsing Acc/Eff w/s
+tation F1 P R F1
+None n/a 87.6 84.4 86.0 25.7
+Oracle 100 91.3 88.9 90.1 188.6
+Unlabeled 80.6 77.2 75.3 76.2 159.1
+Labeled 83.8 83.1 79.5 81.3 195.8
+800
+Segmentation Grammar Segmentation Acc Hedge Parsing Acc/Eff
+P R F1 P R F1 w/s
+None Full w/full CYK 90.3 90.3 90.3 2.7
+/an
+None Hedgebank 88.3 85.3 86.8 26.2
+Labeled Hedgebank 84.0 86.6 85.3 85.1 81.1 83.0 203.0
+</table>
+<tableCaption confidence="0.999673">
+Table 3: Hedge segmentation and parsing results on test data, section 23, for L = 7.
+</tableCaption>
+<figure confidence="0.999409518518519">
+0 5
+10 15 20
+Full Parsing
+Hedge No Seg
+Hedge With Seg
+95
+90
+85
+80
+75
+95
+90
+85
+80
+75
+800
+0
+600
+Words per second
+400
+200
+Hedge Precision
+Hedge Recall
+5 10 15 20
+0 5 10 15 20
+Maximum span size (L) Maximum span)size (L)
+a) b)
+</figure>
+<figureCaption confidence="0.561786">
+e Figure 3: Hedge parsing a) efficiency, and b) accuracy on test data, section 23, for L = 3–20.
+</figureCaption>
+<bodyText confidence="0.9996008">
+beled precision and labeled recall of annotating
+hedge constituents on the test set as a function
+of the maximum span parameter L, versus the
+baseline parser. Keep in mind that the number
+of reference constituents increases as L increases,
+hence both precision and recall can decrease as
+the parameter grows. Segmentation achieves large
+speedups for smaller L values, but the accuracy
+degradation is consistent, pointing to the need for
+improved segmentation.
+</bodyText>
+<sectionHeader confidence="0.996724" genericHeader="conclusions">
+4 Conclusion and Future Work
+</sectionHeader>
+<bodyText confidence="0.999994714285714">
+We proposed a novel partial parsing approach for
+applications that require a fast syntactic analysis
+of the input beyond shallow bracketing. The span-
+limit parameter allows tuning the annotation of in-
+ternal structure as appropriate for the application
+domain, trading off annotation complexity against
+inference time. These properties make hedge pars-
+ing potentially very useful for incremental text or
+speech processing, such as streaming text analysis
+or simultaneous translation.
+One interesting characteristic of these anno-
+tations is that they allow for string segmenta-
+tion prior to inference, provided that the segment
+boundaries do not cross any hedge boundaries. We
+found that baseline segmentation models did pro-
+vide a significant speedup in parsing, but that cas-
+cading errors remain a problem.
+There are many directions of future work to
+pursue here. First, the current results are all for
+exhaustive CYK parsing, and we plan to per-
+form a detailed investigation of the performance
+of hedgebank parsing with prioritization and prun-
+ing methods of the sort available in BUBS (Bo-
+denstab et al., 2011). Further, this sort of annota-
+tion seems well suited to incremental parsing with
+beam search, which has been shown to achieve
+high accuracies even for fully connected parsing
+(Zhang and Clark, 2011). Improvements to the
+transform (e.g., grouping items not in hedges un-
+der non-terminals) and to the segmentation model
+(e.g., increasing precision at the expense of recall)
+could improve accuracy without greatly reducing
+efficiency. Finally, we intend to perform an ex-
+trinsic evaluation of this parsing in an on-line task
+such as simultaneous translation.
+</bodyText>
+<sectionHeader confidence="0.998844" genericHeader="acknowledgments">
+Acknowledgments
+</sectionHeader>
+<bodyText confidence="0.9997248">
+This work was supported in part by NSF grant
+#IIS-0964102. Any opinions, findings, conclu-
+sions or recommendations expressed in this pub-
+lication are those of the authors and do not neces-
+sarily reflect the views of the NSF.
+</bodyText>
+<page confidence="0.996993">
+801
+</page>
+<sectionHeader confidence="0.995876" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.999799169491526">
+Srinivas Bangalore and Aravind K. Joshi. 1999. Su-
+pertagging: An approach to almost parsing. Com-
+putational Linguistics, 25(2):237–265.
+Nathan Bodenstab, Aaron Dunlop, Keith Hall, and
+Brian Roark. 2011. Beam-width prediction for ef-
+ficient context-free parsing. In Proceedings of the
+49th Annual Meeting ACL: HLT, pages 440–449.
+Anne Br¨uggemann-Klein and Derick Wood. 2004.
+Balanced context-free grammars, hedge grammars
+and pushdown caterpillar automata. In Extreme
+Markup Languages.
+Michael Collins. 2002. Discriminative training meth-
+ods for hidden Markov models: theory and experi-
+ments with perceptron algorithms. In Proceedings
+of the conference on Empirical Methods in Natural
+Language Processing (EMNLP), pages 1–8.
+Markus Dreyer, David A. Smith, and Noah A. Smith.
+2006. Vine parsing and minimum risk reranking
+for speed and precision. In Proceedings of the
+Tenth Conference on Computational Natural Lan-
+guage Learning (CoNLL), pages 201–205.
+Jason Eisner and Noah A. Smith. 2005. Parsing with
+soft and hard constraints on dependency length. In
+Proceedings of the Ninth International Workshop on
+Parsing Technology (IWPT), pages 30–41.
+Mitchell P. Marcus, Beatrice Santorini, Mary Ann
+Marcinkiewicz, and Ann Taylor. 1999. Treebank-
+3. Linguistic Data Consortium, Philadelphia.
+Slav Petrov and Dan Klein. 2007. Learning and infer-
+ence for hierarchically split PCFGs. In Proceedings
+of the 22nd national conference on Artificial intelli-
+gence, pages 1663–1666.
+Brian Roark and Kristy Hollingshead. 2008. Classi-
+fying chart cells for quadratic complexity context-
+free inference. In Proceedings of the 22nd Inter-
+national Conference on Computational Linguistics,
+pages 745–751.
+Brian Roark, Kristy Hollingshead, and Nathan Boden-
+stab. 2012. Finite-state chart constraints for reduced
+complexity context-free parsing pipelines. Compu-
+tational Linguistics, 38(4):719–753.
+Erik F. Tjong Kim Sang and Sabine Buchholz.
+2000. Introduction to the CoNLL-2000 shared task:
+Chunking. In Proceedings of Conference on Com-
+putational Natural Language Learning (CoNLL),
+pages 127–132.
+Sunita Sarawagi and William W. Cohen. 2004. Semi-
+Markov conditional random fields for information
+extraction. In Advances in Neural Information Pro-
+cessing Systems (NIPS), pages 1185–1192.
+Mahsa Yarmohammadi, Vivek K. Rangarajan Sridhar,
+Srinivas Bangalore, and Baskaran Sankaran. 2013.
+Incremental segmentation and decoding strategies
+for simultaneous translation. In Proceedings of the
+6th International Joint Conference on Natural Lan-
+guage Processing (IJCNLP), pages 1032–1036.
+Yue Zhang and Stephen Clark. 2011. Syntactic pro-
+cessing using the generalized perceptron and beam
+search. Computational Linguistics, 37(1):105–151.
+</reference>
+<page confidence="0.998217">
+802
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.692213">
+<title confidence="0.999701">Transforming trees into hedges and parsing with “hedgebank” grammars</title>
+<author confidence="0.87056">Aaron Brian Health</author>
+<author confidence="0.87056">Science University</author>
+<author confidence="0.87056">Oregon Inc Portland</author>
+<author confidence="0.87056">New</author>
+<abstract confidence="0.996858333333333">Finite-state chunking and tagging methods are very fast for annotating nonhierarchical syntactic information, and are often applied in applications that do not require full syntactic analyses. Scenarios such as incremental machine translation may benefit from some degree of hierarchical syntactic analysis without requiring fully connected parses. We introduce parsing an approach to recovering constituents of length up to some maxspan This approach improves efficiency by bounding constituent size, and allows for efficient segmentation strategies prior to parsing. Unlike shallow parsing methods, hedge parsing yields internal hierarchical structure of phrases within its span bound. We present the approach and some initial experiments on different inference strategies.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>Srinivas Bangalore</author>
+<author>Aravind K Joshi</author>
+</authors>
+<title>Supertagging: An approach to almost parsing.</title>
+<date>1999</date>
+<journal>Computational Linguistics,</journal>
+<volume>25</volume>
+<issue>2</issue>
+<contexts>
+<context position="2611" citStr="Bangalore and Joshi, 1999" startWordPosition="385" endWordPosition="388">out fully connected trees is to focus on providing full hierarchical annotations for structures within a local window, ignoring global constituents outside that window. We follow the XML community in naming structures of this type hedges (not to be confused with the rhetorical device of the same name), due to the fact that they are like smaller versions of trees which occur in sequences. Such structures may be of utility to various structured inference tasks, as well as within a full parsing pipeline, to quickly constrain subsequent inference, much as finite-state models such as supertagging (Bangalore and Joshi, 1999) or chart cell constraints (Roark and Hollingshead, 2008; Roark et al., 2012) are used. In this paper, we consider the problem of hedge parsing, i.e., discovering every constituent of length up to some span L. Similar constraints have been used in dependency parsing (Eisner and Smith, 2005; Dreyer et al., 2006), where the use of hard constraints on the distance between heads and dependents is known as vine parsing. It is also reminiscent of so-called Semi-Markov models (Sarawagi and Cohen, 2004), which allow finite-state models to reason about segments rather than just tags by imposing segment</context>
+</contexts>
+<marker>Bangalore, Joshi, 1999</marker>
+<rawString>Srinivas Bangalore and Aravind K. Joshi. 1999. Supertagging: An approach to almost parsing. Computational Linguistics, 25(2):237–265.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Nathan Bodenstab</author>
+<author>Aaron Dunlop</author>
+<author>Keith Hall</author>
+<author>Brian Roark</author>
+</authors>
+<title>Beam-width prediction for efficient context-free parsing.</title>
+<date>2011</date>
+<booktitle>In Proceedings of the 49th Annual Meeting ACL: HLT,</booktitle>
+<pages>440--449</pages>
+<contexts>
+<context position="13905" citStr="Bodenstab et al., 2011" startWordPosition="2317" endWordPosition="2320"> additional orthographical feature set is used to tag rare1 and unknown words. This feature set includes prefixes and suffixes of the words (up to 4 characters), and presence of a hyphen, digit, or an upper-case character. Reported results are for a Markov order-2 segmenter, which includes features with the output classes of the previous two words. 3 Experimental Results We ran all experiments on the WSJ Penn Treebank corpus (Marcus et al., 1999) using section 2-21 for training, section 24 for development, and section 23 for testing. We performed exhaustive CYK parsing using the BUBS parser2 (Bodenstab et al., 2011) with Berkeley SM6 latent-variable grammars (Petrov and Klein, 2007) learned by the Berkeley grammar trainer with default settings. We compute accuracy from the 1-best Viterbi tree extracted from the chart using the standard EVALB script. Accuracy results are reported as precision, recall and F1-score, the harmonic mean between the two. In all trials, we evaluate accuracy with respect to the hedge transformed reference 1Rare words occur less than 5 times in the training data. 2https://code.google.com/p/bubs-parser Hedge Parsing Acc/Eff Parser P R F1 w/s Full w/full CYK 88.8 89.2 89.0 2.4 Hedge</context>
+<context position="18877" citStr="Bodenstab et al., 2011" startWordPosition="3157" endWordPosition="3161"> One interesting characteristic of these annotations is that they allow for string segmentation prior to inference, provided that the segment boundaries do not cross any hedge boundaries. We found that baseline segmentation models did provide a significant speedup in parsing, but that cascading errors remain a problem. There are many directions of future work to pursue here. First, the current results are all for exhaustive CYK parsing, and we plan to perform a detailed investigation of the performance of hedgebank parsing with prioritization and pruning methods of the sort available in BUBS (Bodenstab et al., 2011). Further, this sort of annotation seems well suited to incremental parsing with beam search, which has been shown to achieve high accuracies even for fully connected parsing (Zhang and Clark, 2011). Improvements to the transform (e.g., grouping items not in hedges under non-terminals) and to the segmentation model (e.g., increasing precision at the expense of recall) could improve accuracy without greatly reducing efficiency. Finally, we intend to perform an extrinsic evaluation of this parsing in an on-line task such as simultaneous translation. Acknowledgments This work was supported in par</context>
+</contexts>
+<marker>Bodenstab, Dunlop, Hall, Roark, 2011</marker>
+<rawString>Nathan Bodenstab, Aaron Dunlop, Keith Hall, and Brian Roark. 2011. Beam-width prediction for efficient context-free parsing. In Proceedings of the 49th Annual Meeting ACL: HLT, pages 440–449.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Anne Br¨uggemann-Klein</author>
+<author>Derick Wood</author>
+</authors>
+<title>Balanced context-free grammars, hedge grammars and pushdown caterpillar automata.</title>
+<date>2004</date>
+<booktitle>In Extreme Markup Languages.</booktitle>
+<marker>Br¨uggemann-Klein, Wood, 2004</marker>
+<rawString>Anne Br¨uggemann-Klein and Derick Wood. 2004. Balanced context-free grammars, hedge grammars and pushdown caterpillar automata. In Extreme Markup Languages.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Michael Collins</author>
+</authors>
+<title>Discriminative training methods for hidden Markov models: theory and experiments with perceptron algorithms.</title>
+<date>2002</date>
+<booktitle>In Proceedings of the conference on Empirical Methods in Natural Language Processing (EMNLP),</booktitle>
+<pages>1--8</pages>
+<contexts>
+<context position="12922" citStr="Collins, 2002" startWordPosition="2158" endWordPosition="2159">ith B and B¯ tags, we try a labeled segmentation with BC and ¯BC tags where C is hedge constituent type. We restrict the types to the most important types – following the 11 chunk types annotated in the CoNLL-2000 chunking task (Sang and Buchholz, 2000) – by replacing all other types with a new type OUT. Thus, “Analysts” is labeled BG; “much”, BNP; “will”, BVP and so on. To automatically predict the class of each word position, we train a multi-class classifier from labeled training data using a discriminative linear model, learning the model parameters with the averaged perceptron algorithm (Collins, 2002). We follow Roark et al. (2012) in the features they used to label words as beginning or ending constituents. The segmenter extracts features from word and POS-tag input sequences and hedge-boundary tag output sequences. The feature set includes trigrams of surrounding words, trigrams of surrounding POS tags, and hedge-boundary tags of the previous words. An additional orthographical feature set is used to tag rare1 and unknown words. This feature set includes prefixes and suffixes of the words (up to 4 characters), and presence of a hyphen, digit, or an upper-case character. Reported results </context>
+</contexts>
+<marker>Collins, 2002</marker>
+<rawString>Michael Collins. 2002. Discriminative training methods for hidden Markov models: theory and experiments with perceptron algorithms. In Proceedings of the conference on Empirical Methods in Natural Language Processing (EMNLP), pages 1–8.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Markus Dreyer</author>
+<author>David A Smith</author>
+<author>Noah A Smith</author>
+</authors>
+<title>Vine parsing and minimum risk reranking for speed and precision.</title>
+<date>2006</date>
+<booktitle>In Proceedings of the Tenth Conference on Computational Natural Language Learning (CoNLL),</booktitle>
+<pages>201--205</pages>
+<contexts>
+<context position="2923" citStr="Dreyer et al., 2006" startWordPosition="436" endWordPosition="439">t that they are like smaller versions of trees which occur in sequences. Such structures may be of utility to various structured inference tasks, as well as within a full parsing pipeline, to quickly constrain subsequent inference, much as finite-state models such as supertagging (Bangalore and Joshi, 1999) or chart cell constraints (Roark and Hollingshead, 2008; Roark et al., 2012) are used. In this paper, we consider the problem of hedge parsing, i.e., discovering every constituent of length up to some span L. Similar constraints have been used in dependency parsing (Eisner and Smith, 2005; Dreyer et al., 2006), where the use of hard constraints on the distance between heads and dependents is known as vine parsing. It is also reminiscent of so-called Semi-Markov models (Sarawagi and Cohen, 2004), which allow finite-state models to reason about segments rather than just tags by imposing segment length limits. In the XML community, trees and hedges are used for models of XML document instances and for the contents of elements (Br¨uggemann-Klein and Wood, 2004). As far as we know, this paper is the first to consider this sort of partial parsing approach for natural language. We pursue this topic via tr</context>
+</contexts>
+<marker>Dreyer, Smith, Smith, 2006</marker>
+<rawString>Markus Dreyer, David A. Smith, and Noah A. Smith. 2006. Vine parsing and minimum risk reranking for speed and precision. In Proceedings of the Tenth Conference on Computational Natural Language Learning (CoNLL), pages 201–205.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jason Eisner</author>
+<author>Noah A Smith</author>
+</authors>
+<title>Parsing with soft and hard constraints on dependency length.</title>
+<date>2005</date>
+<booktitle>In Proceedings of the Ninth International Workshop on Parsing Technology (IWPT),</booktitle>
+<pages>30--41</pages>
+<contexts>
+<context position="2901" citStr="Eisner and Smith, 2005" startWordPosition="432" endWordPosition="435">me name), due to the fact that they are like smaller versions of trees which occur in sequences. Such structures may be of utility to various structured inference tasks, as well as within a full parsing pipeline, to quickly constrain subsequent inference, much as finite-state models such as supertagging (Bangalore and Joshi, 1999) or chart cell constraints (Roark and Hollingshead, 2008; Roark et al., 2012) are used. In this paper, we consider the problem of hedge parsing, i.e., discovering every constituent of length up to some span L. Similar constraints have been used in dependency parsing (Eisner and Smith, 2005; Dreyer et al., 2006), where the use of hard constraints on the distance between heads and dependents is known as vine parsing. It is also reminiscent of so-called Semi-Markov models (Sarawagi and Cohen, 2004), which allow finite-state models to reason about segments rather than just tags by imposing segment length limits. In the XML community, trees and hedges are used for models of XML document instances and for the contents of elements (Br¨uggemann-Klein and Wood, 2004). As far as we know, this paper is the first to consider this sort of partial parsing approach for natural language. We pu</context>
+</contexts>
+<marker>Eisner, Smith, 2005</marker>
+<rawString>Jason Eisner and Noah A. Smith. 2005. Parsing with soft and hard constraints on dependency length. In Proceedings of the Ninth International Workshop on Parsing Technology (IWPT), pages 30–41.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Mitchell P Marcus</author>
+<author>Beatrice Santorini</author>
+<author>Mary Ann Marcinkiewicz</author>
+<author>Ann Taylor</author>
+</authors>
+<date>1999</date>
+<booktitle>Treebank3. Linguistic Data Consortium,</booktitle>
+<location>Philadelphia.</location>
+<contexts>
+<context position="13732" citStr="Marcus et al., 1999" startWordPosition="2290" endWordPosition="2293">boundary tag output sequences. The feature set includes trigrams of surrounding words, trigrams of surrounding POS tags, and hedge-boundary tags of the previous words. An additional orthographical feature set is used to tag rare1 and unknown words. This feature set includes prefixes and suffixes of the words (up to 4 characters), and presence of a hyphen, digit, or an upper-case character. Reported results are for a Markov order-2 segmenter, which includes features with the output classes of the previous two words. 3 Experimental Results We ran all experiments on the WSJ Penn Treebank corpus (Marcus et al., 1999) using section 2-21 for training, section 24 for development, and section 23 for testing. We performed exhaustive CYK parsing using the BUBS parser2 (Bodenstab et al., 2011) with Berkeley SM6 latent-variable grammars (Petrov and Klein, 2007) learned by the Berkeley grammar trainer with default settings. We compute accuracy from the 1-best Viterbi tree extracted from the chart using the standard EVALB script. Accuracy results are reported as precision, recall and F1-score, the harmonic mean between the two. In all trials, we evaluate accuracy with respect to the hedge transformed reference 1Rar</context>
+</contexts>
+<marker>Marcus, Santorini, Marcinkiewicz, Taylor, 1999</marker>
+<rawString>Mitchell P. Marcus, Beatrice Santorini, Mary Ann Marcinkiewicz, and Ann Taylor. 1999. Treebank3. Linguistic Data Consortium, Philadelphia.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Slav Petrov</author>
+<author>Dan Klein</author>
+</authors>
+<title>Learning and inference for hierarchically split PCFGs.</title>
+<date>2007</date>
+<booktitle>In Proceedings of the 22nd national conference on Artificial intelligence,</booktitle>
+<pages>1663--1666</pages>
+<contexts>
+<context position="13973" citStr="Petrov and Klein, 2007" startWordPosition="2326" endWordPosition="2329">own words. This feature set includes prefixes and suffixes of the words (up to 4 characters), and presence of a hyphen, digit, or an upper-case character. Reported results are for a Markov order-2 segmenter, which includes features with the output classes of the previous two words. 3 Experimental Results We ran all experiments on the WSJ Penn Treebank corpus (Marcus et al., 1999) using section 2-21 for training, section 24 for development, and section 23 for testing. We performed exhaustive CYK parsing using the BUBS parser2 (Bodenstab et al., 2011) with Berkeley SM6 latent-variable grammars (Petrov and Klein, 2007) learned by the Berkeley grammar trainer with default settings. We compute accuracy from the 1-best Viterbi tree extracted from the chart using the standard EVALB script. Accuracy results are reported as precision, recall and F1-score, the harmonic mean between the two. In all trials, we evaluate accuracy with respect to the hedge transformed reference 1Rare words occur less than 5 times in the training data. 2https://code.google.com/p/bubs-parser Hedge Parsing Acc/Eff Parser P R F1 w/s Full w/full CYK 88.8 89.2 89.0 2.4 Hedgebank 87.6 84.4 86.0 25.7 Table 1: Hedge parsing results on section 2</context>
+</contexts>
+<marker>Petrov, Klein, 2007</marker>
+<rawString>Slav Petrov and Dan Klein. 2007. Learning and inference for hierarchically split PCFGs. In Proceedings of the 22nd national conference on Artificial intelligence, pages 1663–1666.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Brian Roark</author>
+<author>Kristy Hollingshead</author>
+</authors>
+<title>Classifying chart cells for quadratic complexity contextfree inference.</title>
+<date>2008</date>
+<booktitle>In Proceedings of the 22nd International Conference on Computational Linguistics,</booktitle>
+<pages>745--751</pages>
+<contexts>
+<context position="2667" citStr="Roark and Hollingshead, 2008" startWordPosition="393" endWordPosition="396">l hierarchical annotations for structures within a local window, ignoring global constituents outside that window. We follow the XML community in naming structures of this type hedges (not to be confused with the rhetorical device of the same name), due to the fact that they are like smaller versions of trees which occur in sequences. Such structures may be of utility to various structured inference tasks, as well as within a full parsing pipeline, to quickly constrain subsequent inference, much as finite-state models such as supertagging (Bangalore and Joshi, 1999) or chart cell constraints (Roark and Hollingshead, 2008; Roark et al., 2012) are used. In this paper, we consider the problem of hedge parsing, i.e., discovering every constituent of length up to some span L. Similar constraints have been used in dependency parsing (Eisner and Smith, 2005; Dreyer et al., 2006), where the use of hard constraints on the distance between heads and dependents is known as vine parsing. It is also reminiscent of so-called Semi-Markov models (Sarawagi and Cohen, 2004), which allow finite-state models to reason about segments rather than just tags by imposing segment length limits. In the XML community, trees and hedges a</context>
+</contexts>
+<marker>Roark, Hollingshead, 2008</marker>
+<rawString>Brian Roark and Kristy Hollingshead. 2008. Classifying chart cells for quadratic complexity contextfree inference. In Proceedings of the 22nd International Conference on Computational Linguistics, pages 745–751.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Brian Roark</author>
+<author>Kristy Hollingshead</author>
+<author>Nathan Bodenstab</author>
+</authors>
+<title>Finite-state chart constraints for reduced complexity context-free parsing pipelines.</title>
+<date>2012</date>
+<journal>Computational Linguistics,</journal>
+<volume>38</volume>
+<issue>4</issue>
+<contexts>
+<context position="2688" citStr="Roark et al., 2012" startWordPosition="397" endWordPosition="400"> structures within a local window, ignoring global constituents outside that window. We follow the XML community in naming structures of this type hedges (not to be confused with the rhetorical device of the same name), due to the fact that they are like smaller versions of trees which occur in sequences. Such structures may be of utility to various structured inference tasks, as well as within a full parsing pipeline, to quickly constrain subsequent inference, much as finite-state models such as supertagging (Bangalore and Joshi, 1999) or chart cell constraints (Roark and Hollingshead, 2008; Roark et al., 2012) are used. In this paper, we consider the problem of hedge parsing, i.e., discovering every constituent of length up to some span L. Similar constraints have been used in dependency parsing (Eisner and Smith, 2005; Dreyer et al., 2006), where the use of hard constraints on the distance between heads and dependents is known as vine parsing. It is also reminiscent of so-called Semi-Markov models (Sarawagi and Cohen, 2004), which allow finite-state models to reason about segments rather than just tags by imposing segment length limits. In the XML community, trees and hedges are used for models of</context>
+<context position="12953" citStr="Roark et al. (2012)" startWordPosition="2162" endWordPosition="2165">a labeled segmentation with BC and ¯BC tags where C is hedge constituent type. We restrict the types to the most important types – following the 11 chunk types annotated in the CoNLL-2000 chunking task (Sang and Buchholz, 2000) – by replacing all other types with a new type OUT. Thus, “Analysts” is labeled BG; “much”, BNP; “will”, BVP and so on. To automatically predict the class of each word position, we train a multi-class classifier from labeled training data using a discriminative linear model, learning the model parameters with the averaged perceptron algorithm (Collins, 2002). We follow Roark et al. (2012) in the features they used to label words as beginning or ending constituents. The segmenter extracts features from word and POS-tag input sequences and hedge-boundary tag output sequences. The feature set includes trigrams of surrounding words, trigrams of surrounding POS tags, and hedge-boundary tags of the previous words. An additional orthographical feature set is used to tag rare1 and unknown words. This feature set includes prefixes and suffixes of the words (up to 4 characters), and presence of a hyphen, digit, or an upper-case character. Reported results are for a Markov order-2 segmen</context>
+</contexts>
+<marker>Roark, Hollingshead, Bodenstab, 2012</marker>
+<rawString>Brian Roark, Kristy Hollingshead, and Nathan Bodenstab. 2012. Finite-state chart constraints for reduced complexity context-free parsing pipelines. Computational Linguistics, 38(4):719–753.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Erik F Tjong Kim Sang</author>
+<author>Sabine Buchholz</author>
+</authors>
+<title>Introduction to the CoNLL-2000 shared task: Chunking.</title>
+<date>2000</date>
+<booktitle>In Proceedings of Conference on Computational Natural Language Learning (CoNLL),</booktitle>
+<pages>127--132</pages>
+<contexts>
+<context position="12561" citStr="Sang and Buchholz, 2000" startWordPosition="2097" endWordPosition="2100">10 15 20 t s K b h fi t t h i b d S t 799 tag hedges together under a new non-terminal labeled G. Unlabeled segmentation tags for the words in the example sentence in Figure 1(b) are: “Analysts/B are/B¯ concerned/B¯ that/B¯ much/B of/B¯ the/B¯ high-yield/B¯ market/B will/B remain/B treacherous/B for/B investors/B¯ ./B” In addition to the simple unlabeled segmentation with B and B¯ tags, we try a labeled segmentation with BC and ¯BC tags where C is hedge constituent type. We restrict the types to the most important types – following the 11 chunk types annotated in the CoNLL-2000 chunking task (Sang and Buchholz, 2000) – by replacing all other types with a new type OUT. Thus, “Analysts” is labeled BG; “much”, BNP; “will”, BVP and so on. To automatically predict the class of each word position, we train a multi-class classifier from labeled training data using a discriminative linear model, learning the model parameters with the averaged perceptron algorithm (Collins, 2002). We follow Roark et al. (2012) in the features they used to label words as beginning or ending constituents. The segmenter extracts features from word and POS-tag input sequences and hedge-boundary tag output sequences. The feature set in</context>
+</contexts>
+<marker>Sang, Buchholz, 2000</marker>
+<rawString>Erik F. Tjong Kim Sang and Sabine Buchholz. 2000. Introduction to the CoNLL-2000 shared task: Chunking. In Proceedings of Conference on Computational Natural Language Learning (CoNLL), pages 127–132.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Sunita Sarawagi</author>
+<author>William W Cohen</author>
+</authors>
+<title>SemiMarkov conditional random fields for information extraction.</title>
+<date>2004</date>
+<booktitle>In Advances in Neural Information Processing Systems (NIPS),</booktitle>
+<pages>1185--1192</pages>
+<contexts>
+<context position="3111" citStr="Sarawagi and Cohen, 2004" startWordPosition="466" endWordPosition="469">line, to quickly constrain subsequent inference, much as finite-state models such as supertagging (Bangalore and Joshi, 1999) or chart cell constraints (Roark and Hollingshead, 2008; Roark et al., 2012) are used. In this paper, we consider the problem of hedge parsing, i.e., discovering every constituent of length up to some span L. Similar constraints have been used in dependency parsing (Eisner and Smith, 2005; Dreyer et al., 2006), where the use of hard constraints on the distance between heads and dependents is known as vine parsing. It is also reminiscent of so-called Semi-Markov models (Sarawagi and Cohen, 2004), which allow finite-state models to reason about segments rather than just tags by imposing segment length limits. In the XML community, trees and hedges are used for models of XML document instances and for the contents of elements (Br¨uggemann-Klein and Wood, 2004). As far as we know, this paper is the first to consider this sort of partial parsing approach for natural language. We pursue this topic via tree transformation, whereby non-root non-terminals labeling constituents of span &gt; L in the tree are recursively elided and their children promoted to attach to their parent. In such a way,</context>
+</contexts>
+<marker>Sarawagi, Cohen, 2004</marker>
+<rawString>Sunita Sarawagi and William W. Cohen. 2004. SemiMarkov conditional random fields for information extraction. In Advances in Neural Information Processing Systems (NIPS), pages 1185–1192.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Mahsa Yarmohammadi</author>
+<author>Vivek K Rangarajan Sridhar</author>
+<author>Srinivas Bangalore</author>
+<author>Baskaran Sankaran</author>
+</authors>
+<title>Incremental segmentation and decoding strategies for simultaneous translation.</title>
+<date>2013</date>
+<booktitle>In Proceedings of the 6th International Joint Conference on Natural Language Processing (IJCNLP),</booktitle>
+<pages>1032--1036</pages>
+<contexts>
+<context position="1622" citStr="Yarmohammadi et al., 2013" startWordPosition="233" endWordPosition="236">e initial experiments on different inference strategies. 1 Introduction Parsing full hierarchical syntactic structures is costly, and some NLP applications that could benefit from parses instead substitute shallow proxies such as NP chunks. Models to derive such non-hierarchical annotations are finite-state, so inference is very fast. Still, these partial annotations omit all but the most basic syntactic segmentation, ignoring the abundant local structure that could be of utility even in the absence of fully connected structures. For example, in incremental (simultaneous) machine translation (Yarmohammadi et al., 2013), sub-sentential segments are translated independently and sequentially, hence the fully-connected syntactic structure is not generally available. Even so, locally-connected source language parse structures can inform both segmentation and translation of each segment in such a translation scenario. One way to provide local hierarchical syntactic structures without fully connected trees is to focus on providing full hierarchical annotations for structures within a local window, ignoring global constituents outside that window. We follow the XML community in naming structures of this type hedges</context>
+</contexts>
+<marker>Yarmohammadi, Sridhar, Bangalore, Sankaran, 2013</marker>
+<rawString>Mahsa Yarmohammadi, Vivek K. Rangarajan Sridhar, Srinivas Bangalore, and Baskaran Sankaran. 2013. Incremental segmentation and decoding strategies for simultaneous translation. In Proceedings of the 6th International Joint Conference on Natural Language Processing (IJCNLP), pages 1032–1036.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yue Zhang</author>
+<author>Stephen Clark</author>
+</authors>
+<title>Syntactic processing using the generalized perceptron and beam search.</title>
+<date>2011</date>
+<journal>Computational Linguistics,</journal>
+<volume>37</volume>
+<issue>1</issue>
+<contexts>
+<context position="19075" citStr="Zhang and Clark, 2011" startWordPosition="3190" endWordPosition="3193">at baseline segmentation models did provide a significant speedup in parsing, but that cascading errors remain a problem. There are many directions of future work to pursue here. First, the current results are all for exhaustive CYK parsing, and we plan to perform a detailed investigation of the performance of hedgebank parsing with prioritization and pruning methods of the sort available in BUBS (Bodenstab et al., 2011). Further, this sort of annotation seems well suited to incremental parsing with beam search, which has been shown to achieve high accuracies even for fully connected parsing (Zhang and Clark, 2011). Improvements to the transform (e.g., grouping items not in hedges under non-terminals) and to the segmentation model (e.g., increasing precision at the expense of recall) could improve accuracy without greatly reducing efficiency. Finally, we intend to perform an extrinsic evaluation of this parsing in an on-line task such as simultaneous translation. Acknowledgments This work was supported in part by NSF grant #IIS-0964102. Any opinions, findings, conclusions or recommendations expressed in this publication are those of the authors and do not necessarily reflect the views of the NSF. 801 Re</context>
+</contexts>
+<marker>Zhang, Clark, 2011</marker>
+<rawString>Yue Zhang and Stephen Clark. 2011. Syntactic processing using the generalized perceptron and beam search. Computational Linguistics, 37(1):105–151.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

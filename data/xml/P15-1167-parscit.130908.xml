@@ -1,0 +1,1819 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.000000">
+<note confidence="0.606068">
+Accurate Linear-Time Chinese Word Segmentation via Embedding
+Matching
+Jianqiang Ma
+SFB 833 and Department of Linguistics
+University of Tübingen, Germany
+jma@sfs.uni-tuebingen.de
+Erhard Hinrichs
+SFB 833 and Department of Linguistics
+</note>
+<affiliation confidence="0.627217">
+University of Tübingen, Germany
+</affiliation>
+<email confidence="0.946461">
+eh@sfs.uni-tuebingen.de
+</email>
+<sectionHeader confidence="0.98246" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.99988925">
+This paper proposes an embedding match-
+ing approach to Chinese word segmenta-
+tion, which generalizes the traditional se-
+quence labeling framework and takes ad-
+vantage of distributed representations. The
+training and prediction algorithms have
+linear-time complexity. Based on the pro-
+posed model, a greedy segmenter is de-
+veloped and evaluated on benchmark cor-
+pora. Experiments show that our greedy
+segmenter achieves improved results over
+previous neural network-based word seg-
+menters, and its performance is competi-
+tive with state-of-the-art methods, despite
+its simple feature set and the absence of ex-
+ternal resources for training.
+</bodyText>
+<sectionHeader confidence="0.992519" genericHeader="keywords">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.999927191489362">
+Chinese sentences are written as character se-
+quences without word delimiters, which makes
+word segmentation a prerequisite of Chinese lan-
+guage processing. Since Xue (2003), most work
+has formulated Chinese word segmentation (CWS)
+as sequence labeling (Peng et al., 2004) with char-
+acter position tags, which has lent itself to struc-
+tured discriminative learning with the benefit of
+allowing rich features of segmentation configura-
+tions, including (i) context of character/word n-
+grams within local windows, (ii) segmentation his-
+tory of previous characters, or the combinations of
+both. These feature-based models still form the
+backbone of most state-of-the art systems.
+Nevertheless, many feature weights in such
+models are inevitably poorly estimated because the
+number of parameters is so large with respect to
+the limited amount of training data. This has mo-
+tivated the introduction of low-dimensional, real-
+valued vectors, known as embeddings, as a tool
+to deal with the sparseness of the input. Em-
+beddings allow linguistic units appearing in sim-
+ilar contexts to share similar vectors. The suc-
+cess of embeddings has been observed in many
+NLP tasks. For CWS, Zheng et al. (2013) adapted
+Collobert et al. (2011) and uses character embed-
+dings in local windows as input for a two-layer net-
+work. The network predicts individual character
+position tags, the transitions of which are learned
+separately. Mansur et al. (2013) also developed a
+similar architecture, which labels individual char-
+acters and uses character bigram embeddings as
+additional features to compensate the absence of
+sentence-level modeling. Pei et al. (2014) im-
+proved upon Zheng et al. (2013) by capturing the
+combinations of context and history via a tensor
+neural network.
+Despite their differences, these CWS ap-
+proaches are all sequence labeling models. In such
+models, the target character can only influence the
+prediction as features. Consider the the segmen-
+tation configuration in (1), where the dot appears
+before the target character in consideration and the
+box (❑) represents any character that can occur in
+the configuration. In that example, the known his-
+tory is that the first two characters 中国 ‘China’ are
+joined together, which is denoted by the underline.
+</bodyText>
+<listItem confidence="0.993825">
+(1) 中国·❑ 格外 (where ❑ E {风, 规, ...})
+(2) 中国风 格外 ‘China-style especially’
+(3) 中国 规格 外 ‘besides Chinese spec.’
+</listItem>
+<bodyText confidence="0.949542454545455">
+For possible target characters, 风 ‘wind’ and 规
+‘rule’, the correct segmentation decisions for them
+are opposite, as shown in (2) and (3), respectively.
+In order to correctly predict both, current models
+can set higher weights for target character-specific
+features. However, in general, 风 is more likely
+to start a new word instead of joining the exist-
+ing one as in this example. Given such conflicting
+evidence, models can rarely find optimal feature
+weights, if they exist at all.
+1733
+</bodyText>
+<note confidence="0.997391666666667">
+Proceedings of the 53rd Annual Meeting of the Association for Computational Linguistics
+and the 7th International Joint Conference on Natural Language Processing, pages 1733–1743,
+Beijing, China, July 26-31, 2015. c�2015 Association for Computational Linguistics
+</note>
+<bodyText confidence="0.99854976923077">
+The crux of this conflicting evidence problem
+is that similar configurations can suggest opposite
+decisions, depending on the target character and
+vice versa. Thus it might be useful to treat segmen-
+tation decisions for distinct characters separately.
+And instead of predicting general segmentation de-
+cisions given configurations, it could be beneficial
+to model the matching between configurations and
+character-specific decisions.
+To this end, this paper proposes an embed-
+ding matching approach (Section 2) to CWS, in
+which embeddings for both input and output are
+learned and used as representations to counteract
+sparsities. Thanks to embeddings of character-
+specific decisions (actions) serving as both input
+features and output, our hidden-layer-free archi-
+tecture (Section 2.2) is capable of capturing pre-
+diction histories in similar ways as the hidden lay-
+ers in recurrent neural networks (Mikolov et al.,
+2010). We evaluate the effectiveness of the model
+via a linear-time greedy segmenter (Section 3) im-
+plementation. The segmenter outperforms previ-
+ous embedding-based models (Section 4.2) and
+achieves state-of-the-art results (Section 4.3) on a
+benchmark dataset. The main contributions of this
+paper are:
+</bodyText>
+<listItem confidence="0.997711">
+• A novel embedding matching model for Chi-
+nese word segmentation.
+• Developing a greedy word segmenter, which
+is based on the matching model and achieves
+competitive results.
+• Introducing the idea of character-specific seg-
+mentation action embeddings as both feature
+and output, which are cornerstones of the
+model and the segmenter.
+</listItem>
+<sectionHeader confidence="0.575162" genericHeader="introduction">
+2 Embedding Matching Models for
+Chinese Word Segmentation
+</sectionHeader>
+<bodyText confidence="0.9997225">
+We propose an embedding based matching model
+for CWS, the architecture of which is shown in
+Figure 1. The model employs trainable embed-
+dings to represent both sides of the matching,
+which will be specified shortly, followed by details
+of the architecture in Section 2.2.
+</bodyText>
+<subsectionHeader confidence="0.9969585">
+2.1 Segmentation as Configuration-Action
+Matching
+</subsectionHeader>
+<bodyText confidence="0.954416692307692">
+Output. The word segmentation output of a char-
+acter sequence can be described as a sequence of
+character-specific segmentation actions. We use
+separation (s) and combination (c) as possible
+actions for each character, where a separation ac-
+tion starts a new word with the current character,
+while a combination action appends the character
+to the preceding ones. We model character-action
+combinations instead of atomic, character inde-
+pendent actions. As a running example, sentence
+(4b) is the correct segmentation for (4a), which can
+be represented as the sequence (猫 -s, 占 -s, 领 -c,
+了 -s, 婴 -s, 儿 -c, 床 -c) .
+</bodyText>
+<listItem confidence="0.91149">
+(4) a. 猫占领了婴儿床
+b. 猫 占领 了 婴儿床
+c. ‘The cat occupied the crib’
+</listItem>
+<bodyText confidence="0.998668571428571">
+Input. The input are the segmentation configura-
+tions for each character under consideration, which
+are described by context and history features. The
+context features of captures the characters that are
+in the same sentence of the current character and
+the history features encode the segmentation ac-
+tions of previous characters.
+</bodyText>
+<listItem confidence="0.9999224">
+• Context features. These refer to character
+unigrams and bigrams that appear in the lo-
+cal context window of h characters that cen-
+ters at ci, where ci is 领 in example (4) and
+h = 5 is used in this paper. The template for
+features are shown in Table 1. For our exam-
+ple, the uni- and bi-gram features would be:
+猫, 占, 领, 了, 婴 and 猫占, 占领, 领了, 了
+婴, respectively.
+• History features. To make inference
+</listItem>
+<bodyText confidence="0.995592058823529">
+tractable, we assume that only previous l
+character-specific actions are relevant, where
+l = 2 for this study. In our example, 猫 -s
+and 战 -s are the history features. Such fea-
+tures capture partial information of syntactic
+and semantic dependencies between previous
+words, which are clues for segmentation that
+pure character contexts could not provide. A
+dummy character START is used to represent
+the absent (left) context characters in the case
+of the first l characters in a sentence. And the
+predicted action for the START symbol is al-
+ways s.
+Matching. CWS is now modeled as the match-
+ing of the input (segmentation configuration) and
+output (two possible character-specific actions) for
+each character. Formally, a matching model learns
+</bodyText>
+<page confidence="0.793669">
+1734
+</page>
+<figureCaption confidence="0.980517">
+Figure 1: The architecture of the embedding matching model for CWS. The model predicts the seg-
+</figureCaption>
+<bodyText confidence="0.9647385">
+mentation for the character 3T in sentence (4), which is the second character of word 占3T ‘occupy’. Both
+feature and output embeddings are trainable parameters of the model.
+</bodyText>
+<tableCaption confidence="0.722103">
+Table 1: Uni- and bi-gram feature template
+the following function:
+</tableCaption>
+<equation confidence="0.997526333333333">
+g ( b1b2...bn, a1a2...an)
+( �
+f bj(aj−2,aj−1;cj− � 2 ...cj+� 2 ), aj (1)
+</equation>
+<bodyText confidence="0.999963166666667">
+where c1c2...cn is the character sequence, bj
+and aj are the segmentation configuration and
+action for character cj, respectively. In (1),
+bj(aj−2, aj−1; cj− 2 ...cj+�2 ) indicates that the con-
+figuration for each character is a function that de-
+pends on the actions of the previous l characters
+and the characters in the local window of size h.
+Why embedding. The above matching model
+would suffer from sparsity if these outputs
+(character-specific action aj) were directly en-
+coded as one-hot vectors, since the matching
+model can be seen as a sequence labeling model
+with C xL outputs, where L is the number of orig-
+inal labels while C is the number of unique char-
+acters. For Chinese, C is at the order of 103 −104.
+The use of embeddings, however, can serve the
+matching model well thanks to their low dimen-
+sionality.
+</bodyText>
+<subsectionHeader confidence="0.999501">
+2.2 The Architecture
+</subsectionHeader>
+<bodyText confidence="0.999961409090909">
+The proposed architecture (Figure 1) has three
+components, namely look-up table, concatenation
+and softmax function for matching. We will go
+through each of them in this section.
+Look-up table. The mapping between fea-
+tures/outputs to their corresponding embeddings
+are kept in a look-up table, as in many previous
+embedding related work (Bengio et al., 2003; Pei
+et al., 2014). Such features are extracted from the
+training data. Formally, the embedding for each
+distinct feature d is denoted as Embed(d) E RN,
+which is a real valued vector of dimension N.
+Each feature is retrieved by its unique index. The
+retrieval of the embeddings for the output actions
+is similar.
+Concatenation. To predict the segmentation for
+the target character cj, its feature vectors are con-
+catenated into a single vector, the input embed-
+ding, i(bj) E RN×K, where K is the number of
+features used to describe the configuration bj.
+Softmax. The model then computes the dot
+product of the input embedding i(bj) and each of
+</bodyText>
+<equation confidence="0.8020191">
+Group
+Feature template
+unigram
+bigram
+ci−2, ci−1, ci, ci+1, ci+2
+ci−2ci−1, ci−1ci, cici+1, ci+1ci+2
+n
+H
+j=1
+1735
+</equation>
+<bodyText confidence="0.999875714285714">
+the two output embeddings, o(aj,1) and o(aj,2),
+which represent the two possible segmentation ac-
+tions for the target character cj, respectively. The
+exponential of the two raw scores are normalized
+to obtain probabilistic values E [0, 1].
+We call the resulting scores matching probabili-
+ties, which denote probabilities that actions match
+the given segmentation configuration. In our ex-
+ample, 领 -c has the probability of 0.7 to be the cor-
+rect action, while 领 -s is less likely with a lower
+probability of 0.3. Formally, the above matching
+procedure can be described as a softmax function,
+as shown in (2), which is also an individual f term
+in (1).
+</bodyText>
+<equation confidence="0.999746">
+f(bj,aj,k) =
+�kxexpi(i(bj) - o(aj,k′)) (2)
+</equation>
+<bodyText confidence="0.999888722222222">
+In (2), aj,k (1 G k G 2) represent two possible
+actions, such as 领 -c and 领 -s for 领 in our ex-
+ample. Note that, to ensure the input and output are
+of the same dimension, for each character specific
+action, the model trains two distinct embeddings,
+one E RN as feature and the other E RN,K as
+output, where K is the number of features for each
+input.
+Best word segmentation of sentence. After
+plugging (2) into (1) and applying (and then drop-
+ping) logarithms for computational convenience,
+finding the best segmentation for a sentence be-
+comes an optimization problem as shown in (3). In
+the formula, Y is the best action sequence found
+by the model among all the possible ones, Y =
+a1a2...an, where aj is the predicted action for the
+character cj (1 G j G n), which is either cj-s or
+cj-c, such as 领 -s and 领 -c.
+</bodyText>
+<equation confidence="0.994446">
+exp(i(bj) - o(aj))
+Ek exp (i(bj) - o(aj,k)) (3)
+</equation>
+<sectionHeader confidence="0.924505" genericHeader="method">
+3 The Greedy Segmenter
+</sectionHeader>
+<bodyText confidence="0.999938153846154">
+Our model depends on the actions predicted for the
+previous two characters as history features. Tradi-
+tionally, such scenarios call for dynamic program-
+ming for exact inference. However, preliminary
+experiments showed that, for our model, a Viterbi
+search based segmenter, even supported by con-
+ditional random field (Lafferty et al., 2001) style
+training, yields similar results as the greedy search
+based segmenter in this section. Since the greedy
+segmenter is much more efficient in training and
+testing, the rest of the paper will focus on the pro-
+posed greedy segmenter, the details of which will
+be described in this section.
+</bodyText>
+<subsectionHeader confidence="0.997561">
+3.1 Greedy Search
+</subsectionHeader>
+<bodyText confidence="0.999954333333334">
+Initialization. The first character in the sentence
+is made to have two left side characters that are
+dummy symbols of START, whose predicted ac-
+tions are always START-s, i.e. separation.
+Iteration. The algorithms predicts the action for
+each character cj, one at a time, in a left-to-right,
+incremental manner, where 1 G j G n and n is the
+sentence length. To do so, it first extracts context
+features and history features, the latter of which are
+the predicted character-specific actions for the pre-
+vious two characters. Then the model matches the
+concatenated feature embedding with embeddings
+of the two possible character-specific actions, cj-s
+and ci-c. The one with higher matching probability
+is predicted as segmentation action for the charac-
+ter, which is irreversible. After the action for the
+last character is predicted, the segmented word se-
+quence of the sentence is built from the predicted
+actions deterministically.
+Hybrid matching. Character-specific embed-
+dings are capable of capturing subtle word forma-
+tion tendencies of individual characters, but such
+representations are incapable of covering match-
+ing cases for unknown target characters. An-
+other minor issue is that the action embeddings
+for certain low frequent characters may not be suf-
+ficiently trained. To better deal with these sce-
+narios, We also train two embeddings to repre-
+sent character-independent segmentation actions,
+ALL-s and ALL-c, and use them to average with
+or substitute embeddings of infrequent or unknown
+characters, which are either insufficiently trained
+or nonexistent. Such strategy is called hybrid
+matching, which can improve accuracy.
+Complexity. Although the total number of ac-
+tions is large, the matching for each target charac-
+ter only requires the two actions that correspond to
+that specific character, such as 领 -s and 领 -c for
+领 in our example. Each prediction is thus similar
+to a softmax computation with two outputs, which
+costs constant time C. Greedy search ensures that
+the total time for predicting a sentence of n char-
+acters is n x C, i.e. linear time complexity, with a
+minor overhead for mapping actions to segmenta-
+tions.
+</bodyText>
+<equation confidence="0.92458275">
+n
+Y = argmax
+Y j=1
+1736
+</equation>
+<subsectionHeader confidence="0.995883">
+3.2 Training
+</subsectionHeader>
+<bodyText confidence="0.999828181818182">
+The training procedure first predicts the action for
+the current character with current parameters, and
+then optimizes the log likelihood of correct seg-
+mentation actions in the gold segmentations to up-
+date parameters. Ideally, the matching probability
+for the correct action embedding should be 1 while
+that of the incorrect one should be 0. We minimize
+the cross-entropy loss function as in (4) for the seg-
+mentation prediction of each character cj to pursue
+this goal. The loss function is convex, similar to
+that of maximum entropy models.
+</bodyText>
+<equation confidence="0.9734515">
+exp (i · o(aj,k))
+δ (aj,k) log �k′ exp �i · o(aj,k′)) (4)
+</equation>
+<bodyText confidence="1">
+where aj,k denotes a possible action for cj and i is a
+compact notation for i(bj). In (4), δ(aj,k) is an in-
+dicator function defined by the following formula,
+where dj denotes the correct action.
+</bodyText>
+<equation confidence="0.9132349">
+�
+δ(aj,k)
+1, if aj k = dj
+=
+0, otherwise
+To counteract over-fitting, we add L2 regulariza-
+tion term to the loss function, as follows:
+�
+λ||i||2 + ||o(aj,k)||2) (5)
+2
+</equation>
+<bodyText confidence="0.998317894736842">
+The formula in (4) and (5) are similar to that of a
+standard softmax regression, except that both in-
+put and output embeddings are parameters to be
+trained. We perform stochastic gradient descent to
+update input and output embeddings in turn, each
+time considering the other as constant. We give the
+gradient (6) and the update rule (7) for the input
+embedding i(bj) (i for short), where ok is a short
+notation for o(aj,k). The gradient and update for
+output embeddings are similar. The α in (7) is the
+learning rate, which we use a linear decay scheme
+to gradually shrink it from its initial value to zero.
+Note that the update for the input embedding i is
+actually performed for the feature embeddings that
+form i in the concatenation step.
+character number, as compared with search, only a
+few constant time operations of gradient computa-
+tion and parameter updates are performed for each
+character.
+</bodyText>
+<sectionHeader confidence="0.999681" genericHeader="method">
+4 Experiments
+</sectionHeader>
+<subsectionHeader confidence="0.998255">
+4.1 Data and Evaluation Metric
+</subsectionHeader>
+<bodyText confidence="0.999240375">
+In the experiments, we use two widely used and
+freely available1 manually word-segmented cor-
+pora, namely, PKU and MSR, from the second
+SIGHAN international Chinese word segmenta-
+tion bakeoff (Emerson, 2005). Table 2 shows the
+details of the two dataset. All evaluations in this
+paper are conducted with official training/testing
+set split using official scoring script.2
+</bodyText>
+<table confidence="0.9985776">
+PKU MSR
+Word types 5.5 × 104 8.8 × 104
+Word tokens 1.1 × 106 2.4 × 106
+Character types 5 × 103 5 × 103
+Character tokens 1.8 × 106 4.1 × 106
+</table>
+<tableCaption confidence="0.999024">
+Table 2: Corpus details of PKU and MSR
+</tableCaption>
+<bodyText confidence="0.999794333333333">
+The segmentation accuracy is evaluated by pre-
+cision (P), recall (R), F-score and Roov, the re-
+call for out-of-vocabulary words. Precision is de-
+fined as the number of correctly segmented words
+divided by the total number of words in the seg-
+mentation result. Recall is defined as the number
+of correctly segmented words divided by the total
+number of words in the gold standard segmenta-
+tion. In particular, Roov reflects the model gen-
+eralization ability. The metric for overall perfor-
+mance, the evenly-weighted F-score is calculated
+as in (8):
+</bodyText>
+<equation confidence="0.99981775">
+2 × P × R
+F =
+(8)
+P + R
+</equation>
+<bodyText confidence="0.996803333333333">
+To comply with CWS evaluation conventions and
+make comparisons fair, we distinguish the follow-
+ing two settings:
+</bodyText>
+<equation confidence="0.9781048">
+K
+J = −
+k=1
+K
+J = J +
+k=1
+∂J �= ( f (bj, aj,k) − δ (aj,k)) · ok + λi (6) • closed-set: no extra resource other than train-
+∂i k ∂J ing corpora is used.
+i = i −α(7) • open-set: additional lexicon, raw corpora, etc
+∂i are used.
+</equation>
+<bodyText confidence="0.939297444444444">
+Complexity. For each iteration of the training pro- 1http://www.sighan.org/bakeoff2005/
+cess, the time complexity is also linear to the input 2http://www.sighan.org/bakeoff2003/score
+1737
+We will report the final results of our model3 on
+PKU and MSR corpora in comparison with pre-
+vious embedding based models (Section 4.2) and
+state-of-the-art systems (Section 4.3), before go-
+ing into detailed experiments for model analyses
+(Section 4.5).
+</bodyText>
+<subsectionHeader confidence="0.9954565">
+4.2 Comparison with Previous
+Embedding-Based Models
+</subsectionHeader>
+<bodyText confidence="0.999994393939394">
+Table 3 shows the results of our greedy segmenter
+on the PKU and MSR datasets, which are com-
+pared with embedding-based segmenters in previ-
+ous studies.4 In the table, results for both closed-
+set and open-set setting are shown for previous
+models. In the open-set evaluations, all three
+previous work use pre-training to train character
+ngram embeddings from large unsegmented cor-
+pora to initialize the embeddings, which will be
+later trained with the manually word-segmented
+training data. For our model, we report the close-
+set results only, as pre-training does not signifi-
+cant improve the results in our experiments (Sec-
+tion 4.5).
+As shown in Table 3, under close-set evaluation,
+our model significantly outperform previous em-
+bedding based models in all metrics. Compared
+with the previous best embedding-based model,
+our greedy segmenter has achieved up to 2.2% and
+25.8% absolute improvements (MSR) on F-score
+and Roo,,, respectively. Surprisingly, our close-set
+results are also comparable to the best open-set re-
+sults of previous models. As we will see in (Sec-
+tion 4.4), when using same or less character uni-
+and bi-gram features, our model still outperforms
+previous embedding based models in closed-set
+evaluation, which shows the effectiveness of our
+matching model.
+Significance test. Table 4 shows the 95% con-
+fidence intervals (CI) for close-set results of our
+model and the best performing previous model (Pei
+et al., 2014), which are computed by formula (9),
+following (Emerson, 2005).
+</bodyText>
+<equation confidence="0.981971">
+CI = 21 &apos;(&apos;N
+VVV N (9)
+</equation>
+<bodyText confidence="0.998809333333333">
+where F is the F-score value and the N is the word
+token count of the testing set, which is 104,372 and
+106,873 for PKU and MSR, respectively. We see
+</bodyText>
+<footnote confidence="0.9977155">
+3Our implementation: https://zenodo.org/record/17645.
+4The results for Zheng et al. (2013) are from the re-
+</footnote>
+<bodyText confidence="0.85497175">
+implementation of Pei et al. (2014).
+that the confidence intervals of our results do not
+overlap with that of (Pei et al., 2014), meaning that
+our improvements are statistically significant.
+</bodyText>
+<subsectionHeader confidence="0.978562">
+4.3 Comparison with the State-of-the-Art
+Systems
+</subsectionHeader>
+<bodyText confidence="0.99998225">
+Table 5 shows that the results of our greedy seg-
+menter are competitive with the state-of-the-art su-
+pervised systems (Best05 closed-set, Zhang and
+Clark, 2007), although our feature set is much
+simpler. More recent state-of-the-art systems rely
+on both extensive feature engineering and ex-
+tra raw corpora to boost performance, which are
+semi-supervised learning. For example, Zhang
+et al (2013) developed 8 types of static and dy-
+namic features to maximize the co-training system
+that used extra corpora of Chinese Gigaword and
+Baike, each of which contains more than 1 bil-
+lion character tokens. Such systems are not di-
+rectly comparable with our supervised model. We
+leave the development of semi-supervised learning
+methods for our model as future work.
+</bodyText>
+<subsectionHeader confidence="0.967908">
+4.4 Features Influence
+</subsectionHeader>
+<bodyText confidence="0.9999785">
+Table 6 shows the F-scores of our model on
+PKU dataset when different features are removed
+(‘w/o’) or when only a subset of features are used.
+Features complement each other and removing any
+group of features leads to a limited drop of F-
+score up to 0.7%. Note that features of previ-
+ous (two) actions are even more informative than
+all unigram features combined, suggesting that
+intra- an inter-word dependencies reflected by ac-
+tion features are strong evidence for segmentation.
+Moreover, using same or less character ngram fea-
+tures, our model outperforms previous embedding
+based models, which shows the effectiveness of
+our matching model.
+</bodyText>
+<subsectionHeader confidence="0.998346">
+4.5 Model Analysis
+</subsectionHeader>
+<bodyText confidence="0.999924636363636">
+Learning curve. Figure 2 shows that the training
+procedure coverages quickly. After the first iter-
+ation, the testing F-scores are already 93.5% and
+95.7% for PKU and MSR, respectively, which then
+gradually reach their maximum within the next 9
+iterations before the curve flats out.
+Speed. With an unoptimized single-thread
+Python implementation running on a laptop with
+intel Core-i5 CPU (1.9 GHZ), each iteration of the
+training procedure on PKU dataset takes about 5
+minutes, or 6,000 characters per second. The pre-
+</bodyText>
+<table confidence="0.976930818181818">
+1738
+Models PKU Corpus MSR Corpus
+P R F Roov P R F Roov
+Zheng et al.(2013) 92.8 92.0 92.4 63.3 92.9 93.6 93.3 55.7
++ pre-training† 93.5 92.2 92.8 69.0 94.2 93.7 93.9 64.1
+Mansur et al. (2013) 93.6 92.8 93.2 57.9 92.3 92.2 92.2 53.7
++ pre-training† 94.0 93.9 94.0 69.5 93.1 93.1 93.1 59.7
+Pei et al. (2014) 93.7 93.4 93.5 64.2 94.6 94.2 94.4 61.4
++ pre-training† 94.4 93.6 94.0 69.0 95.2 94.6 94.9 64.8
++ pre-training &amp; bigram† - - 95.2 - - - 97.2 -
+This work (closed-set) 95.5 94.6 95.1 76.0 96.6 96.5 96.6 87.2
+</table>
+<tableCaption confidence="0.99672">
+Table 3: Comparison with previous embedding based models. Numbers in percentage. Results with †
+</tableCaption>
+<table confidence="0.9681464">
+used extra corpora for (pre-)training.
+Models PKU MSR
+F CI F CI
+Pei et al. 93.5 ±0.15 94.4 ±0.14
+This work 95.1 ±0.13 96.6 ±0.11
+</table>
+<tableCaption confidence="0.9234605">
+Table 4: Significance test of closed-set results of
+Pei et al (2014) and our model.
+</tableCaption>
+<table confidence="0.956313666666667">
+Model PKU MSR
+Best05 closed-set 95.0 96.4
+Zhang et al. (2006) 95.1 97.1
+Zhang and Clark (2007) 94.5 97.2
+Wang et al. (2012) 94.1 97.2
+Sun et al. (2009) 95.2 97.3
+Sun et al. (2012) 95.4 97.4
+Zhang et al. (2013) † 96.1 97.4
+This work 95.1 96.6
+</table>
+<tableCaption confidence="0.994563">
+Table 5: Comparison with the state-of-the-art sys-
+</tableCaption>
+<bodyText confidence="0.971908642857143">
+tems. Results with † used extra lexicon/raw cor-
+pora for training, i.e. in open-set setting. Best05
+refers to the best closed-set results in 2nd SIGHAN
+bakeoff.
+diction speed is above 13,000 character per second.
+Hyper parameters. The hyper parameters used
+in the experiments are shown in Table 7. We ini-
+tialized hyper parameters with recommendations
+in literature before tuning with dev-set experi-
+ments, each of which change one parameter by a
+magnitude. We fixed the hyper parameter to the
+current setting without spending too much time on
+tuning, since that is not the main purpose of this
+paper.
+</bodyText>
+<listItem confidence="0.9834375">
+• Embedding size determines the number of
+parameters to be trained, thus should fit the
+</listItem>
+<tableCaption confidence="0.841634">
+Table 6: The influence of features. F-score in per-
+centage on the PKU corpus.
+</tableCaption>
+<figureCaption confidence="0.996016">
+Figure 2: The learning curve of our model.
+</figureCaption>
+<bodyText confidence="0.999886666666667">
+training data size to achieve good perfor-
+mance. We tried the size of 30 and 100, both
+of which performs worse than 50. A possible
+tuning is to use different embedding size for
+different groups of features instead of setting
+Ni = 50 for all features.
+</bodyText>
+<listItem confidence="0.83405">
+• Context window size. A window size of
+3-5 characters achieves comparable results.
+Zheng et al. (2013) suggested that context
+window larger than 5 may lead to inferior re-
+sults.
+• Initial Learning rate. We found that several
+</listItem>
+<bodyText confidence="0.834557333333333">
+learning rates between 0.04 to 0.15 yielded
+very similar results as the one reported here.
+The training is not very sensitive to reason-
+</bodyText>
+<table confidence="0.880788909090909">
+Feature F-score
+Feature F-score
+All features 95.1
+w/o action 94.6
+w/o unigram 94.8
+w/o bigram 94.4
+uni-&amp;bi-gram 94.6
+only action 93.3
+only unigram 92.1
+only bigram 94.2
+1739
+</table>
+<bodyText confidence="0.993709666666667">
+able values of initial learning rate. However,
+Instead of our simple linear decay of learning
+rate, it might be useful to try more sophisti-
+cated techniques, such as AdaGrad and expo-
+nential decaying (Tsuruoka et al., 2009; Sun
+et al., 2013).
+</bodyText>
+<listItem confidence="0.993348">
+• Regularization. Our model suffers a little
+from over-fitting, if no regularization is used.
+In that case, the F-score on PKU drops from
+95.1% to 94.7%.
+• Pre-training. We tried pre-training charac-
+</listItem>
+<bodyText confidence="0.877687777777778">
+ter embeddings using word2vec5 with Chi-
+nese Gigaword Corpus6 and use them to ini-
+tialize the corresponding embeddings in our
+model, as previous work did. However, we
+were only able to see insignificant F-score
+improvements within 0.1% and observed that
+the training F-score reached 99.9% much ear-
+lier. We hypothesize that pre-training leads to
+sub-optimal local maximums for our model.
+</bodyText>
+<listItem confidence="0.975772666666667">
+• Hybrid matching. We tried applying hy-
+brid matching (Section 3.1) for target char-
+acters which are less frequent than the top
+ftop characters, including unseen characters,
+which leads to about 0.15% of F-score im-
+provements.
+</listItem>
+<tableCaption confidence="0.989083">
+Table 7: Hyper parameters of our model.
+</tableCaption>
+<sectionHeader confidence="0.997318" genericHeader="method">
+5 Related Work
+</sectionHeader>
+<bodyText confidence="0.9999809">
+Word segmentation. Most modern segmenters
+followed Xue (2003) to model CWS as sequence
+labeling of character position tags, using condi-
+tional random fields (Peng et al. 2004), structured
+perceptron (Jiang et al., 2008), etc. Some notable
+exceptions are (Zhang and Clark, 2007; Zhang et
+al., 2012), which exploited rich word-level fea-
+tures and (Ma et al., 2012; Ma, 2014; Zhang et
+al., 2014), which explicitly model word structures.
+Our work generalizes the sequence labeling to a
+</bodyText>
+<footnote confidence="0.98144">
+5https://code.google.com/p/word2vec/
+6https://catalog.ldc.upenn.edu/LDC2005T14
+</footnote>
+<bodyText confidence="0.999940975">
+more flexible framework of matching, and predicts
+actions as in (Zhang and Clark, 2007; Zhang et al.,
+2012) instead of position tags to prevent the greedy
+search from suffering tag inconsistencies. To bet-
+ter utilize resources other than training data, our
+model might benefit from techniques used in recent
+state-of-the-art systems, such as semi-supervised
+learning (Zhao and Kit, 2008; Sun and Xu, 2011;
+Zhang et al., 2013; Zeng et al., 2013), joint models
+(Li and Zhou, 2012; Qian and Liu, 2012), and par-
+tial annotations (Liu et al., 2014; Yang and Vozila,
+2014).
+Distributed representation and CWS. Dis-
+tributed representation are useful for various NLP
+tasks, such as POS tagging (Collobert et al., 2011),
+machine translation (Devlin et al., 2014) and pars-
+ing (Socher et al., 2013). Influenced by Collobert
+et al. (2011), Zheng et al. (2013) modeled CWS as
+tagging and treated sentence-level tag sequence as
+the combination of individual tag predictions and
+context-independent tag transition. Mansur et al.
+(2013) was inspired by Bengio et al. (2003) and
+used character bigram embeddings to compensate
+for the absence of sentence level optimization. To
+model interactions between tags and characters,
+which are absent in these two CWS models, Pei et
+al. (2014) introduced the tag embedding and used
+a tensor hidden layer in the neural net. In con-
+trast, our work uses character-specific action em-
+beddings to explicitly capture such interactions. In
+addition, our work gains efficiency by avoiding
+hidden layers, similar as Mikolov et al. (2013).
+Learning to match. Matching heterogeneous
+objects has been studied in various contexts before,
+and is currently flourishing, thanks to embedding-
+based deep (Gao et al., 2014) and convolutional
+(Huang et al., 2013; Hu et al., 2014) neural net-
+works. This work develops a matching model for
+CWS and differs from others in its“shallow”yet
+effective architecture.
+</bodyText>
+<sectionHeader confidence="0.996546" genericHeader="method">
+6 Discussion
+</sectionHeader>
+<bodyText confidence="0.999188">
+Simple architecture. It is possible to adopt stan-
+dard feed-forward neural network for our embed-
+ding matching model with character-action em-
+beddings as both feature and output. Nevertheless,
+we designed the proposed architecture to avoid
+hidden layers for simplicity, efficiency and easy-
+tuning, inspired by word2vec. Our simple archi-
+tecture is effective, demonstrated by the improved
+results over previous neural-network word seg-
+</bodyText>
+<figure confidence="0.42756">
+Size of feature embed’
+Size of output embed’
+Window size
+Initial learning rate
+Regularization
+Hybrid matching
+</figure>
+<equation confidence="0.834798285714286">
+N1 = 50
+N2 = 550
+h = 5
+α = 0.1
+A = 0.001
+ftop = 8%
+1740
+</equation>
+<bodyText confidence="0.9997592">
+menters, all of which use feed-forward architecture
+with different features and/or layers. It might be
+interesting to directly compare the performances
+of our model with same features on the current and
+feed-forward architectures, which we leave for fu-
+ture work.
+Greedy and exact search-based models. As
+mentioned in Section 3, we implemented and pre-
+liminarily experimented with a segmenter that
+trains a similar model with exact search via Viterbi
+algorithm. On the PKU corpus, its F-score is
+0.944, compared with greedy segmenter’s 0.951.
+Its training and testing speed are up to 7.8 times
+slower than that of the greedy search segmenter.
+It is counter-intuitive that the performance of the
+exact-search segmenter is no better or even worse
+than that of the greedy-search segmenter. We
+hypothesize that since the training updates pa-
+rameters with regard to search errors, the final
+model is “tailored” for the specific search method
+used, which makes the model-search combination
+of greedy search segmenter not necessarily worse
+than that of exact search segmenter. Another way
+of looking at it is that search is less important
+when the model is accurate. In this case, most
+step-wise decisions are correct in the first place,
+which requires no correction from the search algo-
+rithm. Empirically, Zhang and Clark (2011) also
+reported exact-search segmenter performing worse
+than beam-search segmenters.
+Despite that the greedy segmenter is incapable
+of considering future labels, this rarely causes
+problems in practice. Our greedy segmenter has
+good results, compared with the exact-search seg-
+menter above and previous approaches, most of
+which utilize exact search. Moreover, the greedy
+segmenter has additional advantages of faster
+training and prediction.
+Sequence labeling and matching. A tradi-
+tional sequence labeling model such as CRF has
+K (number of labels) target-character-independent
+weight vectors, where the target character influ-
+ences the prediction via the weights of the features
+that contain it. In a way, a matching model can be
+seen as a family of “sub-models”, which keeps a
+group of weight vectors (the output embeddings)
+for each unique target character. Different target
+characters activate different sub-models, allowing
+opposite predictions for similar input features, as
+the target weight vectors used are different.
+</bodyText>
+<sectionHeader confidence="0.964252" genericHeader="conclusions">
+7 Conclusion and Future Work
+</sectionHeader>
+<bodyText confidence="0.99999184">
+In this paper, we have introduced the matching
+formulation for Chinese word segmentation and
+proposed an embedding matching model to take
+advantage of distributed representations. Based
+on the model, we have developed a greedy seg-
+menter, which outperforms previous embedding-
+based methods and is competitive with state-of-
+the-art systems. These results suggest that it is
+promising to model CWS as configuration-action
+matching using distributed representations. In ad-
+dition, linear-time training and testing complexity
+of our simple architecture is very desirable for in-
+dustrial application. To the best of our knowledge,
+this is the first greedy segmenter that is competi-
+tive with the state-of-the-art discriminative learn-
+ing models.
+In the future, we plan to investigate methods for
+our model to better utilize external resources. We
+would like to try using convolutional neural net-
+work to automatically encode ngram-like features,
+in order to further shrink parameter space. It is also
+interesting to study whether extending our model
+with deep architectures can benefit CWS. Lastly,
+it might be useful to adapt our model to tasks such
+as POS tagging and name entity recognition.
+</bodyText>
+<sectionHeader confidence="0.995469" genericHeader="acknowledgments">
+Acknowledgments
+</sectionHeader>
+<bodyText confidence="0.999973384615385">
+The authors would like to thank the anonymous
+reviewers for their very helpful and constructive
+suggestions. We are indebted to Qağrı Qöltekin
+for discussion and comments, to Dale Gerdemann,
+Cyrus Shaoul, Corina Dima, Sowmya Vajjala and
+Helmut Schmid for their useful feedback on an ear-
+lier version of the manuscript. Financial support
+for the research reported in this paper was provided
+by the German Research Foundation (DFG) as part
+of the Collaborative Research Center “Emergence
+of Meaning” (SFB 833) and by the German Min-
+istry of Education and Technology (BMBF) as part
+of the research grant CLARIN-D.
+</bodyText>
+<sectionHeader confidence="0.983027" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.997176331210192">
+Yoshua Bengio, Réjean Ducharme, Pascal Vincent, and
+Christian Janvin. 2003. A neural probabilistic lan-
+guage model. The Journal of Machine Learning Re-
+search, 3:1137–1155.
+Ronan Collobert, Jason Weston, Léon Bottou, Michael
+Karlen, Koray Kavukcuoglu, and Pavel Kuksa.
+2011. Natural language processing (almost) from
+1741
+scratch. The Journal ofMachine Learning Research,
+12:2493–2537.
+Jacob Devlin, Rabih Zbib, Zhongqiang Huang, Thomas
+Lamar, Richard Schwartz, and John Makhoul. 2014.
+Fast and robust neural network joint models for sta-
+tistical machine translation. In Proceedings of ACL,
+pages 1370–1380.
+Thomas Emerson. 2005. The second international chi-
+nese word segmentation bakeoff. In Proceedings of
+the Fourth SIGHAN Workshop on Chinese Language
+Processing, volume 133.
+Jianfeng Gao, Patrick Pantel, Michael Gamon, Xi-
+aodong He, Li Deng, and Yelong Shen. 2014. Mod-
+eling interestingness with deep neural networks. In
+Proceedings of EMNLP, pages 2–13.
+Baotian Hu, Zhengdong Lu, Hang Li, and Qingcai
+Chen. 2014. Convolutional neural network ar-
+chitectures for matching natural language sentences.
+In Advances in Neural Information Processing Sys-
+tems, pages 2042–2050.
+Po-Sen Huang, Xiaodong He, Jianfeng Gao, Li Deng,
+Alex Acero, and Larry Heck. 2013. Learning deep
+structured semantic models for web search using
+clickthrough data. In Proceedings of the ACM Inter-
+national Conference on Information &amp; Knowledge
+Management, pages 2333–2338.
+Wenbin Jiang, Liang Huang, Qun Liu, and Yajuan Lü.
+2008. A cascaded linear model for joint Chinese
+word segmentation and part-of-speech tagging. In
+Proceedings of ACL, pages 897–904.
+John Lafferty, A. McCallum, and F. Pereira. 2001.
+Conditional random fields: probabilistic models for
+segmenting and labeling sequence data. In Proceed-
+ings of International Conference on Machine Learn-
+ing, pages 282–289.
+Zhongguo Li and Guodong Zhou. 2012. Unified
+dependency parsing of Chinese morphological and
+syntactic structures. In Proceedings of EMNLP,
+pages 1445–1454.
+Yijia Liu, Yue Zhang, Wanxiang Che, Ting Liu, and Fan
+Wu. 2014. Domain adaptation for CRF-based Chi-
+nese word segmentation using free annotations. In
+Proceedings of EMNLP, pages 864–874.
+Jianqiang Ma, Chunyu Kit, and Dale Gerdemann.
+2012. Semi-automatic annotation of Chinese word
+structure. In Proceedings of the Second CIPS-
+SIGHAN Joint Conference on Chinese Language
+Processing, pages 9–17.
+Jianqiang Ma. 2014. Automatic refinement of syntac-
+tic categories in Chinese word structures. In Pro-
+ceedings of LREC.
+Mairgup Mansur, Wenzhe Pei, and Baobao Chang.
+2013. Feature-based neural language model and
+Chinese word segmentation. In Proceedings of IJC-
+NLP, pages 1271–1277.
+Tomas Mikolov, Martin Karafiát, Lukas Burget, Jan
+Cernockỳ, and Sanjeev Khudanpur. 2010. Recur-
+rent neural network based language model. In Pro-
+ceedings of INTERSPEECH, pages 1045–1048.
+Tomas Mikolov, Ilya Sutskever, Kai Chen, Greg S Cor-
+rado, and Jeff Dean. 2013. Distributed representa-
+tions of words and phrases and their compositional-
+ity. In Advances in Neural Information Processing
+Systems, pages 3111–3119.
+Wenzhe Pei, Tao Ge, and Chang Baobao. 2014. Max-
+margin tensor neural network for Chinese word seg-
+mentation. In Proceedings of ACL, pages 239–303.
+Fuchun Peng, Fangfang Feng, and Andrew McCallum.
+2004. Chinese segmentation and new word detec-
+tion using conditional random fields. In Proceedings
+of COLING, pages 562–571.
+Xian Qian and Yang Liu. 2012. Joint Chinese word
+segmentation, POS tagging and parsing. In Proceed-
+ings of EMNLP-CoNLL, pages 501–511.
+Richard Socher, John Bauer, Christopher D Manning,
+and Andrew Y Ng. 2013. Parsing with compo-
+sitional vector grammars. In Proceedings of ACL,
+pages 455–465.
+Weiwei Sun and Jia Xu. 2011. Enhancing Chinese
+word segmentation using unlabeled data. In Pro-
+ceedings of EMNLP, pages 970–979.
+Xu Sun, Yaozhong Zhang, Takuya Matsuzaki, Yoshi-
+masa Tsuruoka, and Jun’ichi Tsujii. 2009. A dis-
+criminative latent variable Chinese segmenter with
+hybrid word/character information. In Proceedings
+of NAACL, pages 56–64.
+Xu Sun, Houfeng Wang, and Wenjie Li. 2012. Fast on-
+line training with frequency-adaptive learning rates
+for Chinese word segmentation and new word detec-
+tion. In Proceedings of ACL, pages 253–262.
+Xu Sun, Yaozhong Zhang, Takuya Matsuzaki, Yoshi-
+masa Tsuruoka, and Jun’ichi Tsujii. 2013. Prob-
+abilistic Chinese word segmentation with non-local
+information and stochastic training. Information
+Processing &amp; Management, 49(3):626–636.
+Yoshimasa Tsuruoka, Jun’ichi Tsujii, and Sophia Ana-
+niadou. 2009. Stochastic gradient descent training
+for L1-regularized log-linear models with cumula-
+tive penalty. In Proceedings of ACL-IJCNLP, pages
+477–485.
+Kun Wang, Chengqing Zong, and Keh-Yih Su. 2012.
+Integrating generative and discriminative character-
+based models for Chinese word segmentation. ACM
+Transactions on Asian Language Information Pro-
+cessing (TALIP),11(2):7.
+Nianwen Xue. 2003. Chinese word segmentation as
+character tagging. Computational Linguistics and
+Chinese Language Processing, 8(1):29–48.
+1742
+Fan Yang and Paul Vozila. 2014. Semi-supervised Chi-
+nese word segmentation using partial-label learning
+With conditional random fields. In Proceedings of
+EMNLP, page 90–98.
+Xiaodong Zeng, Derek F Wong, Lidia S Chao, and Is-
+abel Trancoso. 2013. Graph-based semi-supervised
+model for joint Chinese word segmentation and part-
+of-speech tagging. In Proceedings of ACL, pages
+770–779.
+Yue Zhang and Stephen Clark. 2007. Chinese segmen-
+tation with a word-based perceptron algorithm. In
+Proceedings of ACL, pages 840–847.
+Yue Zhang and Stephen Clark. 2011. Syntactic pro-
+cessing using the generalized perceptron and beam
+search. Computational Linguistics, 37(1):105–151.
+Ruiqiang Zhang, Genichiro Kikui, and Eiichiro Sumita.
+2006. Subword-based tagging by conditional ran-
+dom fields for Chinese word segmentation. In Pro-
+ceedings of NAACL, pages 193–196.
+Kaixu Zhang, Maosong Sun, and Changle Zhou. 2012.
+Word segmentation on Chinese mirco-blog data with
+a linear-time incremental model. In Proceedings of
+the 2nd CIPS-SIGHANJoint Conference on Chinese
+Language Processing, pages 41–46.
+Longkai Zhang, Houfeng Wang, Xu Sun, and Maigup
+Mansur. 2013. Exploring representations from un-
+labeled data with co-training for Chinese word seg-
+mentation. In Proceedings of EMNLP, pages 311–
+321.
+Meishan Zhang, Yue Zhang, Wanxiang Che, and Ting
+Liu. 2014. Character-level Chinese dependency
+parsing. In Proceedings of ACL, pages 1326–1336.
+Hai Zhao and Chunyu Kit. 2008. Unsupervised seg-
+mentation helps supervised learning of character tag-
+ging for word segmentation and named entity recog-
+nition. In Proceedings of IJCNLP, pages 106–111.
+Xiaoqing Zheng, Hanyang Chen, and Tianyu Xu. 2013.
+Deep Learning for Chinese Word Segmentation and
+POS Tagging. In Proceedings of EMNLP, pages
+647–657.
+</reference>
+<page confidence="0.527451">
+1743
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.135335">
+<title confidence="0.833533333333333">Accurate Linear-Time Chinese Word Segmentation via Embedding Matching Jianqiang</title>
+<address confidence="0.659127">SFB 833 and Department of</address>
+<affiliation confidence="0.993248">University of Tübingen,</affiliation>
+<email confidence="0.978823">jma@sfs.uni-tuebingen.de</email>
+<author confidence="0.782187">Erhard</author>
+<affiliation confidence="0.714194">SFB 833 and Department of University of Tübingen,</affiliation>
+<email confidence="0.995538">eh@sfs.uni-tuebingen.de</email>
+<abstract confidence="0.997636529411765">paper proposes an matchto Chinese word segmentation, which generalizes the traditional sequence labeling framework and takes advantage of distributed representations. The training and prediction algorithms have linear-time complexity. Based on the proposed model, a greedy segmenter is developed and evaluated on benchmark corpora. Experiments show that our greedy segmenter achieves improved results over previous neural network-based word segmenters, and its performance is competitive with state-of-the-art methods, despite its simple feature set and the absence of external resources for training.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>Yoshua Bengio</author>
+<author>Réjean Ducharme</author>
+<author>Pascal Vincent</author>
+<author>Christian Janvin</author>
+</authors>
+<title>A neural probabilistic language model.</title>
+<date>2003</date>
+<journal>The Journal of Machine Learning Research,</journal>
+<pages>3--1137</pages>
+<contexts>
+<context position="9713" citStr="Bengio et al., 2003" startWordPosition="1537" endWordPosition="1540"> outputs, where L is the number of original labels while C is the number of unique characters. For Chinese, C is at the order of 103 −104. The use of embeddings, however, can serve the matching model well thanks to their low dimensionality. 2.2 The Architecture The proposed architecture (Figure 1) has three components, namely look-up table, concatenation and softmax function for matching. We will go through each of them in this section. Look-up table. The mapping between features/outputs to their corresponding embeddings are kept in a look-up table, as in many previous embedding related work (Bengio et al., 2003; Pei et al., 2014). Such features are extracted from the training data. Formally, the embedding for each distinct feature d is denoted as Embed(d) E RN, which is a real valued vector of dimension N. Each feature is retrieved by its unique index. The retrieval of the embeddings for the output actions is similar. Concatenation. To predict the segmentation for the target character cj, its feature vectors are concatenated into a single vector, the input embedding, i(bj) E RN×K, where K is the number of features used to describe the configuration bj. Softmax. The model then computes the dot produc</context>
+<context position="28101" citStr="Bengio et al. (2003)" startWordPosition="4608" endWordPosition="4611">l., 2013), joint models (Li and Zhou, 2012; Qian and Liu, 2012), and partial annotations (Liu et al., 2014; Yang and Vozila, 2014). Distributed representation and CWS. Distributed representation are useful for various NLP tasks, such as POS tagging (Collobert et al., 2011), machine translation (Devlin et al., 2014) and parsing (Socher et al., 2013). Influenced by Collobert et al. (2011), Zheng et al. (2013) modeled CWS as tagging and treated sentence-level tag sequence as the combination of individual tag predictions and context-independent tag transition. Mansur et al. (2013) was inspired by Bengio et al. (2003) and used character bigram embeddings to compensate for the absence of sentence level optimization. To model interactions between tags and characters, which are absent in these two CWS models, Pei et al. (2014) introduced the tag embedding and used a tensor hidden layer in the neural net. In contrast, our work uses character-specific action embeddings to explicitly capture such interactions. In addition, our work gains efficiency by avoiding hidden layers, similar as Mikolov et al. (2013). Learning to match. Matching heterogeneous objects has been studied in various contexts before, and is cur</context>
+</contexts>
+<marker>Bengio, Ducharme, Vincent, Janvin, 2003</marker>
+<rawString>Yoshua Bengio, Réjean Ducharme, Pascal Vincent, and Christian Janvin. 2003. A neural probabilistic language model. The Journal of Machine Learning Research, 3:1137–1155.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ronan Collobert</author>
+<author>Jason Weston</author>
+<author>Léon Bottou</author>
+<author>Michael Karlen</author>
+<author>Koray Kavukcuoglu</author>
+<author>Pavel Kuksa</author>
+</authors>
+<title>Natural language processing (almost) from scratch.</title>
+<date>2011</date>
+<booktitle>The Journal ofMachine Learning Research,</booktitle>
+<pages>12--2493</pages>
+<contexts>
+<context position="2153" citStr="Collobert et al. (2011)" startWordPosition="315" endWordPosition="318">e feature-based models still form the backbone of most state-of-the art systems. Nevertheless, many feature weights in such models are inevitably poorly estimated because the number of parameters is so large with respect to the limited amount of training data. This has motivated the introduction of low-dimensional, realvalued vectors, known as embeddings, as a tool to deal with the sparseness of the input. Embeddings allow linguistic units appearing in similar contexts to share similar vectors. The success of embeddings has been observed in many NLP tasks. For CWS, Zheng et al. (2013) adapted Collobert et al. (2011) and uses character embeddings in local windows as input for a two-layer network. The network predicts individual character position tags, the transitions of which are learned separately. Mansur et al. (2013) also developed a similar architecture, which labels individual characters and uses character bigram embeddings as additional features to compensate the absence of sentence-level modeling. Pei et al. (2014) improved upon Zheng et al. (2013) by capturing the combinations of context and history via a tensor neural network. Despite their differences, these CWS approaches are all sequence labe</context>
+<context position="27754" citStr="Collobert et al., 2011" startWordPosition="4554" endWordPosition="4557">07; Zhang et al., 2012) instead of position tags to prevent the greedy search from suffering tag inconsistencies. To better utilize resources other than training data, our model might benefit from techniques used in recent state-of-the-art systems, such as semi-supervised learning (Zhao and Kit, 2008; Sun and Xu, 2011; Zhang et al., 2013; Zeng et al., 2013), joint models (Li and Zhou, 2012; Qian and Liu, 2012), and partial annotations (Liu et al., 2014; Yang and Vozila, 2014). Distributed representation and CWS. Distributed representation are useful for various NLP tasks, such as POS tagging (Collobert et al., 2011), machine translation (Devlin et al., 2014) and parsing (Socher et al., 2013). Influenced by Collobert et al. (2011), Zheng et al. (2013) modeled CWS as tagging and treated sentence-level tag sequence as the combination of individual tag predictions and context-independent tag transition. Mansur et al. (2013) was inspired by Bengio et al. (2003) and used character bigram embeddings to compensate for the absence of sentence level optimization. To model interactions between tags and characters, which are absent in these two CWS models, Pei et al. (2014) introduced the tag embedding and used a te</context>
+</contexts>
+<marker>Collobert, Weston, Bottou, Karlen, Kavukcuoglu, Kuksa, 2011</marker>
+<rawString>Ronan Collobert, Jason Weston, Léon Bottou, Michael Karlen, Koray Kavukcuoglu, and Pavel Kuksa. 2011. Natural language processing (almost) from scratch. The Journal ofMachine Learning Research, 12:2493–2537.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jacob Devlin</author>
+<author>Rabih Zbib</author>
+<author>Zhongqiang Huang</author>
+<author>Thomas Lamar</author>
+<author>Richard Schwartz</author>
+<author>John Makhoul</author>
+</authors>
+<title>Fast and robust neural network joint models for statistical machine translation.</title>
+<date>2014</date>
+<booktitle>In Proceedings of ACL,</booktitle>
+<pages>1370--1380</pages>
+<contexts>
+<context position="27797" citStr="Devlin et al., 2014" startWordPosition="4560" endWordPosition="4563">gs to prevent the greedy search from suffering tag inconsistencies. To better utilize resources other than training data, our model might benefit from techniques used in recent state-of-the-art systems, such as semi-supervised learning (Zhao and Kit, 2008; Sun and Xu, 2011; Zhang et al., 2013; Zeng et al., 2013), joint models (Li and Zhou, 2012; Qian and Liu, 2012), and partial annotations (Liu et al., 2014; Yang and Vozila, 2014). Distributed representation and CWS. Distributed representation are useful for various NLP tasks, such as POS tagging (Collobert et al., 2011), machine translation (Devlin et al., 2014) and parsing (Socher et al., 2013). Influenced by Collobert et al. (2011), Zheng et al. (2013) modeled CWS as tagging and treated sentence-level tag sequence as the combination of individual tag predictions and context-independent tag transition. Mansur et al. (2013) was inspired by Bengio et al. (2003) and used character bigram embeddings to compensate for the absence of sentence level optimization. To model interactions between tags and characters, which are absent in these two CWS models, Pei et al. (2014) introduced the tag embedding and used a tensor hidden layer in the neural net. In con</context>
+</contexts>
+<marker>Devlin, Zbib, Huang, Lamar, Schwartz, Makhoul, 2014</marker>
+<rawString>Jacob Devlin, Rabih Zbib, Zhongqiang Huang, Thomas Lamar, Richard Schwartz, and John Makhoul. 2014. Fast and robust neural network joint models for statistical machine translation. In Proceedings of ACL, pages 1370–1380.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Thomas Emerson</author>
+</authors>
+<title>The second international chinese word segmentation bakeoff.</title>
+<date>2005</date>
+<booktitle>In Proceedings of the Fourth SIGHAN Workshop on Chinese Language Processing,</booktitle>
+<volume>133</volume>
+<contexts>
+<context position="16975" citStr="Emerson, 2005" startWordPosition="2765" endWordPosition="2766">r decay scheme to gradually shrink it from its initial value to zero. Note that the update for the input embedding i is actually performed for the feature embeddings that form i in the concatenation step. character number, as compared with search, only a few constant time operations of gradient computation and parameter updates are performed for each character. 4 Experiments 4.1 Data and Evaluation Metric In the experiments, we use two widely used and freely available1 manually word-segmented corpora, namely, PKU and MSR, from the second SIGHAN international Chinese word segmentation bakeoff (Emerson, 2005). Table 2 shows the details of the two dataset. All evaluations in this paper are conducted with official training/testing set split using official scoring script.2 PKU MSR Word types 5.5 × 104 8.8 × 104 Word tokens 1.1 × 106 2.4 × 106 Character types 5 × 103 5 × 103 Character tokens 1.8 × 106 4.1 × 106 Table 2: Corpus details of PKU and MSR The segmentation accuracy is evaluated by precision (P), recall (R), F-score and Roov, the recall for out-of-vocabulary words. Precision is defined as the number of correctly segmented words divided by the total number of words in the segmentation result. </context>
+<context position="20206" citStr="Emerson, 2005" startWordPosition="3306" endWordPosition="3307">e improvements (MSR) on F-score and Roo,,, respectively. Surprisingly, our close-set results are also comparable to the best open-set results of previous models. As we will see in (Section 4.4), when using same or less character uniand bi-gram features, our model still outperforms previous embedding based models in closed-set evaluation, which shows the effectiveness of our matching model. Significance test. Table 4 shows the 95% confidence intervals (CI) for close-set results of our model and the best performing previous model (Pei et al., 2014), which are computed by formula (9), following (Emerson, 2005). CI = 21 &apos;(&apos;N VVV N (9) where F is the F-score value and the N is the word token count of the testing set, which is 104,372 and 106,873 for PKU and MSR, respectively. We see 3Our implementation: https://zenodo.org/record/17645. 4The results for Zheng et al. (2013) are from the reimplementation of Pei et al. (2014). that the confidence intervals of our results do not overlap with that of (Pei et al., 2014), meaning that our improvements are statistically significant. 4.3 Comparison with the State-of-the-Art Systems Table 5 shows that the results of our greedy segmenter are competitive with the</context>
+</contexts>
+<marker>Emerson, 2005</marker>
+<rawString>Thomas Emerson. 2005. The second international chinese word segmentation bakeoff. In Proceedings of the Fourth SIGHAN Workshop on Chinese Language Processing, volume 133.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jianfeng Gao</author>
+<author>Patrick Pantel</author>
+<author>Michael Gamon</author>
+<author>Xiaodong He</author>
+<author>Li Deng</author>
+<author>Yelong Shen</author>
+</authors>
+<title>Modeling interestingness with deep neural networks.</title>
+<date>2014</date>
+<booktitle>In Proceedings of EMNLP,</booktitle>
+<pages>2--13</pages>
+<contexts>
+<context position="28769" citStr="Gao et al., 2014" startWordPosition="4712" endWordPosition="4715"> for the absence of sentence level optimization. To model interactions between tags and characters, which are absent in these two CWS models, Pei et al. (2014) introduced the tag embedding and used a tensor hidden layer in the neural net. In contrast, our work uses character-specific action embeddings to explicitly capture such interactions. In addition, our work gains efficiency by avoiding hidden layers, similar as Mikolov et al. (2013). Learning to match. Matching heterogeneous objects has been studied in various contexts before, and is currently flourishing, thanks to embeddingbased deep (Gao et al., 2014) and convolutional (Huang et al., 2013; Hu et al., 2014) neural networks. This work develops a matching model for CWS and differs from others in its“shallow”yet effective architecture. 6 Discussion Simple architecture. It is possible to adopt standard feed-forward neural network for our embedding matching model with character-action embeddings as both feature and output. Nevertheless, we designed the proposed architecture to avoid hidden layers for simplicity, efficiency and easytuning, inspired by word2vec. Our simple architecture is effective, demonstrated by the improved results over previo</context>
+</contexts>
+<marker>Gao, Pantel, Gamon, He, Deng, Shen, 2014</marker>
+<rawString>Jianfeng Gao, Patrick Pantel, Michael Gamon, Xiaodong He, Li Deng, and Yelong Shen. 2014. Modeling interestingness with deep neural networks. In Proceedings of EMNLP, pages 2–13.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Baotian Hu</author>
+<author>Zhengdong Lu</author>
+<author>Hang Li</author>
+<author>Qingcai Chen</author>
+</authors>
+<title>Convolutional neural network architectures for matching natural language sentences.</title>
+<date>2014</date>
+<booktitle>In Advances in Neural Information Processing Systems,</booktitle>
+<pages>2042--2050</pages>
+<contexts>
+<context position="28825" citStr="Hu et al., 2014" startWordPosition="4722" endWordPosition="4725"> interactions between tags and characters, which are absent in these two CWS models, Pei et al. (2014) introduced the tag embedding and used a tensor hidden layer in the neural net. In contrast, our work uses character-specific action embeddings to explicitly capture such interactions. In addition, our work gains efficiency by avoiding hidden layers, similar as Mikolov et al. (2013). Learning to match. Matching heterogeneous objects has been studied in various contexts before, and is currently flourishing, thanks to embeddingbased deep (Gao et al., 2014) and convolutional (Huang et al., 2013; Hu et al., 2014) neural networks. This work develops a matching model for CWS and differs from others in its“shallow”yet effective architecture. 6 Discussion Simple architecture. It is possible to adopt standard feed-forward neural network for our embedding matching model with character-action embeddings as both feature and output. Nevertheless, we designed the proposed architecture to avoid hidden layers for simplicity, efficiency and easytuning, inspired by word2vec. Our simple architecture is effective, demonstrated by the improved results over previous neural-network word segSize of feature embed’ Size of</context>
+</contexts>
+<marker>Hu, Lu, Li, Chen, 2014</marker>
+<rawString>Baotian Hu, Zhengdong Lu, Hang Li, and Qingcai Chen. 2014. Convolutional neural network architectures for matching natural language sentences. In Advances in Neural Information Processing Systems, pages 2042–2050.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Po-Sen Huang</author>
+<author>Xiaodong He</author>
+<author>Jianfeng Gao</author>
+<author>Li Deng</author>
+<author>Alex Acero</author>
+<author>Larry Heck</author>
+</authors>
+<title>Learning deep structured semantic models for web search using clickthrough data.</title>
+<date>2013</date>
+<booktitle>In Proceedings of the ACM International Conference on Information &amp; Knowledge Management,</booktitle>
+<pages>2333--2338</pages>
+<contexts>
+<context position="28807" citStr="Huang et al., 2013" startWordPosition="4718" endWordPosition="4721">timization. To model interactions between tags and characters, which are absent in these two CWS models, Pei et al. (2014) introduced the tag embedding and used a tensor hidden layer in the neural net. In contrast, our work uses character-specific action embeddings to explicitly capture such interactions. In addition, our work gains efficiency by avoiding hidden layers, similar as Mikolov et al. (2013). Learning to match. Matching heterogeneous objects has been studied in various contexts before, and is currently flourishing, thanks to embeddingbased deep (Gao et al., 2014) and convolutional (Huang et al., 2013; Hu et al., 2014) neural networks. This work develops a matching model for CWS and differs from others in its“shallow”yet effective architecture. 6 Discussion Simple architecture. It is possible to adopt standard feed-forward neural network for our embedding matching model with character-action embeddings as both feature and output. Nevertheless, we designed the proposed architecture to avoid hidden layers for simplicity, efficiency and easytuning, inspired by word2vec. Our simple architecture is effective, demonstrated by the improved results over previous neural-network word segSize of feat</context>
+</contexts>
+<marker>Huang, He, Gao, Deng, Acero, Heck, 2013</marker>
+<rawString>Po-Sen Huang, Xiaodong He, Jianfeng Gao, Li Deng, Alex Acero, and Larry Heck. 2013. Learning deep structured semantic models for web search using clickthrough data. In Proceedings of the ACM International Conference on Information &amp; Knowledge Management, pages 2333–2338.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Wenbin Jiang</author>
+<author>Liang Huang</author>
+<author>Qun Liu</author>
+<author>Yajuan Lü</author>
+</authors>
+<title>A cascaded linear model for joint Chinese word segmentation and part-of-speech tagging.</title>
+<date>2008</date>
+<booktitle>In Proceedings of ACL,</booktitle>
+<pages>897--904</pages>
+<contexts>
+<context position="26706" citStr="Jiang et al., 2008" startWordPosition="4395" endWordPosition="4398">g F-score reached 99.9% much earlier. We hypothesize that pre-training leads to sub-optimal local maximums for our model. • Hybrid matching. We tried applying hybrid matching (Section 3.1) for target characters which are less frequent than the top ftop characters, including unseen characters, which leads to about 0.15% of F-score improvements. Table 7: Hyper parameters of our model. 5 Related Work Word segmentation. Most modern segmenters followed Xue (2003) to model CWS as sequence labeling of character position tags, using conditional random fields (Peng et al. 2004), structured perceptron (Jiang et al., 2008), etc. Some notable exceptions are (Zhang and Clark, 2007; Zhang et al., 2012), which exploited rich word-level features and (Ma et al., 2012; Ma, 2014; Zhang et al., 2014), which explicitly model word structures. Our work generalizes the sequence labeling to a 5https://code.google.com/p/word2vec/ 6https://catalog.ldc.upenn.edu/LDC2005T14 more flexible framework of matching, and predicts actions as in (Zhang and Clark, 2007; Zhang et al., 2012) instead of position tags to prevent the greedy search from suffering tag inconsistencies. To better utilize resources other than training data, our mod</context>
+</contexts>
+<marker>Jiang, Huang, Liu, Lü, 2008</marker>
+<rawString>Wenbin Jiang, Liang Huang, Qun Liu, and Yajuan Lü. 2008. A cascaded linear model for joint Chinese word segmentation and part-of-speech tagging. In Proceedings of ACL, pages 897–904.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>John Lafferty</author>
+<author>A McCallum</author>
+<author>F Pereira</author>
+</authors>
+<title>Conditional random fields: probabilistic models for segmenting and labeling sequence data. In</title>
+<date>2001</date>
+<booktitle>Proceedings of International Conference on Machine Learning,</booktitle>
+<pages>282--289</pages>
+<contexts>
+<context position="12380" citStr="Lafferty et al., 2001" startWordPosition="2000" endWordPosition="2003"> Y is the best action sequence found by the model among all the possible ones, Y = a1a2...an, where aj is the predicted action for the character cj (1 G j G n), which is either cj-s or cj-c, such as 领 -s and 领 -c. exp(i(bj) - o(aj)) Ek exp (i(bj) - o(aj,k)) (3) 3 The Greedy Segmenter Our model depends on the actions predicted for the previous two characters as history features. Traditionally, such scenarios call for dynamic programming for exact inference. However, preliminary experiments showed that, for our model, a Viterbi search based segmenter, even supported by conditional random field (Lafferty et al., 2001) style training, yields similar results as the greedy search based segmenter in this section. Since the greedy segmenter is much more efficient in training and testing, the rest of the paper will focus on the proposed greedy segmenter, the details of which will be described in this section. 3.1 Greedy Search Initialization. The first character in the sentence is made to have two left side characters that are dummy symbols of START, whose predicted actions are always START-s, i.e. separation. Iteration. The algorithms predicts the action for each character cj, one at a time, in a left-to-right,</context>
+</contexts>
+<marker>Lafferty, McCallum, Pereira, 2001</marker>
+<rawString>John Lafferty, A. McCallum, and F. Pereira. 2001. Conditional random fields: probabilistic models for segmenting and labeling sequence data. In Proceedings of International Conference on Machine Learning, pages 282–289.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Zhongguo Li</author>
+<author>Guodong Zhou</author>
+</authors>
+<title>Unified dependency parsing of Chinese morphological and syntactic structures.</title>
+<date>2012</date>
+<booktitle>In Proceedings of EMNLP,</booktitle>
+<pages>1445--1454</pages>
+<contexts>
+<context position="27523" citStr="Li and Zhou, 2012" startWordPosition="4517" endWordPosition="4520">d structures. Our work generalizes the sequence labeling to a 5https://code.google.com/p/word2vec/ 6https://catalog.ldc.upenn.edu/LDC2005T14 more flexible framework of matching, and predicts actions as in (Zhang and Clark, 2007; Zhang et al., 2012) instead of position tags to prevent the greedy search from suffering tag inconsistencies. To better utilize resources other than training data, our model might benefit from techniques used in recent state-of-the-art systems, such as semi-supervised learning (Zhao and Kit, 2008; Sun and Xu, 2011; Zhang et al., 2013; Zeng et al., 2013), joint models (Li and Zhou, 2012; Qian and Liu, 2012), and partial annotations (Liu et al., 2014; Yang and Vozila, 2014). Distributed representation and CWS. Distributed representation are useful for various NLP tasks, such as POS tagging (Collobert et al., 2011), machine translation (Devlin et al., 2014) and parsing (Socher et al., 2013). Influenced by Collobert et al. (2011), Zheng et al. (2013) modeled CWS as tagging and treated sentence-level tag sequence as the combination of individual tag predictions and context-independent tag transition. Mansur et al. (2013) was inspired by Bengio et al. (2003) and used character bi</context>
+</contexts>
+<marker>Li, Zhou, 2012</marker>
+<rawString>Zhongguo Li and Guodong Zhou. 2012. Unified dependency parsing of Chinese morphological and syntactic structures. In Proceedings of EMNLP, pages 1445–1454.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yijia Liu</author>
+<author>Yue Zhang</author>
+<author>Wanxiang Che</author>
+<author>Ting Liu</author>
+<author>Fan Wu</author>
+</authors>
+<title>Domain adaptation for CRF-based Chinese word segmentation using free annotations.</title>
+<date>2014</date>
+<booktitle>In Proceedings of EMNLP,</booktitle>
+<pages>864--874</pages>
+<contexts>
+<context position="27587" citStr="Liu et al., 2014" startWordPosition="4529" endWordPosition="4532">tps://code.google.com/p/word2vec/ 6https://catalog.ldc.upenn.edu/LDC2005T14 more flexible framework of matching, and predicts actions as in (Zhang and Clark, 2007; Zhang et al., 2012) instead of position tags to prevent the greedy search from suffering tag inconsistencies. To better utilize resources other than training data, our model might benefit from techniques used in recent state-of-the-art systems, such as semi-supervised learning (Zhao and Kit, 2008; Sun and Xu, 2011; Zhang et al., 2013; Zeng et al., 2013), joint models (Li and Zhou, 2012; Qian and Liu, 2012), and partial annotations (Liu et al., 2014; Yang and Vozila, 2014). Distributed representation and CWS. Distributed representation are useful for various NLP tasks, such as POS tagging (Collobert et al., 2011), machine translation (Devlin et al., 2014) and parsing (Socher et al., 2013). Influenced by Collobert et al. (2011), Zheng et al. (2013) modeled CWS as tagging and treated sentence-level tag sequence as the combination of individual tag predictions and context-independent tag transition. Mansur et al. (2013) was inspired by Bengio et al. (2003) and used character bigram embeddings to compensate for the absence of sentence level </context>
+</contexts>
+<marker>Liu, Zhang, Che, Liu, Wu, 2014</marker>
+<rawString>Yijia Liu, Yue Zhang, Wanxiang Che, Ting Liu, and Fan Wu. 2014. Domain adaptation for CRF-based Chinese word segmentation using free annotations. In Proceedings of EMNLP, pages 864–874.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jianqiang Ma</author>
+<author>Chunyu Kit</author>
+<author>Dale Gerdemann</author>
+</authors>
+<title>Semi-automatic annotation of Chinese word structure.</title>
+<date>2012</date>
+<booktitle>In Proceedings of the Second CIPSSIGHAN Joint Conference on Chinese Language Processing,</booktitle>
+<pages>9--17</pages>
+<contexts>
+<context position="26847" citStr="Ma et al., 2012" startWordPosition="4419" endWordPosition="4422">ried applying hybrid matching (Section 3.1) for target characters which are less frequent than the top ftop characters, including unseen characters, which leads to about 0.15% of F-score improvements. Table 7: Hyper parameters of our model. 5 Related Work Word segmentation. Most modern segmenters followed Xue (2003) to model CWS as sequence labeling of character position tags, using conditional random fields (Peng et al. 2004), structured perceptron (Jiang et al., 2008), etc. Some notable exceptions are (Zhang and Clark, 2007; Zhang et al., 2012), which exploited rich word-level features and (Ma et al., 2012; Ma, 2014; Zhang et al., 2014), which explicitly model word structures. Our work generalizes the sequence labeling to a 5https://code.google.com/p/word2vec/ 6https://catalog.ldc.upenn.edu/LDC2005T14 more flexible framework of matching, and predicts actions as in (Zhang and Clark, 2007; Zhang et al., 2012) instead of position tags to prevent the greedy search from suffering tag inconsistencies. To better utilize resources other than training data, our model might benefit from techniques used in recent state-of-the-art systems, such as semi-supervised learning (Zhao and Kit, 2008; Sun and Xu, 2</context>
+</contexts>
+<marker>Ma, Kit, Gerdemann, 2012</marker>
+<rawString>Jianqiang Ma, Chunyu Kit, and Dale Gerdemann. 2012. Semi-automatic annotation of Chinese word structure. In Proceedings of the Second CIPSSIGHAN Joint Conference on Chinese Language Processing, pages 9–17.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jianqiang Ma</author>
+</authors>
+<title>Automatic refinement of syntactic categories in Chinese word structures.</title>
+<date>2014</date>
+<booktitle>In Proceedings of LREC.</booktitle>
+<contexts>
+<context position="26857" citStr="Ma, 2014" startWordPosition="4423" endWordPosition="4424">rid matching (Section 3.1) for target characters which are less frequent than the top ftop characters, including unseen characters, which leads to about 0.15% of F-score improvements. Table 7: Hyper parameters of our model. 5 Related Work Word segmentation. Most modern segmenters followed Xue (2003) to model CWS as sequence labeling of character position tags, using conditional random fields (Peng et al. 2004), structured perceptron (Jiang et al., 2008), etc. Some notable exceptions are (Zhang and Clark, 2007; Zhang et al., 2012), which exploited rich word-level features and (Ma et al., 2012; Ma, 2014; Zhang et al., 2014), which explicitly model word structures. Our work generalizes the sequence labeling to a 5https://code.google.com/p/word2vec/ 6https://catalog.ldc.upenn.edu/LDC2005T14 more flexible framework of matching, and predicts actions as in (Zhang and Clark, 2007; Zhang et al., 2012) instead of position tags to prevent the greedy search from suffering tag inconsistencies. To better utilize resources other than training data, our model might benefit from techniques used in recent state-of-the-art systems, such as semi-supervised learning (Zhao and Kit, 2008; Sun and Xu, 2011; Zhang</context>
+</contexts>
+<marker>Ma, 2014</marker>
+<rawString>Jianqiang Ma. 2014. Automatic refinement of syntactic categories in Chinese word structures. In Proceedings of LREC.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Mairgup Mansur</author>
+<author>Wenzhe Pei</author>
+<author>Baobao Chang</author>
+</authors>
+<title>Feature-based neural language model and Chinese word segmentation.</title>
+<date>2013</date>
+<booktitle>In Proceedings of IJCNLP,</booktitle>
+<pages>1271--1277</pages>
+<contexts>
+<context position="2361" citStr="Mansur et al. (2013)" startWordPosition="348" endWordPosition="351">h respect to the limited amount of training data. This has motivated the introduction of low-dimensional, realvalued vectors, known as embeddings, as a tool to deal with the sparseness of the input. Embeddings allow linguistic units appearing in similar contexts to share similar vectors. The success of embeddings has been observed in many NLP tasks. For CWS, Zheng et al. (2013) adapted Collobert et al. (2011) and uses character embeddings in local windows as input for a two-layer network. The network predicts individual character position tags, the transitions of which are learned separately. Mansur et al. (2013) also developed a similar architecture, which labels individual characters and uses character bigram embeddings as additional features to compensate the absence of sentence-level modeling. Pei et al. (2014) improved upon Zheng et al. (2013) by capturing the combinations of context and history via a tensor neural network. Despite their differences, these CWS approaches are all sequence labeling models. In such models, the target character can only influence the prediction as features. Consider the the segmentation configuration in (1), where the dot appears before the target character in consid</context>
+<context position="22873" citStr="Mansur et al. (2013)" startWordPosition="3741" endWordPosition="3744">irst iteration, the testing F-scores are already 93.5% and 95.7% for PKU and MSR, respectively, which then gradually reach their maximum within the next 9 iterations before the curve flats out. Speed. With an unoptimized single-thread Python implementation running on a laptop with intel Core-i5 CPU (1.9 GHZ), each iteration of the training procedure on PKU dataset takes about 5 minutes, or 6,000 characters per second. The pre1738 Models PKU Corpus MSR Corpus P R F Roov P R F Roov Zheng et al.(2013) 92.8 92.0 92.4 63.3 92.9 93.6 93.3 55.7 + pre-training† 93.5 92.2 92.8 69.0 94.2 93.7 93.9 64.1 Mansur et al. (2013) 93.6 92.8 93.2 57.9 92.3 92.2 92.2 53.7 + pre-training† 94.0 93.9 94.0 69.5 93.1 93.1 93.1 59.7 Pei et al. (2014) 93.7 93.4 93.5 64.2 94.6 94.2 94.4 61.4 + pre-training† 94.4 93.6 94.0 69.0 95.2 94.6 94.9 64.8 + pre-training &amp; bigram† - - 95.2 - - - 97.2 - This work (closed-set) 95.5 94.6 95.1 76.0 96.6 96.5 96.6 87.2 Table 3: Comparison with previous embedding based models. Numbers in percentage. Results with † used extra corpora for (pre-)training. Models PKU MSR F CI F CI Pei et al. 93.5 ±0.15 94.4 ±0.14 This work 95.1 ±0.13 96.6 ±0.11 Table 4: Significance test of closed-set results of Pe</context>
+<context position="28064" citStr="Mansur et al. (2013)" startWordPosition="4601" endWordPosition="4604">, 2011; Zhang et al., 2013; Zeng et al., 2013), joint models (Li and Zhou, 2012; Qian and Liu, 2012), and partial annotations (Liu et al., 2014; Yang and Vozila, 2014). Distributed representation and CWS. Distributed representation are useful for various NLP tasks, such as POS tagging (Collobert et al., 2011), machine translation (Devlin et al., 2014) and parsing (Socher et al., 2013). Influenced by Collobert et al. (2011), Zheng et al. (2013) modeled CWS as tagging and treated sentence-level tag sequence as the combination of individual tag predictions and context-independent tag transition. Mansur et al. (2013) was inspired by Bengio et al. (2003) and used character bigram embeddings to compensate for the absence of sentence level optimization. To model interactions between tags and characters, which are absent in these two CWS models, Pei et al. (2014) introduced the tag embedding and used a tensor hidden layer in the neural net. In contrast, our work uses character-specific action embeddings to explicitly capture such interactions. In addition, our work gains efficiency by avoiding hidden layers, similar as Mikolov et al. (2013). Learning to match. Matching heterogeneous objects has been studied i</context>
+</contexts>
+<marker>Mansur, Pei, Chang, 2013</marker>
+<rawString>Mairgup Mansur, Wenzhe Pei, and Baobao Chang. 2013. Feature-based neural language model and Chinese word segmentation. In Proceedings of IJCNLP, pages 1271–1277.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Tomas Mikolov</author>
+<author>Martin Karafiát</author>
+<author>Lukas Burget</author>
+<author>Jan Cernockỳ</author>
+<author>Sanjeev Khudanpur</author>
+</authors>
+<title>Recurrent neural network based language model.</title>
+<date>2010</date>
+<booktitle>In Proceedings of INTERSPEECH,</booktitle>
+<pages>1045--1048</pages>
+<contexts>
+<context position="4956" citStr="Mikolov et al., 2010" startWordPosition="748" endWordPosition="751">ion decisions given configurations, it could be beneficial to model the matching between configurations and character-specific decisions. To this end, this paper proposes an embedding matching approach (Section 2) to CWS, in which embeddings for both input and output are learned and used as representations to counteract sparsities. Thanks to embeddings of characterspecific decisions (actions) serving as both input features and output, our hidden-layer-free architecture (Section 2.2) is capable of capturing prediction histories in similar ways as the hidden layers in recurrent neural networks (Mikolov et al., 2010). We evaluate the effectiveness of the model via a linear-time greedy segmenter (Section 3) implementation. The segmenter outperforms previous embedding-based models (Section 4.2) and achieves state-of-the-art results (Section 4.3) on a benchmark dataset. The main contributions of this paper are: • A novel embedding matching model for Chinese word segmentation. • Developing a greedy word segmenter, which is based on the matching model and achieves competitive results. • Introducing the idea of character-specific segmentation action embeddings as both feature and output, which are cornerstones </context>
+</contexts>
+<marker>Mikolov, Karafiát, Burget, Cernockỳ, Khudanpur, 2010</marker>
+<rawString>Tomas Mikolov, Martin Karafiát, Lukas Burget, Jan Cernockỳ, and Sanjeev Khudanpur. 2010. Recurrent neural network based language model. In Proceedings of INTERSPEECH, pages 1045–1048.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Tomas Mikolov</author>
+<author>Ilya Sutskever</author>
+<author>Kai Chen</author>
+<author>Greg S Corrado</author>
+<author>Jeff Dean</author>
+</authors>
+<title>Distributed representations of words and phrases and their compositionality.</title>
+<date>2013</date>
+<booktitle>In Advances in Neural Information Processing Systems,</booktitle>
+<pages>3111--3119</pages>
+<contexts>
+<context position="28594" citStr="Mikolov et al. (2013)" startWordPosition="4686" endWordPosition="4689"> of individual tag predictions and context-independent tag transition. Mansur et al. (2013) was inspired by Bengio et al. (2003) and used character bigram embeddings to compensate for the absence of sentence level optimization. To model interactions between tags and characters, which are absent in these two CWS models, Pei et al. (2014) introduced the tag embedding and used a tensor hidden layer in the neural net. In contrast, our work uses character-specific action embeddings to explicitly capture such interactions. In addition, our work gains efficiency by avoiding hidden layers, similar as Mikolov et al. (2013). Learning to match. Matching heterogeneous objects has been studied in various contexts before, and is currently flourishing, thanks to embeddingbased deep (Gao et al., 2014) and convolutional (Huang et al., 2013; Hu et al., 2014) neural networks. This work develops a matching model for CWS and differs from others in its“shallow”yet effective architecture. 6 Discussion Simple architecture. It is possible to adopt standard feed-forward neural network for our embedding matching model with character-action embeddings as both feature and output. Nevertheless, we designed the proposed architecture</context>
+</contexts>
+<marker>Mikolov, Sutskever, Chen, Corrado, Dean, 2013</marker>
+<rawString>Tomas Mikolov, Ilya Sutskever, Kai Chen, Greg S Corrado, and Jeff Dean. 2013. Distributed representations of words and phrases and their compositionality. In Advances in Neural Information Processing Systems, pages 3111–3119.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Wenzhe Pei</author>
+<author>Tao Ge</author>
+<author>Chang Baobao</author>
+</authors>
+<title>Maxmargin tensor neural network for Chinese word segmentation.</title>
+<date>2014</date>
+<booktitle>In Proceedings of ACL,</booktitle>
+<pages>239--303</pages>
+<contexts>
+<context position="2567" citStr="Pei et al. (2014)" startWordPosition="377" endWordPosition="380"> allow linguistic units appearing in similar contexts to share similar vectors. The success of embeddings has been observed in many NLP tasks. For CWS, Zheng et al. (2013) adapted Collobert et al. (2011) and uses character embeddings in local windows as input for a two-layer network. The network predicts individual character position tags, the transitions of which are learned separately. Mansur et al. (2013) also developed a similar architecture, which labels individual characters and uses character bigram embeddings as additional features to compensate the absence of sentence-level modeling. Pei et al. (2014) improved upon Zheng et al. (2013) by capturing the combinations of context and history via a tensor neural network. Despite their differences, these CWS approaches are all sequence labeling models. In such models, the target character can only influence the prediction as features. Consider the the segmentation configuration in (1), where the dot appears before the target character in consideration and the box (❑) represents any character that can occur in the configuration. In that example, the known history is that the first two characters 中国 ‘China’ are joined together, which is denoted by </context>
+<context position="9732" citStr="Pei et al., 2014" startWordPosition="1541" endWordPosition="1544">the number of original labels while C is the number of unique characters. For Chinese, C is at the order of 103 −104. The use of embeddings, however, can serve the matching model well thanks to their low dimensionality. 2.2 The Architecture The proposed architecture (Figure 1) has three components, namely look-up table, concatenation and softmax function for matching. We will go through each of them in this section. Look-up table. The mapping between features/outputs to their corresponding embeddings are kept in a look-up table, as in many previous embedding related work (Bengio et al., 2003; Pei et al., 2014). Such features are extracted from the training data. Formally, the embedding for each distinct feature d is denoted as Embed(d) E RN, which is a real valued vector of dimension N. Each feature is retrieved by its unique index. The retrieval of the embeddings for the output actions is similar. Concatenation. To predict the segmentation for the target character cj, its feature vectors are concatenated into a single vector, the input embedding, i(bj) E RN×K, where K is the number of features used to describe the configuration bj. Softmax. The model then computes the dot product of the input embe</context>
+<context position="20144" citStr="Pei et al., 2014" startWordPosition="3295" endWordPosition="3298">l, our greedy segmenter has achieved up to 2.2% and 25.8% absolute improvements (MSR) on F-score and Roo,,, respectively. Surprisingly, our close-set results are also comparable to the best open-set results of previous models. As we will see in (Section 4.4), when using same or less character uniand bi-gram features, our model still outperforms previous embedding based models in closed-set evaluation, which shows the effectiveness of our matching model. Significance test. Table 4 shows the 95% confidence intervals (CI) for close-set results of our model and the best performing previous model (Pei et al., 2014), which are computed by formula (9), following (Emerson, 2005). CI = 21 &apos;(&apos;N VVV N (9) where F is the F-score value and the N is the word token count of the testing set, which is 104,372 and 106,873 for PKU and MSR, respectively. We see 3Our implementation: https://zenodo.org/record/17645. 4The results for Zheng et al. (2013) are from the reimplementation of Pei et al. (2014). that the confidence intervals of our results do not overlap with that of (Pei et al., 2014), meaning that our improvements are statistically significant. 4.3 Comparison with the State-of-the-Art Systems Table 5 shows tha</context>
+<context position="22987" citStr="Pei et al. (2014)" startWordPosition="3763" endWordPosition="3766">reach their maximum within the next 9 iterations before the curve flats out. Speed. With an unoptimized single-thread Python implementation running on a laptop with intel Core-i5 CPU (1.9 GHZ), each iteration of the training procedure on PKU dataset takes about 5 minutes, or 6,000 characters per second. The pre1738 Models PKU Corpus MSR Corpus P R F Roov P R F Roov Zheng et al.(2013) 92.8 92.0 92.4 63.3 92.9 93.6 93.3 55.7 + pre-training† 93.5 92.2 92.8 69.0 94.2 93.7 93.9 64.1 Mansur et al. (2013) 93.6 92.8 93.2 57.9 92.3 92.2 92.2 53.7 + pre-training† 94.0 93.9 94.0 69.5 93.1 93.1 93.1 59.7 Pei et al. (2014) 93.7 93.4 93.5 64.2 94.6 94.2 94.4 61.4 + pre-training† 94.4 93.6 94.0 69.0 95.2 94.6 94.9 64.8 + pre-training &amp; bigram† - - 95.2 - - - 97.2 - This work (closed-set) 95.5 94.6 95.1 76.0 96.6 96.5 96.6 87.2 Table 3: Comparison with previous embedding based models. Numbers in percentage. Results with † used extra corpora for (pre-)training. Models PKU MSR F CI F CI Pei et al. 93.5 ±0.15 94.4 ±0.14 This work 95.1 ±0.13 96.6 ±0.11 Table 4: Significance test of closed-set results of Pei et al (2014) and our model. Model PKU MSR Best05 closed-set 95.0 96.4 Zhang et al. (2006) 95.1 97.1 Zhang and Cl</context>
+<context position="28311" citStr="Pei et al. (2014)" startWordPosition="4641" endWordPosition="4644">ious NLP tasks, such as POS tagging (Collobert et al., 2011), machine translation (Devlin et al., 2014) and parsing (Socher et al., 2013). Influenced by Collobert et al. (2011), Zheng et al. (2013) modeled CWS as tagging and treated sentence-level tag sequence as the combination of individual tag predictions and context-independent tag transition. Mansur et al. (2013) was inspired by Bengio et al. (2003) and used character bigram embeddings to compensate for the absence of sentence level optimization. To model interactions between tags and characters, which are absent in these two CWS models, Pei et al. (2014) introduced the tag embedding and used a tensor hidden layer in the neural net. In contrast, our work uses character-specific action embeddings to explicitly capture such interactions. In addition, our work gains efficiency by avoiding hidden layers, similar as Mikolov et al. (2013). Learning to match. Matching heterogeneous objects has been studied in various contexts before, and is currently flourishing, thanks to embeddingbased deep (Gao et al., 2014) and convolutional (Huang et al., 2013; Hu et al., 2014) neural networks. This work develops a matching model for CWS and differs from others </context>
+</contexts>
+<marker>Pei, Ge, Baobao, 2014</marker>
+<rawString>Wenzhe Pei, Tao Ge, and Chang Baobao. 2014. Maxmargin tensor neural network for Chinese word segmentation. In Proceedings of ACL, pages 239–303.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Fuchun Peng</author>
+<author>Fangfang Feng</author>
+<author>Andrew McCallum</author>
+</authors>
+<title>Chinese segmentation and new word detection using conditional random fields.</title>
+<date>2004</date>
+<booktitle>In Proceedings of COLING,</booktitle>
+<pages>562--571</pages>
+<contexts>
+<context position="1212" citStr="Peng et al., 2004" startWordPosition="166" endWordPosition="169">edy segmenter is developed and evaluated on benchmark corpora. Experiments show that our greedy segmenter achieves improved results over previous neural network-based word segmenters, and its performance is competitive with state-of-the-art methods, despite its simple feature set and the absence of external resources for training. 1 Introduction Chinese sentences are written as character sequences without word delimiters, which makes word segmentation a prerequisite of Chinese language processing. Since Xue (2003), most work has formulated Chinese word segmentation (CWS) as sequence labeling (Peng et al., 2004) with character position tags, which has lent itself to structured discriminative learning with the benefit of allowing rich features of segmentation configurations, including (i) context of character/word ngrams within local windows, (ii) segmentation history of previous characters, or the combinations of both. These feature-based models still form the backbone of most state-of-the art systems. Nevertheless, many feature weights in such models are inevitably poorly estimated because the number of parameters is so large with respect to the limited amount of training data. This has motivated th</context>
+<context position="26662" citStr="Peng et al. 2004" startWordPosition="4389" endWordPosition="4392"> within 0.1% and observed that the training F-score reached 99.9% much earlier. We hypothesize that pre-training leads to sub-optimal local maximums for our model. • Hybrid matching. We tried applying hybrid matching (Section 3.1) for target characters which are less frequent than the top ftop characters, including unseen characters, which leads to about 0.15% of F-score improvements. Table 7: Hyper parameters of our model. 5 Related Work Word segmentation. Most modern segmenters followed Xue (2003) to model CWS as sequence labeling of character position tags, using conditional random fields (Peng et al. 2004), structured perceptron (Jiang et al., 2008), etc. Some notable exceptions are (Zhang and Clark, 2007; Zhang et al., 2012), which exploited rich word-level features and (Ma et al., 2012; Ma, 2014; Zhang et al., 2014), which explicitly model word structures. Our work generalizes the sequence labeling to a 5https://code.google.com/p/word2vec/ 6https://catalog.ldc.upenn.edu/LDC2005T14 more flexible framework of matching, and predicts actions as in (Zhang and Clark, 2007; Zhang et al., 2012) instead of position tags to prevent the greedy search from suffering tag inconsistencies. To better utilize</context>
+</contexts>
+<marker>Peng, Feng, McCallum, 2004</marker>
+<rawString>Fuchun Peng, Fangfang Feng, and Andrew McCallum. 2004. Chinese segmentation and new word detection using conditional random fields. In Proceedings of COLING, pages 562–571.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Xian Qian</author>
+<author>Yang Liu</author>
+</authors>
+<title>Joint Chinese word segmentation, POS tagging and parsing.</title>
+<date>2012</date>
+<booktitle>In Proceedings of EMNLP-CoNLL,</booktitle>
+<pages>501--511</pages>
+<contexts>
+<context position="27544" citStr="Qian and Liu, 2012" startWordPosition="4521" endWordPosition="4524">ork generalizes the sequence labeling to a 5https://code.google.com/p/word2vec/ 6https://catalog.ldc.upenn.edu/LDC2005T14 more flexible framework of matching, and predicts actions as in (Zhang and Clark, 2007; Zhang et al., 2012) instead of position tags to prevent the greedy search from suffering tag inconsistencies. To better utilize resources other than training data, our model might benefit from techniques used in recent state-of-the-art systems, such as semi-supervised learning (Zhao and Kit, 2008; Sun and Xu, 2011; Zhang et al., 2013; Zeng et al., 2013), joint models (Li and Zhou, 2012; Qian and Liu, 2012), and partial annotations (Liu et al., 2014; Yang and Vozila, 2014). Distributed representation and CWS. Distributed representation are useful for various NLP tasks, such as POS tagging (Collobert et al., 2011), machine translation (Devlin et al., 2014) and parsing (Socher et al., 2013). Influenced by Collobert et al. (2011), Zheng et al. (2013) modeled CWS as tagging and treated sentence-level tag sequence as the combination of individual tag predictions and context-independent tag transition. Mansur et al. (2013) was inspired by Bengio et al. (2003) and used character bigram embeddings to co</context>
+</contexts>
+<marker>Qian, Liu, 2012</marker>
+<rawString>Xian Qian and Yang Liu. 2012. Joint Chinese word segmentation, POS tagging and parsing. In Proceedings of EMNLP-CoNLL, pages 501–511.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Richard Socher</author>
+<author>John Bauer</author>
+<author>Christopher D Manning</author>
+<author>Andrew Y Ng</author>
+</authors>
+<title>Parsing with compositional vector grammars.</title>
+<date>2013</date>
+<booktitle>In Proceedings of ACL,</booktitle>
+<pages>455--465</pages>
+<contexts>
+<context position="27831" citStr="Socher et al., 2013" startWordPosition="4567" endWordPosition="4570">om suffering tag inconsistencies. To better utilize resources other than training data, our model might benefit from techniques used in recent state-of-the-art systems, such as semi-supervised learning (Zhao and Kit, 2008; Sun and Xu, 2011; Zhang et al., 2013; Zeng et al., 2013), joint models (Li and Zhou, 2012; Qian and Liu, 2012), and partial annotations (Liu et al., 2014; Yang and Vozila, 2014). Distributed representation and CWS. Distributed representation are useful for various NLP tasks, such as POS tagging (Collobert et al., 2011), machine translation (Devlin et al., 2014) and parsing (Socher et al., 2013). Influenced by Collobert et al. (2011), Zheng et al. (2013) modeled CWS as tagging and treated sentence-level tag sequence as the combination of individual tag predictions and context-independent tag transition. Mansur et al. (2013) was inspired by Bengio et al. (2003) and used character bigram embeddings to compensate for the absence of sentence level optimization. To model interactions between tags and characters, which are absent in these two CWS models, Pei et al. (2014) introduced the tag embedding and used a tensor hidden layer in the neural net. In contrast, our work uses character-spe</context>
+</contexts>
+<marker>Socher, Bauer, Manning, Ng, 2013</marker>
+<rawString>Richard Socher, John Bauer, Christopher D Manning, and Andrew Y Ng. 2013. Parsing with compositional vector grammars. In Proceedings of ACL, pages 455–465.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Weiwei Sun</author>
+<author>Jia Xu</author>
+</authors>
+<title>Enhancing Chinese word segmentation using unlabeled data.</title>
+<date>2011</date>
+<booktitle>In Proceedings of EMNLP,</booktitle>
+<pages>970--979</pages>
+<contexts>
+<context position="27450" citStr="Sun and Xu, 2011" startWordPosition="4503" endWordPosition="4506"> et al., 2012; Ma, 2014; Zhang et al., 2014), which explicitly model word structures. Our work generalizes the sequence labeling to a 5https://code.google.com/p/word2vec/ 6https://catalog.ldc.upenn.edu/LDC2005T14 more flexible framework of matching, and predicts actions as in (Zhang and Clark, 2007; Zhang et al., 2012) instead of position tags to prevent the greedy search from suffering tag inconsistencies. To better utilize resources other than training data, our model might benefit from techniques used in recent state-of-the-art systems, such as semi-supervised learning (Zhao and Kit, 2008; Sun and Xu, 2011; Zhang et al., 2013; Zeng et al., 2013), joint models (Li and Zhou, 2012; Qian and Liu, 2012), and partial annotations (Liu et al., 2014; Yang and Vozila, 2014). Distributed representation and CWS. Distributed representation are useful for various NLP tasks, such as POS tagging (Collobert et al., 2011), machine translation (Devlin et al., 2014) and parsing (Socher et al., 2013). Influenced by Collobert et al. (2011), Zheng et al. (2013) modeled CWS as tagging and treated sentence-level tag sequence as the combination of individual tag predictions and context-independent tag transition. Mansur</context>
+</contexts>
+<marker>Sun, Xu, 2011</marker>
+<rawString>Weiwei Sun and Jia Xu. 2011. Enhancing Chinese word segmentation using unlabeled data. In Proceedings of EMNLP, pages 970–979.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Xu Sun</author>
+<author>Yaozhong Zhang</author>
+<author>Takuya Matsuzaki</author>
+<author>Yoshimasa Tsuruoka</author>
+<author>Jun’ichi Tsujii</author>
+</authors>
+<title>A discriminative latent variable Chinese segmenter with hybrid word/character information.</title>
+<date>2009</date>
+<booktitle>In Proceedings of NAACL,</booktitle>
+<pages>56--64</pages>
+<contexts>
+<context position="23654" citStr="Sun et al. (2009)" startWordPosition="3887" endWordPosition="3890">ining† 94.4 93.6 94.0 69.0 95.2 94.6 94.9 64.8 + pre-training &amp; bigram† - - 95.2 - - - 97.2 - This work (closed-set) 95.5 94.6 95.1 76.0 96.6 96.5 96.6 87.2 Table 3: Comparison with previous embedding based models. Numbers in percentage. Results with † used extra corpora for (pre-)training. Models PKU MSR F CI F CI Pei et al. 93.5 ±0.15 94.4 ±0.14 This work 95.1 ±0.13 96.6 ±0.11 Table 4: Significance test of closed-set results of Pei et al (2014) and our model. Model PKU MSR Best05 closed-set 95.0 96.4 Zhang et al. (2006) 95.1 97.1 Zhang and Clark (2007) 94.5 97.2 Wang et al. (2012) 94.1 97.2 Sun et al. (2009) 95.2 97.3 Sun et al. (2012) 95.4 97.4 Zhang et al. (2013) † 96.1 97.4 This work 95.1 96.6 Table 5: Comparison with the state-of-the-art systems. Results with † used extra lexicon/raw corpora for training, i.e. in open-set setting. Best05 refers to the best closed-set results in 2nd SIGHAN bakeoff. diction speed is above 13,000 character per second. Hyper parameters. The hyper parameters used in the experiments are shown in Table 7. We initialized hyper parameters with recommendations in literature before tuning with dev-set experiments, each of which change one parameter by a magnitude. We fi</context>
+</contexts>
+<marker>Sun, Zhang, Matsuzaki, Tsuruoka, Tsujii, 2009</marker>
+<rawString>Xu Sun, Yaozhong Zhang, Takuya Matsuzaki, Yoshimasa Tsuruoka, and Jun’ichi Tsujii. 2009. A discriminative latent variable Chinese segmenter with hybrid word/character information. In Proceedings of NAACL, pages 56–64.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Xu Sun</author>
+<author>Houfeng Wang</author>
+<author>Wenjie Li</author>
+</authors>
+<title>Fast online training with frequency-adaptive learning rates for Chinese word segmentation and new word detection.</title>
+<date>2012</date>
+<booktitle>In Proceedings of ACL,</booktitle>
+<pages>253--262</pages>
+<contexts>
+<context position="23682" citStr="Sun et al. (2012)" startWordPosition="3893" endWordPosition="3896">5.2 94.6 94.9 64.8 + pre-training &amp; bigram† - - 95.2 - - - 97.2 - This work (closed-set) 95.5 94.6 95.1 76.0 96.6 96.5 96.6 87.2 Table 3: Comparison with previous embedding based models. Numbers in percentage. Results with † used extra corpora for (pre-)training. Models PKU MSR F CI F CI Pei et al. 93.5 ±0.15 94.4 ±0.14 This work 95.1 ±0.13 96.6 ±0.11 Table 4: Significance test of closed-set results of Pei et al (2014) and our model. Model PKU MSR Best05 closed-set 95.0 96.4 Zhang et al. (2006) 95.1 97.1 Zhang and Clark (2007) 94.5 97.2 Wang et al. (2012) 94.1 97.2 Sun et al. (2009) 95.2 97.3 Sun et al. (2012) 95.4 97.4 Zhang et al. (2013) † 96.1 97.4 This work 95.1 96.6 Table 5: Comparison with the state-of-the-art systems. Results with † used extra lexicon/raw corpora for training, i.e. in open-set setting. Best05 refers to the best closed-set results in 2nd SIGHAN bakeoff. diction speed is above 13,000 character per second. Hyper parameters. The hyper parameters used in the experiments are shown in Table 7. We initialized hyper parameters with recommendations in literature before tuning with dev-set experiments, each of which change one parameter by a magnitude. We fixed the hyper parameter to t</context>
+</contexts>
+<marker>Sun, Wang, Li, 2012</marker>
+<rawString>Xu Sun, Houfeng Wang, and Wenjie Li. 2012. Fast online training with frequency-adaptive learning rates for Chinese word segmentation and new word detection. In Proceedings of ACL, pages 253–262.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Xu Sun</author>
+<author>Yaozhong Zhang</author>
+<author>Takuya Matsuzaki</author>
+<author>Yoshimasa Tsuruoka</author>
+<author>Jun’ichi Tsujii</author>
+</authors>
+<title>Probabilistic Chinese word segmentation with non-local information and stochastic training.</title>
+<date>2013</date>
+<journal>Information Processing &amp; Management,</journal>
+<volume>49</volume>
+<issue>3</issue>
+<contexts>
+<context position="25624" citStr="Sun et al., 2013" startWordPosition="4224" endWordPosition="4227"> to inferior results. • Initial Learning rate. We found that several learning rates between 0.04 to 0.15 yielded very similar results as the one reported here. The training is not very sensitive to reasonFeature F-score Feature F-score All features 95.1 w/o action 94.6 w/o unigram 94.8 w/o bigram 94.4 uni-&amp;bi-gram 94.6 only action 93.3 only unigram 92.1 only bigram 94.2 1739 able values of initial learning rate. However, Instead of our simple linear decay of learning rate, it might be useful to try more sophisticated techniques, such as AdaGrad and exponential decaying (Tsuruoka et al., 2009; Sun et al., 2013). • Regularization. Our model suffers a little from over-fitting, if no regularization is used. In that case, the F-score on PKU drops from 95.1% to 94.7%. • Pre-training. We tried pre-training character embeddings using word2vec5 with Chinese Gigaword Corpus6 and use them to initialize the corresponding embeddings in our model, as previous work did. However, we were only able to see insignificant F-score improvements within 0.1% and observed that the training F-score reached 99.9% much earlier. We hypothesize that pre-training leads to sub-optimal local maximums for our model. • Hybrid matchi</context>
+</contexts>
+<marker>Sun, Zhang, Matsuzaki, Tsuruoka, Tsujii, 2013</marker>
+<rawString>Xu Sun, Yaozhong Zhang, Takuya Matsuzaki, Yoshimasa Tsuruoka, and Jun’ichi Tsujii. 2013. Probabilistic Chinese word segmentation with non-local information and stochastic training. Information Processing &amp; Management, 49(3):626–636.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yoshimasa Tsuruoka</author>
+<author>Jun’ichi Tsujii</author>
+<author>Sophia Ananiadou</author>
+</authors>
+<title>Stochastic gradient descent training for L1-regularized log-linear models with cumulative penalty.</title>
+<date>2009</date>
+<booktitle>In Proceedings of ACL-IJCNLP,</booktitle>
+<pages>477--485</pages>
+<contexts>
+<context position="25605" citStr="Tsuruoka et al., 2009" startWordPosition="4220" endWordPosition="4223"> larger than 5 may lead to inferior results. • Initial Learning rate. We found that several learning rates between 0.04 to 0.15 yielded very similar results as the one reported here. The training is not very sensitive to reasonFeature F-score Feature F-score All features 95.1 w/o action 94.6 w/o unigram 94.8 w/o bigram 94.4 uni-&amp;bi-gram 94.6 only action 93.3 only unigram 92.1 only bigram 94.2 1739 able values of initial learning rate. However, Instead of our simple linear decay of learning rate, it might be useful to try more sophisticated techniques, such as AdaGrad and exponential decaying (Tsuruoka et al., 2009; Sun et al., 2013). • Regularization. Our model suffers a little from over-fitting, if no regularization is used. In that case, the F-score on PKU drops from 95.1% to 94.7%. • Pre-training. We tried pre-training character embeddings using word2vec5 with Chinese Gigaword Corpus6 and use them to initialize the corresponding embeddings in our model, as previous work did. However, we were only able to see insignificant F-score improvements within 0.1% and observed that the training F-score reached 99.9% much earlier. We hypothesize that pre-training leads to sub-optimal local maximums for our mod</context>
+</contexts>
+<marker>Tsuruoka, Tsujii, Ananiadou, 2009</marker>
+<rawString>Yoshimasa Tsuruoka, Jun’ichi Tsujii, and Sophia Ananiadou. 2009. Stochastic gradient descent training for L1-regularized log-linear models with cumulative penalty. In Proceedings of ACL-IJCNLP, pages 477–485.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Kun Wang</author>
+<author>Chengqing Zong</author>
+<author>Keh-Yih Su</author>
+</authors>
+<title>Integrating generative and discriminative characterbased models for Chinese word segmentation.</title>
+<date>2012</date>
+<journal>ACM Transactions on Asian Language Information Processing</journal>
+<volume>11</volume>
+<issue>2</issue>
+<contexts>
+<context position="23626" citStr="Wang et al. (2012)" startWordPosition="3881" endWordPosition="3884">94.6 94.2 94.4 61.4 + pre-training† 94.4 93.6 94.0 69.0 95.2 94.6 94.9 64.8 + pre-training &amp; bigram† - - 95.2 - - - 97.2 - This work (closed-set) 95.5 94.6 95.1 76.0 96.6 96.5 96.6 87.2 Table 3: Comparison with previous embedding based models. Numbers in percentage. Results with † used extra corpora for (pre-)training. Models PKU MSR F CI F CI Pei et al. 93.5 ±0.15 94.4 ±0.14 This work 95.1 ±0.13 96.6 ±0.11 Table 4: Significance test of closed-set results of Pei et al (2014) and our model. Model PKU MSR Best05 closed-set 95.0 96.4 Zhang et al. (2006) 95.1 97.1 Zhang and Clark (2007) 94.5 97.2 Wang et al. (2012) 94.1 97.2 Sun et al. (2009) 95.2 97.3 Sun et al. (2012) 95.4 97.4 Zhang et al. (2013) † 96.1 97.4 This work 95.1 96.6 Table 5: Comparison with the state-of-the-art systems. Results with † used extra lexicon/raw corpora for training, i.e. in open-set setting. Best05 refers to the best closed-set results in 2nd SIGHAN bakeoff. diction speed is above 13,000 character per second. Hyper parameters. The hyper parameters used in the experiments are shown in Table 7. We initialized hyper parameters with recommendations in literature before tuning with dev-set experiments, each of which change one par</context>
+</contexts>
+<marker>Wang, Zong, Su, 2012</marker>
+<rawString>Kun Wang, Chengqing Zong, and Keh-Yih Su. 2012. Integrating generative and discriminative characterbased models for Chinese word segmentation. ACM Transactions on Asian Language Information Processing (TALIP),11(2):7.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Nianwen Xue</author>
+</authors>
+<title>Chinese word segmentation as character tagging.</title>
+<date>2003</date>
+<booktitle>Computational Linguistics and Chinese Language Processing,</booktitle>
+<volume>8</volume>
+<issue>1</issue>
+<contexts>
+<context position="1113" citStr="Xue (2003)" startWordPosition="153" endWordPosition="154">g and prediction algorithms have linear-time complexity. Based on the proposed model, a greedy segmenter is developed and evaluated on benchmark corpora. Experiments show that our greedy segmenter achieves improved results over previous neural network-based word segmenters, and its performance is competitive with state-of-the-art methods, despite its simple feature set and the absence of external resources for training. 1 Introduction Chinese sentences are written as character sequences without word delimiters, which makes word segmentation a prerequisite of Chinese language processing. Since Xue (2003), most work has formulated Chinese word segmentation (CWS) as sequence labeling (Peng et al., 2004) with character position tags, which has lent itself to structured discriminative learning with the benefit of allowing rich features of segmentation configurations, including (i) context of character/word ngrams within local windows, (ii) segmentation history of previous characters, or the combinations of both. These feature-based models still form the backbone of most state-of-the art systems. Nevertheless, many feature weights in such models are inevitably poorly estimated because the number o</context>
+<context position="26549" citStr="Xue (2003)" startWordPosition="4372" endWordPosition="4373">s in our model, as previous work did. However, we were only able to see insignificant F-score improvements within 0.1% and observed that the training F-score reached 99.9% much earlier. We hypothesize that pre-training leads to sub-optimal local maximums for our model. • Hybrid matching. We tried applying hybrid matching (Section 3.1) for target characters which are less frequent than the top ftop characters, including unseen characters, which leads to about 0.15% of F-score improvements. Table 7: Hyper parameters of our model. 5 Related Work Word segmentation. Most modern segmenters followed Xue (2003) to model CWS as sequence labeling of character position tags, using conditional random fields (Peng et al. 2004), structured perceptron (Jiang et al., 2008), etc. Some notable exceptions are (Zhang and Clark, 2007; Zhang et al., 2012), which exploited rich word-level features and (Ma et al., 2012; Ma, 2014; Zhang et al., 2014), which explicitly model word structures. Our work generalizes the sequence labeling to a 5https://code.google.com/p/word2vec/ 6https://catalog.ldc.upenn.edu/LDC2005T14 more flexible framework of matching, and predicts actions as in (Zhang and Clark, 2007; Zhang et al., </context>
+</contexts>
+<marker>Xue, 2003</marker>
+<rawString>Nianwen Xue. 2003. Chinese word segmentation as character tagging. Computational Linguistics and Chinese Language Processing, 8(1):29–48.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Fan Yang</author>
+<author>Paul Vozila</author>
+</authors>
+<title>Semi-supervised Chinese word segmentation using partial-label learning With conditional random fields.</title>
+<date>2014</date>
+<booktitle>In Proceedings of EMNLP,</booktitle>
+<pages>90--98</pages>
+<contexts>
+<context position="27611" citStr="Yang and Vozila, 2014" startWordPosition="4533" endWordPosition="4536">com/p/word2vec/ 6https://catalog.ldc.upenn.edu/LDC2005T14 more flexible framework of matching, and predicts actions as in (Zhang and Clark, 2007; Zhang et al., 2012) instead of position tags to prevent the greedy search from suffering tag inconsistencies. To better utilize resources other than training data, our model might benefit from techniques used in recent state-of-the-art systems, such as semi-supervised learning (Zhao and Kit, 2008; Sun and Xu, 2011; Zhang et al., 2013; Zeng et al., 2013), joint models (Li and Zhou, 2012; Qian and Liu, 2012), and partial annotations (Liu et al., 2014; Yang and Vozila, 2014). Distributed representation and CWS. Distributed representation are useful for various NLP tasks, such as POS tagging (Collobert et al., 2011), machine translation (Devlin et al., 2014) and parsing (Socher et al., 2013). Influenced by Collobert et al. (2011), Zheng et al. (2013) modeled CWS as tagging and treated sentence-level tag sequence as the combination of individual tag predictions and context-independent tag transition. Mansur et al. (2013) was inspired by Bengio et al. (2003) and used character bigram embeddings to compensate for the absence of sentence level optimization. To model i</context>
+</contexts>
+<marker>Yang, Vozila, 2014</marker>
+<rawString>Fan Yang and Paul Vozila. 2014. Semi-supervised Chinese word segmentation using partial-label learning With conditional random fields. In Proceedings of EMNLP, page 90–98.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Xiaodong Zeng</author>
+<author>Derek F Wong</author>
+<author>Lidia S Chao</author>
+<author>Isabel Trancoso</author>
+</authors>
+<title>Graph-based semi-supervised model for joint Chinese word segmentation and partof-speech tagging.</title>
+<date>2013</date>
+<booktitle>In Proceedings of ACL,</booktitle>
+<pages>770--779</pages>
+<contexts>
+<context position="27490" citStr="Zeng et al., 2013" startWordPosition="4511" endWordPosition="4514"> 2014), which explicitly model word structures. Our work generalizes the sequence labeling to a 5https://code.google.com/p/word2vec/ 6https://catalog.ldc.upenn.edu/LDC2005T14 more flexible framework of matching, and predicts actions as in (Zhang and Clark, 2007; Zhang et al., 2012) instead of position tags to prevent the greedy search from suffering tag inconsistencies. To better utilize resources other than training data, our model might benefit from techniques used in recent state-of-the-art systems, such as semi-supervised learning (Zhao and Kit, 2008; Sun and Xu, 2011; Zhang et al., 2013; Zeng et al., 2013), joint models (Li and Zhou, 2012; Qian and Liu, 2012), and partial annotations (Liu et al., 2014; Yang and Vozila, 2014). Distributed representation and CWS. Distributed representation are useful for various NLP tasks, such as POS tagging (Collobert et al., 2011), machine translation (Devlin et al., 2014) and parsing (Socher et al., 2013). Influenced by Collobert et al. (2011), Zheng et al. (2013) modeled CWS as tagging and treated sentence-level tag sequence as the combination of individual tag predictions and context-independent tag transition. Mansur et al. (2013) was inspired by Bengio et</context>
+</contexts>
+<marker>Zeng, Wong, Chao, Trancoso, 2013</marker>
+<rawString>Xiaodong Zeng, Derek F Wong, Lidia S Chao, and Isabel Trancoso. 2013. Graph-based semi-supervised model for joint Chinese word segmentation and partof-speech tagging. In Proceedings of ACL, pages 770–779.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yue Zhang</author>
+<author>Stephen Clark</author>
+</authors>
+<title>Chinese segmentation with a word-based perceptron algorithm.</title>
+<date>2007</date>
+<booktitle>In Proceedings of ACL,</booktitle>
+<pages>840--847</pages>
+<contexts>
+<context position="20885" citStr="Zhang and Clark, 2007" startWordPosition="3416" endWordPosition="3419"> the N is the word token count of the testing set, which is 104,372 and 106,873 for PKU and MSR, respectively. We see 3Our implementation: https://zenodo.org/record/17645. 4The results for Zheng et al. (2013) are from the reimplementation of Pei et al. (2014). that the confidence intervals of our results do not overlap with that of (Pei et al., 2014), meaning that our improvements are statistically significant. 4.3 Comparison with the State-of-the-Art Systems Table 5 shows that the results of our greedy segmenter are competitive with the state-of-the-art supervised systems (Best05 closed-set, Zhang and Clark, 2007), although our feature set is much simpler. More recent state-of-the-art systems rely on both extensive feature engineering and extra raw corpora to boost performance, which are semi-supervised learning. For example, Zhang et al (2013) developed 8 types of static and dynamic features to maximize the co-training system that used extra corpora of Chinese Gigaword and Baike, each of which contains more than 1 billion character tokens. Such systems are not directly comparable with our supervised model. We leave the development of semi-supervised learning methods for our model as future work. 4.4 F</context>
+<context position="23597" citStr="Zhang and Clark (2007)" startWordPosition="3875" endWordPosition="3878">t al. (2014) 93.7 93.4 93.5 64.2 94.6 94.2 94.4 61.4 + pre-training† 94.4 93.6 94.0 69.0 95.2 94.6 94.9 64.8 + pre-training &amp; bigram† - - 95.2 - - - 97.2 - This work (closed-set) 95.5 94.6 95.1 76.0 96.6 96.5 96.6 87.2 Table 3: Comparison with previous embedding based models. Numbers in percentage. Results with † used extra corpora for (pre-)training. Models PKU MSR F CI F CI Pei et al. 93.5 ±0.15 94.4 ±0.14 This work 95.1 ±0.13 96.6 ±0.11 Table 4: Significance test of closed-set results of Pei et al (2014) and our model. Model PKU MSR Best05 closed-set 95.0 96.4 Zhang et al. (2006) 95.1 97.1 Zhang and Clark (2007) 94.5 97.2 Wang et al. (2012) 94.1 97.2 Sun et al. (2009) 95.2 97.3 Sun et al. (2012) 95.4 97.4 Zhang et al. (2013) † 96.1 97.4 This work 95.1 96.6 Table 5: Comparison with the state-of-the-art systems. Results with † used extra lexicon/raw corpora for training, i.e. in open-set setting. Best05 refers to the best closed-set results in 2nd SIGHAN bakeoff. diction speed is above 13,000 character per second. Hyper parameters. The hyper parameters used in the experiments are shown in Table 7. We initialized hyper parameters with recommendations in literature before tuning with dev-set experiments,</context>
+<context position="26763" citStr="Zhang and Clark, 2007" startWordPosition="4404" endWordPosition="4407">at pre-training leads to sub-optimal local maximums for our model. • Hybrid matching. We tried applying hybrid matching (Section 3.1) for target characters which are less frequent than the top ftop characters, including unseen characters, which leads to about 0.15% of F-score improvements. Table 7: Hyper parameters of our model. 5 Related Work Word segmentation. Most modern segmenters followed Xue (2003) to model CWS as sequence labeling of character position tags, using conditional random fields (Peng et al. 2004), structured perceptron (Jiang et al., 2008), etc. Some notable exceptions are (Zhang and Clark, 2007; Zhang et al., 2012), which exploited rich word-level features and (Ma et al., 2012; Ma, 2014; Zhang et al., 2014), which explicitly model word structures. Our work generalizes the sequence labeling to a 5https://code.google.com/p/word2vec/ 6https://catalog.ldc.upenn.edu/LDC2005T14 more flexible framework of matching, and predicts actions as in (Zhang and Clark, 2007; Zhang et al., 2012) instead of position tags to prevent the greedy search from suffering tag inconsistencies. To better utilize resources other than training data, our model might benefit from techniques used in recent state-of-</context>
+</contexts>
+<marker>Zhang, Clark, 2007</marker>
+<rawString>Yue Zhang and Stephen Clark. 2007. Chinese segmentation with a word-based perceptron algorithm. In Proceedings of ACL, pages 840–847.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yue Zhang</author>
+<author>Stephen Clark</author>
+</authors>
+<title>Syntactic processing using the generalized perceptron and beam search.</title>
+<date>2011</date>
+<journal>Computational Linguistics,</journal>
+<volume>37</volume>
+<issue>1</issue>
+<contexts>
+<context position="30880" citStr="Zhang and Clark (2011)" startWordPosition="5049" endWordPosition="5052">t-search segmenter is no better or even worse than that of the greedy-search segmenter. We hypothesize that since the training updates parameters with regard to search errors, the final model is “tailored” for the specific search method used, which makes the model-search combination of greedy search segmenter not necessarily worse than that of exact search segmenter. Another way of looking at it is that search is less important when the model is accurate. In this case, most step-wise decisions are correct in the first place, which requires no correction from the search algorithm. Empirically, Zhang and Clark (2011) also reported exact-search segmenter performing worse than beam-search segmenters. Despite that the greedy segmenter is incapable of considering future labels, this rarely causes problems in practice. Our greedy segmenter has good results, compared with the exact-search segmenter above and previous approaches, most of which utilize exact search. Moreover, the greedy segmenter has additional advantages of faster training and prediction. Sequence labeling and matching. A traditional sequence labeling model such as CRF has K (number of labels) target-character-independent weight vectors, where t</context>
+</contexts>
+<marker>Zhang, Clark, 2011</marker>
+<rawString>Yue Zhang and Stephen Clark. 2011. Syntactic processing using the generalized perceptron and beam search. Computational Linguistics, 37(1):105–151.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ruiqiang Zhang</author>
+<author>Genichiro Kikui</author>
+<author>Eiichiro Sumita</author>
+</authors>
+<title>Subword-based tagging by conditional random fields for Chinese word segmentation.</title>
+<date>2006</date>
+<booktitle>In Proceedings of NAACL,</booktitle>
+<pages>193--196</pages>
+<contexts>
+<context position="23564" citStr="Zhang et al. (2006)" startWordPosition="3869" endWordPosition="3872">69.5 93.1 93.1 93.1 59.7 Pei et al. (2014) 93.7 93.4 93.5 64.2 94.6 94.2 94.4 61.4 + pre-training† 94.4 93.6 94.0 69.0 95.2 94.6 94.9 64.8 + pre-training &amp; bigram† - - 95.2 - - - 97.2 - This work (closed-set) 95.5 94.6 95.1 76.0 96.6 96.5 96.6 87.2 Table 3: Comparison with previous embedding based models. Numbers in percentage. Results with † used extra corpora for (pre-)training. Models PKU MSR F CI F CI Pei et al. 93.5 ±0.15 94.4 ±0.14 This work 95.1 ±0.13 96.6 ±0.11 Table 4: Significance test of closed-set results of Pei et al (2014) and our model. Model PKU MSR Best05 closed-set 95.0 96.4 Zhang et al. (2006) 95.1 97.1 Zhang and Clark (2007) 94.5 97.2 Wang et al. (2012) 94.1 97.2 Sun et al. (2009) 95.2 97.3 Sun et al. (2012) 95.4 97.4 Zhang et al. (2013) † 96.1 97.4 This work 95.1 96.6 Table 5: Comparison with the state-of-the-art systems. Results with † used extra lexicon/raw corpora for training, i.e. in open-set setting. Best05 refers to the best closed-set results in 2nd SIGHAN bakeoff. diction speed is above 13,000 character per second. Hyper parameters. The hyper parameters used in the experiments are shown in Table 7. We initialized hyper parameters with recommendations in literature before</context>
+</contexts>
+<marker>Zhang, Kikui, Sumita, 2006</marker>
+<rawString>Ruiqiang Zhang, Genichiro Kikui, and Eiichiro Sumita. 2006. Subword-based tagging by conditional random fields for Chinese word segmentation. In Proceedings of NAACL, pages 193–196.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Kaixu Zhang</author>
+<author>Maosong Sun</author>
+<author>Changle Zhou</author>
+</authors>
+<title>Word segmentation on Chinese mirco-blog data with a linear-time incremental model.</title>
+<date>2012</date>
+<booktitle>In Proceedings of the 2nd CIPS-SIGHANJoint Conference on Chinese Language Processing,</booktitle>
+<pages>41--46</pages>
+<contexts>
+<context position="26784" citStr="Zhang et al., 2012" startWordPosition="4408" endWordPosition="4411">o sub-optimal local maximums for our model. • Hybrid matching. We tried applying hybrid matching (Section 3.1) for target characters which are less frequent than the top ftop characters, including unseen characters, which leads to about 0.15% of F-score improvements. Table 7: Hyper parameters of our model. 5 Related Work Word segmentation. Most modern segmenters followed Xue (2003) to model CWS as sequence labeling of character position tags, using conditional random fields (Peng et al. 2004), structured perceptron (Jiang et al., 2008), etc. Some notable exceptions are (Zhang and Clark, 2007; Zhang et al., 2012), which exploited rich word-level features and (Ma et al., 2012; Ma, 2014; Zhang et al., 2014), which explicitly model word structures. Our work generalizes the sequence labeling to a 5https://code.google.com/p/word2vec/ 6https://catalog.ldc.upenn.edu/LDC2005T14 more flexible framework of matching, and predicts actions as in (Zhang and Clark, 2007; Zhang et al., 2012) instead of position tags to prevent the greedy search from suffering tag inconsistencies. To better utilize resources other than training data, our model might benefit from techniques used in recent state-of-the-art systems, such</context>
+</contexts>
+<marker>Zhang, Sun, Zhou, 2012</marker>
+<rawString>Kaixu Zhang, Maosong Sun, and Changle Zhou. 2012. Word segmentation on Chinese mirco-blog data with a linear-time incremental model. In Proceedings of the 2nd CIPS-SIGHANJoint Conference on Chinese Language Processing, pages 41–46.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Longkai Zhang</author>
+<author>Houfeng Wang</author>
+<author>Xu Sun</author>
+<author>Maigup Mansur</author>
+</authors>
+<title>Exploring representations from unlabeled data with co-training for Chinese word segmentation.</title>
+<date>2013</date>
+<booktitle>In Proceedings of EMNLP,</booktitle>
+<pages>311--321</pages>
+<contexts>
+<context position="21120" citStr="Zhang et al (2013)" startWordPosition="3451" endWordPosition="3454">of Pei et al. (2014). that the confidence intervals of our results do not overlap with that of (Pei et al., 2014), meaning that our improvements are statistically significant. 4.3 Comparison with the State-of-the-Art Systems Table 5 shows that the results of our greedy segmenter are competitive with the state-of-the-art supervised systems (Best05 closed-set, Zhang and Clark, 2007), although our feature set is much simpler. More recent state-of-the-art systems rely on both extensive feature engineering and extra raw corpora to boost performance, which are semi-supervised learning. For example, Zhang et al (2013) developed 8 types of static and dynamic features to maximize the co-training system that used extra corpora of Chinese Gigaword and Baike, each of which contains more than 1 billion character tokens. Such systems are not directly comparable with our supervised model. We leave the development of semi-supervised learning methods for our model as future work. 4.4 Features Influence Table 6 shows the F-scores of our model on PKU dataset when different features are removed (‘w/o’) or when only a subset of features are used. Features complement each other and removing any group of features leads to</context>
+<context position="23712" citStr="Zhang et al. (2013)" startWordPosition="3899" endWordPosition="3902">ining &amp; bigram† - - 95.2 - - - 97.2 - This work (closed-set) 95.5 94.6 95.1 76.0 96.6 96.5 96.6 87.2 Table 3: Comparison with previous embedding based models. Numbers in percentage. Results with † used extra corpora for (pre-)training. Models PKU MSR F CI F CI Pei et al. 93.5 ±0.15 94.4 ±0.14 This work 95.1 ±0.13 96.6 ±0.11 Table 4: Significance test of closed-set results of Pei et al (2014) and our model. Model PKU MSR Best05 closed-set 95.0 96.4 Zhang et al. (2006) 95.1 97.1 Zhang and Clark (2007) 94.5 97.2 Wang et al. (2012) 94.1 97.2 Sun et al. (2009) 95.2 97.3 Sun et al. (2012) 95.4 97.4 Zhang et al. (2013) † 96.1 97.4 This work 95.1 96.6 Table 5: Comparison with the state-of-the-art systems. Results with † used extra lexicon/raw corpora for training, i.e. in open-set setting. Best05 refers to the best closed-set results in 2nd SIGHAN bakeoff. diction speed is above 13,000 character per second. Hyper parameters. The hyper parameters used in the experiments are shown in Table 7. We initialized hyper parameters with recommendations in literature before tuning with dev-set experiments, each of which change one parameter by a magnitude. We fixed the hyper parameter to the current setting without spe</context>
+<context position="27470" citStr="Zhang et al., 2013" startWordPosition="4507" endWordPosition="4510"> 2014; Zhang et al., 2014), which explicitly model word structures. Our work generalizes the sequence labeling to a 5https://code.google.com/p/word2vec/ 6https://catalog.ldc.upenn.edu/LDC2005T14 more flexible framework of matching, and predicts actions as in (Zhang and Clark, 2007; Zhang et al., 2012) instead of position tags to prevent the greedy search from suffering tag inconsistencies. To better utilize resources other than training data, our model might benefit from techniques used in recent state-of-the-art systems, such as semi-supervised learning (Zhao and Kit, 2008; Sun and Xu, 2011; Zhang et al., 2013; Zeng et al., 2013), joint models (Li and Zhou, 2012; Qian and Liu, 2012), and partial annotations (Liu et al., 2014; Yang and Vozila, 2014). Distributed representation and CWS. Distributed representation are useful for various NLP tasks, such as POS tagging (Collobert et al., 2011), machine translation (Devlin et al., 2014) and parsing (Socher et al., 2013). Influenced by Collobert et al. (2011), Zheng et al. (2013) modeled CWS as tagging and treated sentence-level tag sequence as the combination of individual tag predictions and context-independent tag transition. Mansur et al. (2013) was i</context>
+</contexts>
+<marker>Zhang, Wang, Sun, Mansur, 2013</marker>
+<rawString>Longkai Zhang, Houfeng Wang, Xu Sun, and Maigup Mansur. 2013. Exploring representations from unlabeled data with co-training for Chinese word segmentation. In Proceedings of EMNLP, pages 311– 321.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Meishan Zhang</author>
+<author>Yue Zhang</author>
+<author>Wanxiang Che</author>
+<author>Ting Liu</author>
+</authors>
+<title>Character-level Chinese dependency parsing.</title>
+<date>2014</date>
+<booktitle>In Proceedings of ACL,</booktitle>
+<pages>1326--1336</pages>
+<contexts>
+<context position="26878" citStr="Zhang et al., 2014" startWordPosition="4425" endWordPosition="4428">ng (Section 3.1) for target characters which are less frequent than the top ftop characters, including unseen characters, which leads to about 0.15% of F-score improvements. Table 7: Hyper parameters of our model. 5 Related Work Word segmentation. Most modern segmenters followed Xue (2003) to model CWS as sequence labeling of character position tags, using conditional random fields (Peng et al. 2004), structured perceptron (Jiang et al., 2008), etc. Some notable exceptions are (Zhang and Clark, 2007; Zhang et al., 2012), which exploited rich word-level features and (Ma et al., 2012; Ma, 2014; Zhang et al., 2014), which explicitly model word structures. Our work generalizes the sequence labeling to a 5https://code.google.com/p/word2vec/ 6https://catalog.ldc.upenn.edu/LDC2005T14 more flexible framework of matching, and predicts actions as in (Zhang and Clark, 2007; Zhang et al., 2012) instead of position tags to prevent the greedy search from suffering tag inconsistencies. To better utilize resources other than training data, our model might benefit from techniques used in recent state-of-the-art systems, such as semi-supervised learning (Zhao and Kit, 2008; Sun and Xu, 2011; Zhang et al., 2013; Zeng e</context>
+</contexts>
+<marker>Zhang, Zhang, Che, Liu, 2014</marker>
+<rawString>Meishan Zhang, Yue Zhang, Wanxiang Che, and Ting Liu. 2014. Character-level Chinese dependency parsing. In Proceedings of ACL, pages 1326–1336.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Hai Zhao</author>
+<author>Chunyu Kit</author>
+</authors>
+<title>Unsupervised segmentation helps supervised learning of character tagging for word segmentation and named entity recognition.</title>
+<date>2008</date>
+<booktitle>In Proceedings of IJCNLP,</booktitle>
+<pages>106--111</pages>
+<contexts>
+<context position="27432" citStr="Zhao and Kit, 2008" startWordPosition="4499" endWordPosition="4502">vel features and (Ma et al., 2012; Ma, 2014; Zhang et al., 2014), which explicitly model word structures. Our work generalizes the sequence labeling to a 5https://code.google.com/p/word2vec/ 6https://catalog.ldc.upenn.edu/LDC2005T14 more flexible framework of matching, and predicts actions as in (Zhang and Clark, 2007; Zhang et al., 2012) instead of position tags to prevent the greedy search from suffering tag inconsistencies. To better utilize resources other than training data, our model might benefit from techniques used in recent state-of-the-art systems, such as semi-supervised learning (Zhao and Kit, 2008; Sun and Xu, 2011; Zhang et al., 2013; Zeng et al., 2013), joint models (Li and Zhou, 2012; Qian and Liu, 2012), and partial annotations (Liu et al., 2014; Yang and Vozila, 2014). Distributed representation and CWS. Distributed representation are useful for various NLP tasks, such as POS tagging (Collobert et al., 2011), machine translation (Devlin et al., 2014) and parsing (Socher et al., 2013). Influenced by Collobert et al. (2011), Zheng et al. (2013) modeled CWS as tagging and treated sentence-level tag sequence as the combination of individual tag predictions and context-independent tag </context>
+</contexts>
+<marker>Zhao, Kit, 2008</marker>
+<rawString>Hai Zhao and Chunyu Kit. 2008. Unsupervised segmentation helps supervised learning of character tagging for word segmentation and named entity recognition. In Proceedings of IJCNLP, pages 106–111.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Xiaoqing Zheng</author>
+<author>Hanyang Chen</author>
+<author>Tianyu Xu</author>
+</authors>
+<title>Deep Learning for Chinese Word Segmentation and POS Tagging.</title>
+<date>2013</date>
+<booktitle>In Proceedings of EMNLP,</booktitle>
+<pages>647--657</pages>
+<contexts>
+<context position="2121" citStr="Zheng et al. (2013)" startWordPosition="310" endWordPosition="313">e combinations of both. These feature-based models still form the backbone of most state-of-the art systems. Nevertheless, many feature weights in such models are inevitably poorly estimated because the number of parameters is so large with respect to the limited amount of training data. This has motivated the introduction of low-dimensional, realvalued vectors, known as embeddings, as a tool to deal with the sparseness of the input. Embeddings allow linguistic units appearing in similar contexts to share similar vectors. The success of embeddings has been observed in many NLP tasks. For CWS, Zheng et al. (2013) adapted Collobert et al. (2011) and uses character embeddings in local windows as input for a two-layer network. The network predicts individual character position tags, the transitions of which are learned separately. Mansur et al. (2013) also developed a similar architecture, which labels individual characters and uses character bigram embeddings as additional features to compensate the absence of sentence-level modeling. Pei et al. (2014) improved upon Zheng et al. (2013) by capturing the combinations of context and history via a tensor neural network. Despite their differences, these CWS </context>
+<context position="20471" citStr="Zheng et al. (2013)" startWordPosition="3351" endWordPosition="3354">del still outperforms previous embedding based models in closed-set evaluation, which shows the effectiveness of our matching model. Significance test. Table 4 shows the 95% confidence intervals (CI) for close-set results of our model and the best performing previous model (Pei et al., 2014), which are computed by formula (9), following (Emerson, 2005). CI = 21 &apos;(&apos;N VVV N (9) where F is the F-score value and the N is the word token count of the testing set, which is 104,372 and 106,873 for PKU and MSR, respectively. We see 3Our implementation: https://zenodo.org/record/17645. 4The results for Zheng et al. (2013) are from the reimplementation of Pei et al. (2014). that the confidence intervals of our results do not overlap with that of (Pei et al., 2014), meaning that our improvements are statistically significant. 4.3 Comparison with the State-of-the-Art Systems Table 5 shows that the results of our greedy segmenter are competitive with the state-of-the-art supervised systems (Best05 closed-set, Zhang and Clark, 2007), although our feature set is much simpler. More recent state-of-the-art systems rely on both extensive feature engineering and extra raw corpora to boost performance, which are semi-sup</context>
+<context position="24954" citStr="Zheng et al. (2013)" startWordPosition="4111" endWordPosition="4114">tuning, since that is not the main purpose of this paper. • Embedding size determines the number of parameters to be trained, thus should fit the Table 6: The influence of features. F-score in percentage on the PKU corpus. Figure 2: The learning curve of our model. training data size to achieve good performance. We tried the size of 30 and 100, both of which performs worse than 50. A possible tuning is to use different embedding size for different groups of features instead of setting Ni = 50 for all features. • Context window size. A window size of 3-5 characters achieves comparable results. Zheng et al. (2013) suggested that context window larger than 5 may lead to inferior results. • Initial Learning rate. We found that several learning rates between 0.04 to 0.15 yielded very similar results as the one reported here. The training is not very sensitive to reasonFeature F-score Feature F-score All features 95.1 w/o action 94.6 w/o unigram 94.8 w/o bigram 94.4 uni-&amp;bi-gram 94.6 only action 93.3 only unigram 92.1 only bigram 94.2 1739 able values of initial learning rate. However, Instead of our simple linear decay of learning rate, it might be useful to try more sophisticated techniques, such as AdaG</context>
+<context position="27891" citStr="Zheng et al. (2013)" startWordPosition="4577" endWordPosition="4580"> other than training data, our model might benefit from techniques used in recent state-of-the-art systems, such as semi-supervised learning (Zhao and Kit, 2008; Sun and Xu, 2011; Zhang et al., 2013; Zeng et al., 2013), joint models (Li and Zhou, 2012; Qian and Liu, 2012), and partial annotations (Liu et al., 2014; Yang and Vozila, 2014). Distributed representation and CWS. Distributed representation are useful for various NLP tasks, such as POS tagging (Collobert et al., 2011), machine translation (Devlin et al., 2014) and parsing (Socher et al., 2013). Influenced by Collobert et al. (2011), Zheng et al. (2013) modeled CWS as tagging and treated sentence-level tag sequence as the combination of individual tag predictions and context-independent tag transition. Mansur et al. (2013) was inspired by Bengio et al. (2003) and used character bigram embeddings to compensate for the absence of sentence level optimization. To model interactions between tags and characters, which are absent in these two CWS models, Pei et al. (2014) introduced the tag embedding and used a tensor hidden layer in the neural net. In contrast, our work uses character-specific action embeddings to explicitly capture such interacti</context>
+</contexts>
+<marker>Zheng, Chen, Xu, 2013</marker>
+<rawString>Xiaoqing Zheng, Hanyang Chen, and Tianyu Xu. 2013. Deep Learning for Chinese Word Segmentation and POS Tagging. In Proceedings of EMNLP, pages 647–657.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>
