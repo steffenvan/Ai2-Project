@@ -1,0 +1,2118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.000021">
+<title confidence="0.990171">
+Parsing as Reduction
+</title>
+<author confidence="0.998498">
+Daniel Fern´andez-Gonz´alez†∗ Andr´e F. T. Martins$#
+</author>
+<affiliation confidence="0.910812666666667">
+†Departamento de Inform´atica, Universidade de Vigo, Campus As Lagoas, 32004 Ourense, Spain
+$Instituto de Telecomunicac¸˜oes, Instituto Superior T´ecnico, 1049-001 Lisboa, Portugal
+#Priberam Labs, Alameda D. Afonso Henriques, 41, 2o, 1000-123 Lisboa, Portugal
+</affiliation>
+<email confidence="0.992197">
+danifg@uvigo.es, atm@priberam.pt
+</email>
+<sectionHeader confidence="0.997322" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.9999755">
+We reduce phrase-based parsing to depen-
+dency parsing. Our reduction is grounded
+on a new intermediate representation,
+“head-ordered dependency trees,” shown
+to be isomorphic to constituent trees. By
+encoding order information in the depen-
+dency labels, we show that any off-the-
+shelf, trainable dependency parser can be
+used to produce constituents. When this
+parser is non-projective, we can perform
+discontinuous parsing in a very natural
+manner. Despite the simplicity of our ap-
+proach, experiments show that the result-
+ing parsers are on par with strong base-
+lines, such as the Berkeley parser for En-
+glish and the best non-reranking system
+in the SPMRL-2014 shared task. Results
+are particularly striking for discontinuous
+parsing of German, where we surpass the
+current state of the art by a wide margin.
+</bodyText>
+<sectionHeader confidence="0.999516" genericHeader="keywords">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.989749333333333">
+Constituent parsing is a central problem in
+NLP—one at which statistical models trained on
+treebanks have excelled (Charniak, 1996; Klein
+and Manning, 2003; Petrov and Klein, 2007).
+However, most existing parsers are slow, since
+they need to deal with a heavy grammar con-
+stant. Dependency parsers are generally faster, but
+less informative, since they do not produce con-
+stituents, which are often required by downstream
+applications (Johansson and Nugues, 2008; Wu et
+al., 2009; Berg-Kirkpatrick et al., 2011; Elming et
+al., 2013). How to get the best of both worlds?
+Coarse-to-fine decoding (Charniak and John-
+son, 2005) and shift-reduce parsing (Sagae and
+Lavie, 2005; Zhu et al., 2013) were a step forward
+</bodyText>
+<footnote confidence="0.6985555">
+∗This research was carried out during an internship at
+Priberam Labs.
+</footnote>
+<bodyText confidence="0.999924307692308">
+to accelerate constituent parsing, but typical run-
+times still lag those of dependency parsers. This
+is only made worse if discontinuous constituents
+are allowed—such discontinuities are convenient
+to represent wh-movement, scrambling, extrapo-
+sition, and other linguistic phenomena common in
+free word order languages. While non-projective
+dependency parsers, which are able to model such
+phenomena, have been widely developed in the
+last decade (Nivre et al., 2007; McDonald et al.,
+2006; Martins et al., 2013), discontinuous con-
+stituent parsing is still taking its first steps (Maier
+and Søgaard, 2008; Kallmeyer and Maier, 2013).
+In this paper, we show that an off-the-shelf,
+trainable, dependency parser is enough to build
+a highly-competitive constituent parser. This (sur-
+prising) result is based on a reduction1 of con-
+stituent to dependency parsing, followed by a sim-
+ple post-processing procedure to recover unaries.
+Unlike other constituent parsers, ours does not
+require estimating a grammar, nor binarizing the
+treebank. Moreover, when the dependency parser
+is non-projective, our method can perform discon-
+tinuous constituent parsing in a very natural way.
+Key to our approach is the notion of head-
+ordered dependency trees (shown in Figure 1):
+by endowing dependency trees with this additional
+layer of structure, we show that they become iso-
+morphic to constituent trees. We encode this struc-
+ture as part of the dependency labels, enabling
+a dependency-to-constituent conversion. A re-
+lated conversion was attempted by Hall and Nivre
+(2008) to parse German, but their complex encod-
+ing scheme blows up the number of arc labels, af-
+fecting the final parser’s quality. By contrast, our
+light encoding achieves a 10-fold decrease in the
+label alphabet, leading to more accurate parsing.
+While simple, our reduction-based parsers are
+on par with the Berkeley parser for English (Petrov
+</bodyText>
+<footnote confidence="0.814126">
+1The title of this paper is inspired by the seminal paper of
+Pereira and Warren (1983) “Parsing as Deduction.”
+1523
+</footnote>
+<note confidence="0.951752666666667">
+Proceedings of the 53rd Annual Meeting of the Association for Computational Linguistics
+and the 7th International Joint Conference on Natural Language Processing, pages 1523–1533,
+Beijing, China, July 26-31, 2015. c�2015 Association for Computational Linguistics
+</note>
+<bodyText confidence="0.99764">
+and Klein, 2007), and with the best single system
+in the recent SPMRL shared task (Seddah et al.,
+2014), for eight morphologically rich languages.
+For discontinuous parsing, we surpass the current
+state of the art by a wide margin on two German
+datasets (TIGER and NEGRA), while achieving fast
+parsing speeds. We provide a free distribution of
+our parsers along with this paper, as part of the
+TurboParser toolkit.2
+</bodyText>
+<sectionHeader confidence="0.995561" genericHeader="introduction">
+2 Background
+</sectionHeader>
+<bodyText confidence="0.9997896">
+We start by reviewing constituent and dependency
+representations, and setting up the notation. Fol-
+lowing Kong and Smith (2014), we use c-/d- pre-
+fixes for convenience (e.g., we write c-parser for
+constituent parser and d-tree for dependency tree).
+</bodyText>
+<subsectionHeader confidence="0.954702">
+2.1 Constituent Trees
+</subsectionHeader>
+<bodyText confidence="0.99994628125">
+Constituent-based representations are commonly
+seen as derivations according to a context-free
+grammar (CFG). Here, we focus on properties
+of the c-trees, rather than of the grammars used
+to generate them. We consider a broad scenario
+that permits c-trees with discontinuities, such as
+the ones derived with linear context-free rewrit-
+ing systems (LCFRS; Vijay-Shanker et al. (1987)).
+We also assume that the c-trees are lexicalized.
+Formally, let w1w2 ... wL be a sentence, where
+wi denotes the word in the ith position. A c-
+tree is a rooted tree whose leaves are the words
+{wi}Li=1, and whose internal nodes (constituents)
+are represented as a tuple hZ, h, Ii, where Z
+is a non-terminal symbol, h ∈ {1, ... , L} in-
+dicates the lexical head, and I ⊆ {1, . . . , L}
+is the node’s yield. Each word’s parent is a
+pre-terminal unary node of the form hpi, i, {i}i,
+where pi denotes the word’s part-of-speech (POS)
+tag. The yields and lexical heads are defined so
+that for every constituent hZ, h, Ii with children
+{hXk, mk,Jki}Kk=1, (i) we have I = UKk=1 Jk;
+and (ii) there is a unique k such that h = mk. This
+kth node (called the head-child node) is commonly
+chosen applying a handwritten set of head rules
+(Collins, 1999; Yamada and Matsumoto, 2003).
+A c-tree is continuous if all nodes hZ, h, Ii
+have a contiguous yield I, and discontinuous oth-
+erwise. Trees derived by a CFG are always con-
+tinuous; those derived by a LCFRS may have dis-
+continuities, the yield of a node being a union of
+spans, possibly with gaps in the middle. Figure 1
+</bodyText>
+<footnote confidence="0.804272">
+2http://www.ark.cs.cmu.edu/TurboParser
+</footnote>
+<bodyText confidence="0.99996323255814">
+shows an example of a continuous and a discontin-
+uous c-tree. Discontinuous c-trees have crossing
+branches, if the leaves are drawn in left-to-right
+surface order. An internal node which is not a pre-
+terminal is called a proper node. A node is called
+unary if it has exactly one child. A c-tree with-
+out unary proper nodes is called unaryless. If all
+proper nodes have exactly two children then it is
+called a binary c-tree. Continuous binary trees
+may be regarded as having been generated by a
+CFG in Chomsky normal form.
+Prior work. There has been a long string of
+work in statistical c-parsing, shifting from sim-
+ple models (Charniak, 1996) to more sophisticated
+ones using structural annotation (Johnson, 1998;
+Klein and Manning, 2003), latent grammars (Mat-
+suzaki et al., 2005; Petrov and Klein, 2007), and
+lexicalization (Eisner, 1996; Collins, 1999). An
+orthogonal line of work uses ensemble or rerank-
+ing strategies to further improve accuracy (Char-
+niak and Johnson, 2005; Huang, 2008; Bj¨orkelund
+et al., 2014). Discontinuous c-parsing is con-
+sidered a much harder problem, involving mildly
+context-sensitive formalisms such as LCFRS or
+range concatenation grammars, with treebank-
+derived c-parsers exhibiting near-exponential run-
+time (Kallmeyer and Maier, 2013, Figure 27).
+To speed up decoding, prior work has consid-
+ered restrictons, such as bounding the fan-out
+(Maier et al., 2012) and requiring well-nestedness
+(Kuhlmann and Nivre, 2006; G´omez-Rodr´ıguez et
+al., 2010). Other approaches eliminate the dis-
+continuities via tree transformations (Boyd, 2007;
+K¨ubler et al., 2008), sometimes as a pruning step
+in a coarse-to-fine parsing approach (van Cranen-
+burgh and Bod, 2013). However, reported run-
+times are still superior to 10 seconds per sentence,
+which is not practical. Recently, Versley (2014a)
+proposed an easy-first approach that leads to con-
+siderable speed-ups, but is less accurate. In this
+paper, we design fast discontinuous c-parsers that
+outperform all the ones above by a wide margin,
+with similar runtimes as Versley (2014a).
+</bodyText>
+<subsectionHeader confidence="0.996857">
+2.2 Dependency Trees
+</subsectionHeader>
+<bodyText confidence="0.9994085">
+In this paper, we use d-parsers as a black box to
+parse constituents. Given a sentence w1 ... wL,
+a d-tree is a directed tree spanning all the words
+in the sentence.3 Each arc in this tree is a tuple
+</bodyText>
+<footnote confidence="0.971134">
+3We assume throughout that dependency trees have a sin-
+gle root among {wl, ... , wL}. Therefore, there is no need to
+</footnote>
+<page confidence="0.994121">
+1524
+</page>
+<figure confidence="0.997925857142857">
+S
+.
+VP
+ADJP
+JJ
+.
+caut
+</figure>
+<page confidence="0.656947">
+1525
+</page>
+<figureCaption confidence="0.977844833333333">
+Figure 3: Transformation of a strictly-ordered d-tree into a
+binary c-tree. Each node is split into a linked list forming a
+spine, to which modifiers are attached in order.
+Figure 4: Two discontinuous constructions caused by a non-
+nested order (top) and a non-projective d-tree (bottom). In
+both cases node A has a non-contiguous yield.
+</figureCaption>
+<bodyText confidence="0.998254333333333">
+to h before mj”). We represent this graphically
+by decorating d-arcs with indices (#1, #2, ...) to
+denote the order of events, as we do in Figure 1.
+A d-tree endowed with a strict order for each
+head is called a strictly ordered d-tree. We es-
+tablish below a correspondence between strictly
+ordered d-trees and binary c-trees. Before doing
+so, we need a few more definitions about c-trees.
+For each word position h ∈ {1, ... , L}, we define
+0(h) as the node higher in the c-tree whose lexi-
+cal head is h. We call the path from 0(h) down to
+the pre-terminal ph the spine of h. We may regard
+a c-tree as a set of L spines, one per word, which
+attach to each other to form a tree (Carreras et al.,
+2008). We then have the following
+Proposition 1. Binary c-trees and strictly-ordered
+d-trees are isomorphic, i.e., there is a one-to-one
+correspondence between the two sets, where the
+number of symbols is preserved.
+Proof. We use the construction in Figure 3. A for-
+mal proof is given as supplementary material.
+</bodyText>
+<subsectionHeader confidence="0.999551">
+3.2 Weakly Ordered Dependency Trees
+</subsectionHeader>
+<bodyText confidence="0.905830166666667">
+Next, we relax the strict order assumption, restrict-
+ing the modifier sets Mh = {mi, ... , mK} to be
+only weakly ordered. This means that we can par-
+tition the K modifiers into J equivalence classes,
+Mh = UJ j=1 ¯Mjh, and define a strict order ≺h on
+the quotient set: ¯M1h ≺h . . . ≺h¯MJh . Intuitively,
+there is still a sequence of events (1 to J), but now
+at each event j it may happen that multiple mod-
+ifiers (the ones in the equivalence set ¯Mjh) are si-
+Algorithm 1 Conversion from c-tree to d-tree
+Input: c-tree C.
+Output: head-ordered d-tree D.
+</bodyText>
+<listItem confidence="0.9418463">
+1: Nodes := GETPOSTORDERTRAVERSAL(C).
+2: Set j(h) := 1 for every h = 1, ... ,L.
+3: for v := (Z, h, I) E Nodes do
+4: for every u := (X, m, J ) which is a child of v do
+5: if m =� h then
+6: Add to D an arc (h, m, Z), and put it in
+7: end if
+8: end for
+9: Set j(h) := j(h) + 1.
+10: end for
+</listItem>
+<bodyText confidence="0.989430586206897">
+multaneously attached to h. A weakly ordered
+d-tree is a d-tree endowed with a weak order for
+each head and such that any pair m, m&apos; in the same
+equivalence class (written m ≡h m&apos;) receive the
+same dependency label E.
+We now show that Proposition 1 can be gener-
+alized to weakly ordered d-trees.
+Proposition 2. Unaryless c-trees and weakly-
+ordered d-trees are isomorphic.
+Proof. This is a simple extension of Proposition 1.
+The construction is the same as in Figure 3, but
+now we can collapse some of the nodes in the
+linked list, originating multiple modifiers attach-
+ing to the same position of the spine—this is only
+possible for sibling arcs with the same index and
+arc label. Note, however, that if we start with a
+c-tree with unary nodes and apply the inverse pro-
+cedure to obtain a d-tree, the unary nodes will be
+lost, since they do not involve attachment of mod-
+ifiers. In a chain of unary nodes, only the last node
+is recovered in the inverse transformation.
+We emphasize that Propositions 1–2 hold with-
+out blowing up the number of symbols. That is,
+the dependency label alphabet is exactly the same
+as the set of phrasal symbols in the constituent
+representations. Algorithms 1–2 convert back and
+forth between the two formalisms, performing the
+construction of Figure 3. Both algorithms run in
+linear time with respect to the size of the sentence.
+</bodyText>
+<subsectionHeader confidence="0.999161">
+3.3 Continuous and Projective Trees
+</subsectionHeader>
+<bodyText confidence="0.999848875">
+What about the more restricted class of projective
+d-trees? Can we find an equivalence relation with
+continuous c-trees? In this section, we give a pre-
+cise answer to this question. It turns out that we
+need an additional property, illustrated in Figure 4.
+We say that ≺h has the nesting property iff
+closer words in the same direction are always at-
+tached first, i.e., iff h &lt; mi &lt; mj or h &gt; mi &gt;
+</bodyText>
+<equation confidence="0.7610215">
+¯Mj(h)
+h .
+</equation>
+<page confidence="0.873113">
+1526
+</page>
+<bodyText confidence="0.544915">
+Algorithm 2 Conversion from d-tree to c-tree
+Input: head-ordered d-tree D.
+Output: c-tree C.
+</bodyText>
+<listItem confidence="0.944901916666667">
+1: Nodes := GETPOSTORDERTRAVERSAL(D).
+2: for h E Nodes do
+3: Create v := (ph, h, {h}) and set ψ(h) := v.
+4: Sort Mh(D), yielding ¯M1h --&lt;h ¯M2 h --&lt;h . . . --&lt;h ¯MJ h .
+¯Mj h}.
+7: Obtain c-nodes ψ(h) = (X, h, Z) and ψ(m) =
+(Ym, m, Jm) for all m E Mjh.
+8: Add c-node v := (Z, h, Z U Um∈ ¯Mjh Jm) to C.
+9: Set ψ(h) and {ψ(m)  |m E ¯Mjh} as children of v.
+10: Set ψ(h) := v.
+11: end for
+12: end for
+</listItem>
+<bodyText confidence="0.986215791666667">
+mj implies that either mi ≡h mj or mi ≺h mj.
+A weakly-ordered d-tree which is projective and
+whose orders ≺h have the nesting property for ev-
+ery h is called a nested-weakly ordered projec-
+tive d-tree. We then have the following result.
+Proposition 3. Continuous unaryless c-trees and
+nested-weakly ordered projective d-trees are iso-
+morphic.
+Proof. See the supplementary material.
+Together, Propositions 1–3 have as corollary
+that nested-strictly ordered projective d-trees are
+in a one-to-one correspondence with binary con-
+tinuous c-trees. The intuition is simple: if ≺h has
+the nesting property, then, at each point in time, all
+one needs to decide about the next event is whether
+to attach the closest available modifier on the left
+or on the right. This corresponds to choosing
+between left-branching or right-branching in a c-
+tree. While this is potentially interesting for most
+continuous c-parsers, which work with binarized
+c-trees when running the CKY algorithm, our c-
+parsers (to be described in §4) do not require any
+binarization since they work with weakly-ordered
+d-trees, using Proposition 2.
+</bodyText>
+<sectionHeader confidence="0.988674" genericHeader="method">
+4 Reduction-Based Constituent Parsers
+</sectionHeader>
+<bodyText confidence="0.9998545">
+We now invoke the equivalence results established
+in §3 to build c-parsers when only a trainable d-
+parser is available. Given a c-treebank provided as
+input, our procedure is outlined as follows:
+</bodyText>
+<listItem confidence="0.999459571428571">
+1. Convert the c-treebank to dependencies (Algo-
+rithm 1).
+2. Train a labeled d-parser on this treebank.
+3. For each test sentence, run the labeled d-parser
+and convert the predicted d-tree into a c-tree
+without unary nodes (Algorithm 2).
+4. Do post-processing to recover unaries.
+</listItem>
+<bodyText confidence="0.9999342">
+The next subsections describe each of these steps
+in detail. Along the way, we illustrate with exper-
+iments using the English Penn Treebank (Marcus
+et al., 1993), which we lexicalized by applying the
+head rules of Collins (1999).4
+</bodyText>
+<subsectionHeader confidence="0.997316">
+4.1 Dependency Encoding
+</subsectionHeader>
+<bodyText confidence="0.999979378378378">
+The first step is to convert the c-treebank to head-
+ordered dependencies, which we do using Algo-
+rithm 1. If the original treebank has discontinu-
+ous c-trees, we end up with non-projective d-trees
+or with violations of the nested property, as estab-
+lished in Proposition 3. We handle this gracefully
+by training a non-projective d-parser in the sub-
+sequent stage (see §4.2). Note also that this con-
+version drops the unary nodes (a consequence of
+Proposition 2). These nodes will be recovered in
+the last stage, as described in §4.4.
+Since in this paper we are assuming that only
+an off-the-shelf d-parser is available, we need to
+convert head-ordered d-trees to plain d-trees. We
+do so by encoding the order information in the de-
+pendency labels. We tried two different strategies.
+The first one, direct encoding, just appends suf-
+fixes #1, #2, etc., as in Figure 1. A disadvantage is
+that the number of labels grows unbounded with
+the treebank size, as we may encounter complex
+substructures where the event sequences are long.
+The second strategy is a delta-encoding scheme
+where, rather than writing the absolute indices in
+the dependency label, we write the differences be-
+tween consecutive ones.5 We used this strategy
+for the continuous treebanks only, whose d-trees
+are guaranteed to satisfy the nested property.
+For comparison, we also implemented a repli-
+cation of the encoding proposed by Hall and Nivre
+(2008), which we call H&amp;N-encoding. This strat-
+egy concatenates all the c-nodes’ symbols in the
+modifier’s spine with the attachment position in
+the head’s spine (e.g., in Figure 3, if the modi-
+fier m2 has a spine with nodes X1, X2, X3, the
+generated d-label would be X1JX2JX3#2; our direct
+encoding scheme generates Z2#2 instead). Since
+their strategy encodes the entire spines into com-
+</bodyText>
+<footnote confidence="0.976596285714286">
+4We train on §02–21, use §22 for validation, and test on
+§23. We predict automatic POS tags with TurboTagger (Mar-
+tins et al., 2013), with 10-fold jackknifing on the training set.
+5For example, if #1, #3, #4 and #2, #3, #3, #5 are
+respectively the sequence of indices from the head to the left
+and to the right, we encode these sequences as #1, #2, #1
+and #2, #1, #0, #2 (using 3 distinct indices instead of 5).
+</footnote>
+<equation confidence="0.2989335">
+5: for j = 1, ... ,Jdo
+6: Let Z be the label in {(h, m, Z)  |m E
+</equation>
+<page confidence="0.957597">
+1527
+</page>
+<bodyText confidence="0.999971769230769">
+plex arc labels, many such labels will be gener-
+ated, leading to slower runtimes and poorer gener-
+alization, as we will see.
+For the training portion of the English PTB,
+which has 27 non-terminal symbols, the direct en-
+coding strategy yields 75 labels, while delta en-
+coding yields 69 labels (2.6 indices per symbol).
+By contrast, the H&amp;N-encoding procedure yields
+731 labels, more than 10 times as many. We later
+show (in Tables 1–2) that delta-encoding leads to a
+slightly higher c-parsing accuracy than direct en-
+coding, and that both strategies are considerably
+more accurate than H&amp;N-encoding.
+</bodyText>
+<subsectionHeader confidence="0.983833">
+4.2 Training the Labeled Dependency Parser
+</subsectionHeader>
+<bodyText confidence="0.999552875">
+The next step is to train a labeled d-parser on the
+converted treebank. If we are doing continuous c-
+parsing, we train a projective d-parser; otherwise
+we train a non-projective one.
+In our experiments, we found it advantageous to
+perform labeled d-parsing in two stages, as done
+by McDonald et al. (2006): first, train an unla-
+beled d-parser; then, train a dependency labeler.6
+Table 1 compares this approach against a one-
+shot strategy, experimenting with various off-the-
+shelf d-parsers: MaltParser (Nivre et al., 2007),
+MSTParser (McDonald et al., 2005), ZPar (Zhang
+and Nivre, 2011), and TurboParser (Martins et
+al., 2013), all with the default settings. For Tur-
+boParser, we used basic, standard and full models.
+Our separate d-labeler receives as input a back-
+bone d-structure and predicts a label for each arc.
+For each head h, we predict the modifiers’ labels
+using a simple sequence model, with features of
+the form 0(h, m, E) and 0(h, m, m&apos;, E, E&apos;), where
+m and m&apos; are two consecutive modifiers (possi-
+bly on opposite sides of the head) and E and E&apos; are
+their labels. We use the same arc label features
+0(h, m, E) as TurboParser. For 0(h, m, m&apos;, E, E&apos;),
+we use the POS triplet (ph, pm, pm1), plus unilex-
+ical features where each of the three POS is re-
+placed by the word form. Both features are con-
+joined with the label pair E and E&apos;. Decoding un-
+der this model can be done by running the Viterbi
+algorithm independently for each head. The run-
+time is almost negligible compared with the time
+to parse: it took 2.1 seconds to process PTB §22,
+</bodyText>
+<footnote confidence="0.9541352">
+6The reason why a two-stage approach is preferable is
+that one-shot d-parsers, for efficiency reasons, use label fea-
+tures parsimoniously. However, for our reduction approach,
+d-labels are crucial and strongly interdependent, since they
+jointly encode the c-structure.
+</footnote>
+<table confidence="0.9998721">
+Dependency Parser UAS LAS Fl # toks/s.
+MaltParser 90.93 88.95 86.87 5,392
+MSTParser 92.17 89.86 87.93 363
+ZPar 92.93 91.28 89.50 1,022
+TP-Basic 92.13 90.23 87.63 2,585
+TP-Standard 93.55 91.58 90.41 1,658
+TP-Full 93.70 91.70 90.53 959
+TP-Full + Lab., H&amp;N enc. 93.80 87.86 89.39 871
+TP-Full + Lab, direct enc. 93.80 91.99 90.89 912
+TP-Full + Lab., delta enc. 93.80 92.00 90.94 912
+</table>
+<tableCaption confidence="0.998163375">
+Table 1: Results on English PTB §22 achieved by various d-
+parsers and encoding strategies. For dependencies, we report
+unlabeled/labeled attachment scores (UAS/LAS), excluding
+punctuation. For constituents, we show Fl-scores (without
+punctuation and root nodes), as provided by EVALB (Black
+et al., 1992). We report total parsing speeds in tokens per sec-
+ond (including time spent on pruning, decoding, and feature
+evaluation), measured on a Intel Xeon processor @2.30GHz.
+</tableCaption>
+<table confidence="0.9999354">
+direct enc. delta enc.
+# labels Fl # labels Fl
+Basque 26 85.04 17 85.17
+French 61 79.93 56 80.05
+German 66 83.44 59 83.39
+Hebrew 62 83.26 43 83.29
+Hungarian 24 86.54 15 86.67
+Korean 44 79.79 16 79.97
+Polish 47 92.39 34 92.64
+Swedish 29 77.02 25 77.19
+</table>
+<tableCaption confidence="0.96160375">
+Table 2: Impact of direct and delta encodings on the dev sets
+of the SPMRL14 shared task. Reported are the number of
+labels and the Fl-scores yielded by each encoding technique.
+a fraction of about 5% of the total runtime.
+</tableCaption>
+<subsectionHeader confidence="0.994487">
+4.3 Decoding into Unaryless Constituents
+</subsectionHeader>
+<bodyText confidence="0.999991333333333">
+After training the labeled d-parser, we can run it
+on the test data. Then, we need to convert the pre-
+dicted d-tree into a c-tree without unaries.
+To accomplish this step, we first need to recover,
+for each head h, the weak order of its modifiers
+Mh. We do this by looking at the predicted depen-
+dency labels, extracting the event indices j, and
+using them to build and sort the equivalent classes
+I ¯Mjh�J j=1. If two modifiers have the same index
+j, we force them to have consistent labels (by al-
+ways choosing the label of the modifier which is
+the closest to the head). For continuous c-parsing,
+we also decrease the index j of the modifier closer
+to the head as much as necessary to make sure that
+the nesting property holds. In PTB §22, these cor-
+rections were necessary only for 0.6% of the to-
+kens. Having done this, we use Algorithm 2 to
+obtain a predicted c-tree without unary nodes.
+</bodyText>
+<page confidence="0.96484">
+1528
+</page>
+<subsectionHeader confidence="0.994864">
+4.4 Recovery of Unary Nodes
+</subsectionHeader>
+<bodyText confidence="0.999960105263158">
+The last stage is to recover the unary nodes. Given
+a unaryless c-tree as input, we predict unaries by
+running independent classifiers at each node in the
+tree (a simple unstructured task). Each class is
+either NULL (in which case no unary node is ap-
+pended to the current node) or a concatenation of
+unary node labels (e.g., S-&gt;ADJP for a node JJ).
+We obtained 64 classes by processing the training
+sections of the PTB, the fraction of unary nodes
+being about 11% of the total number of nodes. To
+reduce complexity, for each node symbol we only
+consider classes that have been observed with that
+symbol in the training data. In PTB §22, this yields
+an average of 9.9 candidates per node occurrence.
+The classifiers are trained on the original c-
+treebank, stripping off unary nodes and trained to
+recover those nodes. We used the following fea-
+tures (conjoined with the class and with a flag in-
+dicating if the node is a pre-terminal):
+</bodyText>
+<listItem confidence="0.993223">
+• The production rules above and beneath the
+node (e.g., S-&gt;NP VP and NP-&gt;DT NN);
+• The node’s label, alone and conjoined with the
+parent’s label or the left/right sibling’s label;
+• The leftmost and rightmost word/lemma/POS
+tag/morpho-syntactic tags in the node’s yield;
+• If the left/right node is a pre-terminal, the
+word/lemma/morpho-syntactic tags beneath.
+</listItem>
+<bodyText confidence="0.999914777777778">
+This is a relatively easy task: when gold unaryless
+c-trees are provided as input, we obtain an EVALB
+F1-score of 99.43%. This large figure is due to the
+small amount of unary nodes, making this mod-
+ule have less impact on the final parser than the
+d-parser. Being a lightweight unstructured task,
+this step took only 0.7 seconds to run on PTB §22,
+a tiny fraction (less than 2%) of the total runtime.
+Table 1 shows the accuracies obtained with the
+d-parser followed by the unary predictor. Since
+two-stage TP-Full with delta-encoding is the best
+strategy, we use this configuration in the sequel.
+To further explore the impact of delta encoding,
+we report in Table 2 the scores obtained by direct
+and delta encodings on eight other treebanks (see
+§5.2 for details on these datasets). With the ex-
+ception of German, in all cases the delta encoding
+yielded better EVALB F1-scores with fewer labels.
+</bodyText>
+<sectionHeader confidence="0.999759" genericHeader="method">
+5 Experiments
+</sectionHeader>
+<bodyText confidence="0.997962">
+To evaluate the performance of our reduction-
+based parsers, we conduct experiments in a variety
+</bodyText>
+<table confidence="0.996678416666667">
+Parser LR LP F1 #Toks/s.
+Charniak (2000) 89.5 89.9 89.5 –
+Klein and Manning (2003) 85.3 86.5 85.9 143
+Petrov and Klein (2007) 90.0 90.3 90.1 169
+Carreras et al. (2008) 90.7 91.4 91.1 –
+Zhu et al. (2013) 90.3 90.6 90.4 1,290
+Stanford Shift-Reduce (2014) 89.1 89.1 89.1 655
+Hall et al. (2014) 88.4 88.8 88.6 12
+This work 89.9 90.4 90.2 957
+Charniak and Johnson (2005)* 91.2 91.8 91.5 84
+Socher et al. (2013)* 89.1 89.7 89.4 70
+Zhu et al. (2013)* 91.1 91.5 91.3 –
+</table>
+<tableCaption confidence="0.998419333333333">
+Table 3: Results on the English PTB §23. All systems report-
+ing runtimes were run on the same machine. Marked as * are
+reranking and semi-supervised c-parsers.
+</tableCaption>
+<bodyText confidence="0.794657">
+of treebanks, both continuous and discontinuous.
+</bodyText>
+<subsectionHeader confidence="0.549654">
+5.1 Results on the English PTB
+</subsectionHeader>
+<bodyText confidence="0.999957166666667">
+Table 3 shows the accuracies and speeds achieved
+by our system on the English PTB §23, in compar-
+ison to state-of-the-art c-parsers. We can see that
+our simple reduction-based c-parser surpasses the
+three Stanford parsers (Klein and Manning, 2003;
+Socher et al., 2013, and Stanford Shift-Reduce),
+and is on par with the Berkeley parser (Petrov and
+Klein, 2007), while being more than 5 times faster.
+The best supervised competitor is the recent
+shift-reduce parser of Zhu et al. (2013), which
+achieves similar, but slightly better, accuracy and
+speed. Our technique has the advantage of being
+flexible: since the time for d-parsing is the domi-
+nating factor (see §4.4), plugging a faster d-parser
+automatically yields a faster c-parser. While
+reranking and semi-supervised systems achieve
+higher accuracies, this aspect is orthogonal, since
+the same techniques can be applied to our parser.
+</bodyText>
+<subsectionHeader confidence="0.981892">
+5.2 Results on the SPMRL Datasets
+</subsectionHeader>
+<bodyText confidence="0.998864133333333">
+We experimented with datasets for eight lan-
+guages, from the SPMRL14 shared task (Seddah
+et al., 2014). We used the official training, de-
+velopment and test sets with the provided pre-
+dicted POS tags. For French and German, we
+used the lexicalization rules detailed in Dybro-
+Johansen (2004) and Rehbein (2009), respectively.
+For Basque, Hungarian and Korean, we always
+took the rightmost modifier as head-child node.
+For Hebrew and Polish we used the leftmost mod-
+ifier instead. For Swedish we induced head rules
+from the provided dependency treebank, as de-
+scribed in Versley (2014b). These choices were
+based on dev-set experiments.
+Table 4 shows the results. For all languages ex-
+</bodyText>
+<page confidence="0.991522">
+1529
+</page>
+<bodyText confidence="0.999893">
+cept French, our system outperforms the Berke-
+ley parser (Petrov and Klein, 2007), with or with-
+out prescribed POS tags. Our average Fl-scores
+are superior to the best non-reranking system par-
+ticipating in the shared task (Crabb´e and Seddah,
+2014) and to the c-parser of Hall et al. (2014),
+achieving the best results for 4 out of 8 languages.
+</bodyText>
+<subsectionHeader confidence="0.992053">
+5.3 Results on the Discontinuous Treebanks
+</subsectionHeader>
+<bodyText confidence="0.999997387096774">
+Finally, we experimented on two widely-used dis-
+continuous German treebanks: TIGER (Brants et
+al., 2002) and NEGRA (Skut et al., 1997). For
+the former, we used two different splits: TIGER-
+SPMRL, provided in the SPMRL14 shared task;
+and TIGER-H&amp;N, used by Hall and Nivre (2008).
+For NEGRA, we used the standard splits. In these
+experiments, we skipped the unary recovery stage,
+since very few unary nodes exist in the data.7 We
+ran TurboTagger to predict POS tags for TIGER-
+H&amp;N and NEGRA, while in TIGER-SPMRL we used
+the predicted POS tags provided in the shared task.
+All treebanks were lexicalized using the head-rule
+sets of Rehbein (2009). For comparison to related
+work, sentence length cut-offs of 30, 40 and 70
+were applied during the evaluation.
+Table 5 shows the results. We observe that
+our approach outperforms all the competitors con-
+siderably, achieving state-of-the-art accuracies for
+both datasets. The best competitor, van Cranen-
+burgh and Bod (2013), is more than 3 points be-
+hind, both in TIGER-H&amp;N and in NEGRA. Our
+reduction-based parsers are also much faster: van
+Cranenburgh and Bod (2013) report 3 hours to
+parse NEGRA with L ≤ 40. Our system parses
+all NEGRA sentences (regardless of length) in 27.1
+seconds in a single core, which corresponds to a
+rate of 618 tokens per second. This approaches the
+speed of the easy-first system of Versley (2014a),
+who reports runtimes in the range 670–920 tokens
+per second, but is much less accurate.
+</bodyText>
+<sectionHeader confidence="0.99994" genericHeader="evaluation">
+6 Related Work
+</sectionHeader>
+<bodyText confidence="0.985331571428571">
+Conversions between constituents and dependen-
+cies have been considered by De Marneffe et al.
+(2006) in one direction, and by Collins et al.
+(1999) and Xia and Palmer (2001) in the other, to-
+ward multi-representational treebanks (Xia et al.,
+2008). This prior work aimed at linguistically
+sound conversions, involving grammar-specific
+</bodyText>
+<footnote confidence="0.831271">
+7NEGRA has no unaries; for the TIGER-SPMRL and H&amp;N
+dev-sets, the fraction of unaries is 1.45% and 1.01%.
+</footnote>
+<table confidence="0.9998315">
+TIGER-SPMRL L &lt; 70 all
+V14b, gold 76.46 / 41.05 76.11 / 40.94
+Ours, gold 80.98 / 43.44 80.62 / 43.32
+V14b, pred 73.90 / 37.00 – / –
+Ours, pred 77.72 / 38.75 77.32 / 38.64
+TIGER-H&amp;N L &lt; 40 all
+HN08, gold 79.93 / 37.78 – / –
+V14a, gold 74.23 / 37.32 – / –
+Ours, gold 85.53 / 51.21 84.22 / 49.63
+HN08, pred 75.33 / 32.63 – / –
+CB13, pred 78.8– / 40.8– – / –
+Ours, pred 82.57 / 45.93 81.12 / 44.48
+NEGRA L &lt; 30 L &lt; 40 all
+M12, gold 74.5– / – –/––/–
+C12, gold – / – 72.33 / 33.16 71.08 / 32.10
+KM13, gold 75.75 / – –/––/ –
+CB13, gold – / – 76.8– / 40.5– – / –
+Ours, gold 82.56 / 52.13 81.08 / 48.04 80.52 / 46.70
+CB13, pred – / – 74.8– / 38.7– – / –
+Ours, pred 79.63 / 48.43 77.93 / 44.83 76.95 / 43.50
+</table>
+<tableCaption confidence="0.993178">
+Table 5: Fl / exact match scores on TIGER and NEGRA test
+</tableCaption>
+<figureCaption confidence="0.807028714285714">
+sets, with gold and predicted POS tags. These scores are com-
+puted by the DISCO-DOP evaluator ignoring root nodes and,
+for TIGER-H&amp;N and NEGRA, punctuation tokens. The base-
+lines are published results by Hall and Nivre 2008 (HN08),
+Maier et al. 2012 (M12), van Cranenburgh 2012 (C12),
+Kallmeyer and Maier 2013 (KM13), van Cranenburgh and
+Bod 2013 (CB13), and Versley 2014a, 2014b (V14a, V14b).
+</figureCaption>
+<bodyText confidence="0.999977538461539">
+transformation rules to handle the kind of ambigu-
+ities expressed in Figure 2. Our work differs in that
+we are not concerned about the linguistic plausi-
+bility of our conversions, but only with the formal
+aspects that underlie the two representations.
+The work most related to ours is Hall and Nivre
+(2008), who also convert dependencies to con-
+stituents to prototype a c-parser for German. Their
+encoding strategy is compared to ours in §4.1: they
+encode the entire spines into the dependency la-
+bels, which become rather complex and numer-
+ous. A similar strategy has been used by Vers-
+ley (2014a) for discontinuous c-parsing. Both are
+largely outperformed by our system, as shown in
+§5.3. The crucial difference is that we encode only
+the top node’s label and its position in the spine—
+besides being a much lighter representation, ours
+has an interpretation as a weak ordering, leading to
+the isomorphisms expressed in Propositions 1–3.
+Joint constituent and dependency parsing have
+been tackled by Carreras et al. (2008) and Rush
+et al. (2010), but the resulting parsers, while ac-
+curate, are more expensive than a single c-parser.
+Very recently, Kong et al. (2015) proposed a much
+cheaper pipeline in which d-parsing is performed
+first, followed by a c-parser constrained to be con-
+</bodyText>
+<page confidence="0.960503">
+1530
+</page>
+<table confidence="0.999329571428571">
+Parser Basque French German Hebrew Hungar. Korean Polish Swedish Avg.
+Berkeley 70.50 80.38 78.30 86.96 81.62 71.42 79.23 79.19 78.45
+Berkeley Tagged 74.74 79.76 78.28 85.42 85.22 78.56 86.75 80.64 81.17
+Hall et al. (2014) 83.39 79.70 78.43 87.18 88.25 80.18 90.66 82.00 83.72
+Crabb´e and Seddah (2014) 85.35 79.68 77.15 86.19 87.51 79.35 91.60 82.72 83.69
+This work 85.90 78.75 78.66 88.97 88.16 79.28 91.20 82.80 84.22
+Bj¨orkelund et al. (2014) 88.24 82.53 81.66 89.80 91.72 83.81 90.50 85.50 86.72
+</table>
+<tableCaption confidence="0.997245">
+Table 4: Fl-scores on eight treebanks of the SPMRL14 shared task, computed with the provided EVALB SPMRL tool, which
+</tableCaption>
+<bodyText confidence="0.930069916666667">
+takes into account all tokens except root nodes. Berkeley Tagged is a version of Petrov and Klein (2007) using the predicted POS
+tags provided by the organizers. Crabb´e and Seddah (2014) is the best non-reranking system in the shared task, and Bj¨orkelund
+et al. (2014) the ensemble and reranking-based system which won the official task. We report their published scores.
+sistent with the predicted d-structure. Our work
+differs in which we do not need to run a c-parser
+in the second stage—instead, the d-parser already
+stores constituent information in the arc labels,
+and the only necessary post-processing is to re-
+cover unary nodes. Another advantage of our
+method is that it can be readily used for discon-
+tinuous parsing, while their constrained CKY al-
+gorithm can only produce continuous parses.
+</bodyText>
+<sectionHeader confidence="0.993396" genericHeader="conclusions">
+7 Conclusion
+</sectionHeader>
+<bodyText confidence="0.999992583333333">
+We proposed a reduction technique that allows
+to implement a c-parser when only a d-parser is
+given. The technique is applicable to any d-parser,
+regardless of its nature or kind. This reduction was
+accomplished by endowing d-trees with a weak or-
+der relation, and showing that the resulting class of
+head-ordered d-trees is isomorphic to constituent
+trees. We showed empirically that the our re-
+duction leads to highly-competitive c-parsers for
+English and for eight morphologically rich lan-
+guages; and that it outperforms the current state
+of the art in discontinuous parsing of German.
+</bodyText>
+<sectionHeader confidence="0.986911" genericHeader="acknowledgments">
+Acknowledgments
+</sectionHeader>
+<bodyText confidence="0.999804588235294">
+We would like to thank the three reviewers
+for their insightful comments, and Slav Petrov,
+Djam´e Seddah, Yannick Versley, David Hall,
+Muhua Zhu, Lingpeng Kong, Carlos G´omez-
+Rodr´ıguez, and Andreas van Cranenburgh for
+valuable feedback and help in preparing data
+and running software code. This research has
+been partially funded by the Spanish Ministry
+of Economy and Competitiveness and FEDER
+(project TIN2010-18552-C03-01), Ministry of
+Education (FPU Grant Program) and Xunta de
+Galicia (projects R2014/029 and R2014/034).
+A. M. was supported by the EU/FEDER pro-
+gramme, QREN/POR Lisboa (Portugal), under
+the Intelligo project (contract 2012/24803), and
+by the FCT grants UID/EEA/50008/2013 and
+PTDC/EEI-SII/2312/2012.
+</bodyText>
+<sectionHeader confidence="0.995018" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.97779943902439">
+Taylor Berg-Kirkpatrick, Dan Gillick, and Dan Klein.
+2011. Jointly learning to extract and compress. In
+Proc. ofAnnual Meeting of the Association for Com-
+putational Linguistics.
+Anders Bj¨orkelund, ¨Ozlem C¸etino˘glu, Agnieszka
+Fale´nska, Rich´ard Farkas, Thomas Mueller, Wolf-
+gang Seeker, and Zsolt Sz´ant´o. 2014. Introducing
+the ims-wrocław-szeged-cis entry at the spmrl 2014
+shared task: Reranking and morpho-syntax meet un-
+labeled data. In Proc. of the First Joint Workshop
+on Statistical Parsing of Morphologically Rich Lan-
+guages and Syntactic Analysis of Non-Canonical
+Languages.
+Ezra Black, John Lafferty, and Salim Roukos. 1992.
+Development and evaluation of a broad-coverage
+probabilistic grammar of english-language computer
+manuals. In Proc. ofAnnual Meeting on Association
+for Computational Linguistics.
+Adriane Boyd. 2007. Discontinuity revisited: An
+improved conversion to context-free representations.
+In Proc. of Linguistic Annotation Workshop.
+Sabine Brants, Stefanie Dipper, Silvia Hansen, Wolf-
+gang Lezius, and George Smith. 2002. The TIGER
+treebank. In Proc. of the workshop on treebanks and
+linguistic theories.
+Xavier Carreras, Michael Collins, and Terry Koo.
+2008. TAG, Dynamic Programming, and the Per-
+ceptron for Efficient, Feature-rich Parsing. In Proc.
+of the International Conference on Natural Lan-
+guage Learning.
+Eugene Charniak and Mark Johnson. 2005. Coarse-
+to-fine n-best parsing and maxent discriminative
+reranking. In Proc. of Annual Meeting of the As-
+sociation for Computational Linguistics.
+Eugene Charniak. 1996. Tree-bank grammars. In
+Proc. of the National Conference on Artificial Intel-
+ligence.
+Eugene Charniak. 2000. A maximum-entropy-
+inspired parser. In Proc. of the North American
+Chapter of the Association for Computational Lin-
+guistics Conference.
+</reference>
+<page confidence="0.920356">
+1531
+</page>
+<reference confidence="0.999005196721311">
+Michael Collins, Lance Ramshaw, Jan Hajiˇc, and
+Christoph Tillmann. 1999. A Statistical Parser for
+Czech. In Proc. of the Annual Meeting of the Asso-
+ciation for Computational Linguistics on Computa-
+tional Linguistics.
+Michael Collins. 1999. Head-driven statistical models
+for natural language parsing. Ph.D. thesis, Univer-
+sity of Pennsylvania.
+Benoit Crabb´e and Djam´e Seddah. 2014. Multilingual
+discriminative shift reduce phrase structure parsing
+for the SPMRL 2014 shared task. In Proc. of the
+First Joint Workshop on Statistical Parsing of Mor-
+phologically Rich Languages and Syntactic Analysis
+of Non-Canonical Languages.
+Marie-Catherine De Marneffe, Bill MacCartney,
+Christopher D Manning, et al. 2006. Generat-
+ing typed dependency parses from phrase structure
+parses. In Proc. of the Meeting of the Language Re-
+sources and Evaluation Conference.
+Ane Dybro-Johansen. 2004. Extraction automatique
+de Grammaires d’Arbres Adjoints a` partir d’un cor-
+pus arbor´e du franc¸ais. Master’s thesis, Univer-
+sit´e Paris 7.
+Jason Eisner and Giorgio Satta. 1999. Efficient pars-
+ing for bilexical context-free grammars and head au-
+tomaton grammars. In Proc. of Annual Meeting of
+the Association for Computational Linguistics.
+Jason Eisner. 1996. Three new probabilistic models
+for dependency parsing: An exploration. In Proc.
+of International Conference on Computational Lin-
+guistics.
+Jakob Elming, Anders Johannsen, Sigrid Klerke,
+Emanuele Lapponi, Hector Martinez Alonso, and
+Anders Søgaard. 2013. Down-stream effects of
+tree-to-dependency conversions. In Proc. of the An-
+nual Conference of the Human Language Technolo-
+gies - North American Chapter of the Association
+for Computational Linguistics.
+Haim Gaifman. 1965. Dependency systems and
+phrase-structure systems. Information and control.
+Carlos G´omez-Rodr´ıguez, Marco Kuhlmann, and Gior-
+gio Satta. 2010. Efficient parsing of well-nested lin-
+ear context-free rewriting systems. In Proc. of the
+Annual Conference of the North American Chapter
+of the Association for Computational Linguistics.
+Johan Hall and Joakim Nivre. 2008. A dependency-
+driven parser for german dependency and con-
+stituency representations. In Proc. of the Workshop
+on Parsing German.
+David Hall, Greg Durrett, and Dan Klein. 2014. Less
+grammar, more features. In Proc. of the Annual
+Meeting of the Association for Computational Lin-
+guistics.
+Liang Huang. 2008. Forest reranking: Discriminative
+parsing with non-local features. In Proc. of the An-
+nual Meeting of the Association for Computational
+Linguistics.
+Richard Johansson and Pierre Nugues. 2008.
+Dependency-based Semantic Role Labeling of Prop-
+Bank. In Empirical Methods for Natural Language
+Processing.
+Mark Johnson. 1998. PCFG models of linguistic tree
+representations. Computational Linguistics.
+Sylvain Kahane, Alexis Nasr, and Owen Rambow.
+1998. Pseudo-projectivity: a polynomially parsable
+non-projective dependency grammar. In Proc. of
+the International Conference on Computational Lin-
+guistics.
+Laura Kallmeyer and Wolfgang Maier. 2013. Data-
+driven parsing using probabilistic linear context-free
+rewriting systems. Computational Linguistics.
+Dan Klein and Christopher D. Manning. 2003. Accu-
+rate unlexicalized parsing. In Proc. of Annual Meet-
+ing on Association for Computational Linguistics.
+Lingpeng Kong and Noah A Smith. 2014. An em-
+pirical comparison of parsing methods for stanford
+dependencies. arXiv preprint arXiv:1404.4314.
+Lingpeng Kong, Alexander M. Rush, and Noah A.
+Smith. 2015. Transforming dependencies into
+phrase structures. In Proc. of the Conference of
+the North American Chapter of the Association for
+Computational Linguistics.
+Terry Koo and Michael Collins. 2010. Efficient third-
+order dependency parsers. In Proc. of Annual Meet-
+ing of the Association for Computational Linguis-
+tics.
+Sandra K¨ubler, Wolfgang Maier, Ines Rehbein, and
+Yannick Versley. 2008. How to compare treebanks.
+In Proc. of the Meeting of the Language Resources
+and Evaluation Conference.
+Marco Kuhlmann and Joakim Nivre. 2006. Mildly
+non-projective dependency structures. In Proc. of
+the joint conference of the International Committee
+on Computational Linguistics and the Association
+for Computational Linguistics.
+Wolfgang Maier and Anders Søgaard. 2008. Tree-
+banks and mild context-sensitivity. In Proc. of For-
+mal Grammar.
+Wolfgang Maier, Miriam Kaeshammer, and Laura
+Kallmeyer. 2012. Data-driven plcfrs parsing revis-
+ited: Restricting the fan-out to two. In Proc. of the
+Eleventh International Conference on Tree Adjoin-
+ing Grammars and Related Formalisms.
+Mitchell P. Marcus, Beatrice Santorini, and Mary Ann
+Marcinkiewicz. 1993. Building a large annotated
+corpus of english: The penn treebank. Computa-
+tional Linguistics.
+Andr´e F. T. Martins, Miguel B. Almeida, and Noah A.
+Smith. 2013. Turning on the turbo: Fast third-order
+non-projective turbo parsers. In Proc. of the Annual
+Meeting of the Association for Computational Lin-
+guistics.
+Takuya Matsuzaki, Yusuke Miyao, and Jun’ichi Tsujii.
+2005. Probabilistic CFG with latent annotations. In
+Proc. of the Annual Meeting of the Association for
+Computational Linguistics.
+Ryan McDonald and Giorgio Satta. 2007. On the com-
+plexity of non-projective data-driven dependency
+parsing. In Proc. of International Conference on
+Parsing Technologies.
+Ryan McDonald, Fernando Pereira, Kiril Ribarov, and
+Jan Hajic. 2005. Non-projective dependency pars-
+</reference>
+<page confidence="0.855989">
+1532
+</page>
+<reference confidence="0.99923255">
+ing using spanning tree algorithms. In Proc. of Em-
+pirical Methods for Natural Language Processing.
+Ryan McDonald, Kevin Lerman, and Fernando Pereira.
+2006. Multilingual dependency analysis with a two-
+stage discriminative parser. In Proc. of International
+Conference on Natural Language Learning.
+Joakim Nivre, Johan Hall, Jens Nilsson, G¨ulsen
+Eryiˇgit, and Svetoslav Marinov. 2006. Labeled
+pseudo-projective dependency parsing with support
+vector machines. In Proc. of International Confer-
+ence on Natural Language Learning.
+Joakim Nivre, Johan Hall, Jens Nilsson, Atanas
+Chanev, G¨ulsen Eryiˇgit, Sandra K¨ubler, Svetoslav
+Marinov, and Erwin Marsi. 2007. Maltparser: A
+language-independent system for data-driven depen-
+dency parsing. Natural Language Engineering.
+Fernando C. N. Pereira and David H. D. Warren. 1983.
+Parsing as Deduction. In Proc. of the Annual Meet-
+ing of the Association for Computational Linguis-
+tics.
+Slav Petrov and Dan Klein. 2007. Improved infer-
+ence for unlexicalized parsing. In Proc. of the North
+American Chapter of the Association for Computa-
+tional Linguistics.
+Ines Rehbein. 2009. Treebank-Based GrammarAcqui-
+sition for German. Ph.D. thesis, School of Comput-
+ing, Dublin City University.
+Alexander M Rush and Slav Petrov. 2012. Vine prun-
+ing for efficient multi-pass dependency parsing. In
+Proc. of the North American Chapter of the Associ-
+ation for Computational Linguistics.
+Alexander Rush, David Sontag, Michael Collins, and
+Tommi Jaakkola. 2010. On dual decomposition and
+linear programming relaxations for natural language
+processing. In Proc. of Empirical Methods for Nat-
+ural Language Processing.
+Kenji Sagae and Alon Lavie. 2005. A classifier-based
+parser with linear run-time complexity. In Proc. of
+the Ninth International Workshop on Parsing Tech-
+nology.
+Djam´e Seddah, Sandra K¨ubler, and Reut Tsarfaty.
+2014. Introducing the spmrl 2014 shared task on
+parsing morphologically-rich languages. In Proc.
+of the First Joint Workshop on Statistical Parsing
+of Morphologically Rich Languages and Syntactic
+Analysis of Non-Canonical Languages, August.
+Wojciech Skut, Brigitte Krenn, Thorsten Brants, and
+Hans Uszkoreit. 1997. An annotation scheme for
+free word order languages. In Proc. of the Fifth
+Conference on Applied Natural Language Process-
+ing ANLP-97.
+Richard Socher, John Bauer, Christopher D Manning,
+and Andrew Y Ng. 2013. Parsing with composi-
+tional vector grammars. In Proc. of Annual Meeting
+of the Association for Computational Linguistics.
+Andreas van Cranenburgh and Rens Bod. 2013. Dis-
+continuous parsing with an efficient and accurate
+dop model. Proc. of International Conference on
+Parsing Technologies.
+Andreas van Cranenburgh. 2012. Efficient parsing
+with linear context-free rewriting systems. In Proc.
+of the Conference of the European Chapter of the
+Association for Computational Linguistics.
+Yannick Versley. 2014a. Experiments with easy-first
+nonprojective constituent parsing. In Proc. of the
+First Joint Workshop on Statistical Parsing of Mor-
+phologically Rich Languages and Syntactic Analysis
+of Non-Canonical Languages.
+Yannick Versley. 2014b. Incorporating semi-
+supervised features into discontinuous easy-first
+constituent parsing. CoRR, abs/1409.3813.
+Krishnamurti Vijay-Shanker, David J Weir, and Ar-
+avind K Joshi. 1987. Characterizing structural
+descriptions produced by various grammatical for-
+malisms. In Proc. of the Annual Meeting on Associ-
+ation for Computational Linguistics.
+Yuanbin Wu, Qi Zhang, Xuanjing Huang, and Lide Wu.
+2009. Phrase dependency parsing for opinion min-
+ing. In Proc. of Empirical Methods for Natural Lan-
+guage Processing.
+Fei Xia and Martha Palmer. 2001. Converting depen-
+dency structures to phrase structures. In Proc. of the
+First International Conference on Human Language
+Technology Research.
+Fei Xia, Owen Rambow, Rajesh Bhatt, Martha Palmer,
+and Dipti Misra Sharma. 2008. Towards a multi-
+representational treebank. LOT Occasional Series.
+Hiroyasu Yamada and Yuji Matsumoto. 2003. Statis-
+tical dependency analysis with support vector ma-
+chines. In Proc. of International Conference on
+Parsing Technologies.
+Yue Zhang and Joakim Nivre. 2011. Transition-based
+dependency parsing with rich non-local features. In
+Proc. of the Annual Meeting of the Association for
+Computational Linguistics.
+Muhua Zhu, Yue Zhang, Wenliang Chen, Min Zhang,
+and Jingbo Zhu. 2013. Fast and accurate shift-
+reduce constituent parsing. In Proc. ofAnnual Meet-
+ing of the Association for Computational Linguis-
+tics.
+</reference>
+<page confidence="0.977857">
+1533
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.946917">
+<title confidence="0.999694">Parsing as Reduction</title>
+<author confidence="0.999061">F T Andr´e</author>
+<affiliation confidence="0.995492">de Inform´atica, Universidade de Vigo, Campus As Lagoas, 32004 Ourense, de Instituto Superior T´ecnico, 1049-001 Lisboa,</affiliation>
+<address confidence="0.977699">Labs, Alameda D. Afonso Henriques, 41, 1000-123 Lisboa,</address>
+<email confidence="0.990101">danifg@uvigo.es,atm@priberam.pt</email>
+<abstract confidence="0.999377857142857">We reduce phrase-based parsing to dependency parsing. Our reduction is grounded on a new intermediate representation, “head-ordered dependency trees,” shown to be isomorphic to constituent trees. By encoding order information in the dependency labels, we show that any off-theshelf, trainable dependency parser can be used to produce constituents. When this parser is non-projective, we can perform discontinuous parsing in a very natural manner. Despite the simplicity of our approach, experiments show that the resulting parsers are on par with strong baselines, such as the Berkeley parser for English and the best non-reranking system in the SPMRL-2014 shared task. Results are particularly striking for discontinuous parsing of German, where we surpass the current state of the art by a wide margin.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>Taylor Berg-Kirkpatrick</author>
+<author>Dan Gillick</author>
+<author>Dan Klein</author>
+</authors>
+<title>Jointly learning to extract and compress.</title>
+<date>2011</date>
+<booktitle>In Proc. ofAnnual Meeting of the Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="1704" citStr="Berg-Kirkpatrick et al., 2011" startWordPosition="247" endWordPosition="250">king for discontinuous parsing of German, where we surpass the current state of the art by a wide margin. 1 Introduction Constituent parsing is a central problem in NLP—one at which statistical models trained on treebanks have excelled (Charniak, 1996; Klein and Manning, 2003; Petrov and Klein, 2007). However, most existing parsers are slow, since they need to deal with a heavy grammar constant. Dependency parsers are generally faster, but less informative, since they do not produce constituents, which are often required by downstream applications (Johansson and Nugues, 2008; Wu et al., 2009; Berg-Kirkpatrick et al., 2011; Elming et al., 2013). How to get the best of both worlds? Coarse-to-fine decoding (Charniak and Johnson, 2005) and shift-reduce parsing (Sagae and Lavie, 2005; Zhu et al., 2013) were a step forward ∗This research was carried out during an internship at Priberam Labs. to accelerate constituent parsing, but typical runtimes still lag those of dependency parsers. This is only made worse if discontinuous constituents are allowed—such discontinuities are convenient to represent wh-movement, scrambling, extraposition, and other linguistic phenomena common in free word order languages. While non-pr</context>
+</contexts>
+<marker>Berg-Kirkpatrick, Gillick, Klein, 2011</marker>
+<rawString>Taylor Berg-Kirkpatrick, Dan Gillick, and Dan Klein. 2011. Jointly learning to extract and compress. In Proc. ofAnnual Meeting of the Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="false">
+<authors>
+<author>Anders Bj¨orkelund</author>
+<author>¨Ozlem C¸etino˘glu</author>
+<author>Agnieszka Fale´nska</author>
+<author>Rich´ard Farkas</author>
+<author>Thomas Mueller</author>
+<author>Wolfgang Seeker</author>
+<author>Zsolt Sz´ant´o</author>
+</authors>
+<title>Introducing the ims-wrocław-szeged-cis entry at the spmrl 2014 shared task: Reranking and morpho-syntax meet unlabeled data.</title>
+<date>2014</date>
+<booktitle>In Proc. of the First Joint Workshop on Statistical Parsing of Morphologically Rich Languages and Syntactic Analysis of Non-Canonical Languages.</booktitle>
+<marker>Bj¨orkelund, C¸etino˘glu, Fale´nska, Farkas, Mueller, Seeker, Sz´ant´o, 2014</marker>
+<rawString>Anders Bj¨orkelund, ¨Ozlem C¸etino˘glu, Agnieszka Fale´nska, Rich´ard Farkas, Thomas Mueller, Wolfgang Seeker, and Zsolt Sz´ant´o. 2014. Introducing the ims-wrocław-szeged-cis entry at the spmrl 2014 shared task: Reranking and morpho-syntax meet unlabeled data. In Proc. of the First Joint Workshop on Statistical Parsing of Morphologically Rich Languages and Syntactic Analysis of Non-Canonical Languages.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ezra Black</author>
+<author>John Lafferty</author>
+<author>Salim Roukos</author>
+</authors>
+<title>Development and evaluation of a broad-coverage probabilistic grammar of english-language computer manuals.</title>
+<date>1992</date>
+<booktitle>In Proc. ofAnnual Meeting on Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="20699" citStr="Black et al., 1992" startWordPosition="3489" endWordPosition="3492">6.87 5,392 MSTParser 92.17 89.86 87.93 363 ZPar 92.93 91.28 89.50 1,022 TP-Basic 92.13 90.23 87.63 2,585 TP-Standard 93.55 91.58 90.41 1,658 TP-Full 93.70 91.70 90.53 959 TP-Full + Lab., H&amp;N enc. 93.80 87.86 89.39 871 TP-Full + Lab, direct enc. 93.80 91.99 90.89 912 TP-Full + Lab., delta enc. 93.80 92.00 90.94 912 Table 1: Results on English PTB §22 achieved by various dparsers and encoding strategies. For dependencies, we report unlabeled/labeled attachment scores (UAS/LAS), excluding punctuation. For constituents, we show Fl-scores (without punctuation and root nodes), as provided by EVALB (Black et al., 1992). We report total parsing speeds in tokens per second (including time spent on pruning, decoding, and feature evaluation), measured on a Intel Xeon processor @2.30GHz. direct enc. delta enc. # labels Fl # labels Fl Basque 26 85.04 17 85.17 French 61 79.93 56 80.05 German 66 83.44 59 83.39 Hebrew 62 83.26 43 83.29 Hungarian 24 86.54 15 86.67 Korean 44 79.79 16 79.97 Polish 47 92.39 34 92.64 Swedish 29 77.02 25 77.19 Table 2: Impact of direct and delta encodings on the dev sets of the SPMRL14 shared task. Reported are the number of labels and the Fl-scores yielded by each encoding technique. a f</context>
+</contexts>
+<marker>Black, Lafferty, Roukos, 1992</marker>
+<rawString>Ezra Black, John Lafferty, and Salim Roukos. 1992. Development and evaluation of a broad-coverage probabilistic grammar of english-language computer manuals. In Proc. ofAnnual Meeting on Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Adriane Boyd</author>
+</authors>
+<title>Discontinuity revisited: An improved conversion to context-free representations.</title>
+<date>2007</date>
+<booktitle>In Proc. of Linguistic Annotation Workshop.</booktitle>
+<contexts>
+<context position="8070" citStr="Boyd, 2007" startWordPosition="1267" endWordPosition="1268">rniak and Johnson, 2005; Huang, 2008; Bj¨orkelund et al., 2014). Discontinuous c-parsing is considered a much harder problem, involving mildly context-sensitive formalisms such as LCFRS or range concatenation grammars, with treebankderived c-parsers exhibiting near-exponential runtime (Kallmeyer and Maier, 2013, Figure 27). To speed up decoding, prior work has considered restrictons, such as bounding the fan-out (Maier et al., 2012) and requiring well-nestedness (Kuhlmann and Nivre, 2006; G´omez-Rodr´ıguez et al., 2010). Other approaches eliminate the discontinuities via tree transformations (Boyd, 2007; K¨ubler et al., 2008), sometimes as a pruning step in a coarse-to-fine parsing approach (van Cranenburgh and Bod, 2013). However, reported runtimes are still superior to 10 seconds per sentence, which is not practical. Recently, Versley (2014a) proposed an easy-first approach that leads to considerable speed-ups, but is less accurate. In this paper, we design fast discontinuous c-parsers that outperform all the ones above by a wide margin, with similar runtimes as Versley (2014a). 2.2 Dependency Trees In this paper, we use d-parsers as a black box to parse constituents. Given a sentence w1 .</context>
+</contexts>
+<marker>Boyd, 2007</marker>
+<rawString>Adriane Boyd. 2007. Discontinuity revisited: An improved conversion to context-free representations. In Proc. of Linguistic Annotation Workshop.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Sabine Brants</author>
+<author>Stefanie Dipper</author>
+<author>Silvia Hansen</author>
+<author>Wolfgang Lezius</author>
+<author>George Smith</author>
+</authors>
+<title>The TIGER treebank.</title>
+<date>2002</date>
+<booktitle>In Proc. of the workshop on treebanks and linguistic theories.</booktitle>
+<contexts>
+<context position="27396" citStr="Brants et al., 2002" startWordPosition="4635" endWordPosition="4638">described in Versley (2014b). These choices were based on dev-set experiments. Table 4 shows the results. For all languages ex1529 cept French, our system outperforms the Berkeley parser (Petrov and Klein, 2007), with or without prescribed POS tags. Our average Fl-scores are superior to the best non-reranking system participating in the shared task (Crabb´e and Seddah, 2014) and to the c-parser of Hall et al. (2014), achieving the best results for 4 out of 8 languages. 5.3 Results on the Discontinuous Treebanks Finally, we experimented on two widely-used discontinuous German treebanks: TIGER (Brants et al., 2002) and NEGRA (Skut et al., 1997). For the former, we used two different splits: TIGERSPMRL, provided in the SPMRL14 shared task; and TIGER-H&amp;N, used by Hall and Nivre (2008). For NEGRA, we used the standard splits. In these experiments, we skipped the unary recovery stage, since very few unary nodes exist in the data.7 We ran TurboTagger to predict POS tags for TIGERH&amp;N and NEGRA, while in TIGER-SPMRL we used the predicted POS tags provided in the shared task. All treebanks were lexicalized using the head-rule sets of Rehbein (2009). For comparison to related work, sentence length cut-offs of 30</context>
+</contexts>
+<marker>Brants, Dipper, Hansen, Lezius, Smith, 2002</marker>
+<rawString>Sabine Brants, Stefanie Dipper, Silvia Hansen, Wolfgang Lezius, and George Smith. 2002. The TIGER treebank. In Proc. of the workshop on treebanks and linguistic theories.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Xavier Carreras</author>
+<author>Michael Collins</author>
+<author>Terry Koo</author>
+</authors>
+<title>TAG, Dynamic Programming, and the Perceptron for Efficient, Feature-rich Parsing.</title>
+<date>2008</date>
+<booktitle>In Proc. of the International Conference on Natural Language Learning.</booktitle>
+<contexts>
+<context position="9961" citStr="Carreras et al., 2008" startWordPosition="1607" endWordPosition="1610">dices (#1, #2, ...) to denote the order of events, as we do in Figure 1. A d-tree endowed with a strict order for each head is called a strictly ordered d-tree. We establish below a correspondence between strictly ordered d-trees and binary c-trees. Before doing so, we need a few more definitions about c-trees. For each word position h ∈ {1, ... , L}, we define 0(h) as the node higher in the c-tree whose lexical head is h. We call the path from 0(h) down to the pre-terminal ph the spine of h. We may regard a c-tree as a set of L spines, one per word, which attach to each other to form a tree (Carreras et al., 2008). We then have the following Proposition 1. Binary c-trees and strictly-ordered d-trees are isomorphic, i.e., there is a one-to-one correspondence between the two sets, where the number of symbols is preserved. Proof. We use the construction in Figure 3. A formal proof is given as supplementary material. 3.2 Weakly Ordered Dependency Trees Next, we relax the strict order assumption, restricting the modifier sets Mh = {mi, ... , mK} to be only weakly ordered. This means that we can partition the K modifiers into J equivalence classes, Mh = UJ j=1 ¯Mjh, and define a strict order ≺h on the quotie</context>
+<context position="24770" citStr="Carreras et al. (2008)" startWordPosition="4203" endWordPosition="4206">tegy, we use this configuration in the sequel. To further explore the impact of delta encoding, we report in Table 2 the scores obtained by direct and delta encodings on eight other treebanks (see §5.2 for details on these datasets). With the exception of German, in all cases the delta encoding yielded better EVALB F1-scores with fewer labels. 5 Experiments To evaluate the performance of our reductionbased parsers, we conduct experiments in a variety Parser LR LP F1 #Toks/s. Charniak (2000) 89.5 89.9 89.5 – Klein and Manning (2003) 85.3 86.5 85.9 143 Petrov and Klein (2007) 90.0 90.3 90.1 169 Carreras et al. (2008) 90.7 91.4 91.1 – Zhu et al. (2013) 90.3 90.6 90.4 1,290 Stanford Shift-Reduce (2014) 89.1 89.1 89.1 655 Hall et al. (2014) 88.4 88.8 88.6 12 This work 89.9 90.4 90.2 957 Charniak and Johnson (2005)* 91.2 91.8 91.5 84 Socher et al. (2013)* 89.1 89.7 89.4 70 Zhu et al. (2013)* 91.1 91.5 91.3 – Table 3: Results on the English PTB §23. All systems reporting runtimes were run on the same machine. Marked as * are reranking and semi-supervised c-parsers. of treebanks, both continuous and discontinuous. 5.1 Results on the English PTB Table 3 shows the accuracies and speeds achieved by our system on t</context>
+<context position="31368" citStr="Carreras et al. (2008)" startWordPosition="5344" endWordPosition="5347">coding strategy is compared to ours in §4.1: they encode the entire spines into the dependency labels, which become rather complex and numerous. A similar strategy has been used by Versley (2014a) for discontinuous c-parsing. Both are largely outperformed by our system, as shown in §5.3. The crucial difference is that we encode only the top node’s label and its position in the spine— besides being a much lighter representation, ours has an interpretation as a weak ordering, leading to the isomorphisms expressed in Propositions 1–3. Joint constituent and dependency parsing have been tackled by Carreras et al. (2008) and Rush et al. (2010), but the resulting parsers, while accurate, are more expensive than a single c-parser. Very recently, Kong et al. (2015) proposed a much cheaper pipeline in which d-parsing is performed first, followed by a c-parser constrained to be con1530 Parser Basque French German Hebrew Hungar. Korean Polish Swedish Avg. Berkeley 70.50 80.38 78.30 86.96 81.62 71.42 79.23 79.19 78.45 Berkeley Tagged 74.74 79.76 78.28 85.42 85.22 78.56 86.75 80.64 81.17 Hall et al. (2014) 83.39 79.70 78.43 87.18 88.25 80.18 90.66 82.00 83.72 Crabb´e and Seddah (2014) 85.35 79.68 77.15 86.19 87.51 79</context>
+</contexts>
+<marker>Carreras, Collins, Koo, 2008</marker>
+<rawString>Xavier Carreras, Michael Collins, and Terry Koo. 2008. TAG, Dynamic Programming, and the Perceptron for Efficient, Feature-rich Parsing. In Proc. of the International Conference on Natural Language Learning.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Eugene Charniak</author>
+<author>Mark Johnson</author>
+</authors>
+<title>Coarseto-fine n-best parsing and maxent discriminative reranking.</title>
+<date>2005</date>
+<booktitle>In Proc. of Annual Meeting of the Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="1816" citStr="Charniak and Johnson, 2005" startWordPosition="265" endWordPosition="269">uction Constituent parsing is a central problem in NLP—one at which statistical models trained on treebanks have excelled (Charniak, 1996; Klein and Manning, 2003; Petrov and Klein, 2007). However, most existing parsers are slow, since they need to deal with a heavy grammar constant. Dependency parsers are generally faster, but less informative, since they do not produce constituents, which are often required by downstream applications (Johansson and Nugues, 2008; Wu et al., 2009; Berg-Kirkpatrick et al., 2011; Elming et al., 2013). How to get the best of both worlds? Coarse-to-fine decoding (Charniak and Johnson, 2005) and shift-reduce parsing (Sagae and Lavie, 2005; Zhu et al., 2013) were a step forward ∗This research was carried out during an internship at Priberam Labs. to accelerate constituent parsing, but typical runtimes still lag those of dependency parsers. This is only made worse if discontinuous constituents are allowed—such discontinuities are convenient to represent wh-movement, scrambling, extraposition, and other linguistic phenomena common in free word order languages. While non-projective dependency parsers, which are able to model such phenomena, have been widely developed in the last deca</context>
+<context position="7483" citStr="Charniak and Johnson, 2005" startWordPosition="1183" endWordPosition="1187"> proper nodes have exactly two children then it is called a binary c-tree. Continuous binary trees may be regarded as having been generated by a CFG in Chomsky normal form. Prior work. There has been a long string of work in statistical c-parsing, shifting from simple models (Charniak, 1996) to more sophisticated ones using structural annotation (Johnson, 1998; Klein and Manning, 2003), latent grammars (Matsuzaki et al., 2005; Petrov and Klein, 2007), and lexicalization (Eisner, 1996; Collins, 1999). An orthogonal line of work uses ensemble or reranking strategies to further improve accuracy (Charniak and Johnson, 2005; Huang, 2008; Bj¨orkelund et al., 2014). Discontinuous c-parsing is considered a much harder problem, involving mildly context-sensitive formalisms such as LCFRS or range concatenation grammars, with treebankderived c-parsers exhibiting near-exponential runtime (Kallmeyer and Maier, 2013, Figure 27). To speed up decoding, prior work has considered restrictons, such as bounding the fan-out (Maier et al., 2012) and requiring well-nestedness (Kuhlmann and Nivre, 2006; G´omez-Rodr´ıguez et al., 2010). Other approaches eliminate the discontinuities via tree transformations (Boyd, 2007; K¨ubler et </context>
+<context position="24968" citStr="Charniak and Johnson (2005)" startWordPosition="4240" endWordPosition="4243">see §5.2 for details on these datasets). With the exception of German, in all cases the delta encoding yielded better EVALB F1-scores with fewer labels. 5 Experiments To evaluate the performance of our reductionbased parsers, we conduct experiments in a variety Parser LR LP F1 #Toks/s. Charniak (2000) 89.5 89.9 89.5 – Klein and Manning (2003) 85.3 86.5 85.9 143 Petrov and Klein (2007) 90.0 90.3 90.1 169 Carreras et al. (2008) 90.7 91.4 91.1 – Zhu et al. (2013) 90.3 90.6 90.4 1,290 Stanford Shift-Reduce (2014) 89.1 89.1 89.1 655 Hall et al. (2014) 88.4 88.8 88.6 12 This work 89.9 90.4 90.2 957 Charniak and Johnson (2005)* 91.2 91.8 91.5 84 Socher et al. (2013)* 89.1 89.7 89.4 70 Zhu et al. (2013)* 91.1 91.5 91.3 – Table 3: Results on the English PTB §23. All systems reporting runtimes were run on the same machine. Marked as * are reranking and semi-supervised c-parsers. of treebanks, both continuous and discontinuous. 5.1 Results on the English PTB Table 3 shows the accuracies and speeds achieved by our system on the English PTB §23, in comparison to state-of-the-art c-parsers. We can see that our simple reduction-based c-parser surpasses the three Stanford parsers (Klein and Manning, 2003; Socher et al., 201</context>
+</contexts>
+<marker>Charniak, Johnson, 2005</marker>
+<rawString>Eugene Charniak and Mark Johnson. 2005. Coarseto-fine n-best parsing and maxent discriminative reranking. In Proc. of Annual Meeting of the Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Eugene Charniak</author>
+</authors>
+<title>Tree-bank grammars.</title>
+<date>1996</date>
+<booktitle>In Proc. of the National Conference on Artificial Intelligence.</booktitle>
+<contexts>
+<context position="1326" citStr="Charniak, 1996" startWordPosition="190" endWordPosition="191">nstituents. When this parser is non-projective, we can perform discontinuous parsing in a very natural manner. Despite the simplicity of our approach, experiments show that the resulting parsers are on par with strong baselines, such as the Berkeley parser for English and the best non-reranking system in the SPMRL-2014 shared task. Results are particularly striking for discontinuous parsing of German, where we surpass the current state of the art by a wide margin. 1 Introduction Constituent parsing is a central problem in NLP—one at which statistical models trained on treebanks have excelled (Charniak, 1996; Klein and Manning, 2003; Petrov and Klein, 2007). However, most existing parsers are slow, since they need to deal with a heavy grammar constant. Dependency parsers are generally faster, but less informative, since they do not produce constituents, which are often required by downstream applications (Johansson and Nugues, 2008; Wu et al., 2009; Berg-Kirkpatrick et al., 2011; Elming et al., 2013). How to get the best of both worlds? Coarse-to-fine decoding (Charniak and Johnson, 2005) and shift-reduce parsing (Sagae and Lavie, 2005; Zhu et al., 2013) were a step forward ∗This research was car</context>
+<context position="7149" citStr="Charniak, 1996" startWordPosition="1136" endWordPosition="1137">ntinuous and a discontinuous c-tree. Discontinuous c-trees have crossing branches, if the leaves are drawn in left-to-right surface order. An internal node which is not a preterminal is called a proper node. A node is called unary if it has exactly one child. A c-tree without unary proper nodes is called unaryless. If all proper nodes have exactly two children then it is called a binary c-tree. Continuous binary trees may be regarded as having been generated by a CFG in Chomsky normal form. Prior work. There has been a long string of work in statistical c-parsing, shifting from simple models (Charniak, 1996) to more sophisticated ones using structural annotation (Johnson, 1998; Klein and Manning, 2003), latent grammars (Matsuzaki et al., 2005; Petrov and Klein, 2007), and lexicalization (Eisner, 1996; Collins, 1999). An orthogonal line of work uses ensemble or reranking strategies to further improve accuracy (Charniak and Johnson, 2005; Huang, 2008; Bj¨orkelund et al., 2014). Discontinuous c-parsing is considered a much harder problem, involving mildly context-sensitive formalisms such as LCFRS or range concatenation grammars, with treebankderived c-parsers exhibiting near-exponential runtime (Ka</context>
+</contexts>
+<marker>Charniak, 1996</marker>
+<rawString>Eugene Charniak. 1996. Tree-bank grammars. In Proc. of the National Conference on Artificial Intelligence.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Eugene Charniak</author>
+</authors>
+<title>A maximum-entropyinspired parser.</title>
+<date>2000</date>
+<booktitle>In Proc. of the North American Chapter of the Association for Computational Linguistics Conference.</booktitle>
+<contexts>
+<context position="24643" citStr="Charniak (2000)" startWordPosition="4181" endWordPosition="4182">obtained with the d-parser followed by the unary predictor. Since two-stage TP-Full with delta-encoding is the best strategy, we use this configuration in the sequel. To further explore the impact of delta encoding, we report in Table 2 the scores obtained by direct and delta encodings on eight other treebanks (see §5.2 for details on these datasets). With the exception of German, in all cases the delta encoding yielded better EVALB F1-scores with fewer labels. 5 Experiments To evaluate the performance of our reductionbased parsers, we conduct experiments in a variety Parser LR LP F1 #Toks/s. Charniak (2000) 89.5 89.9 89.5 – Klein and Manning (2003) 85.3 86.5 85.9 143 Petrov and Klein (2007) 90.0 90.3 90.1 169 Carreras et al. (2008) 90.7 91.4 91.1 – Zhu et al. (2013) 90.3 90.6 90.4 1,290 Stanford Shift-Reduce (2014) 89.1 89.1 89.1 655 Hall et al. (2014) 88.4 88.8 88.6 12 This work 89.9 90.4 90.2 957 Charniak and Johnson (2005)* 91.2 91.8 91.5 84 Socher et al. (2013)* 89.1 89.7 89.4 70 Zhu et al. (2013)* 91.1 91.5 91.3 – Table 3: Results on the English PTB §23. All systems reporting runtimes were run on the same machine. Marked as * are reranking and semi-supervised c-parsers. of treebanks, both c</context>
+</contexts>
+<marker>Charniak, 2000</marker>
+<rawString>Eugene Charniak. 2000. A maximum-entropyinspired parser. In Proc. of the North American Chapter of the Association for Computational Linguistics Conference.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Michael Collins</author>
+<author>Lance Ramshaw</author>
+<author>Jan Hajiˇc</author>
+<author>Christoph Tillmann</author>
+</authors>
+<title>A Statistical Parser for Czech.</title>
+<date>1999</date>
+<booktitle>In Proc. of the Annual Meeting of the Association for Computational Linguistics on Computational Linguistics.</booktitle>
+<marker>Collins, Ramshaw, Hajiˇc, Tillmann, 1999</marker>
+<rawString>Michael Collins, Lance Ramshaw, Jan Hajiˇc, and Christoph Tillmann. 1999. A Statistical Parser for Czech. In Proc. of the Annual Meeting of the Association for Computational Linguistics on Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Michael Collins</author>
+</authors>
+<title>Head-driven statistical models for natural language parsing.</title>
+<date>1999</date>
+<tech>Ph.D. thesis,</tech>
+<institution>University of Pennsylvania.</institution>
+<contexts>
+<context position="6154" citStr="Collins, 1999" startWordPosition="964" endWordPosition="965">odes (constituents) are represented as a tuple hZ, h, Ii, where Z is a non-terminal symbol, h ∈ {1, ... , L} indicates the lexical head, and I ⊆ {1, . . . , L} is the node’s yield. Each word’s parent is a pre-terminal unary node of the form hpi, i, {i}i, where pi denotes the word’s part-of-speech (POS) tag. The yields and lexical heads are defined so that for every constituent hZ, h, Ii with children {hXk, mk,Jki}Kk=1, (i) we have I = UKk=1 Jk; and (ii) there is a unique k such that h = mk. This kth node (called the head-child node) is commonly chosen applying a handwritten set of head rules (Collins, 1999; Yamada and Matsumoto, 2003). A c-tree is continuous if all nodes hZ, h, Ii have a contiguous yield I, and discontinuous otherwise. Trees derived by a CFG are always continuous; those derived by a LCFRS may have discontinuities, the yield of a node being a union of spans, possibly with gaps in the middle. Figure 1 2http://www.ark.cs.cmu.edu/TurboParser shows an example of a continuous and a discontinuous c-tree. Discontinuous c-trees have crossing branches, if the leaves are drawn in left-to-right surface order. An internal node which is not a preterminal is called a proper node. A node is ca</context>
+<context position="15272" citStr="Collins (1999)" startWordPosition="2571" endWordPosition="2572">trainable dparser is available. Given a c-treebank provided as input, our procedure is outlined as follows: 1. Convert the c-treebank to dependencies (Algorithm 1). 2. Train a labeled d-parser on this treebank. 3. For each test sentence, run the labeled d-parser and convert the predicted d-tree into a c-tree without unary nodes (Algorithm 2). 4. Do post-processing to recover unaries. The next subsections describe each of these steps in detail. Along the way, we illustrate with experiments using the English Penn Treebank (Marcus et al., 1993), which we lexicalized by applying the head rules of Collins (1999).4 4.1 Dependency Encoding The first step is to convert the c-treebank to headordered dependencies, which we do using Algorithm 1. If the original treebank has discontinuous c-trees, we end up with non-projective d-trees or with violations of the nested property, as established in Proposition 3. We handle this gracefully by training a non-projective d-parser in the subsequent stage (see §4.2). Note also that this conversion drops the unary nodes (a consequence of Proposition 2). These nodes will be recovered in the last stage, as described in §4.4. Since in this paper we are assuming that only</context>
+</contexts>
+<marker>Collins, 1999</marker>
+<rawString>Michael Collins. 1999. Head-driven statistical models for natural language parsing. Ph.D. thesis, University of Pennsylvania.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Benoit Crabb´e</author>
+<author>Djam´e Seddah</author>
+</authors>
+<title>Multilingual discriminative shift reduce phrase structure parsing for the SPMRL 2014 shared task.</title>
+<date>2014</date>
+<booktitle>In Proc. of the First Joint Workshop on Statistical Parsing of Morphologically Rich Languages and Syntactic Analysis of Non-Canonical Languages.</booktitle>
+<marker>Crabb´e, Seddah, 2014</marker>
+<rawString>Benoit Crabb´e and Djam´e Seddah. 2014. Multilingual discriminative shift reduce phrase structure parsing for the SPMRL 2014 shared task. In Proc. of the First Joint Workshop on Statistical Parsing of Morphologically Rich Languages and Syntactic Analysis of Non-Canonical Languages.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Marie-Catherine De Marneffe</author>
+<author>Bill MacCartney</author>
+<author>Christopher D Manning</author>
+</authors>
+<title>Generating typed dependency parses from phrase structure parses.</title>
+<date>2006</date>
+<booktitle>In Proc. of the Meeting of the Language Resources and Evaluation Conference.</booktitle>
+<marker>De Marneffe, MacCartney, Manning, 2006</marker>
+<rawString>Marie-Catherine De Marneffe, Bill MacCartney, Christopher D Manning, et al. 2006. Generating typed dependency parses from phrase structure parses. In Proc. of the Meeting of the Language Resources and Evaluation Conference.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ane Dybro-Johansen</author>
+</authors>
+<title>Extraction automatique de Grammaires d’Arbres Adjoints a` partir d’un corpus arbor´e du franc¸ais.</title>
+<date>2004</date>
+<tech>Master’s thesis,</tech>
+<institution>Universit´e Paris</institution>
+<marker>Dybro-Johansen, 2004</marker>
+<rawString>Ane Dybro-Johansen. 2004. Extraction automatique de Grammaires d’Arbres Adjoints a` partir d’un corpus arbor´e du franc¸ais. Master’s thesis, Universit´e Paris 7.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jason Eisner</author>
+<author>Giorgio Satta</author>
+</authors>
+<title>Efficient parsing for bilexical context-free grammars and head automaton grammars.</title>
+<date>1999</date>
+<booktitle>In Proc. of Annual Meeting of the Association for Computational Linguistics.</booktitle>
+<marker>Eisner, Satta, 1999</marker>
+<rawString>Jason Eisner and Giorgio Satta. 1999. Efficient parsing for bilexical context-free grammars and head automaton grammars. In Proc. of Annual Meeting of the Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jason Eisner</author>
+</authors>
+<title>Three new probabilistic models for dependency parsing: An exploration.</title>
+<date>1996</date>
+<booktitle>In Proc. of International Conference on Computational Linguistics.</booktitle>
+<contexts>
+<context position="7345" citStr="Eisner, 1996" startWordPosition="1164" endWordPosition="1165">er node. A node is called unary if it has exactly one child. A c-tree without unary proper nodes is called unaryless. If all proper nodes have exactly two children then it is called a binary c-tree. Continuous binary trees may be regarded as having been generated by a CFG in Chomsky normal form. Prior work. There has been a long string of work in statistical c-parsing, shifting from simple models (Charniak, 1996) to more sophisticated ones using structural annotation (Johnson, 1998; Klein and Manning, 2003), latent grammars (Matsuzaki et al., 2005; Petrov and Klein, 2007), and lexicalization (Eisner, 1996; Collins, 1999). An orthogonal line of work uses ensemble or reranking strategies to further improve accuracy (Charniak and Johnson, 2005; Huang, 2008; Bj¨orkelund et al., 2014). Discontinuous c-parsing is considered a much harder problem, involving mildly context-sensitive formalisms such as LCFRS or range concatenation grammars, with treebankderived c-parsers exhibiting near-exponential runtime (Kallmeyer and Maier, 2013, Figure 27). To speed up decoding, prior work has considered restrictons, such as bounding the fan-out (Maier et al., 2012) and requiring well-nestedness (Kuhlmann and Nivr</context>
+</contexts>
+<marker>Eisner, 1996</marker>
+<rawString>Jason Eisner. 1996. Three new probabilistic models for dependency parsing: An exploration. In Proc. of International Conference on Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jakob Elming</author>
+<author>Anders Johannsen</author>
+<author>Sigrid Klerke</author>
+<author>Emanuele Lapponi</author>
+<author>Hector Martinez Alonso</author>
+<author>Anders Søgaard</author>
+</authors>
+<title>Down-stream effects of tree-to-dependency conversions.</title>
+<date>2013</date>
+<booktitle>In Proc. of the Annual Conference of the Human Language Technologies - North American Chapter of the Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="1726" citStr="Elming et al., 2013" startWordPosition="251" endWordPosition="254">of German, where we surpass the current state of the art by a wide margin. 1 Introduction Constituent parsing is a central problem in NLP—one at which statistical models trained on treebanks have excelled (Charniak, 1996; Klein and Manning, 2003; Petrov and Klein, 2007). However, most existing parsers are slow, since they need to deal with a heavy grammar constant. Dependency parsers are generally faster, but less informative, since they do not produce constituents, which are often required by downstream applications (Johansson and Nugues, 2008; Wu et al., 2009; Berg-Kirkpatrick et al., 2011; Elming et al., 2013). How to get the best of both worlds? Coarse-to-fine decoding (Charniak and Johnson, 2005) and shift-reduce parsing (Sagae and Lavie, 2005; Zhu et al., 2013) were a step forward ∗This research was carried out during an internship at Priberam Labs. to accelerate constituent parsing, but typical runtimes still lag those of dependency parsers. This is only made worse if discontinuous constituents are allowed—such discontinuities are convenient to represent wh-movement, scrambling, extraposition, and other linguistic phenomena common in free word order languages. While non-projective dependency pa</context>
+</contexts>
+<marker>Elming, Johannsen, Klerke, Lapponi, Alonso, Søgaard, 2013</marker>
+<rawString>Jakob Elming, Anders Johannsen, Sigrid Klerke, Emanuele Lapponi, Hector Martinez Alonso, and Anders Søgaard. 2013. Down-stream effects of tree-to-dependency conversions. In Proc. of the Annual Conference of the Human Language Technologies - North American Chapter of the Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Haim Gaifman</author>
+</authors>
+<title>Dependency systems and phrase-structure systems. Information and control.</title>
+<date>1965</date>
+<marker>Gaifman, 1965</marker>
+<rawString>Haim Gaifman. 1965. Dependency systems and phrase-structure systems. Information and control.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Carlos G´omez-Rodr´ıguez</author>
+<author>Marco Kuhlmann</author>
+<author>Giorgio Satta</author>
+</authors>
+<title>Efficient parsing of well-nested linear context-free rewriting systems.</title>
+<date>2010</date>
+<booktitle>In Proc. of the Annual Conference of the North American Chapter of the Association for Computational Linguistics.</booktitle>
+<marker>G´omez-Rodr´ıguez, Kuhlmann, Satta, 2010</marker>
+<rawString>Carlos G´omez-Rodr´ıguez, Marco Kuhlmann, and Giorgio Satta. 2010. Efficient parsing of well-nested linear context-free rewriting systems. In Proc. of the Annual Conference of the North American Chapter of the Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Johan Hall</author>
+<author>Joakim Nivre</author>
+</authors>
+<title>A dependencydriven parser for german dependency and constituency representations.</title>
+<date>2008</date>
+<booktitle>In Proc. of the Workshop on Parsing German.</booktitle>
+<contexts>
+<context position="3521" citStr="Hall and Nivre (2008)" startWordPosition="525" endWordPosition="528">ke other constituent parsers, ours does not require estimating a grammar, nor binarizing the treebank. Moreover, when the dependency parser is non-projective, our method can perform discontinuous constituent parsing in a very natural way. Key to our approach is the notion of headordered dependency trees (shown in Figure 1): by endowing dependency trees with this additional layer of structure, we show that they become isomorphic to constituent trees. We encode this structure as part of the dependency labels, enabling a dependency-to-constituent conversion. A related conversion was attempted by Hall and Nivre (2008) to parse German, but their complex encoding scheme blows up the number of arc labels, affecting the final parser’s quality. By contrast, our light encoding achieves a 10-fold decrease in the label alphabet, leading to more accurate parsing. While simple, our reduction-based parsers are on par with the Berkeley parser for English (Petrov 1The title of this paper is inspired by the seminal paper of Pereira and Warren (1983) “Parsing as Deduction.” 1523 Proceedings of the 53rd Annual Meeting of the Association for Computational Linguistics and the 7th International Joint Conference on Natural La</context>
+<context position="16710" citStr="Hall and Nivre (2008)" startWordPosition="2806" endWordPosition="2809"> direct encoding, just appends suffixes #1, #2, etc., as in Figure 1. A disadvantage is that the number of labels grows unbounded with the treebank size, as we may encounter complex substructures where the event sequences are long. The second strategy is a delta-encoding scheme where, rather than writing the absolute indices in the dependency label, we write the differences between consecutive ones.5 We used this strategy for the continuous treebanks only, whose d-trees are guaranteed to satisfy the nested property. For comparison, we also implemented a replication of the encoding proposed by Hall and Nivre (2008), which we call H&amp;N-encoding. This strategy concatenates all the c-nodes’ symbols in the modifier’s spine with the attachment position in the head’s spine (e.g., in Figure 3, if the modifier m2 has a spine with nodes X1, X2, X3, the generated d-label would be X1JX2JX3#2; our direct encoding scheme generates Z2#2 instead). Since their strategy encodes the entire spines into com4We train on §02–21, use §22 for validation, and test on §23. We predict automatic POS tags with TurboTagger (Martins et al., 2013), with 10-fold jackknifing on the training set. 5For example, if #1, #3, #4 and #2, #3, #3</context>
+<context position="27567" citStr="Hall and Nivre (2008)" startWordPosition="4665" endWordPosition="4668"> Berkeley parser (Petrov and Klein, 2007), with or without prescribed POS tags. Our average Fl-scores are superior to the best non-reranking system participating in the shared task (Crabb´e and Seddah, 2014) and to the c-parser of Hall et al. (2014), achieving the best results for 4 out of 8 languages. 5.3 Results on the Discontinuous Treebanks Finally, we experimented on two widely-used discontinuous German treebanks: TIGER (Brants et al., 2002) and NEGRA (Skut et al., 1997). For the former, we used two different splits: TIGERSPMRL, provided in the SPMRL14 shared task; and TIGER-H&amp;N, used by Hall and Nivre (2008). For NEGRA, we used the standard splits. In these experiments, we skipped the unary recovery stage, since very few unary nodes exist in the data.7 We ran TurboTagger to predict POS tags for TIGERH&amp;N and NEGRA, while in TIGER-SPMRL we used the predicted POS tags provided in the shared task. All treebanks were lexicalized using the head-rule sets of Rehbein (2009). For comparison to related work, sentence length cut-offs of 30, 40 and 70 were applied during the evaluation. Table 5 shows the results. We observe that our approach outperforms all the competitors considerably, achieving state-of-th</context>
+<context position="30179" citStr="Hall and Nivre 2008" startWordPosition="5149" endWordPosition="5152">rs, pred 82.57 / 45.93 81.12 / 44.48 NEGRA L &lt; 30 L &lt; 40 all M12, gold 74.5– / – –/––/– C12, gold – / – 72.33 / 33.16 71.08 / 32.10 KM13, gold 75.75 / – –/––/ – CB13, gold – / – 76.8– / 40.5– – / – Ours, gold 82.56 / 52.13 81.08 / 48.04 80.52 / 46.70 CB13, pred – / – 74.8– / 38.7– – / – Ours, pred 79.63 / 48.43 77.93 / 44.83 76.95 / 43.50 Table 5: Fl / exact match scores on TIGER and NEGRA test sets, with gold and predicted POS tags. These scores are computed by the DISCO-DOP evaluator ignoring root nodes and, for TIGER-H&amp;N and NEGRA, punctuation tokens. The baselines are published results by Hall and Nivre 2008 (HN08), Maier et al. 2012 (M12), van Cranenburgh 2012 (C12), Kallmeyer and Maier 2013 (KM13), van Cranenburgh and Bod 2013 (CB13), and Versley 2014a, 2014b (V14a, V14b). transformation rules to handle the kind of ambiguities expressed in Figure 2. Our work differs in that we are not concerned about the linguistic plausibility of our conversions, but only with the formal aspects that underlie the two representations. The work most related to ours is Hall and Nivre (2008), who also convert dependencies to constituents to prototype a c-parser for German. Their encoding strategy is compared to ou</context>
+</contexts>
+<marker>Hall, Nivre, 2008</marker>
+<rawString>Johan Hall and Joakim Nivre. 2008. A dependencydriven parser for german dependency and constituency representations. In Proc. of the Workshop on Parsing German.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>David Hall</author>
+<author>Greg Durrett</author>
+<author>Dan Klein</author>
+</authors>
+<title>Less grammar, more features.</title>
+<date>2014</date>
+<booktitle>In Proc. of the Annual Meeting of the Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="24893" citStr="Hall et al. (2014)" startWordPosition="4226" endWordPosition="4229"> obtained by direct and delta encodings on eight other treebanks (see §5.2 for details on these datasets). With the exception of German, in all cases the delta encoding yielded better EVALB F1-scores with fewer labels. 5 Experiments To evaluate the performance of our reductionbased parsers, we conduct experiments in a variety Parser LR LP F1 #Toks/s. Charniak (2000) 89.5 89.9 89.5 – Klein and Manning (2003) 85.3 86.5 85.9 143 Petrov and Klein (2007) 90.0 90.3 90.1 169 Carreras et al. (2008) 90.7 91.4 91.1 – Zhu et al. (2013) 90.3 90.6 90.4 1,290 Stanford Shift-Reduce (2014) 89.1 89.1 89.1 655 Hall et al. (2014) 88.4 88.8 88.6 12 This work 89.9 90.4 90.2 957 Charniak and Johnson (2005)* 91.2 91.8 91.5 84 Socher et al. (2013)* 89.1 89.7 89.4 70 Zhu et al. (2013)* 91.1 91.5 91.3 – Table 3: Results on the English PTB §23. All systems reporting runtimes were run on the same machine. Marked as * are reranking and semi-supervised c-parsers. of treebanks, both continuous and discontinuous. 5.1 Results on the English PTB Table 3 shows the accuracies and speeds achieved by our system on the English PTB §23, in comparison to state-of-the-art c-parsers. We can see that our simple reduction-based c-parser surpas</context>
+<context position="27195" citStr="Hall et al. (2014)" startWordPosition="4604" endWordPosition="4607">an, we always took the rightmost modifier as head-child node. For Hebrew and Polish we used the leftmost modifier instead. For Swedish we induced head rules from the provided dependency treebank, as described in Versley (2014b). These choices were based on dev-set experiments. Table 4 shows the results. For all languages ex1529 cept French, our system outperforms the Berkeley parser (Petrov and Klein, 2007), with or without prescribed POS tags. Our average Fl-scores are superior to the best non-reranking system participating in the shared task (Crabb´e and Seddah, 2014) and to the c-parser of Hall et al. (2014), achieving the best results for 4 out of 8 languages. 5.3 Results on the Discontinuous Treebanks Finally, we experimented on two widely-used discontinuous German treebanks: TIGER (Brants et al., 2002) and NEGRA (Skut et al., 1997). For the former, we used two different splits: TIGERSPMRL, provided in the SPMRL14 shared task; and TIGER-H&amp;N, used by Hall and Nivre (2008). For NEGRA, we used the standard splits. In these experiments, we skipped the unary recovery stage, since very few unary nodes exist in the data.7 We ran TurboTagger to predict POS tags for TIGERH&amp;N and NEGRA, while in TIGER-SP</context>
+<context position="31855" citStr="Hall et al. (2014)" startWordPosition="5424" endWordPosition="5427">he isomorphisms expressed in Propositions 1–3. Joint constituent and dependency parsing have been tackled by Carreras et al. (2008) and Rush et al. (2010), but the resulting parsers, while accurate, are more expensive than a single c-parser. Very recently, Kong et al. (2015) proposed a much cheaper pipeline in which d-parsing is performed first, followed by a c-parser constrained to be con1530 Parser Basque French German Hebrew Hungar. Korean Polish Swedish Avg. Berkeley 70.50 80.38 78.30 86.96 81.62 71.42 79.23 79.19 78.45 Berkeley Tagged 74.74 79.76 78.28 85.42 85.22 78.56 86.75 80.64 81.17 Hall et al. (2014) 83.39 79.70 78.43 87.18 88.25 80.18 90.66 82.00 83.72 Crabb´e and Seddah (2014) 85.35 79.68 77.15 86.19 87.51 79.35 91.60 82.72 83.69 This work 85.90 78.75 78.66 88.97 88.16 79.28 91.20 82.80 84.22 Bj¨orkelund et al. (2014) 88.24 82.53 81.66 89.80 91.72 83.81 90.50 85.50 86.72 Table 4: Fl-scores on eight treebanks of the SPMRL14 shared task, computed with the provided EVALB SPMRL tool, which takes into account all tokens except root nodes. Berkeley Tagged is a version of Petrov and Klein (2007) using the predicted POS tags provided by the organizers. Crabb´e and Seddah (2014) is the best non-</context>
+</contexts>
+<marker>Hall, Durrett, Klein, 2014</marker>
+<rawString>David Hall, Greg Durrett, and Dan Klein. 2014. Less grammar, more features. In Proc. of the Annual Meeting of the Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Liang Huang</author>
+</authors>
+<title>Forest reranking: Discriminative parsing with non-local features.</title>
+<date>2008</date>
+<booktitle>In Proc. of the Annual Meeting of the Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="7496" citStr="Huang, 2008" startWordPosition="1188" endWordPosition="1189">wo children then it is called a binary c-tree. Continuous binary trees may be regarded as having been generated by a CFG in Chomsky normal form. Prior work. There has been a long string of work in statistical c-parsing, shifting from simple models (Charniak, 1996) to more sophisticated ones using structural annotation (Johnson, 1998; Klein and Manning, 2003), latent grammars (Matsuzaki et al., 2005; Petrov and Klein, 2007), and lexicalization (Eisner, 1996; Collins, 1999). An orthogonal line of work uses ensemble or reranking strategies to further improve accuracy (Charniak and Johnson, 2005; Huang, 2008; Bj¨orkelund et al., 2014). Discontinuous c-parsing is considered a much harder problem, involving mildly context-sensitive formalisms such as LCFRS or range concatenation grammars, with treebankderived c-parsers exhibiting near-exponential runtime (Kallmeyer and Maier, 2013, Figure 27). To speed up decoding, prior work has considered restrictons, such as bounding the fan-out (Maier et al., 2012) and requiring well-nestedness (Kuhlmann and Nivre, 2006; G´omez-Rodr´ıguez et al., 2010). Other approaches eliminate the discontinuities via tree transformations (Boyd, 2007; K¨ubler et al., 2008), s</context>
+</contexts>
+<marker>Huang, 2008</marker>
+<rawString>Liang Huang. 2008. Forest reranking: Discriminative parsing with non-local features. In Proc. of the Annual Meeting of the Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Richard Johansson</author>
+<author>Pierre Nugues</author>
+</authors>
+<title>Dependency-based Semantic Role Labeling of PropBank.</title>
+<date>2008</date>
+<booktitle>In Empirical Methods for Natural Language Processing.</booktitle>
+<contexts>
+<context position="1656" citStr="Johansson and Nugues, 2008" startWordPosition="239" endWordPosition="242">14 shared task. Results are particularly striking for discontinuous parsing of German, where we surpass the current state of the art by a wide margin. 1 Introduction Constituent parsing is a central problem in NLP—one at which statistical models trained on treebanks have excelled (Charniak, 1996; Klein and Manning, 2003; Petrov and Klein, 2007). However, most existing parsers are slow, since they need to deal with a heavy grammar constant. Dependency parsers are generally faster, but less informative, since they do not produce constituents, which are often required by downstream applications (Johansson and Nugues, 2008; Wu et al., 2009; Berg-Kirkpatrick et al., 2011; Elming et al., 2013). How to get the best of both worlds? Coarse-to-fine decoding (Charniak and Johnson, 2005) and shift-reduce parsing (Sagae and Lavie, 2005; Zhu et al., 2013) were a step forward ∗This research was carried out during an internship at Priberam Labs. to accelerate constituent parsing, but typical runtimes still lag those of dependency parsers. This is only made worse if discontinuous constituents are allowed—such discontinuities are convenient to represent wh-movement, scrambling, extraposition, and other linguistic phenomena c</context>
+</contexts>
+<marker>Johansson, Nugues, 2008</marker>
+<rawString>Richard Johansson and Pierre Nugues. 2008. Dependency-based Semantic Role Labeling of PropBank. In Empirical Methods for Natural Language Processing.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Mark Johnson</author>
+</authors>
+<title>PCFG models of linguistic tree representations. Computational Linguistics.</title>
+<date>1998</date>
+<contexts>
+<context position="7219" citStr="Johnson, 1998" startWordPosition="1145" endWordPosition="1146"> branches, if the leaves are drawn in left-to-right surface order. An internal node which is not a preterminal is called a proper node. A node is called unary if it has exactly one child. A c-tree without unary proper nodes is called unaryless. If all proper nodes have exactly two children then it is called a binary c-tree. Continuous binary trees may be regarded as having been generated by a CFG in Chomsky normal form. Prior work. There has been a long string of work in statistical c-parsing, shifting from simple models (Charniak, 1996) to more sophisticated ones using structural annotation (Johnson, 1998; Klein and Manning, 2003), latent grammars (Matsuzaki et al., 2005; Petrov and Klein, 2007), and lexicalization (Eisner, 1996; Collins, 1999). An orthogonal line of work uses ensemble or reranking strategies to further improve accuracy (Charniak and Johnson, 2005; Huang, 2008; Bj¨orkelund et al., 2014). Discontinuous c-parsing is considered a much harder problem, involving mildly context-sensitive formalisms such as LCFRS or range concatenation grammars, with treebankderived c-parsers exhibiting near-exponential runtime (Kallmeyer and Maier, 2013, Figure 27). To speed up decoding, prior work </context>
+</contexts>
+<marker>Johnson, 1998</marker>
+<rawString>Mark Johnson. 1998. PCFG models of linguistic tree representations. Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Sylvain Kahane</author>
+<author>Alexis Nasr</author>
+<author>Owen Rambow</author>
+</authors>
+<title>Pseudo-projectivity: a polynomially parsable non-projective dependency grammar.</title>
+<date>1998</date>
+<booktitle>In Proc. of the International Conference on Computational Linguistics.</booktitle>
+<marker>Kahane, Nasr, Rambow, 1998</marker>
+<rawString>Sylvain Kahane, Alexis Nasr, and Owen Rambow. 1998. Pseudo-projectivity: a polynomially parsable non-projective dependency grammar. In Proc. of the International Conference on Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Laura Kallmeyer</author>
+<author>Wolfgang Maier</author>
+</authors>
+<title>Datadriven parsing using probabilistic linear context-free rewriting systems.</title>
+<date>2013</date>
+<journal>Computational Linguistics.</journal>
+<contexts>
+<context position="2604" citStr="Kallmeyer and Maier, 2013" startWordPosition="384" endWordPosition="387">ccelerate constituent parsing, but typical runtimes still lag those of dependency parsers. This is only made worse if discontinuous constituents are allowed—such discontinuities are convenient to represent wh-movement, scrambling, extraposition, and other linguistic phenomena common in free word order languages. While non-projective dependency parsers, which are able to model such phenomena, have been widely developed in the last decade (Nivre et al., 2007; McDonald et al., 2006; Martins et al., 2013), discontinuous constituent parsing is still taking its first steps (Maier and Søgaard, 2008; Kallmeyer and Maier, 2013). In this paper, we show that an off-the-shelf, trainable, dependency parser is enough to build a highly-competitive constituent parser. This (surprising) result is based on a reduction1 of constituent to dependency parsing, followed by a simple post-processing procedure to recover unaries. Unlike other constituent parsers, ours does not require estimating a grammar, nor binarizing the treebank. Moreover, when the dependency parser is non-projective, our method can perform discontinuous constituent parsing in a very natural way. Key to our approach is the notion of headordered dependency trees</context>
+<context position="7772" citStr="Kallmeyer and Maier, 2013" startWordPosition="1222" endWordPosition="1225">6) to more sophisticated ones using structural annotation (Johnson, 1998; Klein and Manning, 2003), latent grammars (Matsuzaki et al., 2005; Petrov and Klein, 2007), and lexicalization (Eisner, 1996; Collins, 1999). An orthogonal line of work uses ensemble or reranking strategies to further improve accuracy (Charniak and Johnson, 2005; Huang, 2008; Bj¨orkelund et al., 2014). Discontinuous c-parsing is considered a much harder problem, involving mildly context-sensitive formalisms such as LCFRS or range concatenation grammars, with treebankderived c-parsers exhibiting near-exponential runtime (Kallmeyer and Maier, 2013, Figure 27). To speed up decoding, prior work has considered restrictons, such as bounding the fan-out (Maier et al., 2012) and requiring well-nestedness (Kuhlmann and Nivre, 2006; G´omez-Rodr´ıguez et al., 2010). Other approaches eliminate the discontinuities via tree transformations (Boyd, 2007; K¨ubler et al., 2008), sometimes as a pruning step in a coarse-to-fine parsing approach (van Cranenburgh and Bod, 2013). However, reported runtimes are still superior to 10 seconds per sentence, which is not practical. Recently, Versley (2014a) proposed an easy-first approach that leads to considera</context>
+<context position="30265" citStr="Kallmeyer and Maier 2013" startWordPosition="5163" endWordPosition="5166">–/––/– C12, gold – / – 72.33 / 33.16 71.08 / 32.10 KM13, gold 75.75 / – –/––/ – CB13, gold – / – 76.8– / 40.5– – / – Ours, gold 82.56 / 52.13 81.08 / 48.04 80.52 / 46.70 CB13, pred – / – 74.8– / 38.7– – / – Ours, pred 79.63 / 48.43 77.93 / 44.83 76.95 / 43.50 Table 5: Fl / exact match scores on TIGER and NEGRA test sets, with gold and predicted POS tags. These scores are computed by the DISCO-DOP evaluator ignoring root nodes and, for TIGER-H&amp;N and NEGRA, punctuation tokens. The baselines are published results by Hall and Nivre 2008 (HN08), Maier et al. 2012 (M12), van Cranenburgh 2012 (C12), Kallmeyer and Maier 2013 (KM13), van Cranenburgh and Bod 2013 (CB13), and Versley 2014a, 2014b (V14a, V14b). transformation rules to handle the kind of ambiguities expressed in Figure 2. Our work differs in that we are not concerned about the linguistic plausibility of our conversions, but only with the formal aspects that underlie the two representations. The work most related to ours is Hall and Nivre (2008), who also convert dependencies to constituents to prototype a c-parser for German. Their encoding strategy is compared to ours in §4.1: they encode the entire spines into the dependency labels, which become rat</context>
+</contexts>
+<marker>Kallmeyer, Maier, 2013</marker>
+<rawString>Laura Kallmeyer and Wolfgang Maier. 2013. Datadriven parsing using probabilistic linear context-free rewriting systems. Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Dan Klein</author>
+<author>Christopher D Manning</author>
+</authors>
+<title>Accurate unlexicalized parsing.</title>
+<date>2003</date>
+<booktitle>In Proc. of Annual Meeting on Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="1351" citStr="Klein and Manning, 2003" startWordPosition="192" endWordPosition="195"> this parser is non-projective, we can perform discontinuous parsing in a very natural manner. Despite the simplicity of our approach, experiments show that the resulting parsers are on par with strong baselines, such as the Berkeley parser for English and the best non-reranking system in the SPMRL-2014 shared task. Results are particularly striking for discontinuous parsing of German, where we surpass the current state of the art by a wide margin. 1 Introduction Constituent parsing is a central problem in NLP—one at which statistical models trained on treebanks have excelled (Charniak, 1996; Klein and Manning, 2003; Petrov and Klein, 2007). However, most existing parsers are slow, since they need to deal with a heavy grammar constant. Dependency parsers are generally faster, but less informative, since they do not produce constituents, which are often required by downstream applications (Johansson and Nugues, 2008; Wu et al., 2009; Berg-Kirkpatrick et al., 2011; Elming et al., 2013). How to get the best of both worlds? Coarse-to-fine decoding (Charniak and Johnson, 2005) and shift-reduce parsing (Sagae and Lavie, 2005; Zhu et al., 2013) were a step forward ∗This research was carried out during an intern</context>
+<context position="7245" citStr="Klein and Manning, 2003" startWordPosition="1147" endWordPosition="1150">he leaves are drawn in left-to-right surface order. An internal node which is not a preterminal is called a proper node. A node is called unary if it has exactly one child. A c-tree without unary proper nodes is called unaryless. If all proper nodes have exactly two children then it is called a binary c-tree. Continuous binary trees may be regarded as having been generated by a CFG in Chomsky normal form. Prior work. There has been a long string of work in statistical c-parsing, shifting from simple models (Charniak, 1996) to more sophisticated ones using structural annotation (Johnson, 1998; Klein and Manning, 2003), latent grammars (Matsuzaki et al., 2005; Petrov and Klein, 2007), and lexicalization (Eisner, 1996; Collins, 1999). An orthogonal line of work uses ensemble or reranking strategies to further improve accuracy (Charniak and Johnson, 2005; Huang, 2008; Bj¨orkelund et al., 2014). Discontinuous c-parsing is considered a much harder problem, involving mildly context-sensitive formalisms such as LCFRS or range concatenation grammars, with treebankderived c-parsers exhibiting near-exponential runtime (Kallmeyer and Maier, 2013, Figure 27). To speed up decoding, prior work has considered restrictons</context>
+<context position="24685" citStr="Klein and Manning (2003)" startWordPosition="4187" endWordPosition="4190">ed by the unary predictor. Since two-stage TP-Full with delta-encoding is the best strategy, we use this configuration in the sequel. To further explore the impact of delta encoding, we report in Table 2 the scores obtained by direct and delta encodings on eight other treebanks (see §5.2 for details on these datasets). With the exception of German, in all cases the delta encoding yielded better EVALB F1-scores with fewer labels. 5 Experiments To evaluate the performance of our reductionbased parsers, we conduct experiments in a variety Parser LR LP F1 #Toks/s. Charniak (2000) 89.5 89.9 89.5 – Klein and Manning (2003) 85.3 86.5 85.9 143 Petrov and Klein (2007) 90.0 90.3 90.1 169 Carreras et al. (2008) 90.7 91.4 91.1 – Zhu et al. (2013) 90.3 90.6 90.4 1,290 Stanford Shift-Reduce (2014) 89.1 89.1 89.1 655 Hall et al. (2014) 88.4 88.8 88.6 12 This work 89.9 90.4 90.2 957 Charniak and Johnson (2005)* 91.2 91.8 91.5 84 Socher et al. (2013)* 89.1 89.7 89.4 70 Zhu et al. (2013)* 91.1 91.5 91.3 – Table 3: Results on the English PTB §23. All systems reporting runtimes were run on the same machine. Marked as * are reranking and semi-supervised c-parsers. of treebanks, both continuous and discontinuous. 5.1 Results o</context>
+</contexts>
+<marker>Klein, Manning, 2003</marker>
+<rawString>Dan Klein and Christopher D. Manning. 2003. Accurate unlexicalized parsing. In Proc. of Annual Meeting on Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Lingpeng Kong</author>
+<author>Noah A Smith</author>
+</authors>
+<title>An empirical comparison of parsing methods for stanford dependencies. arXiv preprint arXiv:1404.4314.</title>
+<date>2014</date>
+<contexts>
+<context position="4795" citStr="Kong and Smith (2014)" startWordPosition="724" endWordPosition="727">uly 26-31, 2015. c�2015 Association for Computational Linguistics and Klein, 2007), and with the best single system in the recent SPMRL shared task (Seddah et al., 2014), for eight morphologically rich languages. For discontinuous parsing, we surpass the current state of the art by a wide margin on two German datasets (TIGER and NEGRA), while achieving fast parsing speeds. We provide a free distribution of our parsers along with this paper, as part of the TurboParser toolkit.2 2 Background We start by reviewing constituent and dependency representations, and setting up the notation. Following Kong and Smith (2014), we use c-/d- prefixes for convenience (e.g., we write c-parser for constituent parser and d-tree for dependency tree). 2.1 Constituent Trees Constituent-based representations are commonly seen as derivations according to a context-free grammar (CFG). Here, we focus on properties of the c-trees, rather than of the grammars used to generate them. We consider a broad scenario that permits c-trees with discontinuities, such as the ones derived with linear context-free rewriting systems (LCFRS; Vijay-Shanker et al. (1987)). We also assume that the c-trees are lexicalized. Formally, let w1w2 ... w</context>
+</contexts>
+<marker>Kong, Smith, 2014</marker>
+<rawString>Lingpeng Kong and Noah A Smith. 2014. An empirical comparison of parsing methods for stanford dependencies. arXiv preprint arXiv:1404.4314.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Lingpeng Kong</author>
+<author>Alexander M Rush</author>
+<author>Noah A Smith</author>
+</authors>
+<title>Transforming dependencies into phrase structures.</title>
+<date>2015</date>
+<booktitle>In Proc. of the Conference of the North American Chapter of the Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="31512" citStr="Kong et al. (2015)" startWordPosition="5369" endWordPosition="5372">imilar strategy has been used by Versley (2014a) for discontinuous c-parsing. Both are largely outperformed by our system, as shown in §5.3. The crucial difference is that we encode only the top node’s label and its position in the spine— besides being a much lighter representation, ours has an interpretation as a weak ordering, leading to the isomorphisms expressed in Propositions 1–3. Joint constituent and dependency parsing have been tackled by Carreras et al. (2008) and Rush et al. (2010), but the resulting parsers, while accurate, are more expensive than a single c-parser. Very recently, Kong et al. (2015) proposed a much cheaper pipeline in which d-parsing is performed first, followed by a c-parser constrained to be con1530 Parser Basque French German Hebrew Hungar. Korean Polish Swedish Avg. Berkeley 70.50 80.38 78.30 86.96 81.62 71.42 79.23 79.19 78.45 Berkeley Tagged 74.74 79.76 78.28 85.42 85.22 78.56 86.75 80.64 81.17 Hall et al. (2014) 83.39 79.70 78.43 87.18 88.25 80.18 90.66 82.00 83.72 Crabb´e and Seddah (2014) 85.35 79.68 77.15 86.19 87.51 79.35 91.60 82.72 83.69 This work 85.90 78.75 78.66 88.97 88.16 79.28 91.20 82.80 84.22 Bj¨orkelund et al. (2014) 88.24 82.53 81.66 89.80 91.72 83</context>
+</contexts>
+<marker>Kong, Rush, Smith, 2015</marker>
+<rawString>Lingpeng Kong, Alexander M. Rush, and Noah A. Smith. 2015. Transforming dependencies into phrase structures. In Proc. of the Conference of the North American Chapter of the Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Terry Koo</author>
+<author>Michael Collins</author>
+</authors>
+<title>Efficient thirdorder dependency parsers.</title>
+<date>2010</date>
+<booktitle>In Proc. of Annual Meeting of the Association for Computational Linguistics.</booktitle>
+<marker>Koo, Collins, 2010</marker>
+<rawString>Terry Koo and Michael Collins. 2010. Efficient thirdorder dependency parsers. In Proc. of Annual Meeting of the Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Sandra K¨ubler</author>
+<author>Wolfgang Maier</author>
+<author>Ines Rehbein</author>
+<author>Yannick Versley</author>
+</authors>
+<title>How to compare treebanks.</title>
+<date>2008</date>
+<booktitle>In Proc. of the Meeting of the Language Resources and Evaluation Conference.</booktitle>
+<marker>K¨ubler, Maier, Rehbein, Versley, 2008</marker>
+<rawString>Sandra K¨ubler, Wolfgang Maier, Ines Rehbein, and Yannick Versley. 2008. How to compare treebanks. In Proc. of the Meeting of the Language Resources and Evaluation Conference.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Marco Kuhlmann</author>
+<author>Joakim Nivre</author>
+</authors>
+<title>Mildly non-projective dependency structures.</title>
+<date>2006</date>
+<booktitle>In Proc. of the joint conference of the International Committee on Computational Linguistics and the Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="7952" citStr="Kuhlmann and Nivre, 2006" startWordPosition="1250" endWordPosition="1253">ion (Eisner, 1996; Collins, 1999). An orthogonal line of work uses ensemble or reranking strategies to further improve accuracy (Charniak and Johnson, 2005; Huang, 2008; Bj¨orkelund et al., 2014). Discontinuous c-parsing is considered a much harder problem, involving mildly context-sensitive formalisms such as LCFRS or range concatenation grammars, with treebankderived c-parsers exhibiting near-exponential runtime (Kallmeyer and Maier, 2013, Figure 27). To speed up decoding, prior work has considered restrictons, such as bounding the fan-out (Maier et al., 2012) and requiring well-nestedness (Kuhlmann and Nivre, 2006; G´omez-Rodr´ıguez et al., 2010). Other approaches eliminate the discontinuities via tree transformations (Boyd, 2007; K¨ubler et al., 2008), sometimes as a pruning step in a coarse-to-fine parsing approach (van Cranenburgh and Bod, 2013). However, reported runtimes are still superior to 10 seconds per sentence, which is not practical. Recently, Versley (2014a) proposed an easy-first approach that leads to considerable speed-ups, but is less accurate. In this paper, we design fast discontinuous c-parsers that outperform all the ones above by a wide margin, with similar runtimes as Versley (20</context>
+</contexts>
+<marker>Kuhlmann, Nivre, 2006</marker>
+<rawString>Marco Kuhlmann and Joakim Nivre. 2006. Mildly non-projective dependency structures. In Proc. of the joint conference of the International Committee on Computational Linguistics and the Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Wolfgang Maier</author>
+<author>Anders Søgaard</author>
+</authors>
+<title>Treebanks and mild context-sensitivity.</title>
+<date>2008</date>
+<booktitle>In Proc. of Formal Grammar.</booktitle>
+<contexts>
+<context position="2576" citStr="Maier and Søgaard, 2008" startWordPosition="380" endWordPosition="383">ip at Priberam Labs. to accelerate constituent parsing, but typical runtimes still lag those of dependency parsers. This is only made worse if discontinuous constituents are allowed—such discontinuities are convenient to represent wh-movement, scrambling, extraposition, and other linguistic phenomena common in free word order languages. While non-projective dependency parsers, which are able to model such phenomena, have been widely developed in the last decade (Nivre et al., 2007; McDonald et al., 2006; Martins et al., 2013), discontinuous constituent parsing is still taking its first steps (Maier and Søgaard, 2008; Kallmeyer and Maier, 2013). In this paper, we show that an off-the-shelf, trainable, dependency parser is enough to build a highly-competitive constituent parser. This (surprising) result is based on a reduction1 of constituent to dependency parsing, followed by a simple post-processing procedure to recover unaries. Unlike other constituent parsers, ours does not require estimating a grammar, nor binarizing the treebank. Moreover, when the dependency parser is non-projective, our method can perform discontinuous constituent parsing in a very natural way. Key to our approach is the notion of </context>
+</contexts>
+<marker>Maier, Søgaard, 2008</marker>
+<rawString>Wolfgang Maier and Anders Søgaard. 2008. Treebanks and mild context-sensitivity. In Proc. of Formal Grammar.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Wolfgang Maier</author>
+<author>Miriam Kaeshammer</author>
+<author>Laura Kallmeyer</author>
+</authors>
+<title>Data-driven plcfrs parsing revisited: Restricting the fan-out to two.</title>
+<date>2012</date>
+<booktitle>In Proc. of the Eleventh International Conference on Tree Adjoining Grammars and Related Formalisms.</booktitle>
+<contexts>
+<context position="7896" citStr="Maier et al., 2012" startWordPosition="1243" endWordPosition="1246">al., 2005; Petrov and Klein, 2007), and lexicalization (Eisner, 1996; Collins, 1999). An orthogonal line of work uses ensemble or reranking strategies to further improve accuracy (Charniak and Johnson, 2005; Huang, 2008; Bj¨orkelund et al., 2014). Discontinuous c-parsing is considered a much harder problem, involving mildly context-sensitive formalisms such as LCFRS or range concatenation grammars, with treebankderived c-parsers exhibiting near-exponential runtime (Kallmeyer and Maier, 2013, Figure 27). To speed up decoding, prior work has considered restrictons, such as bounding the fan-out (Maier et al., 2012) and requiring well-nestedness (Kuhlmann and Nivre, 2006; G´omez-Rodr´ıguez et al., 2010). Other approaches eliminate the discontinuities via tree transformations (Boyd, 2007; K¨ubler et al., 2008), sometimes as a pruning step in a coarse-to-fine parsing approach (van Cranenburgh and Bod, 2013). However, reported runtimes are still superior to 10 seconds per sentence, which is not practical. Recently, Versley (2014a) proposed an easy-first approach that leads to considerable speed-ups, but is less accurate. In this paper, we design fast discontinuous c-parsers that outperform all the ones abov</context>
+<context position="30205" citStr="Maier et al. 2012" startWordPosition="5154" endWordPosition="5157"> / 44.48 NEGRA L &lt; 30 L &lt; 40 all M12, gold 74.5– / – –/––/– C12, gold – / – 72.33 / 33.16 71.08 / 32.10 KM13, gold 75.75 / – –/––/ – CB13, gold – / – 76.8– / 40.5– – / – Ours, gold 82.56 / 52.13 81.08 / 48.04 80.52 / 46.70 CB13, pred – / – 74.8– / 38.7– – / – Ours, pred 79.63 / 48.43 77.93 / 44.83 76.95 / 43.50 Table 5: Fl / exact match scores on TIGER and NEGRA test sets, with gold and predicted POS tags. These scores are computed by the DISCO-DOP evaluator ignoring root nodes and, for TIGER-H&amp;N and NEGRA, punctuation tokens. The baselines are published results by Hall and Nivre 2008 (HN08), Maier et al. 2012 (M12), van Cranenburgh 2012 (C12), Kallmeyer and Maier 2013 (KM13), van Cranenburgh and Bod 2013 (CB13), and Versley 2014a, 2014b (V14a, V14b). transformation rules to handle the kind of ambiguities expressed in Figure 2. Our work differs in that we are not concerned about the linguistic plausibility of our conversions, but only with the formal aspects that underlie the two representations. The work most related to ours is Hall and Nivre (2008), who also convert dependencies to constituents to prototype a c-parser for German. Their encoding strategy is compared to ours in §4.1: they encode th</context>
+</contexts>
+<marker>Maier, Kaeshammer, Kallmeyer, 2012</marker>
+<rawString>Wolfgang Maier, Miriam Kaeshammer, and Laura Kallmeyer. 2012. Data-driven plcfrs parsing revisited: Restricting the fan-out to two. In Proc. of the Eleventh International Conference on Tree Adjoining Grammars and Related Formalisms.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Mitchell P Marcus</author>
+<author>Beatrice Santorini</author>
+<author>Mary Ann Marcinkiewicz</author>
+</authors>
+<title>Building a large annotated corpus of english: The penn treebank. Computational Linguistics.</title>
+<date>1993</date>
+<contexts>
+<context position="15205" citStr="Marcus et al., 1993" startWordPosition="2558" endWordPosition="2561">the equivalence results established in §3 to build c-parsers when only a trainable dparser is available. Given a c-treebank provided as input, our procedure is outlined as follows: 1. Convert the c-treebank to dependencies (Algorithm 1). 2. Train a labeled d-parser on this treebank. 3. For each test sentence, run the labeled d-parser and convert the predicted d-tree into a c-tree without unary nodes (Algorithm 2). 4. Do post-processing to recover unaries. The next subsections describe each of these steps in detail. Along the way, we illustrate with experiments using the English Penn Treebank (Marcus et al., 1993), which we lexicalized by applying the head rules of Collins (1999).4 4.1 Dependency Encoding The first step is to convert the c-treebank to headordered dependencies, which we do using Algorithm 1. If the original treebank has discontinuous c-trees, we end up with non-projective d-trees or with violations of the nested property, as established in Proposition 3. We handle this gracefully by training a non-projective d-parser in the subsequent stage (see §4.2). Note also that this conversion drops the unary nodes (a consequence of Proposition 2). These nodes will be recovered in the last stage, </context>
+</contexts>
+<marker>Marcus, Santorini, Marcinkiewicz, 1993</marker>
+<rawString>Mitchell P. Marcus, Beatrice Santorini, and Mary Ann Marcinkiewicz. 1993. Building a large annotated corpus of english: The penn treebank. Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Andr´e F T Martins</author>
+<author>Miguel B Almeida</author>
+<author>Noah A Smith</author>
+</authors>
+<title>Turning on the turbo: Fast third-order non-projective turbo parsers.</title>
+<date>2013</date>
+<booktitle>In Proc. of the Annual Meeting of the Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="2484" citStr="Martins et al., 2013" startWordPosition="366" endWordPosition="369">5; Zhu et al., 2013) were a step forward ∗This research was carried out during an internship at Priberam Labs. to accelerate constituent parsing, but typical runtimes still lag those of dependency parsers. This is only made worse if discontinuous constituents are allowed—such discontinuities are convenient to represent wh-movement, scrambling, extraposition, and other linguistic phenomena common in free word order languages. While non-projective dependency parsers, which are able to model such phenomena, have been widely developed in the last decade (Nivre et al., 2007; McDonald et al., 2006; Martins et al., 2013), discontinuous constituent parsing is still taking its first steps (Maier and Søgaard, 2008; Kallmeyer and Maier, 2013). In this paper, we show that an off-the-shelf, trainable, dependency parser is enough to build a highly-competitive constituent parser. This (surprising) result is based on a reduction1 of constituent to dependency parsing, followed by a simple post-processing procedure to recover unaries. Unlike other constituent parsers, ours does not require estimating a grammar, nor binarizing the treebank. Moreover, when the dependency parser is non-projective, our method can perform di</context>
+<context position="17220" citStr="Martins et al., 2013" startWordPosition="2892" endWordPosition="2896">d property. For comparison, we also implemented a replication of the encoding proposed by Hall and Nivre (2008), which we call H&amp;N-encoding. This strategy concatenates all the c-nodes’ symbols in the modifier’s spine with the attachment position in the head’s spine (e.g., in Figure 3, if the modifier m2 has a spine with nodes X1, X2, X3, the generated d-label would be X1JX2JX3#2; our direct encoding scheme generates Z2#2 instead). Since their strategy encodes the entire spines into com4We train on §02–21, use §22 for validation, and test on §23. We predict automatic POS tags with TurboTagger (Martins et al., 2013), with 10-fold jackknifing on the training set. 5For example, if #1, #3, #4 and #2, #3, #3, #5 are respectively the sequence of indices from the head to the left and to the right, we encode these sequences as #1, #2, #1 and #2, #1, #0, #2 (using 3 distinct indices instead of 5). 5: for j = 1, ... ,Jdo 6: Let Z be the label in {(h, m, Z) |m E 1527 plex arc labels, many such labels will be generated, leading to slower runtimes and poorer generalization, as we will see. For the training portion of the English PTB, which has 27 non-terminal symbols, the direct encoding strategy yields 75 labels, w</context>
+<context position="18829" citStr="Martins et al., 2013" startWordPosition="3170" endWordPosition="3173">e next step is to train a labeled d-parser on the converted treebank. If we are doing continuous cparsing, we train a projective d-parser; otherwise we train a non-projective one. In our experiments, we found it advantageous to perform labeled d-parsing in two stages, as done by McDonald et al. (2006): first, train an unlabeled d-parser; then, train a dependency labeler.6 Table 1 compares this approach against a oneshot strategy, experimenting with various off-theshelf d-parsers: MaltParser (Nivre et al., 2007), MSTParser (McDonald et al., 2005), ZPar (Zhang and Nivre, 2011), and TurboParser (Martins et al., 2013), all with the default settings. For TurboParser, we used basic, standard and full models. Our separate d-labeler receives as input a backbone d-structure and predicts a label for each arc. For each head h, we predict the modifiers’ labels using a simple sequence model, with features of the form 0(h, m, E) and 0(h, m, m&apos;, E, E&apos;), where m and m&apos; are two consecutive modifiers (possibly on opposite sides of the head) and E and E&apos; are their labels. We use the same arc label features 0(h, m, E) as TurboParser. For 0(h, m, m&apos;, E, E&apos;), we use the POS triplet (ph, pm, pm1), plus unilexical features wh</context>
+</contexts>
+<marker>Martins, Almeida, Smith, 2013</marker>
+<rawString>Andr´e F. T. Martins, Miguel B. Almeida, and Noah A. Smith. 2013. Turning on the turbo: Fast third-order non-projective turbo parsers. In Proc. of the Annual Meeting of the Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Takuya Matsuzaki</author>
+<author>Yusuke Miyao</author>
+<author>Jun’ichi Tsujii</author>
+</authors>
+<title>Probabilistic CFG with latent annotations.</title>
+<date>2005</date>
+<booktitle>In Proc. of the Annual Meeting of the Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="7286" citStr="Matsuzaki et al., 2005" startWordPosition="1153" endWordPosition="1157">e order. An internal node which is not a preterminal is called a proper node. A node is called unary if it has exactly one child. A c-tree without unary proper nodes is called unaryless. If all proper nodes have exactly two children then it is called a binary c-tree. Continuous binary trees may be regarded as having been generated by a CFG in Chomsky normal form. Prior work. There has been a long string of work in statistical c-parsing, shifting from simple models (Charniak, 1996) to more sophisticated ones using structural annotation (Johnson, 1998; Klein and Manning, 2003), latent grammars (Matsuzaki et al., 2005; Petrov and Klein, 2007), and lexicalization (Eisner, 1996; Collins, 1999). An orthogonal line of work uses ensemble or reranking strategies to further improve accuracy (Charniak and Johnson, 2005; Huang, 2008; Bj¨orkelund et al., 2014). Discontinuous c-parsing is considered a much harder problem, involving mildly context-sensitive formalisms such as LCFRS or range concatenation grammars, with treebankderived c-parsers exhibiting near-exponential runtime (Kallmeyer and Maier, 2013, Figure 27). To speed up decoding, prior work has considered restrictons, such as bounding the fan-out (Maier et </context>
+</contexts>
+<marker>Matsuzaki, Miyao, Tsujii, 2005</marker>
+<rawString>Takuya Matsuzaki, Yusuke Miyao, and Jun’ichi Tsujii. 2005. Probabilistic CFG with latent annotations. In Proc. of the Annual Meeting of the Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ryan McDonald</author>
+<author>Giorgio Satta</author>
+</authors>
+<title>On the complexity of non-projective data-driven dependency parsing.</title>
+<date>2007</date>
+<booktitle>In Proc. of International Conference on Parsing Technologies.</booktitle>
+<marker>McDonald, Satta, 2007</marker>
+<rawString>Ryan McDonald and Giorgio Satta. 2007. On the complexity of non-projective data-driven dependency parsing. In Proc. of International Conference on Parsing Technologies.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ryan McDonald</author>
+<author>Fernando Pereira</author>
+<author>Kiril Ribarov</author>
+<author>Jan Hajic</author>
+</authors>
+<title>Non-projective dependency parsing using spanning tree algorithms.</title>
+<date>2005</date>
+<booktitle>In Proc. of Empirical Methods for Natural Language Processing.</booktitle>
+<contexts>
+<context position="18759" citStr="McDonald et al., 2005" startWordPosition="3159" endWordPosition="3162">curate than H&amp;N-encoding. 4.2 Training the Labeled Dependency Parser The next step is to train a labeled d-parser on the converted treebank. If we are doing continuous cparsing, we train a projective d-parser; otherwise we train a non-projective one. In our experiments, we found it advantageous to perform labeled d-parsing in two stages, as done by McDonald et al. (2006): first, train an unlabeled d-parser; then, train a dependency labeler.6 Table 1 compares this approach against a oneshot strategy, experimenting with various off-theshelf d-parsers: MaltParser (Nivre et al., 2007), MSTParser (McDonald et al., 2005), ZPar (Zhang and Nivre, 2011), and TurboParser (Martins et al., 2013), all with the default settings. For TurboParser, we used basic, standard and full models. Our separate d-labeler receives as input a backbone d-structure and predicts a label for each arc. For each head h, we predict the modifiers’ labels using a simple sequence model, with features of the form 0(h, m, E) and 0(h, m, m&apos;, E, E&apos;), where m and m&apos; are two consecutive modifiers (possibly on opposite sides of the head) and E and E&apos; are their labels. We use the same arc label features 0(h, m, E) as TurboParser. For 0(h, m, m&apos;, E, </context>
+</contexts>
+<marker>McDonald, Pereira, Ribarov, Hajic, 2005</marker>
+<rawString>Ryan McDonald, Fernando Pereira, Kiril Ribarov, and Jan Hajic. 2005. Non-projective dependency parsing using spanning tree algorithms. In Proc. of Empirical Methods for Natural Language Processing.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ryan McDonald</author>
+<author>Kevin Lerman</author>
+<author>Fernando Pereira</author>
+</authors>
+<title>Multilingual dependency analysis with a twostage discriminative parser.</title>
+<date>2006</date>
+<booktitle>In Proc. of International Conference on Natural Language Learning.</booktitle>
+<contexts>
+<context position="2461" citStr="McDonald et al., 2006" startWordPosition="362" endWordPosition="365">g (Sagae and Lavie, 2005; Zhu et al., 2013) were a step forward ∗This research was carried out during an internship at Priberam Labs. to accelerate constituent parsing, but typical runtimes still lag those of dependency parsers. This is only made worse if discontinuous constituents are allowed—such discontinuities are convenient to represent wh-movement, scrambling, extraposition, and other linguistic phenomena common in free word order languages. While non-projective dependency parsers, which are able to model such phenomena, have been widely developed in the last decade (Nivre et al., 2007; McDonald et al., 2006; Martins et al., 2013), discontinuous constituent parsing is still taking its first steps (Maier and Søgaard, 2008; Kallmeyer and Maier, 2013). In this paper, we show that an off-the-shelf, trainable, dependency parser is enough to build a highly-competitive constituent parser. This (surprising) result is based on a reduction1 of constituent to dependency parsing, followed by a simple post-processing procedure to recover unaries. Unlike other constituent parsers, ours does not require estimating a grammar, nor binarizing the treebank. Moreover, when the dependency parser is non-projective, ou</context>
+<context position="18510" citStr="McDonald et al. (2006)" startWordPosition="3122" endWordPosition="3125">ntrast, the H&amp;N-encoding procedure yields 731 labels, more than 10 times as many. We later show (in Tables 1–2) that delta-encoding leads to a slightly higher c-parsing accuracy than direct encoding, and that both strategies are considerably more accurate than H&amp;N-encoding. 4.2 Training the Labeled Dependency Parser The next step is to train a labeled d-parser on the converted treebank. If we are doing continuous cparsing, we train a projective d-parser; otherwise we train a non-projective one. In our experiments, we found it advantageous to perform labeled d-parsing in two stages, as done by McDonald et al. (2006): first, train an unlabeled d-parser; then, train a dependency labeler.6 Table 1 compares this approach against a oneshot strategy, experimenting with various off-theshelf d-parsers: MaltParser (Nivre et al., 2007), MSTParser (McDonald et al., 2005), ZPar (Zhang and Nivre, 2011), and TurboParser (Martins et al., 2013), all with the default settings. For TurboParser, we used basic, standard and full models. Our separate d-labeler receives as input a backbone d-structure and predicts a label for each arc. For each head h, we predict the modifiers’ labels using a simple sequence model, with featu</context>
+</contexts>
+<marker>McDonald, Lerman, Pereira, 2006</marker>
+<rawString>Ryan McDonald, Kevin Lerman, and Fernando Pereira. 2006. Multilingual dependency analysis with a twostage discriminative parser. In Proc. of International Conference on Natural Language Learning.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Joakim Nivre</author>
+<author>Johan Hall</author>
+<author>Jens Nilsson</author>
+<author>G¨ulsen Eryiˇgit</author>
+<author>Svetoslav Marinov</author>
+</authors>
+<title>Labeled pseudo-projective dependency parsing with support vector machines.</title>
+<date>2006</date>
+<booktitle>In Proc. of International Conference on Natural Language Learning.</booktitle>
+<marker>Nivre, Hall, Nilsson, Eryiˇgit, Marinov, 2006</marker>
+<rawString>Joakim Nivre, Johan Hall, Jens Nilsson, G¨ulsen Eryiˇgit, and Svetoslav Marinov. 2006. Labeled pseudo-projective dependency parsing with support vector machines. In Proc. of International Conference on Natural Language Learning.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Joakim Nivre</author>
+<author>Johan Hall</author>
+<author>Jens Nilsson</author>
+</authors>
+<title>Atanas Chanev, G¨ulsen Eryiˇgit, Sandra K¨ubler, Svetoslav Marinov, and Erwin Marsi.</title>
+<date>2007</date>
+<contexts>
+<context position="2438" citStr="Nivre et al., 2007" startWordPosition="358" endWordPosition="361"> shift-reduce parsing (Sagae and Lavie, 2005; Zhu et al., 2013) were a step forward ∗This research was carried out during an internship at Priberam Labs. to accelerate constituent parsing, but typical runtimes still lag those of dependency parsers. This is only made worse if discontinuous constituents are allowed—such discontinuities are convenient to represent wh-movement, scrambling, extraposition, and other linguistic phenomena common in free word order languages. While non-projective dependency parsers, which are able to model such phenomena, have been widely developed in the last decade (Nivre et al., 2007; McDonald et al., 2006; Martins et al., 2013), discontinuous constituent parsing is still taking its first steps (Maier and Søgaard, 2008; Kallmeyer and Maier, 2013). In this paper, we show that an off-the-shelf, trainable, dependency parser is enough to build a highly-competitive constituent parser. This (surprising) result is based on a reduction1 of constituent to dependency parsing, followed by a simple post-processing procedure to recover unaries. Unlike other constituent parsers, ours does not require estimating a grammar, nor binarizing the treebank. Moreover, when the dependency parse</context>
+<context position="18724" citStr="Nivre et al., 2007" startWordPosition="3154" endWordPosition="3157">ategies are considerably more accurate than H&amp;N-encoding. 4.2 Training the Labeled Dependency Parser The next step is to train a labeled d-parser on the converted treebank. If we are doing continuous cparsing, we train a projective d-parser; otherwise we train a non-projective one. In our experiments, we found it advantageous to perform labeled d-parsing in two stages, as done by McDonald et al. (2006): first, train an unlabeled d-parser; then, train a dependency labeler.6 Table 1 compares this approach against a oneshot strategy, experimenting with various off-theshelf d-parsers: MaltParser (Nivre et al., 2007), MSTParser (McDonald et al., 2005), ZPar (Zhang and Nivre, 2011), and TurboParser (Martins et al., 2013), all with the default settings. For TurboParser, we used basic, standard and full models. Our separate d-labeler receives as input a backbone d-structure and predicts a label for each arc. For each head h, we predict the modifiers’ labels using a simple sequence model, with features of the form 0(h, m, E) and 0(h, m, m&apos;, E, E&apos;), where m and m&apos; are two consecutive modifiers (possibly on opposite sides of the head) and E and E&apos; are their labels. We use the same arc label features 0(h, m, E) </context>
+</contexts>
+<marker>Nivre, Hall, Nilsson, 2007</marker>
+<rawString>Joakim Nivre, Johan Hall, Jens Nilsson, Atanas Chanev, G¨ulsen Eryiˇgit, Sandra K¨ubler, Svetoslav Marinov, and Erwin Marsi. 2007. Maltparser: A language-independent system for data-driven dependency parsing. Natural Language Engineering.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Fernando C N Pereira</author>
+<author>David H D Warren</author>
+</authors>
+<title>Parsing as Deduction.</title>
+<date>1983</date>
+<booktitle>In Proc. of the Annual Meeting of the Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="3947" citStr="Pereira and Warren (1983)" startWordPosition="596" endWordPosition="599">somorphic to constituent trees. We encode this structure as part of the dependency labels, enabling a dependency-to-constituent conversion. A related conversion was attempted by Hall and Nivre (2008) to parse German, but their complex encoding scheme blows up the number of arc labels, affecting the final parser’s quality. By contrast, our light encoding achieves a 10-fold decrease in the label alphabet, leading to more accurate parsing. While simple, our reduction-based parsers are on par with the Berkeley parser for English (Petrov 1The title of this paper is inspired by the seminal paper of Pereira and Warren (1983) “Parsing as Deduction.” 1523 Proceedings of the 53rd Annual Meeting of the Association for Computational Linguistics and the 7th International Joint Conference on Natural Language Processing, pages 1523–1533, Beijing, China, July 26-31, 2015. c�2015 Association for Computational Linguistics and Klein, 2007), and with the best single system in the recent SPMRL shared task (Seddah et al., 2014), for eight morphologically rich languages. For discontinuous parsing, we surpass the current state of the art by a wide margin on two German datasets (TIGER and NEGRA), while achieving fast parsing speed</context>
+</contexts>
+<marker>Pereira, Warren, 1983</marker>
+<rawString>Fernando C. N. Pereira and David H. D. Warren. 1983. Parsing as Deduction. In Proc. of the Annual Meeting of the Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Slav Petrov</author>
+<author>Dan Klein</author>
+</authors>
+<title>Improved inference for unlexicalized parsing.</title>
+<date>2007</date>
+<booktitle>In Proc. of the North American Chapter of the Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="1376" citStr="Petrov and Klein, 2007" startWordPosition="196" endWordPosition="199">ctive, we can perform discontinuous parsing in a very natural manner. Despite the simplicity of our approach, experiments show that the resulting parsers are on par with strong baselines, such as the Berkeley parser for English and the best non-reranking system in the SPMRL-2014 shared task. Results are particularly striking for discontinuous parsing of German, where we surpass the current state of the art by a wide margin. 1 Introduction Constituent parsing is a central problem in NLP—one at which statistical models trained on treebanks have excelled (Charniak, 1996; Klein and Manning, 2003; Petrov and Klein, 2007). However, most existing parsers are slow, since they need to deal with a heavy grammar constant. Dependency parsers are generally faster, but less informative, since they do not produce constituents, which are often required by downstream applications (Johansson and Nugues, 2008; Wu et al., 2009; Berg-Kirkpatrick et al., 2011; Elming et al., 2013). How to get the best of both worlds? Coarse-to-fine decoding (Charniak and Johnson, 2005) and shift-reduce parsing (Sagae and Lavie, 2005; Zhu et al., 2013) were a step forward ∗This research was carried out during an internship at Priberam Labs. to</context>
+<context position="7311" citStr="Petrov and Klein, 2007" startWordPosition="1158" endWordPosition="1161">e which is not a preterminal is called a proper node. A node is called unary if it has exactly one child. A c-tree without unary proper nodes is called unaryless. If all proper nodes have exactly two children then it is called a binary c-tree. Continuous binary trees may be regarded as having been generated by a CFG in Chomsky normal form. Prior work. There has been a long string of work in statistical c-parsing, shifting from simple models (Charniak, 1996) to more sophisticated ones using structural annotation (Johnson, 1998; Klein and Manning, 2003), latent grammars (Matsuzaki et al., 2005; Petrov and Klein, 2007), and lexicalization (Eisner, 1996; Collins, 1999). An orthogonal line of work uses ensemble or reranking strategies to further improve accuracy (Charniak and Johnson, 2005; Huang, 2008; Bj¨orkelund et al., 2014). Discontinuous c-parsing is considered a much harder problem, involving mildly context-sensitive formalisms such as LCFRS or range concatenation grammars, with treebankderived c-parsers exhibiting near-exponential runtime (Kallmeyer and Maier, 2013, Figure 27). To speed up decoding, prior work has considered restrictons, such as bounding the fan-out (Maier et al., 2012) and requiring </context>
+<context position="24728" citStr="Petrov and Klein (2007)" startWordPosition="4195" endWordPosition="4198">P-Full with delta-encoding is the best strategy, we use this configuration in the sequel. To further explore the impact of delta encoding, we report in Table 2 the scores obtained by direct and delta encodings on eight other treebanks (see §5.2 for details on these datasets). With the exception of German, in all cases the delta encoding yielded better EVALB F1-scores with fewer labels. 5 Experiments To evaluate the performance of our reductionbased parsers, we conduct experiments in a variety Parser LR LP F1 #Toks/s. Charniak (2000) 89.5 89.9 89.5 – Klein and Manning (2003) 85.3 86.5 85.9 143 Petrov and Klein (2007) 90.0 90.3 90.1 169 Carreras et al. (2008) 90.7 91.4 91.1 – Zhu et al. (2013) 90.3 90.6 90.4 1,290 Stanford Shift-Reduce (2014) 89.1 89.1 89.1 655 Hall et al. (2014) 88.4 88.8 88.6 12 This work 89.9 90.4 90.2 957 Charniak and Johnson (2005)* 91.2 91.8 91.5 84 Socher et al. (2013)* 89.1 89.7 89.4 70 Zhu et al. (2013)* 91.1 91.5 91.3 – Table 3: Results on the English PTB §23. All systems reporting runtimes were run on the same machine. Marked as * are reranking and semi-supervised c-parsers. of treebanks, both continuous and discontinuous. 5.1 Results on the English PTB Table 3 shows the accurac</context>
+<context position="26987" citStr="Petrov and Klein, 2007" startWordPosition="4568" endWordPosition="4571">lopment and test sets with the provided predicted POS tags. For French and German, we used the lexicalization rules detailed in DybroJohansen (2004) and Rehbein (2009), respectively. For Basque, Hungarian and Korean, we always took the rightmost modifier as head-child node. For Hebrew and Polish we used the leftmost modifier instead. For Swedish we induced head rules from the provided dependency treebank, as described in Versley (2014b). These choices were based on dev-set experiments. Table 4 shows the results. For all languages ex1529 cept French, our system outperforms the Berkeley parser (Petrov and Klein, 2007), with or without prescribed POS tags. Our average Fl-scores are superior to the best non-reranking system participating in the shared task (Crabb´e and Seddah, 2014) and to the c-parser of Hall et al. (2014), achieving the best results for 4 out of 8 languages. 5.3 Results on the Discontinuous Treebanks Finally, we experimented on two widely-used discontinuous German treebanks: TIGER (Brants et al., 2002) and NEGRA (Skut et al., 1997). For the former, we used two different splits: TIGERSPMRL, provided in the SPMRL14 shared task; and TIGER-H&amp;N, used by Hall and Nivre (2008). For NEGRA, we used</context>
+<context position="32355" citStr="Petrov and Klein (2007)" startWordPosition="5507" endWordPosition="5510">6.96 81.62 71.42 79.23 79.19 78.45 Berkeley Tagged 74.74 79.76 78.28 85.42 85.22 78.56 86.75 80.64 81.17 Hall et al. (2014) 83.39 79.70 78.43 87.18 88.25 80.18 90.66 82.00 83.72 Crabb´e and Seddah (2014) 85.35 79.68 77.15 86.19 87.51 79.35 91.60 82.72 83.69 This work 85.90 78.75 78.66 88.97 88.16 79.28 91.20 82.80 84.22 Bj¨orkelund et al. (2014) 88.24 82.53 81.66 89.80 91.72 83.81 90.50 85.50 86.72 Table 4: Fl-scores on eight treebanks of the SPMRL14 shared task, computed with the provided EVALB SPMRL tool, which takes into account all tokens except root nodes. Berkeley Tagged is a version of Petrov and Klein (2007) using the predicted POS tags provided by the organizers. Crabb´e and Seddah (2014) is the best non-reranking system in the shared task, and Bj¨orkelund et al. (2014) the ensemble and reranking-based system which won the official task. We report their published scores. sistent with the predicted d-structure. Our work differs in which we do not need to run a c-parser in the second stage—instead, the d-parser already stores constituent information in the arc labels, and the only necessary post-processing is to recover unary nodes. Another advantage of our method is that it can be readily used fo</context>
+</contexts>
+<marker>Petrov, Klein, 2007</marker>
+<rawString>Slav Petrov and Dan Klein. 2007. Improved inference for unlexicalized parsing. In Proc. of the North American Chapter of the Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ines Rehbein</author>
+</authors>
+<title>Treebank-Based GrammarAcquisition for German.</title>
+<date>2009</date>
+<tech>Ph.D. thesis,</tech>
+<institution>School of Computing, Dublin City University.</institution>
+<contexts>
+<context position="26531" citStr="Rehbein (2009)" startWordPosition="4497" endWordPosition="4498">me for d-parsing is the dominating factor (see §4.4), plugging a faster d-parser automatically yields a faster c-parser. While reranking and semi-supervised systems achieve higher accuracies, this aspect is orthogonal, since the same techniques can be applied to our parser. 5.2 Results on the SPMRL Datasets We experimented with datasets for eight languages, from the SPMRL14 shared task (Seddah et al., 2014). We used the official training, development and test sets with the provided predicted POS tags. For French and German, we used the lexicalization rules detailed in DybroJohansen (2004) and Rehbein (2009), respectively. For Basque, Hungarian and Korean, we always took the rightmost modifier as head-child node. For Hebrew and Polish we used the leftmost modifier instead. For Swedish we induced head rules from the provided dependency treebank, as described in Versley (2014b). These choices were based on dev-set experiments. Table 4 shows the results. For all languages ex1529 cept French, our system outperforms the Berkeley parser (Petrov and Klein, 2007), with or without prescribed POS tags. Our average Fl-scores are superior to the best non-reranking system participating in the shared task (Cra</context>
+<context position="27932" citStr="Rehbein (2009)" startWordPosition="4729" endWordPosition="4730">on two widely-used discontinuous German treebanks: TIGER (Brants et al., 2002) and NEGRA (Skut et al., 1997). For the former, we used two different splits: TIGERSPMRL, provided in the SPMRL14 shared task; and TIGER-H&amp;N, used by Hall and Nivre (2008). For NEGRA, we used the standard splits. In these experiments, we skipped the unary recovery stage, since very few unary nodes exist in the data.7 We ran TurboTagger to predict POS tags for TIGERH&amp;N and NEGRA, while in TIGER-SPMRL we used the predicted POS tags provided in the shared task. All treebanks were lexicalized using the head-rule sets of Rehbein (2009). For comparison to related work, sentence length cut-offs of 30, 40 and 70 were applied during the evaluation. Table 5 shows the results. We observe that our approach outperforms all the competitors considerably, achieving state-of-the-art accuracies for both datasets. The best competitor, van Cranenburgh and Bod (2013), is more than 3 points behind, both in TIGER-H&amp;N and in NEGRA. Our reduction-based parsers are also much faster: van Cranenburgh and Bod (2013) report 3 hours to parse NEGRA with L ≤ 40. Our system parses all NEGRA sentences (regardless of length) in 27.1 seconds in a single c</context>
+</contexts>
+<marker>Rehbein, 2009</marker>
+<rawString>Ines Rehbein. 2009. Treebank-Based GrammarAcquisition for German. Ph.D. thesis, School of Computing, Dublin City University.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Alexander M Rush</author>
+<author>Slav Petrov</author>
+</authors>
+<title>Vine pruning for efficient multi-pass dependency parsing.</title>
+<date>2012</date>
+<booktitle>In Proc. of the North American Chapter of the Association for Computational Linguistics.</booktitle>
+<marker>Rush, Petrov, 2012</marker>
+<rawString>Alexander M Rush and Slav Petrov. 2012. Vine pruning for efficient multi-pass dependency parsing. In Proc. of the North American Chapter of the Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Alexander Rush</author>
+<author>David Sontag</author>
+<author>Michael Collins</author>
+<author>Tommi Jaakkola</author>
+</authors>
+<title>On dual decomposition and linear programming relaxations for natural language processing.</title>
+<date>2010</date>
+<booktitle>In Proc. of Empirical Methods for Natural Language Processing.</booktitle>
+<contexts>
+<context position="31391" citStr="Rush et al. (2010)" startWordPosition="5349" endWordPosition="5352"> to ours in §4.1: they encode the entire spines into the dependency labels, which become rather complex and numerous. A similar strategy has been used by Versley (2014a) for discontinuous c-parsing. Both are largely outperformed by our system, as shown in §5.3. The crucial difference is that we encode only the top node’s label and its position in the spine— besides being a much lighter representation, ours has an interpretation as a weak ordering, leading to the isomorphisms expressed in Propositions 1–3. Joint constituent and dependency parsing have been tackled by Carreras et al. (2008) and Rush et al. (2010), but the resulting parsers, while accurate, are more expensive than a single c-parser. Very recently, Kong et al. (2015) proposed a much cheaper pipeline in which d-parsing is performed first, followed by a c-parser constrained to be con1530 Parser Basque French German Hebrew Hungar. Korean Polish Swedish Avg. Berkeley 70.50 80.38 78.30 86.96 81.62 71.42 79.23 79.19 78.45 Berkeley Tagged 74.74 79.76 78.28 85.42 85.22 78.56 86.75 80.64 81.17 Hall et al. (2014) 83.39 79.70 78.43 87.18 88.25 80.18 90.66 82.00 83.72 Crabb´e and Seddah (2014) 85.35 79.68 77.15 86.19 87.51 79.35 91.60 82.72 83.69 T</context>
+</contexts>
+<marker>Rush, Sontag, Collins, Jaakkola, 2010</marker>
+<rawString>Alexander Rush, David Sontag, Michael Collins, and Tommi Jaakkola. 2010. On dual decomposition and linear programming relaxations for natural language processing. In Proc. of Empirical Methods for Natural Language Processing.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Kenji Sagae</author>
+<author>Alon Lavie</author>
+</authors>
+<title>A classifier-based parser with linear run-time complexity.</title>
+<date>2005</date>
+<booktitle>In Proc. of the Ninth International Workshop on Parsing Technology.</booktitle>
+<contexts>
+<context position="1864" citStr="Sagae and Lavie, 2005" startWordPosition="273" endWordPosition="276">—one at which statistical models trained on treebanks have excelled (Charniak, 1996; Klein and Manning, 2003; Petrov and Klein, 2007). However, most existing parsers are slow, since they need to deal with a heavy grammar constant. Dependency parsers are generally faster, but less informative, since they do not produce constituents, which are often required by downstream applications (Johansson and Nugues, 2008; Wu et al., 2009; Berg-Kirkpatrick et al., 2011; Elming et al., 2013). How to get the best of both worlds? Coarse-to-fine decoding (Charniak and Johnson, 2005) and shift-reduce parsing (Sagae and Lavie, 2005; Zhu et al., 2013) were a step forward ∗This research was carried out during an internship at Priberam Labs. to accelerate constituent parsing, but typical runtimes still lag those of dependency parsers. This is only made worse if discontinuous constituents are allowed—such discontinuities are convenient to represent wh-movement, scrambling, extraposition, and other linguistic phenomena common in free word order languages. While non-projective dependency parsers, which are able to model such phenomena, have been widely developed in the last decade (Nivre et al., 2007; McDonald et al., 2006; M</context>
+</contexts>
+<marker>Sagae, Lavie, 2005</marker>
+<rawString>Kenji Sagae and Alon Lavie. 2005. A classifier-based parser with linear run-time complexity. In Proc. of the Ninth International Workshop on Parsing Technology.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Djam´e Seddah</author>
+<author>Sandra K¨ubler</author>
+<author>Reut Tsarfaty</author>
+</authors>
+<title>Introducing the spmrl 2014 shared task on parsing morphologically-rich languages.</title>
+<date>2014</date>
+<booktitle>In Proc. of the First Joint Workshop on Statistical Parsing of Morphologically Rich Languages and Syntactic Analysis of Non-Canonical Languages,</booktitle>
+<marker>Seddah, K¨ubler, Tsarfaty, 2014</marker>
+<rawString>Djam´e Seddah, Sandra K¨ubler, and Reut Tsarfaty. 2014. Introducing the spmrl 2014 shared task on parsing morphologically-rich languages. In Proc. of the First Joint Workshop on Statistical Parsing of Morphologically Rich Languages and Syntactic Analysis of Non-Canonical Languages, August.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Wojciech Skut</author>
+<author>Brigitte Krenn</author>
+<author>Thorsten Brants</author>
+<author>Hans Uszkoreit</author>
+</authors>
+<title>An annotation scheme for free word order languages.</title>
+<date>1997</date>
+<booktitle>In Proc. of the Fifth Conference on Applied Natural Language Processing ANLP-97.</booktitle>
+<contexts>
+<context position="27426" citStr="Skut et al., 1997" startWordPosition="4641" endWordPosition="4644">ese choices were based on dev-set experiments. Table 4 shows the results. For all languages ex1529 cept French, our system outperforms the Berkeley parser (Petrov and Klein, 2007), with or without prescribed POS tags. Our average Fl-scores are superior to the best non-reranking system participating in the shared task (Crabb´e and Seddah, 2014) and to the c-parser of Hall et al. (2014), achieving the best results for 4 out of 8 languages. 5.3 Results on the Discontinuous Treebanks Finally, we experimented on two widely-used discontinuous German treebanks: TIGER (Brants et al., 2002) and NEGRA (Skut et al., 1997). For the former, we used two different splits: TIGERSPMRL, provided in the SPMRL14 shared task; and TIGER-H&amp;N, used by Hall and Nivre (2008). For NEGRA, we used the standard splits. In these experiments, we skipped the unary recovery stage, since very few unary nodes exist in the data.7 We ran TurboTagger to predict POS tags for TIGERH&amp;N and NEGRA, while in TIGER-SPMRL we used the predicted POS tags provided in the shared task. All treebanks were lexicalized using the head-rule sets of Rehbein (2009). For comparison to related work, sentence length cut-offs of 30, 40 and 70 were applied durin</context>
+</contexts>
+<marker>Skut, Krenn, Brants, Uszkoreit, 1997</marker>
+<rawString>Wojciech Skut, Brigitte Krenn, Thorsten Brants, and Hans Uszkoreit. 1997. An annotation scheme for free word order languages. In Proc. of the Fifth Conference on Applied Natural Language Processing ANLP-97.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Richard Socher</author>
+<author>John Bauer</author>
+<author>Christopher D Manning</author>
+<author>Andrew Y Ng</author>
+</authors>
+<title>Parsing with compositional vector grammars.</title>
+<date>2013</date>
+<booktitle>In Proc. of Annual Meeting of the Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="25008" citStr="Socher et al. (2013)" startWordPosition="4248" endWordPosition="4251">he exception of German, in all cases the delta encoding yielded better EVALB F1-scores with fewer labels. 5 Experiments To evaluate the performance of our reductionbased parsers, we conduct experiments in a variety Parser LR LP F1 #Toks/s. Charniak (2000) 89.5 89.9 89.5 – Klein and Manning (2003) 85.3 86.5 85.9 143 Petrov and Klein (2007) 90.0 90.3 90.1 169 Carreras et al. (2008) 90.7 91.4 91.1 – Zhu et al. (2013) 90.3 90.6 90.4 1,290 Stanford Shift-Reduce (2014) 89.1 89.1 89.1 655 Hall et al. (2014) 88.4 88.8 88.6 12 This work 89.9 90.4 90.2 957 Charniak and Johnson (2005)* 91.2 91.8 91.5 84 Socher et al. (2013)* 89.1 89.7 89.4 70 Zhu et al. (2013)* 91.1 91.5 91.3 – Table 3: Results on the English PTB §23. All systems reporting runtimes were run on the same machine. Marked as * are reranking and semi-supervised c-parsers. of treebanks, both continuous and discontinuous. 5.1 Results on the English PTB Table 3 shows the accuracies and speeds achieved by our system on the English PTB §23, in comparison to state-of-the-art c-parsers. We can see that our simple reduction-based c-parser surpasses the three Stanford parsers (Klein and Manning, 2003; Socher et al., 2013, and Stanford Shift-Reduce), and is on</context>
+</contexts>
+<marker>Socher, Bauer, Manning, Ng, 2013</marker>
+<rawString>Richard Socher, John Bauer, Christopher D Manning, and Andrew Y Ng. 2013. Parsing with compositional vector grammars. In Proc. of Annual Meeting of the Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Andreas van Cranenburgh</author>
+<author>Rens Bod</author>
+</authors>
+<title>Discontinuous parsing with an efficient and accurate dop model.</title>
+<date>2013</date>
+<booktitle>Proc. of International Conference on Parsing Technologies.</booktitle>
+<marker>van Cranenburgh, Bod, 2013</marker>
+<rawString>Andreas van Cranenburgh and Rens Bod. 2013. Discontinuous parsing with an efficient and accurate dop model. Proc. of International Conference on Parsing Technologies.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Andreas van Cranenburgh</author>
+</authors>
+<title>Efficient parsing with linear context-free rewriting systems.</title>
+<date>2012</date>
+<booktitle>In Proc. of the Conference of the European Chapter of the Association for Computational Linguistics.</booktitle>
+<marker>van Cranenburgh, 2012</marker>
+<rawString>Andreas van Cranenburgh. 2012. Efficient parsing with linear context-free rewriting systems. In Proc. of the Conference of the European Chapter of the Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yannick Versley</author>
+</authors>
+<title>Experiments with easy-first nonprojective constituent parsing.</title>
+<date>2014</date>
+<booktitle>In Proc. of the First Joint Workshop on Statistical Parsing of Morphologically Rich Languages and Syntactic Analysis of Non-Canonical Languages.</booktitle>
+<contexts>
+<context position="8314" citStr="Versley (2014" startWordPosition="1306" endWordPosition="1307">-parsers exhibiting near-exponential runtime (Kallmeyer and Maier, 2013, Figure 27). To speed up decoding, prior work has considered restrictons, such as bounding the fan-out (Maier et al., 2012) and requiring well-nestedness (Kuhlmann and Nivre, 2006; G´omez-Rodr´ıguez et al., 2010). Other approaches eliminate the discontinuities via tree transformations (Boyd, 2007; K¨ubler et al., 2008), sometimes as a pruning step in a coarse-to-fine parsing approach (van Cranenburgh and Bod, 2013). However, reported runtimes are still superior to 10 seconds per sentence, which is not practical. Recently, Versley (2014a) proposed an easy-first approach that leads to considerable speed-ups, but is less accurate. In this paper, we design fast discontinuous c-parsers that outperform all the ones above by a wide margin, with similar runtimes as Versley (2014a). 2.2 Dependency Trees In this paper, we use d-parsers as a black box to parse constituents. Given a sentence w1 ... wL, a d-tree is a directed tree spanning all the words in the sentence.3 Each arc in this tree is a tuple 3We assume throughout that dependency trees have a single root among {wl, ... , wL}. Therefore, there is no need to 1524 S . VP ADJP JJ</context>
+<context position="26802" citStr="Versley (2014" startWordPosition="4540" endWordPosition="4541">r. 5.2 Results on the SPMRL Datasets We experimented with datasets for eight languages, from the SPMRL14 shared task (Seddah et al., 2014). We used the official training, development and test sets with the provided predicted POS tags. For French and German, we used the lexicalization rules detailed in DybroJohansen (2004) and Rehbein (2009), respectively. For Basque, Hungarian and Korean, we always took the rightmost modifier as head-child node. For Hebrew and Polish we used the leftmost modifier instead. For Swedish we induced head rules from the provided dependency treebank, as described in Versley (2014b). These choices were based on dev-set experiments. Table 4 shows the results. For all languages ex1529 cept French, our system outperforms the Berkeley parser (Petrov and Klein, 2007), with or without prescribed POS tags. Our average Fl-scores are superior to the best non-reranking system participating in the shared task (Crabb´e and Seddah, 2014) and to the c-parser of Hall et al. (2014), achieving the best results for 4 out of 8 languages. 5.3 Results on the Discontinuous Treebanks Finally, we experimented on two widely-used discontinuous German treebanks: TIGER (Brants et al., 2002) and N</context>
+<context position="28658" citStr="Versley (2014" startWordPosition="4850" endWordPosition="4851">able 5 shows the results. We observe that our approach outperforms all the competitors considerably, achieving state-of-the-art accuracies for both datasets. The best competitor, van Cranenburgh and Bod (2013), is more than 3 points behind, both in TIGER-H&amp;N and in NEGRA. Our reduction-based parsers are also much faster: van Cranenburgh and Bod (2013) report 3 hours to parse NEGRA with L ≤ 40. Our system parses all NEGRA sentences (regardless of length) in 27.1 seconds in a single core, which corresponds to a rate of 618 tokens per second. This approaches the speed of the easy-first system of Versley (2014a), who reports runtimes in the range 670–920 tokens per second, but is much less accurate. 6 Related Work Conversions between constituents and dependencies have been considered by De Marneffe et al. (2006) in one direction, and by Collins et al. (1999) and Xia and Palmer (2001) in the other, toward multi-representational treebanks (Xia et al., 2008). This prior work aimed at linguistically sound conversions, involving grammar-specific 7NEGRA has no unaries; for the TIGER-SPMRL and H&amp;N dev-sets, the fraction of unaries is 1.45% and 1.01%. TIGER-SPMRL L &lt; 70 all V14b, gold 76.46 / 41.05 76.11 /</context>
+<context position="30327" citStr="Versley 2014" startWordPosition="5175" endWordPosition="5176">––/ – CB13, gold – / – 76.8– / 40.5– – / – Ours, gold 82.56 / 52.13 81.08 / 48.04 80.52 / 46.70 CB13, pred – / – 74.8– / 38.7– – / – Ours, pred 79.63 / 48.43 77.93 / 44.83 76.95 / 43.50 Table 5: Fl / exact match scores on TIGER and NEGRA test sets, with gold and predicted POS tags. These scores are computed by the DISCO-DOP evaluator ignoring root nodes and, for TIGER-H&amp;N and NEGRA, punctuation tokens. The baselines are published results by Hall and Nivre 2008 (HN08), Maier et al. 2012 (M12), van Cranenburgh 2012 (C12), Kallmeyer and Maier 2013 (KM13), van Cranenburgh and Bod 2013 (CB13), and Versley 2014a, 2014b (V14a, V14b). transformation rules to handle the kind of ambiguities expressed in Figure 2. Our work differs in that we are not concerned about the linguistic plausibility of our conversions, but only with the formal aspects that underlie the two representations. The work most related to ours is Hall and Nivre (2008), who also convert dependencies to constituents to prototype a c-parser for German. Their encoding strategy is compared to ours in §4.1: they encode the entire spines into the dependency labels, which become rather complex and numerous. A similar strategy has been used by </context>
+</contexts>
+<marker>Versley, 2014</marker>
+<rawString>Yannick Versley. 2014a. Experiments with easy-first nonprojective constituent parsing. In Proc. of the First Joint Workshop on Statistical Parsing of Morphologically Rich Languages and Syntactic Analysis of Non-Canonical Languages.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yannick Versley</author>
+</authors>
+<title>Incorporating semisupervised features into discontinuous easy-first constituent parsing.</title>
+<date>2014</date>
+<location>CoRR, abs/1409.3813.</location>
+<contexts>
+<context position="8314" citStr="Versley (2014" startWordPosition="1306" endWordPosition="1307">-parsers exhibiting near-exponential runtime (Kallmeyer and Maier, 2013, Figure 27). To speed up decoding, prior work has considered restrictons, such as bounding the fan-out (Maier et al., 2012) and requiring well-nestedness (Kuhlmann and Nivre, 2006; G´omez-Rodr´ıguez et al., 2010). Other approaches eliminate the discontinuities via tree transformations (Boyd, 2007; K¨ubler et al., 2008), sometimes as a pruning step in a coarse-to-fine parsing approach (van Cranenburgh and Bod, 2013). However, reported runtimes are still superior to 10 seconds per sentence, which is not practical. Recently, Versley (2014a) proposed an easy-first approach that leads to considerable speed-ups, but is less accurate. In this paper, we design fast discontinuous c-parsers that outperform all the ones above by a wide margin, with similar runtimes as Versley (2014a). 2.2 Dependency Trees In this paper, we use d-parsers as a black box to parse constituents. Given a sentence w1 ... wL, a d-tree is a directed tree spanning all the words in the sentence.3 Each arc in this tree is a tuple 3We assume throughout that dependency trees have a single root among {wl, ... , wL}. Therefore, there is no need to 1524 S . VP ADJP JJ</context>
+<context position="26802" citStr="Versley (2014" startWordPosition="4540" endWordPosition="4541">r. 5.2 Results on the SPMRL Datasets We experimented with datasets for eight languages, from the SPMRL14 shared task (Seddah et al., 2014). We used the official training, development and test sets with the provided predicted POS tags. For French and German, we used the lexicalization rules detailed in DybroJohansen (2004) and Rehbein (2009), respectively. For Basque, Hungarian and Korean, we always took the rightmost modifier as head-child node. For Hebrew and Polish we used the leftmost modifier instead. For Swedish we induced head rules from the provided dependency treebank, as described in Versley (2014b). These choices were based on dev-set experiments. Table 4 shows the results. For all languages ex1529 cept French, our system outperforms the Berkeley parser (Petrov and Klein, 2007), with or without prescribed POS tags. Our average Fl-scores are superior to the best non-reranking system participating in the shared task (Crabb´e and Seddah, 2014) and to the c-parser of Hall et al. (2014), achieving the best results for 4 out of 8 languages. 5.3 Results on the Discontinuous Treebanks Finally, we experimented on two widely-used discontinuous German treebanks: TIGER (Brants et al., 2002) and N</context>
+<context position="28658" citStr="Versley (2014" startWordPosition="4850" endWordPosition="4851">able 5 shows the results. We observe that our approach outperforms all the competitors considerably, achieving state-of-the-art accuracies for both datasets. The best competitor, van Cranenburgh and Bod (2013), is more than 3 points behind, both in TIGER-H&amp;N and in NEGRA. Our reduction-based parsers are also much faster: van Cranenburgh and Bod (2013) report 3 hours to parse NEGRA with L ≤ 40. Our system parses all NEGRA sentences (regardless of length) in 27.1 seconds in a single core, which corresponds to a rate of 618 tokens per second. This approaches the speed of the easy-first system of Versley (2014a), who reports runtimes in the range 670–920 tokens per second, but is much less accurate. 6 Related Work Conversions between constituents and dependencies have been considered by De Marneffe et al. (2006) in one direction, and by Collins et al. (1999) and Xia and Palmer (2001) in the other, toward multi-representational treebanks (Xia et al., 2008). This prior work aimed at linguistically sound conversions, involving grammar-specific 7NEGRA has no unaries; for the TIGER-SPMRL and H&amp;N dev-sets, the fraction of unaries is 1.45% and 1.01%. TIGER-SPMRL L &lt; 70 all V14b, gold 76.46 / 41.05 76.11 /</context>
+<context position="30327" citStr="Versley 2014" startWordPosition="5175" endWordPosition="5176">––/ – CB13, gold – / – 76.8– / 40.5– – / – Ours, gold 82.56 / 52.13 81.08 / 48.04 80.52 / 46.70 CB13, pred – / – 74.8– / 38.7– – / – Ours, pred 79.63 / 48.43 77.93 / 44.83 76.95 / 43.50 Table 5: Fl / exact match scores on TIGER and NEGRA test sets, with gold and predicted POS tags. These scores are computed by the DISCO-DOP evaluator ignoring root nodes and, for TIGER-H&amp;N and NEGRA, punctuation tokens. The baselines are published results by Hall and Nivre 2008 (HN08), Maier et al. 2012 (M12), van Cranenburgh 2012 (C12), Kallmeyer and Maier 2013 (KM13), van Cranenburgh and Bod 2013 (CB13), and Versley 2014a, 2014b (V14a, V14b). transformation rules to handle the kind of ambiguities expressed in Figure 2. Our work differs in that we are not concerned about the linguistic plausibility of our conversions, but only with the formal aspects that underlie the two representations. The work most related to ours is Hall and Nivre (2008), who also convert dependencies to constituents to prototype a c-parser for German. Their encoding strategy is compared to ours in §4.1: they encode the entire spines into the dependency labels, which become rather complex and numerous. A similar strategy has been used by </context>
+</contexts>
+<marker>Versley, 2014</marker>
+<rawString>Yannick Versley. 2014b. Incorporating semisupervised features into discontinuous easy-first constituent parsing. CoRR, abs/1409.3813.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Krishnamurti Vijay-Shanker</author>
+<author>David J Weir</author>
+<author>Aravind K Joshi</author>
+</authors>
+<title>Characterizing structural descriptions produced by various grammatical formalisms.</title>
+<date>1987</date>
+<booktitle>In Proc. of the Annual Meeting on Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="5319" citStr="Vijay-Shanker et al. (1987)" startWordPosition="802" endWordPosition="805">onstituent and dependency representations, and setting up the notation. Following Kong and Smith (2014), we use c-/d- prefixes for convenience (e.g., we write c-parser for constituent parser and d-tree for dependency tree). 2.1 Constituent Trees Constituent-based representations are commonly seen as derivations according to a context-free grammar (CFG). Here, we focus on properties of the c-trees, rather than of the grammars used to generate them. We consider a broad scenario that permits c-trees with discontinuities, such as the ones derived with linear context-free rewriting systems (LCFRS; Vijay-Shanker et al. (1987)). We also assume that the c-trees are lexicalized. Formally, let w1w2 ... wL be a sentence, where wi denotes the word in the ith position. A ctree is a rooted tree whose leaves are the words {wi}Li=1, and whose internal nodes (constituents) are represented as a tuple hZ, h, Ii, where Z is a non-terminal symbol, h ∈ {1, ... , L} indicates the lexical head, and I ⊆ {1, . . . , L} is the node’s yield. Each word’s parent is a pre-terminal unary node of the form hpi, i, {i}i, where pi denotes the word’s part-of-speech (POS) tag. The yields and lexical heads are defined so that for every constituen</context>
+</contexts>
+<marker>Vijay-Shanker, Weir, Joshi, 1987</marker>
+<rawString>Krishnamurti Vijay-Shanker, David J Weir, and Aravind K Joshi. 1987. Characterizing structural descriptions produced by various grammatical formalisms. In Proc. of the Annual Meeting on Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yuanbin Wu</author>
+<author>Qi Zhang</author>
+<author>Xuanjing Huang</author>
+<author>Lide Wu</author>
+</authors>
+<title>Phrase dependency parsing for opinion mining.</title>
+<date>2009</date>
+<booktitle>In Proc. of Empirical Methods for Natural Language Processing.</booktitle>
+<contexts>
+<context position="1673" citStr="Wu et al., 2009" startWordPosition="243" endWordPosition="246">particularly striking for discontinuous parsing of German, where we surpass the current state of the art by a wide margin. 1 Introduction Constituent parsing is a central problem in NLP—one at which statistical models trained on treebanks have excelled (Charniak, 1996; Klein and Manning, 2003; Petrov and Klein, 2007). However, most existing parsers are slow, since they need to deal with a heavy grammar constant. Dependency parsers are generally faster, but less informative, since they do not produce constituents, which are often required by downstream applications (Johansson and Nugues, 2008; Wu et al., 2009; Berg-Kirkpatrick et al., 2011; Elming et al., 2013). How to get the best of both worlds? Coarse-to-fine decoding (Charniak and Johnson, 2005) and shift-reduce parsing (Sagae and Lavie, 2005; Zhu et al., 2013) were a step forward ∗This research was carried out during an internship at Priberam Labs. to accelerate constituent parsing, but typical runtimes still lag those of dependency parsers. This is only made worse if discontinuous constituents are allowed—such discontinuities are convenient to represent wh-movement, scrambling, extraposition, and other linguistic phenomena common in free wor</context>
+</contexts>
+<marker>Wu, Zhang, Huang, Wu, 2009</marker>
+<rawString>Yuanbin Wu, Qi Zhang, Xuanjing Huang, and Lide Wu. 2009. Phrase dependency parsing for opinion mining. In Proc. of Empirical Methods for Natural Language Processing.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Fei Xia</author>
+<author>Martha Palmer</author>
+</authors>
+<title>Converting dependency structures to phrase structures.</title>
+<date>2001</date>
+<booktitle>In Proc. of the First International Conference on Human Language Technology Research.</booktitle>
+<contexts>
+<context position="28937" citStr="Xia and Palmer (2001)" startWordPosition="4895" endWordPosition="4898">. Our reduction-based parsers are also much faster: van Cranenburgh and Bod (2013) report 3 hours to parse NEGRA with L ≤ 40. Our system parses all NEGRA sentences (regardless of length) in 27.1 seconds in a single core, which corresponds to a rate of 618 tokens per second. This approaches the speed of the easy-first system of Versley (2014a), who reports runtimes in the range 670–920 tokens per second, but is much less accurate. 6 Related Work Conversions between constituents and dependencies have been considered by De Marneffe et al. (2006) in one direction, and by Collins et al. (1999) and Xia and Palmer (2001) in the other, toward multi-representational treebanks (Xia et al., 2008). This prior work aimed at linguistically sound conversions, involving grammar-specific 7NEGRA has no unaries; for the TIGER-SPMRL and H&amp;N dev-sets, the fraction of unaries is 1.45% and 1.01%. TIGER-SPMRL L &lt; 70 all V14b, gold 76.46 / 41.05 76.11 / 40.94 Ours, gold 80.98 / 43.44 80.62 / 43.32 V14b, pred 73.90 / 37.00 – / – Ours, pred 77.72 / 38.75 77.32 / 38.64 TIGER-H&amp;N L &lt; 40 all HN08, gold 79.93 / 37.78 – / – V14a, gold 74.23 / 37.32 – / – Ours, gold 85.53 / 51.21 84.22 / 49.63 HN08, pred 75.33 / 32.63 – / – CB13, pred</context>
+</contexts>
+<marker>Xia, Palmer, 2001</marker>
+<rawString>Fei Xia and Martha Palmer. 2001. Converting dependency structures to phrase structures. In Proc. of the First International Conference on Human Language Technology Research.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Fei Xia</author>
+<author>Owen Rambow</author>
+<author>Rajesh Bhatt</author>
+<author>Martha Palmer</author>
+<author>Dipti Misra Sharma</author>
+</authors>
+<title>Towards a multirepresentational treebank. LOT Occasional Series.</title>
+<date>2008</date>
+<contexts>
+<context position="29010" citStr="Xia et al., 2008" startWordPosition="4906" endWordPosition="4909">2013) report 3 hours to parse NEGRA with L ≤ 40. Our system parses all NEGRA sentences (regardless of length) in 27.1 seconds in a single core, which corresponds to a rate of 618 tokens per second. This approaches the speed of the easy-first system of Versley (2014a), who reports runtimes in the range 670–920 tokens per second, but is much less accurate. 6 Related Work Conversions between constituents and dependencies have been considered by De Marneffe et al. (2006) in one direction, and by Collins et al. (1999) and Xia and Palmer (2001) in the other, toward multi-representational treebanks (Xia et al., 2008). This prior work aimed at linguistically sound conversions, involving grammar-specific 7NEGRA has no unaries; for the TIGER-SPMRL and H&amp;N dev-sets, the fraction of unaries is 1.45% and 1.01%. TIGER-SPMRL L &lt; 70 all V14b, gold 76.46 / 41.05 76.11 / 40.94 Ours, gold 80.98 / 43.44 80.62 / 43.32 V14b, pred 73.90 / 37.00 – / – Ours, pred 77.72 / 38.75 77.32 / 38.64 TIGER-H&amp;N L &lt; 40 all HN08, gold 79.93 / 37.78 – / – V14a, gold 74.23 / 37.32 – / – Ours, gold 85.53 / 51.21 84.22 / 49.63 HN08, pred 75.33 / 32.63 – / – CB13, pred 78.8– / 40.8– – / – Ours, pred 82.57 / 45.93 81.12 / 44.48 NEGRA L &lt; 30 </context>
+</contexts>
+<marker>Xia, Rambow, Bhatt, Palmer, Sharma, 2008</marker>
+<rawString>Fei Xia, Owen Rambow, Rajesh Bhatt, Martha Palmer, and Dipti Misra Sharma. 2008. Towards a multirepresentational treebank. LOT Occasional Series.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Hiroyasu Yamada</author>
+<author>Yuji Matsumoto</author>
+</authors>
+<title>Statistical dependency analysis with support vector machines.</title>
+<date>2003</date>
+<booktitle>In Proc. of International Conference on Parsing Technologies.</booktitle>
+<contexts>
+<context position="6183" citStr="Yamada and Matsumoto, 2003" startWordPosition="966" endWordPosition="969">nts) are represented as a tuple hZ, h, Ii, where Z is a non-terminal symbol, h ∈ {1, ... , L} indicates the lexical head, and I ⊆ {1, . . . , L} is the node’s yield. Each word’s parent is a pre-terminal unary node of the form hpi, i, {i}i, where pi denotes the word’s part-of-speech (POS) tag. The yields and lexical heads are defined so that for every constituent hZ, h, Ii with children {hXk, mk,Jki}Kk=1, (i) we have I = UKk=1 Jk; and (ii) there is a unique k such that h = mk. This kth node (called the head-child node) is commonly chosen applying a handwritten set of head rules (Collins, 1999; Yamada and Matsumoto, 2003). A c-tree is continuous if all nodes hZ, h, Ii have a contiguous yield I, and discontinuous otherwise. Trees derived by a CFG are always continuous; those derived by a LCFRS may have discontinuities, the yield of a node being a union of spans, possibly with gaps in the middle. Figure 1 2http://www.ark.cs.cmu.edu/TurboParser shows an example of a continuous and a discontinuous c-tree. Discontinuous c-trees have crossing branches, if the leaves are drawn in left-to-right surface order. An internal node which is not a preterminal is called a proper node. A node is called unary if it has exactly </context>
+</contexts>
+<marker>Yamada, Matsumoto, 2003</marker>
+<rawString>Hiroyasu Yamada and Yuji Matsumoto. 2003. Statistical dependency analysis with support vector machines. In Proc. of International Conference on Parsing Technologies.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yue Zhang</author>
+<author>Joakim Nivre</author>
+</authors>
+<title>Transition-based dependency parsing with rich non-local features.</title>
+<date>2011</date>
+<booktitle>In Proc. of the Annual Meeting of the Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="18789" citStr="Zhang and Nivre, 2011" startWordPosition="3164" endWordPosition="3167">Training the Labeled Dependency Parser The next step is to train a labeled d-parser on the converted treebank. If we are doing continuous cparsing, we train a projective d-parser; otherwise we train a non-projective one. In our experiments, we found it advantageous to perform labeled d-parsing in two stages, as done by McDonald et al. (2006): first, train an unlabeled d-parser; then, train a dependency labeler.6 Table 1 compares this approach against a oneshot strategy, experimenting with various off-theshelf d-parsers: MaltParser (Nivre et al., 2007), MSTParser (McDonald et al., 2005), ZPar (Zhang and Nivre, 2011), and TurboParser (Martins et al., 2013), all with the default settings. For TurboParser, we used basic, standard and full models. Our separate d-labeler receives as input a backbone d-structure and predicts a label for each arc. For each head h, we predict the modifiers’ labels using a simple sequence model, with features of the form 0(h, m, E) and 0(h, m, m&apos;, E, E&apos;), where m and m&apos; are two consecutive modifiers (possibly on opposite sides of the head) and E and E&apos; are their labels. We use the same arc label features 0(h, m, E) as TurboParser. For 0(h, m, m&apos;, E, E&apos;), we use the POS triplet (p</context>
+</contexts>
+<marker>Zhang, Nivre, 2011</marker>
+<rawString>Yue Zhang and Joakim Nivre. 2011. Transition-based dependency parsing with rich non-local features. In Proc. of the Annual Meeting of the Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Muhua Zhu</author>
+<author>Yue Zhang</author>
+<author>Wenliang Chen</author>
+<author>Min Zhang</author>
+<author>Jingbo Zhu</author>
+</authors>
+<title>Fast and accurate shiftreduce constituent parsing.</title>
+<date>2013</date>
+<booktitle>In Proc. ofAnnual Meeting of the Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="1883" citStr="Zhu et al., 2013" startWordPosition="277" endWordPosition="280">al models trained on treebanks have excelled (Charniak, 1996; Klein and Manning, 2003; Petrov and Klein, 2007). However, most existing parsers are slow, since they need to deal with a heavy grammar constant. Dependency parsers are generally faster, but less informative, since they do not produce constituents, which are often required by downstream applications (Johansson and Nugues, 2008; Wu et al., 2009; Berg-Kirkpatrick et al., 2011; Elming et al., 2013). How to get the best of both worlds? Coarse-to-fine decoding (Charniak and Johnson, 2005) and shift-reduce parsing (Sagae and Lavie, 2005; Zhu et al., 2013) were a step forward ∗This research was carried out during an internship at Priberam Labs. to accelerate constituent parsing, but typical runtimes still lag those of dependency parsers. This is only made worse if discontinuous constituents are allowed—such discontinuities are convenient to represent wh-movement, scrambling, extraposition, and other linguistic phenomena common in free word order languages. While non-projective dependency parsers, which are able to model such phenomena, have been widely developed in the last decade (Nivre et al., 2007; McDonald et al., 2006; Martins et al., 2013</context>
+<context position="24805" citStr="Zhu et al. (2013)" startWordPosition="4211" endWordPosition="4214">equel. To further explore the impact of delta encoding, we report in Table 2 the scores obtained by direct and delta encodings on eight other treebanks (see §5.2 for details on these datasets). With the exception of German, in all cases the delta encoding yielded better EVALB F1-scores with fewer labels. 5 Experiments To evaluate the performance of our reductionbased parsers, we conduct experiments in a variety Parser LR LP F1 #Toks/s. Charniak (2000) 89.5 89.9 89.5 – Klein and Manning (2003) 85.3 86.5 85.9 143 Petrov and Klein (2007) 90.0 90.3 90.1 169 Carreras et al. (2008) 90.7 91.4 91.1 – Zhu et al. (2013) 90.3 90.6 90.4 1,290 Stanford Shift-Reduce (2014) 89.1 89.1 89.1 655 Hall et al. (2014) 88.4 88.8 88.6 12 This work 89.9 90.4 90.2 957 Charniak and Johnson (2005)* 91.2 91.8 91.5 84 Socher et al. (2013)* 89.1 89.7 89.4 70 Zhu et al. (2013)* 91.1 91.5 91.3 – Table 3: Results on the English PTB §23. All systems reporting runtimes were run on the same machine. Marked as * are reranking and semi-supervised c-parsers. of treebanks, both continuous and discontinuous. 5.1 Results on the English PTB Table 3 shows the accuracies and speeds achieved by our system on the English PTB §23, in comparison t</context>
+</contexts>
+<marker>Zhu, Zhang, Chen, Zhang, Zhu, 2013</marker>
+<rawString>Muhua Zhu, Yue Zhang, Wenliang Chen, Min Zhang, and Jingbo Zhu. 2013. Fast and accurate shiftreduce constituent parsing. In Proc. ofAnnual Meeting of the Association for Computational Linguistics.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

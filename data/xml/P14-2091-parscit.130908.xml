@@ -1,0 +1,953 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.000435">
+<title confidence="0.9977995">
+A joint inference of deep case analysis and zero subject generation for
+Japanese-to-English statistical machine translation
+</title>
+<author confidence="0.980197">
+Taku Kudo, Hiroshi Ichikawa, Hideto Kazawa
+</author>
+<affiliation confidence="0.899913">
+Google Japan
+</affiliation>
+<email confidence="0.993898">
+{taku,ichikawa,kazawa}@google.com
+</email>
+<sectionHeader confidence="0.997326" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.999990235294118">
+We present a simple joint inference of
+deep case analysis and zero subject gener-
+ation for the pre-ordering in Japanese-to-
+English machine translation. The detec-
+tion of subjects and objects from Japanese
+sentences is more difficult than that from
+English, while it is the key process to gen-
+erate correct English word orders. In addi-
+tion, subjects are often omitted in Japanese
+when they are inferable from the context.
+We propose a new Japanese deep syntac-
+tic parser that consists of pointwise proba-
+bilistic models and a global inference with
+linguistic constraints. We applied our new
+deep parser to pre-ordering in Japanese-to-
+English SMT system and show substantial
+improvements in automatic evaluations.
+</bodyText>
+<sectionHeader confidence="0.999516" genericHeader="introduction">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.999966555555556">
+Japanese to English translation is known to be one
+of the most difficult language pair for statistical
+machine translation (SMT). It has been widely be-
+lieved for years that the difference of word or-
+ders, i.e., Japanese is an SOV language, while En-
+glish is an SVO language, makes the English-to-
+Japanese and Japanese-to-English translation dif-
+ficult. However, simple, yet powerful pre-ordering
+techniques have made this argument a thing of the
+past (Isozaki et al., 2010b; Komachi et al., 2006;
+Fei and Michael, 2004; Lerner and Petrov, 2013;
+Wu et al., 2011; Katz-Brown and Collins, 2008;
+Neubig et al., 2012; Hoshino et al., 2013). Pre-
+ordering processes the source sentence in such a
+way that word orders appear closer to their final
+positions on the target side.
+While many successes of English-to-Japanese
+translation have been reported recently, the quality
+improvement of Japanese-to-English translation is
+still small even with the help of pre-ordering (Goto
+et al., 2013). We found that there are two ma-
+jor issues that make Japanese-to-English transla-
+tion difficult. One is that Japanese subject and ob-
+ject cannot easily be identified compared to En-
+glish, while their detections are the key process
+to generate correct English word orders. Japanese
+surface syntactic structures are not always corre-
+sponding to their deep structures, i.e., semantic
+roles. The other is that Japanese is a pro-drop lan-
+guage in which certain classes of pronouns may
+be omitted when they are pragmatically inferable.
+In Japanese-to-English translation, these omitted
+pronouns have to be generated properly.
+There are several researches that focused on the
+pre-ordering with Japanese deep syntactic analysis
+(Komachi et al., 2006; Hoshino et al., 2013) and
+zero pronoun generation (Taira et al., 2012) for
+Japanese-to-English translation. However, these
+two issues have been considered independently,
+while they heavily rely on one another.
+In this paper, we propose a simple joint infer-
+ence which handles both Japanese deep structure
+analysis and zero pronoun generation. To the best
+of our knowledge, this is the first study that ad-
+dresses these two issues at the same time.
+This paper is organized as follows. First, we de-
+scribe why Japanese-to-English translation is dif-
+ficult. Second, we show the basic idea of this
+work and its implementation based on pointwise
+probabilistic models and a global inference with
+an integer linear programming (ILP). Several ex-
+periments are employed to confirm that our new
+model can improve the Japanese to English trans-
+lation quality.
+</bodyText>
+<sectionHeader confidence="0.968269" genericHeader="method">
+2 What makes Japanese-to-English
+translation difficult?
+</sectionHeader>
+<bodyText confidence="0.999208">
+Japanese syntactic relations between arguments
+and predicates are usually specified by particles.
+There are several types of particles, but we focus
+on が (ga), を (wo) and は (wa) for the sake of
+</bodyText>
+<page confidence="0.961111">
+557
+</page>
+<note confidence="0.6017395">
+Proceedings of the 52nd Annual Meeting of the Association for Computational Linguistics (Short Papers), pages 557–562,
+Baltimore, Maryland, USA, June 23-25 2014. c�2014 Association for Computational Linguistics
+</note>
+<tableCaption confidence="0.995226">
+Table 1: An example of difficult sentence for pars-
+</tableCaption>
+<equation confidence="0.5905296">
+ing
+Sentence: 今日 は お酒 が 飲める.
+Gloss: today wa TOP liquor ga NOm can drink.
+Translation: (I) can drink liquor today.
+simplicity 1.
+</equation>
+<listItem confidence="0.9948677">
+• ga is usually a subject marker. However, it
+becomes an object marker if the predicate has
+a potential voice type, which is usually trans-
+lated into can, be able to, want to, or would
+like to.
+• wo is an object marker.
+• wa is a topic case marker. The topic can be
+anything that a speaker wants to talk about. It
+can be subject, object, location, time or any
+other grammatical elements.
+</listItem>
+<bodyText confidence="0.9990648">
+We cannot always identify Japanese subject and
+object only by seeing the surface case markers ga,
+wo and wa. Especially the topic case marker is
+problematic, since there is no concept of topic in
+English. It is necessary to get a deep interpretation
+of topic case markers in order to develop accurate
+Japanese-to-English SMT systems.
+Another big issue is that Japanese subject (or
+even an object) can be omitted when they can
+pragmatically be inferable from the context. Such
+a pronoun-dropping is not a unique phenomenon
+in Japanese actually. For instance, Spanish also
+allows to omit pronouns. However, the inflec-
+tional suffix of Spanish verbs include a hint of the
+person of the subject. On the other hand, infer-
+ring Japanese subjects is more difficult than Span-
+ish, since Japanese verbs usually do not have any
+grammatical cues to tell the subject type.
+Table 1 shows an example Japanese sentence
+which cannot be parsed only with the surface
+structure. The second token wa specifies the rela-
+tion between 今日 (today) and 飲める (can drink).
+Human can easily tell that the relation of them is
+not a subject but an adverb (time). The topic case
+marker wa implies that the time when the speaker
+drinks liquor is the focus of this sentence. The
+4th token ga indicates the relation between お酒
+(liquor) and 飲める (can drink). Since the predi-
+cate has a potential voice (can drink), the ga par-
+ticle should be interpreted as an object here. In
+&apos;Other case markers are less frequent than these three
+markers
+this sentence, the subject is omitted. In general, it
+is unknown who speaks this sentence, but the first
+person is a natural interpretation in this context.
+Another tricky phenomenon is that detecting
+voice type is not always deterministic. There
+are several ways to generate a potential voice in
+Japanese, but we usually put the suffix word れる
+(reru) or られる (rareru) after predicates. How-
+ever, these suffix words are also used for a passive
+voice.
+In summary, we can see that the following
+four factors are the potential causes that make the
+Japanese parsing difficult.
+</bodyText>
+<listItem confidence="0.888593928571429">
+• Japanese voice type detection is not straight-
+forward. reru or rareru are used either for
+passive or potential voice.
+• surface case ga changes its interpretation
+from subject to object when the predicate has
+a potential voice.
+• topic case marker wa is used as a topic case
+marker which doesn’t exist in English. Topic
+is either subject, object or any grammatical
+elements depending on the context.
+• Japanese subject is often omitted when it is
+inferable from the context. There is no cue to
+tell the subject person in verb suffix (inflec-
+tion) like in Spanish verbs
+</listItem>
+<bodyText confidence="0.999975181818182">
+We should note that they are not always inde-
+pendent issues. For instance, the deep case detec-
+tion helps to tell the voice type, and vice versa.
+Another note is that they are unique issues
+observed only in Japanese-to-English translation.
+In English-to-Japanese translation, it is accept-
+able to generate Japanese sentences that do not
+use Japanese topic markers wa. Also, generating
+Japanese pronoun from English pronoun is accept-
+able, although it sounds redundant and unnatural
+for native speakers.
+</bodyText>
+<sectionHeader confidence="0.9391275" genericHeader="method">
+3 A joint inference of deep case analysis
+and zero subject generation
+</sectionHeader>
+<subsectionHeader confidence="0.9649135">
+3.1 Probabilistic model over
+predicate-argument structures
+</subsectionHeader>
+<bodyText confidence="0.999880333333333">
+Our deep parser runs on the top of a dependency
+parse tree. First, it extracts all predicates and their
+arguments from a dependency tree by using man-
+ual rules over POS tags. Since our pre-ordering
+system generates the final word orders from a
+labeled dependency tree, we formalize our deep
+</bodyText>
+<page confidence="0.987644">
+558
+</page>
+<bodyText confidence="0.9999372">
+parsing task as a simple labeling problem over de-
+pendency links, where the label indicates the deep
+syntactic roles between head and modifier.
+We here define a joint probability over a predi-
+cate and its arguments as follows:
+</bodyText>
+<equation confidence="0.998329">
+P(p,z,v,A,S,D) (1)
+</equation>
+<bodyText confidence="0.994886">
+where
+</bodyText>
+<listItem confidence="0.998527">
+• p: a predicate
+• z: a zero subject candidate for p. z E Z =
+{I, you, we, it, he/she, imperative, already exists}
+• v: voice type of the predicate p. v E V =
+{active, passive, potential}
+• ak E A: k-th argument which modifies or is
+modified by the predicate2.
+• dk E D: deep case label which represents a
+deep relation between ak and p. d E { sub-
+ject, object, other }, where other means that
+deep case is neither subject nor object.
+• sk E S: surface relation (surface case
+marker) between ak and p.
+</listItem>
+<bodyText confidence="0.99996475">
+We assume that a predicate p is independent
+from other predicates in a sentence. This assump-
+tion allows us to estimate the deep structures of p
+separately, with no regard to which decisions are
+made in other predicates.
+An optimal zero subject label z, deep cases D,
+and voice type v for a given predicate p can be
+solved as the following optimization problem.
+</bodyText>
+<equation confidence="0.9918">
+(z, v, D) = argmax P(p,z,v,A,S,D)
+z,v,D
+</equation>
+<bodyText confidence="0.986403333333333">
+Since the inference of this joint probability is diffi-
+cult, we decompose P(p, z, v, A, S, D) into small
+independent sub models:
+</bodyText>
+<equation confidence="0.876834">
+P(p, z, v, A, S, D) �
+Pz(z|p, A, S)Pv(v|p, A, S)
+Pd(D|p, v, A, S)P(p, A, S) (2)
+</equation>
+<bodyText confidence="0.982101833333333">
+We do not take the last term P(p, A, S) into con-
+sideration, since it is constant for the optimization.
+In the next sections, we describe how these proba-
+bilities Pz, Pd, and Pv are computed.
+2Generally, an argument modifies a predicate, but in rela-
+tive clauses, a predicate modifies an argument
+</bodyText>
+<subsubsectionHeader confidence="0.759007">
+3.1.1 Zero subject model: Pz(z|p, A, S)
+</subsubsectionHeader>
+<bodyText confidence="0.999945777777778">
+This model estimates the syntactic zero subject 3
+of the predicate p. For instance, z= I means that the
+subject of p is omitted and its type is first person.
+z=imperative means that we do not need to aug-
+ment a subject because the predicate is imperative.
+z=already exists means that a subject already ap-
+pears in the sentence. A maximum entropy classi-
+fier is used in our zero subject model, which takes
+the contextual features extracted from p, A, and S.
+</bodyText>
+<subsubsectionHeader confidence="0.617765">
+3.1.2 Voice type model: Pv(v|p, A, S)
+</subsubsectionHeader>
+<bodyText confidence="0.999744714285714">
+This model estimates the voice type of a predicate.
+We also use a maximum entropy classifier for this
+model. This classifier is used only when the predi-
+cate has the ambiguous suffix reru or rareru. If the
+predicate does not have any ambiguous suffix, this
+model returns pre-defined voice types with with
+very high probabilities.
+</bodyText>
+<subsubsectionHeader confidence="0.781947">
+3.1.3 Deep case model: Pd(D|p, v, A, S)
+</subsubsectionHeader>
+<bodyText confidence="0.998061333333333">
+This model estimates the deep syntactic role be-
+tween a predicate p and its arguments A. This
+model helps to resolve the deep cases when their
+surface cases are topic. We define Pd as follows
+after introducing an independent assumption over
+predicate-argument structures:
+</bodyText>
+<equation confidence="0.92537">
+P(D|p, v, A, S) �
+� [max(p(di|ai, p) − m(si, di, v), s)].
+i
+p(d|a, p) models the deep relation between p and
+a. We use a maximum likelihood estimation for
+p(d|a, p):
+f req(s = ga, a, active form of p)
+p(d = subj �a, p) = freq(a, active form of p)
+f req(s = wo, a, active form of p)
+p(d = obj �a, p) = freq(a, active form of p) ,
+</equation>
+<bodyText confidence="0.999867333333333">
+where freqs = ga, a, active form of p) is the
+frequency of how often an argument a and p ap-
+pears with the surface case ga. The frequencies
+are aggregated only when the predicate appear in
+active voice. If the voice type is active, we can
+safely assume that the surface cases ga and wo
+correspond to subject and object respectively. We
+compute the frequencies from a large amount of
+auto-parsed data.
+m(s, d, v) is a non-negative penalty variable de-
+scribing how the deep case d generates the sur-
+face case s depending on the voice type v. Since
+</bodyText>
+<footnote confidence="0.9053805">
+3Here syntactic subject means the subject which takes the
+voice type into account.
+</footnote>
+<page confidence="0.998249">
+559
+</page>
+<bodyText confidence="0.999720384615385">
+the number of possible surface cases, deep cases,
+and voice types are small, we define this penalty
+manually by referring to the Japanese grammar
+book (descriptive grammar research group, 2009).
+We use these manually defined penalties in order
+to put more importance on syntactic preferences
+rather than those of semantics. Even if a predicate-
+augment structure is semantically irrelevant, we
+take this structure as long as it is syntactically cor-
+rect in order to avoid SMT from generating liberal
+translations.
+δ is a very small positive constant to avoid zero
+probability.
+</bodyText>
+<subsectionHeader confidence="0.994437">
+3.2 Joint inference with linguistic constraints
+</subsectionHeader>
+<bodyText confidence="0.999419444444445">
+Our initial model (2) assumes that zero subjects
+and deep cases are generated independently. How-
+ever, this assumption does not always capture
+real linguistic phenomena. English is a subject-
+prominent language in which almost all sentences
+(or predicates) must have a subject. This implies
+that it is more reasonable to introduce strong lin-
+guistic constraints to the final solution for pre-
+ordering, which are described as follows:
+</bodyText>
+<listItem confidence="0.989181714285714">
+• Subject is a mandatory role. A subject must
+be inferred either by zero subject or deep case
+model 4. When the voice type is passive, an
+object role in D is considered as a syntactic
+subject.
+• A predicate can not have multiple subjects
+and objects respectively.
+</listItem>
+<bodyText confidence="0.999349583333333">
+These two constraints avoid the model from in-
+ferring syntactically irrelevant solutions.
+In order to find the result with the constraints
+above, we formalize our model as an integer lin-
+ear programming, ILP. Let {x1, , ..., xn} be bi-
+nary variables, i.e., xi ∈ {0, 1}. xi corresponds
+to the binary decisions in our model, e.g., xk =
+1 if di = subj and v = active. Let {p1, ..., pn} be
+probability vector corresponding to the binary de-
+cisions. ILP can be formalized as a mathematical
+problem, in which the objective function and the
+constraints are linear:
+</bodyText>
+<equation confidence="0.8576235">
+n
+{�x1, ..., �xn} =argmax log(pi)xi
+{x1,...,xn}E{0,1}n i=1
+s.t. linear constraints over {x1, .., xn}.
+</equation>
+<bodyText confidence="0.934563">
+After taking the log of (2), our optimization model
+can be converted into an ILP. Also, the constraints
+</bodyText>
+<footnote confidence="0.967551">
+4imperative is also handled as an invisible subject
+</footnote>
+<bodyText confidence="0.99720275">
+described above can be represented as linear equa-
+tions over binary variables X. We leave the details
+of the representations to (Punyakanok et al., 2004;
+Iida and Poesio, 2011).
+</bodyText>
+<subsectionHeader confidence="0.988742">
+3.3 Japanese pre-ordering with deep parser
+</subsectionHeader>
+<bodyText confidence="0.999183">
+We use a simple rule-based approach to make pre-
+ordered Japanese sentences from our deep parse
+trees, which is similar to the algorithms described
+in (Komachi et al., 2006; Katz-Brown and Collins,
+2008; Hoshino et al., 2013). First, we naively re-
+verse all the bunsetsu-chunks 5. Then, we move
+a subject chunk just before its predicate. This
+process converts SOV to SVO. When the subject
+is omitted, we generate a subject with our deep
+parser and insert it to a subject position in the
+source sentence. There are three different ways
+to generate a subject.
+</bodyText>
+<listItem confidence="0.99485275">
+1. Generate real Japanese words (Insert U (I),
+あなた (you).. etc)
+2. Generate virtual seed Japanese words (Insert
+1st person, 2nd person..., which are not in
+the Japanese lexicon.)
+3. Generate only a single virtual seed Japanese
+word regardless of the subject type. (Insert
+zero subject)
+</listItem>
+<bodyText confidence="0.89423775">
+1) is the most aggressive method, but it causes
+completely incorrect translations if the detection
+of subject type fails. 2) and 3) is rather conser-
+vative, since they leave SMT to generate English
+pronouns.
+We decided to use the following hybrid ap-
+proach, since it shows the best performance in our
+preliminary experiments.
+</bodyText>
+<listItem confidence="0.991178333333333">
+• In the training of SMT, use 3).
+• In decoding, use 1) if the input sentence only
+has one predicate. Otherwise, use 3).
+</listItem>
+<subsectionHeader confidence="0.998793">
+3.4 Examples of parsing results
+</subsectionHeader>
+<bodyText confidence="0.993658333333333">
+Table 2 shows examples of our deep parser output.
+It can be seen that our parser can correctly identify
+the deep case of topic case markers wa.
+</bodyText>
+<footnote confidence="0.9835725">
+5bunsetsu is a basic Japanese grammatical unit consisting
+of one content word and functional words.
+</footnote>
+<page confidence="0.996496">
+560
+</page>
+<tableCaption confidence="0.9975">
+Table 2: Examples of deep parser output
+</tableCaption>
+<bodyText confidence="0.47362225">
+�H6t (today wa) {d=other} A7)1(liquor ga) {d=obj} Wb (can drink) {v=potential, z=I}
+= — 7)1 (news ga) {d=subj} ( h Lt,: (was broadcast) {v=passive, z=already exist}
+���� (pasta wa) {d=obj} Lt,:7)1, (ate+question) {v=active, z=you}
+c54d:t,:U (you wa) {d=subj} Lt,:7)1, (ate+question) {v=active, z=already exist}
+</bodyText>
+<sectionHeader confidence="0.99738" genericHeader="method">
+4 Experiments
+</sectionHeader>
+<subsectionHeader confidence="0.99956">
+4.1 Experimental settings
+</subsectionHeader>
+<bodyText confidence="0.999987826086957">
+We carried out all our experiments using a state-
+of-the-art phrase-based statistical Japanese-to-
+English machine translation system (Och, 2003)
+with pre-ordering. During the decoding, we
+use the reordering window (distortion limit) to 4
+words. For parallel training data, we use an in-
+house collection of parallel sentences. These come
+from various sources with a substantial portion
+coming from the web. We trained our system on
+about 300M source words. Our test set contains
+about 10,000 sentences randomly sampled from
+the web.
+The dependency parser we apply is an imple-
+mentation of a shift-reduce dependency parser
+which uses a bunsetsu-chunk as a basic unit for
+parsing (Kudo and Matsumoto, 2002).
+The zero subject and voice type models were
+trained with about 20,000 and 5,000 manually an-
+notated web sentences respectively. In order to
+simplify the rating tasks for our annotators, we ex-
+tracted only one candidate predicate from a sen-
+tence for annotations.
+We tested the following six systems.
+</bodyText>
+<listItem confidence="0.97740925">
+• baseline: no pre-ordering.
+• surface reordering: pre-ordering only with
+surface dependency relations.
+• independent deep reordering: pre-ordering
+using deep parser without global linguistic
+constraints.
+• independent deep reordering + zero sub-
+ject: pre-ordering using deep parser and zero
+subject generation without global linguistic
+constraints.
+• joint deep reordering: pre-ordering using
+our new deep parser with global linguistic
+constraints.
+• joint deep reordering + zero-subject: pre-
+ordering using deep parser and zero subject
+generation with global linguistic constraints.
+</listItem>
+<tableCaption confidence="0.992599">
+Table 3: Results for different reordering methods
+</tableCaption>
+<table confidence="0.910661142857143">
+BLEU RIBES
+16.15 52.67
+19.39 60.30
+19.68 61.27
+19.81 61.67
+19.76 61.43
+19.90 61.89
+</table>
+<bodyText confidence="0.9961612">
+As translation metrics, we used BLEU (Pap-
+ineni et al., 2002), as well as RIBES (Isozaki et
+al., 2010a), which is designed for measuring the
+quality of distant language pairs in terms of word
+orders.
+</bodyText>
+<sectionHeader confidence="0.889114" genericHeader="evaluation">
+4.2 Results
+</sectionHeader>
+<bodyText confidence="0.999950818181818">
+Table 3 shows the experimental results for six pre-
+reordering systems. It can be seen that the pro-
+posed method with deep parser outperforms base-
+line and naive reordering with surface syntactic
+trees. The zero subject generation can also im-
+prove both BLEU and RIBES scores, but the im-
+provements are smaller than those with reordering.
+Also, joint inference with global linguistics con-
+straints outperforms the model which solves deep
+syntactic analysis and zero subject generation in-
+dependently.
+</bodyText>
+<sectionHeader confidence="0.999652" genericHeader="conclusions">
+5 Conclusions
+</sectionHeader>
+<bodyText confidence="0.999914882352941">
+In this paper, we proposed a simple joint inference
+of deep case analysis and zero subject generation
+for Japanese-to-English SMT. Our parser consists
+of pointwise probabilistic models and a global in-
+ference with linguistic constraints. We applied our
+new deep parser to pre-ordering in Japanese-to-
+English SMT system and showed substantial im-
+provements in automatic evaluations.
+Our future work is to enhance our deep parser so
+that it can handle other linguistic phenomena, in-
+cluding causative voice, coordinations, and object
+ellipsis. Also, the current system is built on the
+top of a dependency parser. The final output of our
+deep parser is highly influenced by the parsing er-
+rors. It would be interesting to develop a full joint
+inference of dependency parsing and deep syntac-
+tic analysis.
+</bodyText>
+<figure confidence="0.976655142857143">
+System
+baseline (no reordering)
+surface reordering
+independent deep reordering
+independent deep reordering + zero subj.
+joint deep reordering
+joint deep reordering + zero subj.
+</figure>
+<page confidence="0.99091">
+561
+</page>
+<sectionHeader confidence="0.99717" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.997573936507937">
+Japan descriptive grammar research group. 2009. Con-
+temporary Japanese grammar book 2. Part 3. Case
+and Syntax, Part 4. Voice. Kuroshio Publishers.
+Xia Fei and McCord Michael. 2004. Improving a sta-
+tistical mt system with automatically learned rewrite
+patterns. In Proc. of ACL.
+Isao Goto, Bin Lu, Ka Po Chow, Eiichiro Sumita, and
+Benjamin K Tsou. 2013. Overview of the patent
+machine translation task at the ntcir-10 workshop.
+In Proc. of NTCIR.
+Sho Hoshino, Yusuke Miyao, Katsuhito Sudoh, and
+Masaaki Nagata. 2013. Two-stage pre-ordering
+for japanese-to-english statistical machine transla-
+tion. In Proc. IJCNLP.
+Ryu Iida and Massimo Poesio. 2011. A cross-lingual
+ilp solution to zero anaphora resolution. In Proc. of
+ACL.
+Hideki Isozaki, Tsutomu Hirao, Kevin Duh, Katsuhito
+Sudoh, and Hajime Tsukada. 2010a. Automatic
+evaluation of translation quality for distant language
+pairs. In Proc. of EMNLP. Association for Compu-
+tational Linguistics.
+Hideki Isozaki, Katsuhito Sudoh, Hajime Tsukada, and
+Kevin Duh. 2010b. Head finalization: A simple re-
+ordering rule for sov languages. In Proc. of the Joint
+Fifth Workshop on Statistical Machine Translation
+and MetricsMATR.
+Jason Katz-Brown and Michael Collins. 2008. Syntac-
+tic reordering in preprocessing for japanese → en-
+glish translation: Mit system description for ntcir-
+7 patent translation task. In Proc. of the NTCIR-7
+Workshop Meeting.
+Mamoru Komachi, Masaaki Nagata, and Yuji Mat-
+sumoto. 2006. Phrase reordering for statistical ma-
+chine translation based on predicate-argument struc-
+ture. In Proc. of the International Workshop on Spo-
+ken Language Translation.
+Taku Kudo and Yuji Matsumoto. 2002. Japanese
+dependency analysis using cascaded chunking. In
+Proc. of CoNLL.
+Uri Lerner and Slav Petrov. 2013. Source-side classi-
+fier preordering for machine translation. In Proc. of
+EMNLP.
+Graham Neubig, Taro Watanabe, and Shinsuke Mori.
+2012. Inducing a discriminative parser to optimize
+machine translation reordering. In Proc. of EMNLP.
+Franz Josef Och. 2003. Minimum error rate training in
+statistical machine translation. In Proc. ofACL.
+Kishore Papineni, Salim Roukos, Todd Ward, and Wei-
+Jing Zhu. 2002. Bleu: a method for automatic eval-
+uation of machine translation. In Proc. of ACL.
+Vasin Punyakanok, Dan Roth, Wen-tau Yih, and Dav
+Zimak. 2004. Semantic role labeling via integer
+linear programming inference. In Proc. of ACL.
+Hirotoshi Taira, Katsuhito Sudoh, and Masaaki Na-
+gata. 2012. Zero pronoun resolution can improve
+the quality of je translation. In Proc. of Workshop on
+Syntax, Semantics and Structure in Statistical Trans-
+lation.
+Xianchao Wu, Katsuhito Sudoh, Kevin Duh, Hajime
+Tsukada, and Masaaki Nagata. 2011. Extracting
+pre-ordering rules from predicate-argument struc-
+tures. In Proc. of IJCNLP.
+</reference>
+<page confidence="0.997346">
+562
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.708942">
+<title confidence="0.981675">A joint inference of deep case analysis and zero subject generation Japanese-to-English statistical machine translation</title>
+<author confidence="0.865122">Taku Kudo</author>
+<author confidence="0.865122">Hiroshi Ichikawa</author>
+<author confidence="0.865122">Hideto Google Japan</author>
+<abstract confidence="0.999175444444444">We present a simple joint inference of deep case analysis and zero subject generation for the pre-ordering in Japanese-to- English machine translation. The detection of subjects and objects from Japanese sentences is more difficult than that from English, while it is the key process to generate correct English word orders. In addition, subjects are often omitted in Japanese when they are inferable from the context. We propose a new Japanese deep syntactic parser that consists of pointwise probabilistic models and a global inference with linguistic constraints. We applied our new deep parser to pre-ordering in Japanese-to- English SMT system and show substantial improvements in automatic evaluations.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<title>descriptive grammar research group.</title>
+<date></date>
+<publisher>Voice. Kuroshio Publishers.</publisher>
+<marker></marker>
+<rawString>Japan descriptive grammar research group. 2009. Contemporary Japanese grammar book 2. Part 3. Case and Syntax, Part 4. Voice. Kuroshio Publishers.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Xia Fei</author>
+<author>McCord Michael</author>
+</authors>
+<title>Improving a statistical mt system with automatically learned rewrite patterns.</title>
+<date>2004</date>
+<booktitle>In Proc. of ACL.</booktitle>
+<contexts>
+<context position="1457" citStr="Fei and Michael, 2004" startWordPosition="220" endWordPosition="223">n Japanese-toEnglish SMT system and show substantial improvements in automatic evaluations. 1 Introduction Japanese to English translation is known to be one of the most difficult language pair for statistical machine translation (SMT). It has been widely believed for years that the difference of word orders, i.e., Japanese is an SOV language, while English is an SVO language, makes the English-toJapanese and Japanese-to-English translation difficult. However, simple, yet powerful pre-ordering techniques have made this argument a thing of the past (Isozaki et al., 2010b; Komachi et al., 2006; Fei and Michael, 2004; Lerner and Petrov, 2013; Wu et al., 2011; Katz-Brown and Collins, 2008; Neubig et al., 2012; Hoshino et al., 2013). Preordering processes the source sentence in such a way that word orders appear closer to their final positions on the target side. While many successes of English-to-Japanese translation have been reported recently, the quality improvement of Japanese-to-English translation is still small even with the help of pre-ordering (Goto et al., 2013). We found that there are two major issues that make Japanese-to-English translation difficult. One is that Japanese subject and object c</context>
+</contexts>
+<marker>Fei, Michael, 2004</marker>
+<rawString>Xia Fei and McCord Michael. 2004. Improving a statistical mt system with automatically learned rewrite patterns. In Proc. of ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Isao Goto</author>
+<author>Bin Lu</author>
+<author>Ka Po Chow</author>
+<author>Eiichiro Sumita</author>
+<author>Benjamin K Tsou</author>
+</authors>
+<title>Overview of the patent machine translation task at the ntcir-10 workshop.</title>
+<date>2013</date>
+<booktitle>In Proc. of NTCIR.</booktitle>
+<contexts>
+<context position="1920" citStr="Goto et al., 2013" startWordPosition="292" endWordPosition="295">imple, yet powerful pre-ordering techniques have made this argument a thing of the past (Isozaki et al., 2010b; Komachi et al., 2006; Fei and Michael, 2004; Lerner and Petrov, 2013; Wu et al., 2011; Katz-Brown and Collins, 2008; Neubig et al., 2012; Hoshino et al., 2013). Preordering processes the source sentence in such a way that word orders appear closer to their final positions on the target side. While many successes of English-to-Japanese translation have been reported recently, the quality improvement of Japanese-to-English translation is still small even with the help of pre-ordering (Goto et al., 2013). We found that there are two major issues that make Japanese-to-English translation difficult. One is that Japanese subject and object cannot easily be identified compared to English, while their detections are the key process to generate correct English word orders. Japanese surface syntactic structures are not always corresponding to their deep structures, i.e., semantic roles. The other is that Japanese is a pro-drop language in which certain classes of pronouns may be omitted when they are pragmatically inferable. In Japanese-to-English translation, these omitted pronouns have to be gener</context>
+</contexts>
+<marker>Goto, Lu, Chow, Sumita, Tsou, 2013</marker>
+<rawString>Isao Goto, Bin Lu, Ka Po Chow, Eiichiro Sumita, and Benjamin K Tsou. 2013. Overview of the patent machine translation task at the ntcir-10 workshop. In Proc. of NTCIR.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Sho Hoshino</author>
+<author>Yusuke Miyao</author>
+<author>Katsuhito Sudoh</author>
+<author>Masaaki Nagata</author>
+</authors>
+<title>Two-stage pre-ordering for japanese-to-english statistical machine translation.</title>
+<date>2013</date>
+<booktitle>In Proc. IJCNLP.</booktitle>
+<contexts>
+<context position="1573" citStr="Hoshino et al., 2013" startWordPosition="240" endWordPosition="243">to English translation is known to be one of the most difficult language pair for statistical machine translation (SMT). It has been widely believed for years that the difference of word orders, i.e., Japanese is an SOV language, while English is an SVO language, makes the English-toJapanese and Japanese-to-English translation difficult. However, simple, yet powerful pre-ordering techniques have made this argument a thing of the past (Isozaki et al., 2010b; Komachi et al., 2006; Fei and Michael, 2004; Lerner and Petrov, 2013; Wu et al., 2011; Katz-Brown and Collins, 2008; Neubig et al., 2012; Hoshino et al., 2013). Preordering processes the source sentence in such a way that word orders appear closer to their final positions on the target side. While many successes of English-to-Japanese translation have been reported recently, the quality improvement of Japanese-to-English translation is still small even with the help of pre-ordering (Goto et al., 2013). We found that there are two major issues that make Japanese-to-English translation difficult. One is that Japanese subject and object cannot easily be identified compared to English, while their detections are the key process to generate correct Engli</context>
+<context position="14444" citStr="Hoshino et al., 2013" startWordPosition="2434" endWordPosition="2437">ts over {x1, .., xn}. After taking the log of (2), our optimization model can be converted into an ILP. Also, the constraints 4imperative is also handled as an invisible subject described above can be represented as linear equations over binary variables X. We leave the details of the representations to (Punyakanok et al., 2004; Iida and Poesio, 2011). 3.3 Japanese pre-ordering with deep parser We use a simple rule-based approach to make preordered Japanese sentences from our deep parse trees, which is similar to the algorithms described in (Komachi et al., 2006; Katz-Brown and Collins, 2008; Hoshino et al., 2013). First, we naively reverse all the bunsetsu-chunks 5. Then, we move a subject chunk just before its predicate. This process converts SOV to SVO. When the subject is omitted, we generate a subject with our deep parser and insert it to a subject position in the source sentence. There are three different ways to generate a subject. 1. Generate real Japanese words (Insert U (I), あなた (you).. etc) 2. Generate virtual seed Japanese words (Insert 1st person, 2nd person..., which are not in the Japanese lexicon.) 3. Generate only a single virtual seed Japanese word regardless of the subject type. (Ins</context>
+</contexts>
+<marker>Hoshino, Miyao, Sudoh, Nagata, 2013</marker>
+<rawString>Sho Hoshino, Yusuke Miyao, Katsuhito Sudoh, and Masaaki Nagata. 2013. Two-stage pre-ordering for japanese-to-english statistical machine translation. In Proc. IJCNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ryu Iida</author>
+<author>Massimo Poesio</author>
+</authors>
+<title>A cross-lingual ilp solution to zero anaphora resolution.</title>
+<date>2011</date>
+<booktitle>In Proc. of ACL.</booktitle>
+<contexts>
+<context position="14176" citStr="Iida and Poesio, 2011" startWordPosition="2391" endWordPosition="2394"> {p1, ..., pn} be probability vector corresponding to the binary decisions. ILP can be formalized as a mathematical problem, in which the objective function and the constraints are linear: n {�x1, ..., �xn} =argmax log(pi)xi {x1,...,xn}E{0,1}n i=1 s.t. linear constraints over {x1, .., xn}. After taking the log of (2), our optimization model can be converted into an ILP. Also, the constraints 4imperative is also handled as an invisible subject described above can be represented as linear equations over binary variables X. We leave the details of the representations to (Punyakanok et al., 2004; Iida and Poesio, 2011). 3.3 Japanese pre-ordering with deep parser We use a simple rule-based approach to make preordered Japanese sentences from our deep parse trees, which is similar to the algorithms described in (Komachi et al., 2006; Katz-Brown and Collins, 2008; Hoshino et al., 2013). First, we naively reverse all the bunsetsu-chunks 5. Then, we move a subject chunk just before its predicate. This process converts SOV to SVO. When the subject is omitted, we generate a subject with our deep parser and insert it to a subject position in the source sentence. There are three different ways to generate a subject. </context>
+</contexts>
+<marker>Iida, Poesio, 2011</marker>
+<rawString>Ryu Iida and Massimo Poesio. 2011. A cross-lingual ilp solution to zero anaphora resolution. In Proc. of ACL.</rawString>
+</citation>
+<citation valid="false">
+<authors>
+<author>Hideki Isozaki</author>
+<author>Tsutomu Hirao</author>
+<author>Kevin Duh</author>
+</authors>
+<title>Katsuhito Sudoh, and Hajime Tsukada. 2010a. Automatic evaluation of translation quality for distant language pairs.</title>
+<booktitle>In Proc. of EMNLP. Association for Computational Linguistics.</booktitle>
+<marker>Isozaki, Hirao, Duh, </marker>
+<rawString>Hideki Isozaki, Tsutomu Hirao, Kevin Duh, Katsuhito Sudoh, and Hajime Tsukada. 2010a. Automatic evaluation of translation quality for distant language pairs. In Proc. of EMNLP. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Hideki Isozaki</author>
+<author>Katsuhito Sudoh</author>
+<author>Hajime Tsukada</author>
+<author>Kevin Duh</author>
+</authors>
+<title>Head finalization: A simple reordering rule for sov languages.</title>
+<date>2010</date>
+<booktitle>In Proc. of the Joint Fifth Workshop on Statistical Machine Translation and MetricsMATR.</booktitle>
+<contexts>
+<context position="1411" citStr="Isozaki et al., 2010" startWordPosition="212" endWordPosition="215">applied our new deep parser to pre-ordering in Japanese-toEnglish SMT system and show substantial improvements in automatic evaluations. 1 Introduction Japanese to English translation is known to be one of the most difficult language pair for statistical machine translation (SMT). It has been widely believed for years that the difference of word orders, i.e., Japanese is an SOV language, while English is an SVO language, makes the English-toJapanese and Japanese-to-English translation difficult. However, simple, yet powerful pre-ordering techniques have made this argument a thing of the past (Isozaki et al., 2010b; Komachi et al., 2006; Fei and Michael, 2004; Lerner and Petrov, 2013; Wu et al., 2011; Katz-Brown and Collins, 2008; Neubig et al., 2012; Hoshino et al., 2013). Preordering processes the source sentence in such a way that word orders appear closer to their final positions on the target side. While many successes of English-to-Japanese translation have been reported recently, the quality improvement of Japanese-to-English translation is still small even with the help of pre-ordering (Goto et al., 2013). We found that there are two major issues that make Japanese-to-English translation diffic</context>
+<context position="17991" citStr="Isozaki et al., 2010" startWordPosition="2994" endWordPosition="2997">traints. • independent deep reordering + zero subject: pre-ordering using deep parser and zero subject generation without global linguistic constraints. • joint deep reordering: pre-ordering using our new deep parser with global linguistic constraints. • joint deep reordering + zero-subject: preordering using deep parser and zero subject generation with global linguistic constraints. Table 3: Results for different reordering methods BLEU RIBES 16.15 52.67 19.39 60.30 19.68 61.27 19.81 61.67 19.76 61.43 19.90 61.89 As translation metrics, we used BLEU (Papineni et al., 2002), as well as RIBES (Isozaki et al., 2010a), which is designed for measuring the quality of distant language pairs in terms of word orders. 4.2 Results Table 3 shows the experimental results for six prereordering systems. It can be seen that the proposed method with deep parser outperforms baseline and naive reordering with surface syntactic trees. The zero subject generation can also improve both BLEU and RIBES scores, but the improvements are smaller than those with reordering. Also, joint inference with global linguistics constraints outperforms the model which solves deep syntactic analysis and zero subject generation independent</context>
+</contexts>
+<marker>Isozaki, Sudoh, Tsukada, Duh, 2010</marker>
+<rawString>Hideki Isozaki, Katsuhito Sudoh, Hajime Tsukada, and Kevin Duh. 2010b. Head finalization: A simple reordering rule for sov languages. In Proc. of the Joint Fifth Workshop on Statistical Machine Translation and MetricsMATR.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jason Katz-Brown</author>
+<author>Michael Collins</author>
+</authors>
+<title>Syntactic reordering in preprocessing for japanese → english translation: Mit system description for ntcir7 patent translation task.</title>
+<date>2008</date>
+<booktitle>In Proc. of the NTCIR-7 Workshop Meeting.</booktitle>
+<contexts>
+<context position="1529" citStr="Katz-Brown and Collins, 2008" startWordPosition="232" endWordPosition="235"> in automatic evaluations. 1 Introduction Japanese to English translation is known to be one of the most difficult language pair for statistical machine translation (SMT). It has been widely believed for years that the difference of word orders, i.e., Japanese is an SOV language, while English is an SVO language, makes the English-toJapanese and Japanese-to-English translation difficult. However, simple, yet powerful pre-ordering techniques have made this argument a thing of the past (Isozaki et al., 2010b; Komachi et al., 2006; Fei and Michael, 2004; Lerner and Petrov, 2013; Wu et al., 2011; Katz-Brown and Collins, 2008; Neubig et al., 2012; Hoshino et al., 2013). Preordering processes the source sentence in such a way that word orders appear closer to their final positions on the target side. While many successes of English-to-Japanese translation have been reported recently, the quality improvement of Japanese-to-English translation is still small even with the help of pre-ordering (Goto et al., 2013). We found that there are two major issues that make Japanese-to-English translation difficult. One is that Japanese subject and object cannot easily be identified compared to English, while their detections a</context>
+<context position="14421" citStr="Katz-Brown and Collins, 2008" startWordPosition="2430" endWordPosition="2433">,1}n i=1 s.t. linear constraints over {x1, .., xn}. After taking the log of (2), our optimization model can be converted into an ILP. Also, the constraints 4imperative is also handled as an invisible subject described above can be represented as linear equations over binary variables X. We leave the details of the representations to (Punyakanok et al., 2004; Iida and Poesio, 2011). 3.3 Japanese pre-ordering with deep parser We use a simple rule-based approach to make preordered Japanese sentences from our deep parse trees, which is similar to the algorithms described in (Komachi et al., 2006; Katz-Brown and Collins, 2008; Hoshino et al., 2013). First, we naively reverse all the bunsetsu-chunks 5. Then, we move a subject chunk just before its predicate. This process converts SOV to SVO. When the subject is omitted, we generate a subject with our deep parser and insert it to a subject position in the source sentence. There are three different ways to generate a subject. 1. Generate real Japanese words (Insert U (I), あなた (you).. etc) 2. Generate virtual seed Japanese words (Insert 1st person, 2nd person..., which are not in the Japanese lexicon.) 3. Generate only a single virtual seed Japanese word regardless of</context>
+</contexts>
+<marker>Katz-Brown, Collins, 2008</marker>
+<rawString>Jason Katz-Brown and Michael Collins. 2008. Syntactic reordering in preprocessing for japanese → english translation: Mit system description for ntcir7 patent translation task. In Proc. of the NTCIR-7 Workshop Meeting.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Mamoru Komachi</author>
+<author>Masaaki Nagata</author>
+<author>Yuji Matsumoto</author>
+</authors>
+<title>Phrase reordering for statistical machine translation based on predicate-argument structure.</title>
+<date>2006</date>
+<booktitle>In Proc. of the International Workshop on Spoken Language Translation.</booktitle>
+<contexts>
+<context position="1434" citStr="Komachi et al., 2006" startWordPosition="216" endWordPosition="219">rser to pre-ordering in Japanese-toEnglish SMT system and show substantial improvements in automatic evaluations. 1 Introduction Japanese to English translation is known to be one of the most difficult language pair for statistical machine translation (SMT). It has been widely believed for years that the difference of word orders, i.e., Japanese is an SOV language, while English is an SVO language, makes the English-toJapanese and Japanese-to-English translation difficult. However, simple, yet powerful pre-ordering techniques have made this argument a thing of the past (Isozaki et al., 2010b; Komachi et al., 2006; Fei and Michael, 2004; Lerner and Petrov, 2013; Wu et al., 2011; Katz-Brown and Collins, 2008; Neubig et al., 2012; Hoshino et al., 2013). Preordering processes the source sentence in such a way that word orders appear closer to their final positions on the target side. While many successes of English-to-Japanese translation have been reported recently, the quality improvement of Japanese-to-English translation is still small even with the help of pre-ordering (Goto et al., 2013). We found that there are two major issues that make Japanese-to-English translation difficult. One is that Japane</context>
+<context position="2656" citStr="Komachi et al., 2006" startWordPosition="405" endWordPosition="408"> subject and object cannot easily be identified compared to English, while their detections are the key process to generate correct English word orders. Japanese surface syntactic structures are not always corresponding to their deep structures, i.e., semantic roles. The other is that Japanese is a pro-drop language in which certain classes of pronouns may be omitted when they are pragmatically inferable. In Japanese-to-English translation, these omitted pronouns have to be generated properly. There are several researches that focused on the pre-ordering with Japanese deep syntactic analysis (Komachi et al., 2006; Hoshino et al., 2013) and zero pronoun generation (Taira et al., 2012) for Japanese-to-English translation. However, these two issues have been considered independently, while they heavily rely on one another. In this paper, we propose a simple joint inference which handles both Japanese deep structure analysis and zero pronoun generation. To the best of our knowledge, this is the first study that addresses these two issues at the same time. This paper is organized as follows. First, we describe why Japanese-to-English translation is difficult. Second, we show the basic idea of this work and</context>
+<context position="14391" citStr="Komachi et al., 2006" startWordPosition="2426" endWordPosition="2429">g(pi)xi {x1,...,xn}E{0,1}n i=1 s.t. linear constraints over {x1, .., xn}. After taking the log of (2), our optimization model can be converted into an ILP. Also, the constraints 4imperative is also handled as an invisible subject described above can be represented as linear equations over binary variables X. We leave the details of the representations to (Punyakanok et al., 2004; Iida and Poesio, 2011). 3.3 Japanese pre-ordering with deep parser We use a simple rule-based approach to make preordered Japanese sentences from our deep parse trees, which is similar to the algorithms described in (Komachi et al., 2006; Katz-Brown and Collins, 2008; Hoshino et al., 2013). First, we naively reverse all the bunsetsu-chunks 5. Then, we move a subject chunk just before its predicate. This process converts SOV to SVO. When the subject is omitted, we generate a subject with our deep parser and insert it to a subject position in the source sentence. There are three different ways to generate a subject. 1. Generate real Japanese words (Insert U (I), あなた (you).. etc) 2. Generate virtual seed Japanese words (Insert 1st person, 2nd person..., which are not in the Japanese lexicon.) 3. Generate only a single virtual se</context>
+</contexts>
+<marker>Komachi, Nagata, Matsumoto, 2006</marker>
+<rawString>Mamoru Komachi, Masaaki Nagata, and Yuji Matsumoto. 2006. Phrase reordering for statistical machine translation based on predicate-argument structure. In Proc. of the International Workshop on Spoken Language Translation.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Taku Kudo</author>
+<author>Yuji Matsumoto</author>
+</authors>
+<title>Japanese dependency analysis using cascaded chunking.</title>
+<date>2002</date>
+<booktitle>In Proc. of CoNLL.</booktitle>
+<contexts>
+<context position="16876" citStr="Kudo and Matsumoto, 2002" startWordPosition="2827" endWordPosition="2830">tatistical Japanese-toEnglish machine translation system (Och, 2003) with pre-ordering. During the decoding, we use the reordering window (distortion limit) to 4 words. For parallel training data, we use an inhouse collection of parallel sentences. These come from various sources with a substantial portion coming from the web. We trained our system on about 300M source words. Our test set contains about 10,000 sentences randomly sampled from the web. The dependency parser we apply is an implementation of a shift-reduce dependency parser which uses a bunsetsu-chunk as a basic unit for parsing (Kudo and Matsumoto, 2002). The zero subject and voice type models were trained with about 20,000 and 5,000 manually annotated web sentences respectively. In order to simplify the rating tasks for our annotators, we extracted only one candidate predicate from a sentence for annotations. We tested the following six systems. • baseline: no pre-ordering. • surface reordering: pre-ordering only with surface dependency relations. • independent deep reordering: pre-ordering using deep parser without global linguistic constraints. • independent deep reordering + zero subject: pre-ordering using deep parser and zero subject ge</context>
+</contexts>
+<marker>Kudo, Matsumoto, 2002</marker>
+<rawString>Taku Kudo and Yuji Matsumoto. 2002. Japanese dependency analysis using cascaded chunking. In Proc. of CoNLL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Uri Lerner</author>
+<author>Slav Petrov</author>
+</authors>
+<title>Source-side classifier preordering for machine translation.</title>
+<date>2013</date>
+<booktitle>In Proc. of EMNLP.</booktitle>
+<contexts>
+<context position="1482" citStr="Lerner and Petrov, 2013" startWordPosition="224" endWordPosition="227">T system and show substantial improvements in automatic evaluations. 1 Introduction Japanese to English translation is known to be one of the most difficult language pair for statistical machine translation (SMT). It has been widely believed for years that the difference of word orders, i.e., Japanese is an SOV language, while English is an SVO language, makes the English-toJapanese and Japanese-to-English translation difficult. However, simple, yet powerful pre-ordering techniques have made this argument a thing of the past (Isozaki et al., 2010b; Komachi et al., 2006; Fei and Michael, 2004; Lerner and Petrov, 2013; Wu et al., 2011; Katz-Brown and Collins, 2008; Neubig et al., 2012; Hoshino et al., 2013). Preordering processes the source sentence in such a way that word orders appear closer to their final positions on the target side. While many successes of English-to-Japanese translation have been reported recently, the quality improvement of Japanese-to-English translation is still small even with the help of pre-ordering (Goto et al., 2013). We found that there are two major issues that make Japanese-to-English translation difficult. One is that Japanese subject and object cannot easily be identifie</context>
+</contexts>
+<marker>Lerner, Petrov, 2013</marker>
+<rawString>Uri Lerner and Slav Petrov. 2013. Source-side classifier preordering for machine translation. In Proc. of EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Graham Neubig</author>
+<author>Taro Watanabe</author>
+<author>Shinsuke Mori</author>
+</authors>
+<title>Inducing a discriminative parser to optimize machine translation reordering.</title>
+<date>2012</date>
+<booktitle>In Proc. of EMNLP.</booktitle>
+<contexts>
+<context position="1550" citStr="Neubig et al., 2012" startWordPosition="236" endWordPosition="239">ntroduction Japanese to English translation is known to be one of the most difficult language pair for statistical machine translation (SMT). It has been widely believed for years that the difference of word orders, i.e., Japanese is an SOV language, while English is an SVO language, makes the English-toJapanese and Japanese-to-English translation difficult. However, simple, yet powerful pre-ordering techniques have made this argument a thing of the past (Isozaki et al., 2010b; Komachi et al., 2006; Fei and Michael, 2004; Lerner and Petrov, 2013; Wu et al., 2011; Katz-Brown and Collins, 2008; Neubig et al., 2012; Hoshino et al., 2013). Preordering processes the source sentence in such a way that word orders appear closer to their final positions on the target side. While many successes of English-to-Japanese translation have been reported recently, the quality improvement of Japanese-to-English translation is still small even with the help of pre-ordering (Goto et al., 2013). We found that there are two major issues that make Japanese-to-English translation difficult. One is that Japanese subject and object cannot easily be identified compared to English, while their detections are the key process to</context>
+</contexts>
+<marker>Neubig, Watanabe, Mori, 2012</marker>
+<rawString>Graham Neubig, Taro Watanabe, and Shinsuke Mori. 2012. Inducing a discriminative parser to optimize machine translation reordering. In Proc. of EMNLP.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Franz Josef Och</author>
+</authors>
+<title>Minimum error rate training in statistical machine translation.</title>
+<date>2003</date>
+<booktitle>In Proc. ofACL.</booktitle>
+<contexts>
+<context position="16319" citStr="Och, 2003" startWordPosition="2739" endWordPosition="2740">ese grammatical unit consisting of one content word and functional words. 560 Table 2: Examples of deep parser output �H6t (today wa) {d=other} A7)1(liquor ga) {d=obj} Wb (can drink) {v=potential, z=I} = — 7)1 (news ga) {d=subj} ( h Lt,: (was broadcast) {v=passive, z=already exist} ���� (pasta wa) {d=obj} Lt,:7)1, (ate+question) {v=active, z=you} c54d:t,:U (you wa) {d=subj} Lt,:7)1, (ate+question) {v=active, z=already exist} 4 Experiments 4.1 Experimental settings We carried out all our experiments using a stateof-the-art phrase-based statistical Japanese-toEnglish machine translation system (Och, 2003) with pre-ordering. During the decoding, we use the reordering window (distortion limit) to 4 words. For parallel training data, we use an inhouse collection of parallel sentences. These come from various sources with a substantial portion coming from the web. We trained our system on about 300M source words. Our test set contains about 10,000 sentences randomly sampled from the web. The dependency parser we apply is an implementation of a shift-reduce dependency parser which uses a bunsetsu-chunk as a basic unit for parsing (Kudo and Matsumoto, 2002). The zero subject and voice type models we</context>
+</contexts>
+<marker>Och, 2003</marker>
+<rawString>Franz Josef Och. 2003. Minimum error rate training in statistical machine translation. In Proc. ofACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Kishore Papineni</author>
+<author>Salim Roukos</author>
+<author>Todd Ward</author>
+<author>WeiJing Zhu</author>
+</authors>
+<title>Bleu: a method for automatic evaluation of machine translation.</title>
+<date>2002</date>
+<booktitle>In Proc. of ACL.</booktitle>
+<contexts>
+<context position="17951" citStr="Papineni et al., 2002" startWordPosition="2985" endWordPosition="2989">deep parser without global linguistic constraints. • independent deep reordering + zero subject: pre-ordering using deep parser and zero subject generation without global linguistic constraints. • joint deep reordering: pre-ordering using our new deep parser with global linguistic constraints. • joint deep reordering + zero-subject: preordering using deep parser and zero subject generation with global linguistic constraints. Table 3: Results for different reordering methods BLEU RIBES 16.15 52.67 19.39 60.30 19.68 61.27 19.81 61.67 19.76 61.43 19.90 61.89 As translation metrics, we used BLEU (Papineni et al., 2002), as well as RIBES (Isozaki et al., 2010a), which is designed for measuring the quality of distant language pairs in terms of word orders. 4.2 Results Table 3 shows the experimental results for six prereordering systems. It can be seen that the proposed method with deep parser outperforms baseline and naive reordering with surface syntactic trees. The zero subject generation can also improve both BLEU and RIBES scores, but the improvements are smaller than those with reordering. Also, joint inference with global linguistics constraints outperforms the model which solves deep syntactic analysis</context>
+</contexts>
+<marker>Papineni, Roukos, Ward, Zhu, 2002</marker>
+<rawString>Kishore Papineni, Salim Roukos, Todd Ward, and WeiJing Zhu. 2002. Bleu: a method for automatic evaluation of machine translation. In Proc. of ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Vasin Punyakanok</author>
+<author>Dan Roth</author>
+<author>Wen-tau Yih</author>
+<author>Dav Zimak</author>
+</authors>
+<title>Semantic role labeling via integer linear programming inference.</title>
+<date>2004</date>
+<booktitle>In Proc. of ACL.</booktitle>
+<contexts>
+<context position="14152" citStr="Punyakanok et al., 2004" startWordPosition="2387" endWordPosition="2390"> subj and v = active. Let {p1, ..., pn} be probability vector corresponding to the binary decisions. ILP can be formalized as a mathematical problem, in which the objective function and the constraints are linear: n {�x1, ..., �xn} =argmax log(pi)xi {x1,...,xn}E{0,1}n i=1 s.t. linear constraints over {x1, .., xn}. After taking the log of (2), our optimization model can be converted into an ILP. Also, the constraints 4imperative is also handled as an invisible subject described above can be represented as linear equations over binary variables X. We leave the details of the representations to (Punyakanok et al., 2004; Iida and Poesio, 2011). 3.3 Japanese pre-ordering with deep parser We use a simple rule-based approach to make preordered Japanese sentences from our deep parse trees, which is similar to the algorithms described in (Komachi et al., 2006; Katz-Brown and Collins, 2008; Hoshino et al., 2013). First, we naively reverse all the bunsetsu-chunks 5. Then, we move a subject chunk just before its predicate. This process converts SOV to SVO. When the subject is omitted, we generate a subject with our deep parser and insert it to a subject position in the source sentence. There are three different ways</context>
+</contexts>
+<marker>Punyakanok, Roth, Yih, Zimak, 2004</marker>
+<rawString>Vasin Punyakanok, Dan Roth, Wen-tau Yih, and Dav Zimak. 2004. Semantic role labeling via integer linear programming inference. In Proc. of ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Hirotoshi Taira</author>
+<author>Katsuhito Sudoh</author>
+<author>Masaaki Nagata</author>
+</authors>
+<title>Zero pronoun resolution can improve the quality of je translation.</title>
+<date>2012</date>
+<booktitle>In Proc. of Workshop on Syntax, Semantics and Structure in Statistical Translation.</booktitle>
+<contexts>
+<context position="2728" citStr="Taira et al., 2012" startWordPosition="417" endWordPosition="420">e their detections are the key process to generate correct English word orders. Japanese surface syntactic structures are not always corresponding to their deep structures, i.e., semantic roles. The other is that Japanese is a pro-drop language in which certain classes of pronouns may be omitted when they are pragmatically inferable. In Japanese-to-English translation, these omitted pronouns have to be generated properly. There are several researches that focused on the pre-ordering with Japanese deep syntactic analysis (Komachi et al., 2006; Hoshino et al., 2013) and zero pronoun generation (Taira et al., 2012) for Japanese-to-English translation. However, these two issues have been considered independently, while they heavily rely on one another. In this paper, we propose a simple joint inference which handles both Japanese deep structure analysis and zero pronoun generation. To the best of our knowledge, this is the first study that addresses these two issues at the same time. This paper is organized as follows. First, we describe why Japanese-to-English translation is difficult. Second, we show the basic idea of this work and its implementation based on pointwise probabilistic models and a global</context>
+</contexts>
+<marker>Taira, Sudoh, Nagata, 2012</marker>
+<rawString>Hirotoshi Taira, Katsuhito Sudoh, and Masaaki Nagata. 2012. Zero pronoun resolution can improve the quality of je translation. In Proc. of Workshop on Syntax, Semantics and Structure in Statistical Translation.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Xianchao Wu</author>
+<author>Katsuhito Sudoh</author>
+<author>Kevin Duh</author>
+<author>Hajime Tsukada</author>
+<author>Masaaki Nagata</author>
+</authors>
+<title>Extracting pre-ordering rules from predicate-argument structures.</title>
+<date>2011</date>
+<booktitle>In Proc. of IJCNLP.</booktitle>
+<contexts>
+<context position="1499" citStr="Wu et al., 2011" startWordPosition="228" endWordPosition="231">tial improvements in automatic evaluations. 1 Introduction Japanese to English translation is known to be one of the most difficult language pair for statistical machine translation (SMT). It has been widely believed for years that the difference of word orders, i.e., Japanese is an SOV language, while English is an SVO language, makes the English-toJapanese and Japanese-to-English translation difficult. However, simple, yet powerful pre-ordering techniques have made this argument a thing of the past (Isozaki et al., 2010b; Komachi et al., 2006; Fei and Michael, 2004; Lerner and Petrov, 2013; Wu et al., 2011; Katz-Brown and Collins, 2008; Neubig et al., 2012; Hoshino et al., 2013). Preordering processes the source sentence in such a way that word orders appear closer to their final positions on the target side. While many successes of English-to-Japanese translation have been reported recently, the quality improvement of Japanese-to-English translation is still small even with the help of pre-ordering (Goto et al., 2013). We found that there are two major issues that make Japanese-to-English translation difficult. One is that Japanese subject and object cannot easily be identified compared to Eng</context>
+</contexts>
+<marker>Wu, Sudoh, Duh, Tsukada, Nagata, 2011</marker>
+<rawString>Xianchao Wu, Katsuhito Sudoh, Kevin Duh, Hajime Tsukada, and Masaaki Nagata. 2011. Extracting pre-ordering rules from predicate-argument structures. In Proc. of IJCNLP.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

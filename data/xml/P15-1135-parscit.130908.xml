@@ -1,0 +1,1891 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.000000">
+<title confidence="0.999127">
+Probing the Linguistic Strengths and Limitations
+of Unsupervised Grammar Induction
+</title>
+<author confidence="0.995412">
+Yonatan Bisk and Julia Hockenmaier
+</author>
+<affiliation confidence="0.9421565">
+Department of Computer Science
+The University of Illinois at Urbana-Champaign
+</affiliation>
+<address confidence="0.59869">
+201 N Goodwin Ave Urbana, IL 61801
+</address>
+<email confidence="0.995003">
+{bisk1,juliahmr@illinois.edu}
+</email>
+<sectionHeader confidence="0.994673" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.999953625">
+Work in grammar induction should help
+shed light on the amount of syntactic struc-
+ture that is discoverable from raw word
+or tag sequences. But since most cur-
+rent grammar induction algorithms pro-
+duce unlabeled dependencies, it is diffi-
+cult to analyze what types of constructions
+these algorithms can or cannot capture,
+and, therefore, to identify where additional
+supervision may be necessary. This pa-
+per provides an in-depth analysis of the
+errors made by unsupervised CCG parsers
+by evaluating them against the labeled de-
+pendencies in CCGbank, hinting at new
+research directions necessary for progress
+in grammar induction.
+</bodyText>
+<sectionHeader confidence="0.998783" genericHeader="keywords">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.999968548387097">
+Grammar induction aims to develop algorithms
+that can automatically discover the latent syntactic
+structure of language from raw or part-of-speech
+tagged text. While such algorithms would have
+the greatest utility for low-resource languages for
+which no treebank is available to train supervised
+parsers, most work in this area has focused on
+languages where existing treebanks can be used
+to measure and compare the performance of the
+resultant parsers. Despite significant progress in
+the last decade (Klein and Manning, 2004; Head-
+den III et al., 2009; Blunsom and Cohn, 2010;
+Spitkovsky et al., 2013; Mareˇcek and Straka,
+2013), there has been little analysis performed on
+the types of errors these induction systems make,
+and our understanding of what kinds of construc-
+tions these parsers can or cannot recover is still
+rather limited. One likely reason for this lack of
+analysis is the fact that most of the work in this do-
+main has focused on parsers that return unlabeled
+dependencies, which cannot easily be assigned a
+linguistic interpretation.
+This paper shows that approaches that are
+based on categorial grammar (Steedman, 2000)
+are amenable to more stringent evaluation metrics,
+which enable detailed analyses of the construc-
+tions they capture, while the commonly used
+unlabeled directed attachment scores hide linguis-
+tically important errors. Any categorial grammar
+based system, whether deriving its grammar
+from seed knowledge distinguishing nouns and
+verbs (Bisk and Hockenmaier, 2013), from a
+lexicon constructed from a simple questionnaire
+for linguists (Boonkwan and Steedman, 2011), or
+from sections of a treebank (Garrette et al., 2015),
+will attach linguistically expressive categories
+to individual words, and can therefore produce
+labeled dependencies. We provide a simple proof
+of concept for how these labeled dependencies
+can be used to isolate problem areas in CCG
+induction algorithms. We illustrate how they
+make the linguistic assumptions and mistakes of
+the model transparent, and are easily comparable
+to a treebank where available. They also allow us
+to identify linguistic phenomena that require addi-
+tional supervision or training signal to master. Our
+analysis will be based on extensions of our earlier
+system (Bisk and Hockenmaier, 2013), since it
+requires less supervision than the CCG-based
+approaches of Boonkwan and Steedman (2011)
+or Garrette et al. (2015). Our aim in presenting
+this analysis is to initiate a broader conversation
+and classification of the impact of various types of
+supervision provided to these approaches. We will
+see that most of the constructions that our system
+cannot capture, even when they are included in
+the model’s search space, involve precisely the
+kinds of non-local dependencies that elude even
+supervised dependency parsers (since they require
+dependency graphs, instead of trees), and that
+have motivated the use of categorial grammar-
+based approaches for supervised parsing.
+</bodyText>
+<page confidence="0.929265">
+1395
+</page>
+<note confidence="0.975956666666667">
+Proceedings of the 53rd Annual Meeting of the Association for Computational Linguistics
+and the 7th International Joint Conference on Natural Language Processing, pages 1395–1404,
+Beijing, China, July 26-31, 2015. c�2015 Association for Computational Linguistics
+</note>
+<bodyText confidence="0.999826823529412">
+First, we provide a brief introduction to CCG.
+Next, we define a labeled evaluation metric that al-
+lows us to compare the labeled dependencies pro-
+duced by Bisk and Hockenmaier (2013)’s unsu-
+pervised parser with those in CCGbank (Hock-
+enmaier and Steedman, 2007). Third, we ex-
+tend their induction algorithm to allow it to induce
+more complex categories, and refine their proba-
+bility model to handle punctuation and lexicaliza-
+tion, which we show to be necessary when han-
+dling the larger grammars induced by our vari-
+ant of their algorithm. While we also perform a
+traditional dependency evaluation for comparison
+to the non-CCG based literature, we focus on our
+CCG-based labeled evaluation metrics to perform
+a comparative analysis of Bisk and Hockenmaier
+(2013)’s parser and our extensions.
+</bodyText>
+<sectionHeader confidence="0.994992" genericHeader="introduction">
+2 Combinatory Categorial Grammar
+</sectionHeader>
+<bodyText confidence="0.999551230769231">
+CCG categories CCG (Steedman, 2000) is a
+lexicalized grammar formalism which associates
+each word with a set of lexical categories that fully
+specify its syntactic behavior. Lexical categories
+indicate the expected number, type and relative lo-
+cation of arguments a word should take, or what
+constituents it may modify. Even without explicit
+evaluation against a treebank, the CCG lexicon
+that an unsupervised parser produces provides an
+easily interpretable snapshot of the assumptions
+the model has made about a language (Bisk and
+Hockenmaier, 2013). The set of CCG categories is
+defined recursively over a small set of atomic cat-
+egories (e.g. S, N, NP, PP). Complex categories
+take the form X\Y or X/Y and represent functions
+which create a result of category X when com-
+bined with an argument Y. The slash indicates
+whether the argument precedes (\) or follows (/)
+the functor (descriptions of CCG commonly use
+the vertical slash  |to range over both / and \).
+Modifiers are categories of the form X|X, and may
+take arguments of their own.
+CCG rules CCG rules are defined schematically
+as function application (&gt;, &lt;), unary (&gt;B1, &lt;B1)
+and generalized composition (&gt;Bn, &lt;Bn), type-
+raising (&gt;T, &lt;T) and conjunction:
+</bodyText>
+<table confidence="0.581529625">
+X/Y Y ⇒&gt; X
+X/Y Y|Z ⇒&gt;B1 X|Z
+X/Y Y|Z1|...|Zn ⇒&gt;Bn X|Z1|...|Zn
+X X\Y ⇒&gt;T T/(T\X)
+Y X\Y ⇒&lt; X
+Y|Z X\Y ⇒&lt;B1 X|Z
+Y|Z1|...|Zn X ⇒&lt;Bn X|Z1|...|Zn
+⇒&lt;T T\(T/X)
+</table>
+<bodyText confidence="0.9011728">
+CCG derivations In the following derivation,
+forward application is used in line 1) as both the
+verb and the preposition take their NP arguments.
+In line 2),the prepositional phrase modfies the
+exicl head of a lexial categry c� is the cor
+poig ngl, t lec he
+verb via backwards composition. Finally, in line
+did ty i dtd by th (i
+3), the derivation completes by producing a sen-
+functor o that the lexicl head of a ategory
+</bodyText>
+<equation confidence="0.935639785714286">
+tence (S) via backwards application:
+or X� 1� � n that resulted fro
+�
+I saw her from afar
+H h mdifi i
+N(S\N1)/N2 N (S\S1)/N2 N
+ead m is coin with an X� ho
+&gt; &gt;
+1) S\N1
+w, th of the
+S\S1
+&lt;B b
+S
+3) S
+</equation>
+<bodyText confidence="0.62992475">
+CCG dependencies CCG has two standard
+a dependency etween now nd frm rather th
+evaluationmetrics. Supertagging accuracy sim-
+between knw and saw.
+ply computesnhoweoften a model choosestthewcor-
+rect lexical category for a given word. The cor-
+if e gu o a categy c
+d w is iated wih h lial e
+</bodyText>
+<equation confidence="0.6224075">
+rect category is a prerequisite for recovering the
+of word w� In the abov dervation
+correct labeled dependency. By tracing through
+w
+</equation>
+<bodyText confidence="0.9887365">
+which word fills which argument of which cate-
+gory, a set of dependency arcs, labeled by lexical
+</bodyText>
+<equation confidence="0.9474608">
+1 2 (S�N1)tN2 2 saw he
+(S
+category and slot, can be extracted:
+4 3 (S�S1)tN2 2
+I saw her from afar
+</equation>
+<bodyText confidence="0.91671">
+In this exampl, I fills th fist argumnt of saw.
+</bodyText>
+<subsectionHeader confidence="0.548711">
+The ue of categorie as dependency lab
+</subsectionHeader>
+<bodyText confidence="0.981068">
+This is represnted by an edg from saw o I, la-
+</bodyText>
+<subsectionHeader confidence="0.529902">
+makes CCG labels more fine-grained than a s
+</subsectionHeader>
+<bodyText confidence="0.906770625">
+beled as a transitive verb ((S\N)/N). This proce-
+d epy grammar For xamp,
+j l f iti ranitie d dii
+dure is followed for every argument of every pred-
+verbs are ll SUB in dependency treebanks b
+icate, leading to a labeld directed graph.
+take at least three different labels in C
+Evaluation metrics for supervised CCG parsers
+</bodyText>
+<equation confidence="0.987248">
+w Lbel
+(Clark et al., 2002) measure labeled f-score (LF1)
+2 1 I SUB
+w �
+</equation>
+<bodyText confidence="0.8855335">
+precision of these dependencies (requiring the
+2 3 her OBJ
+functor, argument, lexical category of the func-
+tor and slot of the argument to all match). A
+</bodyText>
+<equation confidence="0.920152333333333">
+��
+second, looser, evaluation is often also performed
+OBJ ����
+</equation>
+<bodyText confidence="0.990119">
+which measures unlabeled, undirected depen-
+dency scores (UF1).
+</bodyText>
+<subsectionHeader confidence="0.866464">
+An addit
+</subsectionHeader>
+<bodyText confidence="0.852466">
+Non-localdependencies and complex argu-
+ronouns or contr verb) which mdiate no
+ments One advantage of CCG is its ability to
+l dpns via a ondaton e
+difyin h nlal dpdeni
+recover the non-local dependencies involved in
+e to ditingsh betee sbjet nd objet
+</bodyText>
+<equation confidence="0.633639">
+control, raising, r wh-extration. Since these
+trol (I promse her to come I peruade h
+constructions introduce additional epndencies,
+to come), is mot likely beyond the scope of a
+</equation>
+<bodyText confidence="0.781599692307692">
+CCG parsers return dependency graphs (DAGs),
+purly syntactic grammar induction system
+not trees. To obtain these additional dependen-
+will egin to merge n a semisupervised syst
+cies, relative pronouns and control verbs require
+That is, the arumen X and reslt X of modifier X
+t d n h b n
+lexical categories that take complex arguments of
+the form S\NP or S/NP, and a mechanism for co-
+indexation of the NP inside this argument with an-
+other NP argument (e.g. (NP\NPi)/(S|NPi) for
+relative pronouns). These co-indexed subjects can
+be seen in Figure 1.
+</bodyText>
+<figure confidence="0.98888775">
+2)erwise
+S\N1
+a &lt;
+1396
+I ise
+promise
+N )()
+(S\N)/(S\N
+tot
+(S�N)/(S�N)
+(S\N)/(S\N
+John �, who ran home � ate dinner
+�
+N �((N\N)/(S\N) (S\N)/N N�N)�N
+� (S\N)/ N N
+youy
+N N
+paypy
+(S�N)/N
+(S\N)/
+</figure>
+<figureCaption confidence="0.999968">
+Figure 1: Unlabeled predicate-argument dependency graphs for two sentences with co-indexed subjects.
+</figureCaption>
+<bodyText confidence="0.9892985">
+Errors exposed by labeled evaluation We now
+illustrate how the lexical categories and labeled
+</bodyText>
+<subsectionHeader confidence="0.37355">
+Additional Ctegory p(c �
+</subsectionHeader>
+<bodyText confidence="0.7660535">
+Additil Cty (t |dependencies produced by CCG parsers expose 93 WP$
+S�N 1
+linguistic mistakes.(First, we consider a wildly in-
+correct analysisgof the first example sentence,hin
+which the subjectSisStreated as an adverb, and the
+PP as anfNPtobjecttof theeverb:
+</bodyText>
+<equation confidence="0.9332406">
+o I 8:Cn cagories t the
+saw
+� her from afar
+rested frm om
+c
+indu thei orpus pbabili
+S/Sn(S/N1)/N2 NgN/N12N baof X o
+i Hever
+t fq odi X
+S/N1 &gt; N
+</equation>
+<bodyText confidence="0.999331">
+The unlabeled dependencies inside the noun
+phrases are identical, but the heads differ. The
+</bodyText>
+<figure confidence="0.5256772">
+CGbank 02-21 WSJ2-1 DA
+CCGbk 0221 WJ22 DA
+first sentence turns the@prepositional phrase (at the
+vs) 9 4
+company) into a modifier of won. In contrast,
+71.9 504
+Naseem (Englih)
+Naseem (Uiversa)
+Spurious ambiguity and normal-frm parsing
+73.8 661
+as (E) 6
+in the possessivencase, woman4’s modifiesecom-
+pany. According to an1unlabeled6(directed)tscore,
+1 C 4 1
+confusingltheseeanalyseshwould bet80%ecorrect,
+orman CCGbn an CoNLL
+YTable 10: Performance on CCGbnk and CoNLL-
+wheras LF1 would only be 20%. But without a
+.
+cies. In upervised CCG parser (Hockenmaier
+le depndei (ection 0221) fr a mpr
+dstyle dependencie (Sections 02-21) for compar-
+n with Nasem et al. (2010).
+semtic bias for companies growing and women
+, ,
+</figure>
+<footnote confidence="0.257503">
+and Steedman, 2002; Clark and Curran 2007),
+l is wth se
+</footnote>
+<equation confidence="0.934074416666667">
+laugng, there is no signal for the learner.
+s spios ambit ael eimin
+thi uru a (0)
+guy is lrgy l
+h h i i
+F w
+alSrv
+PO SP e 0. r
+no m o
+None ofYthe labeled directed CCG dependencies
+il hd f th S�N w h fro f d
+Y
+</equation>
+<bodyText confidence="0.844146">
+rg 9are correct.TBut under the moreclenient unlabeled XZ
+directedZevaluation of Garretteaet al. (2015), and
+the even mor lenet ulabeed ndirectd metric
+A full xplaatin of the calculus can be found
+.
+discussed in this paper (Section 23)
+between know and saw
+dicate missing information which only becomes
+prep
+prep
+of Clark et al. (2002),otwo (or three) of theofour
+dependencis wuld be deemed corret:
+</bodyText>
+<figure confidence="0.83489374">
+I saw her from f
+teisi n a ar rule o conunt
+yprang d teny fr jc
+I saw her from afar
+if the
+available laer in the discourse
+-
+7 Final Oveall Model Perform
+-th argument of the lexical
+I saw her
+I saw he
+h i i
+.
+7 Final
+Finally, we l Performanc
+Incorrect parse Crrect parse
+models again o
+D of word w� derivation:
+i
+Insawaherffrom afar Ipsaw her frommafar
+d b il d b d
+Incorct arse
+eiher “uiv un a arse
+g (eg. that adj
+Corret parse
+aon s peror
+ti i
+dard depend
+attachment pendency) score
+. r For exampl
+f tig p
+-spec
+v
+pre
+, a
+tie
+tha p
+hing hed pen itr
+owld
+ives t
+nsubj
+deenc eba
+ns g. t djec
+dobj
+prec nu
+pobj p
+d
+ma modiy nouo Englihspcific now
+e of o craints Ther univrsal
+e A y s
+</figure>
+<figureCaption confidence="0.390641">
+uon is oft l perfrme whih
+er from far
+</figureCaption>
+<bodyText confidence="0.724273">
+a least hree fnt lels i CCGbn
+</bodyText>
+<equation confidence="0.8994585">
+fom aar I saw her from af
+saw hr from a
+ld i k i d d
+w
+</equation>
+<bodyText confidence="0.9827144">
+We now turntto ahsubtle distinction that corre-
+sponds toca/systematic mistaketmadeebyeallamod-
+els wecevaluate. Theecategories of noun-modifying
+is the eadens o reositinal hsesrs
+hdes f ppo pra veus
+</bodyText>
+<equation confidence="0.64064">
+2 4 rom VOD
+f �
+I saw her from afr
+</equation>
+<bodyText confidence="0.920171">
+prepositions (at) and possessive markers (’) differ
+saw her from afar aar ����
+I saw her from afr
+I saw he from afa
+only in the directionality of their slashes:
+</bodyText>
+<subsectionHeader confidence="0.450855">
+sses
+</subsectionHeader>
+<bodyText confidence="0.936813">
+poeiv 4 5 f
+</bodyText>
+<subsectionHeader confidence="0.992916">
+Prepositional Phrase
+</subsectionHeader>
+<bodyText confidence="0.94998125">
+OBJ
+algthm (se Bisk and Hocknmer (2013) for
+geng the wrong head leads to the compny
+cuon). They evaluate on their traning data,
+</bodyText>
+<sectionHeader confidence="0.88955" genericHeader="method">
+3 Labeled Evaluation for CCG Induction
+</sectionHeader>
+<bodyText confidence="0.8936">
+form that uses composition and typeraising only
+</bodyText>
+<figure confidence="0.442037296296296">
+UsinLabes o Danose Errors
+g
+nk transate to similar gans on the CoNLL de-
+order to enable a fair and informatve
+that minimizes the use of compositio
+g
+We ee that performance increases on CCG
+ndencies on long senences. We sould note
+g e w s ti puo
+bank translate to simiar gain on the CoNLL de
+, i) W ill h bl tht
+ally, we quickly provide an incorrect aalysis
+of unsupervised CCG parsers against the lexical
+w pe
+amut arcr eetou o e
+pendencies on long ss We shoud note
+he first xaml snne as a sm er
+bigiy is ptiualy dleris fr unsupr
+epe etec
+dsrepany to g ys
+categories and labled dependencies in CCGbank,
+iple xecise
+usng aes to a mse
+f i lbl dgnos itaks:
+ptu se arsers a o no moe an norma
+vid CCG p
+fiid ditincti I thi
+</figure>
+<equation confidence="0.715298">
+we exp is screpncy grw as sy
+</equation>
+<bodyText confidence="0.9373445">
+tht d t ip y l
+we define a simplification of CCGbank’s lexical
+n we computed directed attachmen recall be-
+form contraints
+t fieid dit I thi
+categories that does nottalter the number or direc-
+tion3of dependencies, butCmakes the categories and &gt;
+dependency labelsndirectlyncomparable to those N &gt;
+</bodyText>
+<equation confidence="0.874653666666667">
+&gt;
+25 vel i G
+cpai
+</equation>
+<bodyText confidence="0.973824555555556">
+producedtbyuanpunsupervised parser. We also
+domnot alter thetuderivations themselves, although
+thi bt th i itti pl
+these mayf containctype-changing rules (which al-
+lowse.g. participial verbbphraoes S[ng]\NP to be
+f f wok heh tion
+used as NPrmodifiers N P\ N P)ithat are beyondithe
+del roducing this analysis is not lea
+scope f our iduction algorthm.
+</bodyText>
+<subsectionHeader confidence="0.5944845">
+algorithm needs to identify t
+Conos
+</subsectionHeader>
+<bodyText confidence="0.996982111111111">
+pap p m
+Although thetCCGnderivations andrrdependen-
+ciesathat CCG-based parsersareturngshould in prin-
+cipleebe amenable tova quantitative labeledaevalu-
+ation when a gold-standardnCCG corpusnis avail-
+able, thereimay bemminoresystematic differences
+d h a t’ t
+of problems exit in ther languaes and can be
+lysi
+</bodyText>
+<subsectionHeader confidence="0.767617">
+3With Yamada and Matsumoto’ (2003) head rule
+</subsectionHeader>
+<bodyText confidence="0.962428">
+between the sets of categories assumed by the in-
+</bodyText>
+<equation confidence="0.59525975">
+Bik and Hockenmaier (2012b) define an algo
+en e diagng y ou
+ay d eg o th a l
+i i
+</equation>
+<bodyText confidence="0.816591342105263">
+duced parser and those in the treebank. In par-
+rithm that automatically nduces a CCG lexcon
+td t it
+With Yamad and Matsumotos (2003) had ules
+fm prtfpeh gge et i an eratie pro
+ticular, the lexicl categories n the English CCG-
+A Simplified Labeled Evaluation
+cess s roces wt a sma amun o
+Thi ps starts ih ll ot f
+bank are augmented with morphosyntactic fea-
+t b
+see noee t enes c aomc ae
+lguge wih e
+d kwldg th dfi whih i t
+ll l
+tures that indicte e.g. whether sentences are
+declaratives(S[dd]), ornverb phrases are infiniti-
+val (S[to]\NP). Prior work on supervisedhparsing
+i
+twith CCG found thathmanymofttheseafeaturesmcan
+ches between the basic set of caegories and
+-
+,
+se used in rebanks We wil fcus on the En-
+be rcovered with proper modeling of latent state
+restrictions, wods can either subcategorize for or
+splitting (Fowler and Penn, 2010). Since we wih
+,
+modify the words they are adjacen to, this process
+h CCGbank but these details apply with only
+.
+t evluat a system that do not am to induce
+rue lexicl cao of ncan oex-
+podc a egres resig cmpl
+nor changes to German and Chinese as well.
+t. Immee neibors wo t cateores
+iy. diat gh of ds wh gi
+such features, we remove them. We also remove
+</bodyText>
+<subsectionHeader confidence="0.611612">
+Siio
+</subsectionHeader>
+<bodyText confidence="0.404858916666667">
+S N a dfi h t SS
+rthe distinction between noun phrases (NP) and
+mplifiat
+or my a wi gories �
+or T eond rnd o indtion a also
+cause t icl tories uiars, t
+N�N he sc
+e lea aeg ou f uc cn
+nouns (N), which is predicated on knowledge of
+gd png, he
+intodue moer o exsng o
+c difis f iti md
+</bodyText>
+<figure confidence="0.939650115384615">
+(S/N)/N (S\S)/N
+.
+(S/N)/N N/N (SW)/N (S\N)/N (S\S)/N
+1 0
+S/S
+y t
+g womanwoman
+ITee
+Is
+dditi
+in typ atlecthe company laughrd
+N o cro vr w
+(N\N)/N N/N ebN S\N
+r ont med
+dencie v
+Possessive
+(dnA ( A ch l
+coman
+company j rew
+grew
+(I Nl (N/N)\NoN/N Ns S\N
+The
+N/N
+e
+The
+N/N
+</figure>
+<bodyText confidence="0.925552333333333">
+Whenrwe translate theaCCG analysis to anrunla-
+beled dependency treee(and hence fliptthepdirection
+of modifierbdependenciesbandoadduatroot edge), a
+system directly osimilar picture emerges, and threeaout of five at-
+tachments are deemedelorrect:
+rf l k
+</bodyText>
+<figure confidence="0.726544291666667">
+g
+Isaw h
+aw her
+er eal
+tke
+i.e. sentncs of p to lngth 20 (withot punctu-
+on marks) o Sectons 02-21 o the Penn Tree-
+We have jus seen that labeled evaluation can ex-
+ated via the use of a normalform parsing algo-
+rthm er, 96 ocenmaer nd s, 20
+) Sn 021 f
+(Esn, 19; Hki a Bik, 0)
+pose many linguistically important mistakes. In
+n T
+bk3
+W h pfm t ia on CCG n (andtype
+comparison
+h i
+co b X
+1397
+Our simplification of CCGbank’s lexical categories
+Congress has n’t lifted the ceiling
+Original NP (S[dcl]\NP)/(S[pt]\NP) (S\NP)\(S\NP) (S[pt]\NP)/NP NP[nb]/N N
+Simplified N (S\N)/(S\N) S\S (S\N)/N N/N N
+</figure>
+<figureCaption confidence="0.670178">
+Figure 2: We remove morphosyntactic features, simplify verb phrase modifiers, and change NP to N.
+</figureCaption>
+<table confidence="0.996047">
+CCGbank w/out Feats Simplified
+All 1640 458 444
+Lexical 1286 393 384
+</table>
+<tableCaption confidence="0.999858">
+Table 1: Category types in CCGbank 02-21
+</tableCaption>
+<bodyText confidence="0.998675212121212">
+determiners and other structural elements of a lan-
+guage. Finally, CCGbank distinguishes between
+sentential modifiers (which have categories of the
+form S|S, without features) and verb phrase mod-
+ifiers ((S\NP)|(S\NP), again without features).
+But since the NP argument slot of a VP mod-
+ifier is never filled, we can maintain the same
+number of gold standard dependencies by remov-
+ing this distinction and changing all VP modifiers
+to be of the form S|S. However, categories of
+the form (S[·]\NP;)/(S[·]\NP;), which are used
+e.g. for modals and auxiliaries, are changed to
+(S\N;)/(S\N;), allowing us to maintain the de-
+pendency on the subject. With these three simplifi-
+cations we eliminate much of the detailed knowl-
+edge required to construct the precise CCGbank-
+style categories, and dramatically reduce the set of
+categories without losing expressive power. One
+distinction that we do not conflate, even though
+it is currently beyond the scope of the induc-
+tion algorithm, is the distinction between PP argu-
+ments (requiring prepositions to have the category
+PP/NP) and adjuncts (requiring prepositions to be
+(NP\NP)/NP or ((S\NP)\(S\NP))/NP).
+This simplification is consistent with the most
+basic components of CCG and can therefore be
+easily used for the evaluation and analysis of any
+weakly or fully supervised CCG system, not just
+that of Bisk and Hockenmaier (2012). An example
+simplification is present in Figure 2, and the reduc-
+tion in the set of categories can be seen in Table 1.
+Similar simplifications should also be possible for
+CCGbanks in other languages.
+</bodyText>
+<sectionHeader confidence="0.985799" genericHeader="method">
+4 Our approach
+</sectionHeader>
+<bodyText confidence="0.999861166666667">
+There are two parts to our approach: 1) induc-
+ing a CCG grammar from seed knowledge and 2)
+learning a probability model over parses. The in-
+duction algorithm (Bisk and Hockenmaier, 2012)
+uses the seed knowledge that nouns can take the
+CCG category N, that verbs can take the category
+S and may take N arguments, and that any word
+may modify a constituent it is adjacent to, to iter-
+atively induce a CCG lexicon to parse the train-
+ing data. In Bisk and Hockenmaier (2013), we
+introduced a model that is based on Hierarchical
+Dirichlet Processes (Teh et al., 2006). This HDP-
+CCG model gave state-of-the-art performance on a
+number languages, and qualitative analysis of the
+resultant lexicons indicated that the system was
+learning the word order and many of the correct
+attachments of the tested languages. But this sys-
+tem also had a number of shortcomings: the in-
+duction algorithm was restricted to a small frag-
+ment of CCG, the model emitted only POS tags
+rather than words, and punctuation was ignored.
+Here, we use our previous HDP-CCG system as a
+baseline, and introduce three novel extensions that
+attempt to address these concerns.
+</bodyText>
+<sectionHeader confidence="0.99779" genericHeader="method">
+5 Experimental Setup
+</sectionHeader>
+<bodyText confidence="0.999984857142857">
+For our experiments we will follow the standard
+practice in supervised parsing of using WSJ Sec-
+tions 02-21 for training, Section 22 for develop-
+ment and error analysis, and a final evaluation of
+the best models on Section 23. Because the in-
+duced lexicons are overly general, the memory
+footprint grows rapidly as the complexity of the
+grammar increases. For this reason, we only train
+on sentences that contain up to 20 words (as well
+as an arbitrary number of punctuation marks). All
+analyses and evaluation are performed with sen-
+tences of all lengths unless otherwise indicated.
+Finally, Bisk and Hockenmaier (2013) followed
+Liang et al. (2007) in setting the values of the hy-
+perparameters α to powers (eg. the square) of the
+number of observed outcomes in the distribution.
+But when the output consists of words rather than
+POS tags, the concentration parameter α=V 2 is
+too large to allow the model to learn. For this rea-
+son, experiments will be reported with all hyper-
+parameters set to a constant of 2500.1
+</bodyText>
+<footnote confidence="0.9446425">
+1We tested three values (1000, 2500, 5000) and found that
+the basic model at 2500 performed closest to the previously
+</footnote>
+<page confidence="0.959858">
+1398
+</page>
+<table confidence="0.9958242">
+Base + Lexicalization + Punctuation + Punc &amp; Lex + Allow (X|X)|X
+Only Atomic Arguments B1 34.2 35.2 36.3 36.9 36.8
+(S, N) B3 34.4 35.1 33.8 38.9 38.8
+Allow Complex Arguments B1 33.0 34.9 33.2 35.7 35.8
+(S, N, S|N) B3 29.4 29.5 31.2 31.2 31.2
+</table>
+<tableCaption confidence="0.993211">
+Table 2: The impact of our changes to Bisk and Hockenmaier’s (2013) model (henceforth: B1, top left)
+</tableCaption>
+<bodyText confidence="0.7506935">
+on CCGbank dependencies (LF1, Section 22, all sentences). The best overall model (B3P&amp;L) uses B3,
+punctuation and lexicalization. The best model with complex arguments (BC1) uses only B1.
+</bodyText>
+<sectionHeader confidence="0.982505" genericHeader="method">
+6 Extending the HDP-CCG system
+</sectionHeader>
+<bodyText confidence="0.99996025">
+We now examine how extending the HDP-CCG
+baseline model to capture lexicalization and punc-
+tuation, and how increasing the complexity of the
+induced grammars affect performance (Table 2).
+</bodyText>
+<subsectionHeader confidence="0.998983">
+6.1 Modeling Lexicalization
+</subsectionHeader>
+<bodyText confidence="0.9999938">
+In keeping with most work in grammar induction
+from part-of-speech tagged text, Bisk and Hocken-
+maier’s (2013) HDP-CCG treats POS tags t rather
+than words w as the terminals it generates based
+on their lexical categories c. The advantage of this
+approach is that tag-based emissions p(t|c) are a
+lot less sparse than word-based emissions p(w|c).
+It is therefore beneficial to first train a model that
+emits tags rather than words (Carroll and Rooth,
+1998), and then to use this simpler model to ini-
+tialize a lexicalized model that generates words in-
+stead of tags. To perform the switch we simply es-
+timate counts for the parse forests using the unlex-
+icalized model during the E-Step and then apply
+those counts to the lexicalized model during the
+M-Step. Inside-Outside then continues as before.
+Many words, like prepositions, differ systemati-
+cally in their preferred syntactic role from that of
+their part-of-speech tags. This change benefits all
+settings of the model (Column 2 of Table 2).
+</bodyText>
+<subsectionHeader confidence="0.999783">
+6.2 Modeling Punctuation
+</subsectionHeader>
+<bodyText confidence="0.99178659375">
+Spitkovsky et al. (2011) performed a detailed anal-
+ysis of punctuation for dependency-based gram-
+mar induction, and proposed a number of con-
+straints that aimed to capture the different ways
+in which dependencies might cross constituent
+boundaries implied by punctuation marks.
+A constituency-based formalism like CCG al-
+lows us instead to define a very simple, but effec-
+tive Dirichlet Process (DP) based Markov gram-
+reported dependency evaluation comparison with the work of
+Naseem et al. (2010). We fixed this hyperparameter setting
+for experimental simplicity but a more rigorous grid search
+might find better parameters for the complex models.
+mar that emits punctuation marks at the maximal
+projections of constituents. We note that CCG
+derivations are binary branching, and that virtually
+every instance of a binary rule in a normal-form
+derivation combines a head X or X|Y with an ar-
+gument Y or modifier X|X. Without reducing the
+set of strings generated by the grammar, we can
+therefore assume that punctuation marks can only
+be attached to the argument Y or the adjunct X|X:
+To model this, for each maximal projection (i.e.
+whenever we generate a non-head child) with cate-
+gory C, we first decide whether punctuation marks
+should be emitted (M = {true, false}) to the left
+or right side (Dir) of C. Since there may be mul-
+tiple adjacent punctuation marks (... .”), we treat
+this as a Markov process in which the history vari-
+able captures whether previous punctuation marks
+have been generated or not. Finally, we generate
+an actual punctuation mark wr,t:
+</bodyText>
+<equation confidence="0.9992485">
+p(M  |Dir, Hist, C) ∼ DP(α, p(M  |dir))
+p(M  |Dir) ∼ DP(α, p(M))
+p(w.  |Dir, Hist, C) ∼ DP(α, p(w.  |dir, hist))
+p(w.  |Dir, Hist) ∼ DP(α, p(w.))
+</equation>
+<bodyText confidence="0.999143666666666">
+We treat # and $ symbols as ordinary lexi-
+cal items for which CCG categories will be in-
+duced by the regular induction algorithm, but treat
+all other punctuation marks, including quotes and
+brackets. Commas and semicolons (,, ;) can
+act both as punctuation marks generated by this
+Markov grammar, and as conjunctions with lexical
+category conj. This model leads to further perfor-
+mance gains (Columns 3 and 4 of Table 2).
+</bodyText>
+<subsectionHeader confidence="0.996907">
+6.3 Increasing Grammatical Complexity
+</subsectionHeader>
+<bodyText confidence="0.999823">
+The existing grammar induction scheme is very
+simplistic. It assumes that adjacent words either
+modify one another or can be taken as arguments.
+Left unconstrained this space of grammatical cat-
+</bodyText>
+<equation confidence="0.940890375">
+, X\X ,
+, Y ,
+X
+X/Y
+X
+X
+X\X
+Y
+</equation>
+<page confidence="0.991549">
+1399
+</page>
+<table confidence="0.989155533333333">
+CCGbank 02-21 WSJ2-21 DA
+Model LF1 UF1 @10 @20 @∞
+Naseem (Universal) 71.9 50.4
+Naseem (English) 73.8 66.1
+B1 33.8 60.3 70.7 63.1 58.4
+BC 34.4 62.0 70.5 65.4 61.9
+1
+BP&amp;L 38.3 66.2 71.3 65.9 62.3
+3
+Model Supertagging LF1 UF1
+B1 59.2 34.5 60.6
+BC 59.9 34.9 63.6
+1 62.3 37.1 64.9
+BP&amp;L
+3
+</table>
+<tableCaption confidence="0.936329">
+Table 3: Test set performance of the final systems
+discussed in this paper (Section 23)
+</tableCaption>
+<bodyText confidence="0.99981375">
+egories introduced grows very rapidly, introduc-
+ing a tremendous number of incorrect categories
+(analyzed later in Table 9). For this reason Bisk
+and Hockenmaier (2013) applied the HDP-CCG
+model to a context-free fragment of CCG, limit-
+ing the arity of lexical categories (number of ar-
+guments they can take) to two and the arity of
+composition (how many arguments can be passed
+through composition) to one. We know the space
+of grammatical constructions is larger than this, so
+we will allow the model to induce categories with
+three arguments and use generalized composition
+(B3). Bisk and Hockenmaier (2013) allow lexical
+categories to only take atomic arguments, but, as
+explained above, non-local dependencies require
+complex arguments of the form S|N. We therefore
+allow lexical categories to take up to one complex
+argument of the form S|N. Atomic lexical cate-
+gories are not allowed to take complex arguments,
+eliminating S|(S|N) and N|(S|N). Increasing the
+search space (Rows 3 and 4 of Table 2) shows cor-
+responding decreases in performance.
+Finally, Bisk and Hockenmaier (2013) elim-
+inated the possessive-preposition ambiguity ex-
+plained above by disallowing categories of the
+form (X\X)/X and (X/X)\X to be used simulta-
+neously. Removing this restriction does not harm
+performance (Column 5 of Table 2).
+</bodyText>
+<subsectionHeader confidence="0.998845">
+6.4 Summary and test set performance
+</subsectionHeader>
+<bodyText confidence="0.988014347826087">
+Table 2 shows the performance of 20 different
+model settings on Section 22 under the simpli-
+fied labeled CCG-based dependency evaluation
+proposed above, starting with Bisk and Hocken-
+maier’s (2013) original model (henceforth: B1,
+top left). We see that modeling punctuation and
+lexicalization both increase performance. We
+also show that allowing categories of the form
+(X\X)/X and (X/X)\X on top of the lexicalized
+models with punctuation does not lead to a notice-
+able decrease in performance. We also see that an
+increase in grammatical and lexical complexity is
+only beneficial for the grammars that allow only
+atomic arguments, and only if both lexicalization
+Table 4: Performance on CCGbank and CoNLL-
+style dependencies (Sections 02-21) for a compar-
+ison with Naseem et al. (2010).
+and punctuation are modeled. Allowing complex
+arguments is generally not beneficial, and perfor-
+mance drops further if the grammatical complex-
+ity is increased to B3. Our further analysis will
+focus on the three bolded models, B1, Bi (the
+best model with complex arguments) and BP&amp;L
+</bodyText>
+<page confidence="0.741444">
+3
+</page>
+<bodyText confidence="0.995227333333333">
+(the best overall model), whose supertag accuracy,
+labeled (LF1) and unlabeled undirected CCG de-
+pendency recovery on Section 23 are shown in Ta-
+ble 3. We see that BC1 and BP&amp;L
+3 both outperform
+B1 on all metrics, although the unlabeled met-
+ric (UF1) perhaps misleadingly suggests that Bi
+leads to a greater improvement than the supertag-
+ging and LF1 metrics indicate.
+</bodyText>
+<subsectionHeader confidence="0.99607">
+6.5 CCGbank vs. dependency trees
+</subsectionHeader>
+<bodyText confidence="0.99981">
+Finally, to compare our models directly to a com-
+parable unsupervised dependency parser (Naseem
+et al., 2010), we evaluate them against the un-
+labeled dependencies produced by Yamada and
+Matsumoto’s (2003) head rules for Sections 02-
+21 of the Penn Treebank (Table 4)2. Naseem et al.
+(2010) only report performance on sentences of up
+to length 20 (without punctuation marks). Their
+approach incorporates prior linguistic knowledge
+either in the form of “universal” constraints (e.g.
+that adjectives may modify nouns) or “English-
+specific” constraints (e.g. that adjectives tend to
+modify and precede nouns). These universal con-
+straints are akin to, but more explicit and detailed
+than the information given to the induction algo-
+rithm (see Bisk and Hockenmaier (2013) for a dis-
+cussion). Comparing these numbers to labeled
+and unlabeled CCG dependencies on the same cor-
+pus (all sentences, hence, @oc), we see that per-
+formance increases on CCGbank do not translate
+to similar gains on these unlabeled dependencies.
+While we have done our best to convert the predi-
+cate argument structure of CCG into dependencies
+</bodyText>
+<footnote confidence="0.946075">
+2BH13 use hyperparameter schemes and report 64.2@20.
+</footnote>
+<page confidence="0.908296">
+1400
+</page>
+<table confidence="0.999653083333333">
+Correct LR B1 LR Bs&amp;L LR Bi
+Category Used instead (%) Used instead (%) Used instead (%)
+N 82.6 N/N 7.5 74.5 N/N 8.3 77.4 N/N 9.8
+N/N 78.5 (S\S)\(S\S) 9.8 71.9 (S\S)\(S\S) 8.7 80.6 N 7.7
+S\N 17.3 S\S 43.5 22.1 S\S 27.6 18.3 S\S 39.5
+S\S 38.1 N 24.3 34.9 N 16.0 39.4 N 22.7
+S/S 37.8 N\N 20.8 41.1 N/N 16.3 57.2 (S\S)/S 13.8
+(N\N)/N 64.3 (S\S)/N 20.8 60.5 (S\S)/N 13.8 53.1 (S\S)/N 23.8
+(S\N)/N 25.6 S/N 27.0 26.0 (S/N)/N 23.5 29.4 S/N 22.3
+(S\S)/N 51.0 (N\N)/N 23.1 48.0 (N\N)/N 18.2 62.6 N/N 10.1
+(S\N)/S 60.7 S\N 12.1 55.7 S\N 12.4 57.9 S\N 11.0
+(S\S)/S 38.0 (N\N)/N 35.2 50.8 S/S 14.4 61.5 N 7.5
+</table>
+<tableCaption confidence="0.8875815">
+Table 5: Detailed supertagging analysis: Recall scores of B1, BC1, and B3P&amp;L on the most common
+recoverable (simplified) lexical categories in Section 22 along with the most commonly produced error.
+</tableCaption>
+<table confidence="0.99886025">
+Category Example usage Used instead by BC1 (%)
+(N/N)\N The woman ’s company ... (N\N)/N 89.9 N/N 3.7 N 2.9
+(S/S)/N Before Monday, ... S/S 69.9 N/N 14.8 (N\N)/N 8.2
+(N/N)/(N/N) The very tall man ... N/N 38.0 (S\S)\(S\S) 33.9 (S\S)/N 10.1
+(N\N)/(S\N) John, who ran home,... (S\S)/(S/N) 26.5 N\N 23.3 S/S 14.9
+(S\N)/(S\N) I promise to pay ... S\N 32.6 (S\S)/(S/N) 21.5 (S\N)/(S/N) 12.4
+((S\N)/N)/N I gave her a gift. (S\N)/N 34.6 (S/N)/N 34.6 N/N 7.7
+((S\N)/(S\N))/N I persuaded her to pay ... (S\N)/N 24.8 (S/N)/N 22.0 N/N 11.0
+</table>
+<tableCaption confidence="0.9314225">
+Table 6: Categories that are in the search space of the induction algorithm, but do not occur in any Viterbi
+parse, and what BC1 uses instead.
+</tableCaption>
+<bodyText confidence="0.99807">
+there are many constructions which have vastly
+different analysis, making a proper conversion too
+difficult for the scope of this paper.3
+</bodyText>
+<sectionHeader confidence="0.976207" genericHeader="method">
+7 Error analysis
+</sectionHeader>
+<bodyText confidence="0.9977897">
+Supertagging error analysis We first consider
+the lexical categories that are induced by the mod-
+els. Table 5 shows the accuracy with which they
+recover the most common gold lexical categories,
+together with the category that they most often
+produced instead. We see that the simplest model
+(B1) performs best on N, and perhaps over gen-
+erates (N\N)/N (noun-modifying prepositions),
+while the overall best model (BP&amp;L
+3 ) outperforms
+both other models only on intransitive verbs.
+The most interesting component of our analysis
+is the long tail of constructions that must be cap-
+tured in order to produce semantically appropriate
+representations. We can inspect the confusion ma-
+trix of the lexical categories that the model fails to
+use to obtain insight into how its predictions dis-
+agree with the ground truth, and why these con-
+structions may require special attention. Table 6
+shows the most common CCGbank categories that
+</bodyText>
+<footnote confidence="0.968997666666667">
+3The overlap (F-score of unlabeled undirected attachment
+scores) between CCGbank dependencies and those obtained
+via Matsumoto’s head finding rules is only 81.9%.
+</footnote>
+<bodyText confidence="0.994458769230769">
+were in the search space of some of the more com-
+plex models (e.g. BC3 ), but were never used by any
+of the parsers in a Viterbi parse. These include
+possessives, relative pronouns, modals/auxiliaries,
+control verbs and ditransitives. We show the cat-
+egories that the BC1 model uses instead. The gold
+categories shown correspond to the bold words in
+Table 6. While the reason many of these cases
+are difficult is intuitive (e.g. very modifying tall
+instead of man), a more difficult type of error
+than previously discussed is that of recovering
+non-local dependencies. The recovery of non-
+local dependencies is beyond the scope of both
+standard dependency-based approaches and Bisk
+and Hockenmaier (2013)’s original induction al-
+gorithm. But the parser does not learn to use lexi-
+cal categories with complex arguments correctly
+even when the algorithm is extended, to induce
+them. For example, BC1 prefers to treat auxiliaries
+or equi verbs like promise as intransitives rather
+than as an auxiliary that shares its subject with
+pay. The surface string supports this decision, as
+it can be parsed without having to capture the non-
+local dependencies (top row) present in the correct
+(bottom row) analysis:
+I promise to pay you
+</bodyText>
+<equation confidence="0.4450855">
+N S\N (S\S)/S S/N N
+N (S\N)/(S\N) (S\N)/(S\N) (S\N)/N N
+</equation>
+<page confidence="0.565576">
+1401
+</page>
+<table confidence="0.999844666666667">
+1st Argument 2nd Argument
+B1 BC1 BP&amp;L B1 BC1 BP&amp;L
+3
+N/N 68.4 69.7 71.6
+S\N 12.2 24.9 14.6
+S\S 17.0 16.2 18.7
+S/S 24.0 27.1 33.8
+(N\N)/N 49.7 54.4 51.2 41.0 46.2 42.4
+(S\N)/N 26.6 32.9 34.4 30.6 33.2 33.8
+(S\S)/N 21.6 19.2 24.7 24.0 24.9 29.3
+(S\N)/S 23.9 50.3 32.5 25.2 59.1 35.0
+(S\S)/S 6.1 22.7 14.1 9.5 34.6 19.5
+</table>
+<tableCaption confidence="0.992941">
+Table 7: LF1 scores of B1, BC1 and B3P&amp;L on the
+</tableCaption>
+<bodyText confidence="0.97989505">
+most common dependency types in Section 22.
+We also see that this model uses seemingly non-
+English verb categories of the form (S/N)/N, both
+for ditransitives, and object control verbs, perhaps
+because the possibly spurious /N argument could
+be swallowed by other categories that take argu-
+ments of the form S/N, like the (incorrect) treat-
+ment of subject relative pronouns. One possible
+lesson we can extract from this is that practical
+approaches for building parsers for new languages
+might need to focus on injecting semantic infor-
+mation that is outside the scope of the learner.
+Dependency error analysis Table 7 shows the
+labeled recall of the most common dependencies.
+We see that both new models typically outper-
+form the baseline, although they yield different
+improvements on different dependency types. Bi
+is better at recovering the subjects of intransitive
+verbs (S\N) and verbs that take sentential com-
+plements ((S\N)/S), while B3 is better for simple
+adjuncts (N/N, S/S, S\S) and transitive verbs.
+Wh-words and the long tail To dig slightly
+deeper into the set of missing constructions, we
+tried to identify the most common categories that
+are beyond the search space of the current induc-
+tion algorithm. We first computed the set of cat-
+egories used by each part of speech tag in CCG-
+bank, and thresholded the lexicon at 95% token
+coverage for each tag. Removing the categories
+that contain PP and those that can be induced by
+the algorithm in its most general setting, we are
+left with the categories shown in Table 8. The tags
+that are missing categories are predominantly wh-
+words required for wh-questions, relative clauses
+or free relative clauses. Some of these categories
+violate the assumptions made by the induction al-
+gorithm: question words return a sentence (S) but
+are not themselves verbs. Free relative pronouns
+return a noun, but take arguments. However, this is
+Additional Category p(cat  |tag)
+</bodyText>
+<equation confidence="0.976572142857143">
+((N\N)/(S\N))/N .93 WP$
+N/(S/N) .14 WP
+N/(S\N) .08 WP
+((N\N)/S)\((N\N)/N) .07 WDT
+((S\S)\(S\S))\N .04 RBR
+S/(S\N) .04 WP
+S/(S/N) .02 WP
+</equation>
+<tableCaption confidence="0.970638">
+Table 8: Common categories that the algorithm
+cannot induce
+</tableCaption>
+<table confidence="0.965035888888889">
+Size, ambiguity, coverage and precision
+of the induced lexicons
+Arguments: Atomic Complex
+# Lexical Arity: 2 3 2 3
+# Lexical Categories 37 53 61 133
+Avg. #Cats / Tag 26.4 29.5 42.3 56.3
+Token-based Coverage 84.3 84.4 89.8 90.2
+Type-based Coverage 20.3 21.6 27.0 32.4
+Type-based Precision 81.1 60.4 65.6 36.1
+</table>
+<tableCaption confidence="0.981923">
+Table 9: Size, ambiguity, coverage and precision
+(evaluated on Section 22) of the induced lexicons.
+</tableCaption>
+<bodyText confidence="0.997418551724138">
+a surprisingly small set of special function words
+and therefore perhaps a strategic place for super-
+vision. Questions in particular pose an interesting
+learning question – how does one learn that these
+constructions indicate missing information which
+only becomes available later in the discourse?
+Grammatical complexity and size of the search
+space As lexical categories are a good proxy for
+the set of constructions the grammar will enter-
+tain, we can measure the size and ambiguity of the
+search space as a function of the number of lexical
+category types it induces as compared to the per-
+centage that are actually valid categories for the
+language. In Table 9, we compare the lexicons in-
+duced by variants of the induction algorithm by
+their token-based coverage (the percent of tokens
+in Sections 22 for which the induced tag lexicon
+contains the correct category), type-based cover-
+age (the percent of category types that the induced
+lexicon contains), as well as type-based precision
+(the percent of induced category types that occur
+in Section 22). This analysis is independent of the
+learned models, as their probabilities are not taken
+into account. We see that as the number of lex-
+ical categories induced (subject to the constraints
+of Bisk and Hockenmaier (2012)) increases, the
+percent that are valid English categories decreases
+rapidly (type-based precision falls from 81.1% to
+36.1%). Despite this, and despite a high token
+</bodyText>
+<page confidence="0.989107">
+1402
+</page>
+<bodyText confidence="0.999849">
+coverage of up to 90%, we still miss almost 70%
+of the required category types. This helps explain
+why performance degrades so much for BC3, the
+arity three lexicon with complex arguments.
+</bodyText>
+<sectionHeader confidence="0.891795" genericHeader="method">
+8 Dealing with Non-Local Dependencies
+</sectionHeader>
+<bodyText confidence="0.9999521">
+While the methodology used here is restricted to
+CCG based algorithms, we believe the lessons to
+be very general. The aforementioned construc-
+tions involve optional arguments, non-local de-
+pendencies, and multiple potential heads. Even
+though CCG is theoretically expressive enough to
+handle these constructions, they present the un-
+supervised learner with additional ambiguity that
+will pose difficulties independently of the under-
+lying grammatical representation.
+For example, although our approach learns that
+subject NPs are taken as arguments by verbs, the
+task of deciding which verb to attach the subject
+to is frequently ambiguous. This most commonly
+occurs in verb chains, and is compounded in the
+presence of subject-modifying relative clauses (in
+CCGbank, both constructions are in fact treated
+as several verbs sharing a single subject). To
+illustrate this, we ran the BC1 and B3P&amp;L systems on
+the following three sentences:
+</bodyText>
+<listItem confidence="0.883636">
+1. The woman won an award
+2. The woman has won an award
+3. The woman being promoted has won an award
+</listItem>
+<bodyText confidence="0.9982932">
+The single-verb sentence is correctly parsed by
+both models, but they flounder as distractors are
+added. Both treat has as an intransitive verb, won
+as an adverb and an as a preposition:
+The woman won an award
+</bodyText>
+<sectionHeader confidence="0.41413" genericHeader="method">
+B3P&amp;L/BC1: N/N N (S\N)/N N/N N
+</sectionHeader>
+<bodyText confidence="0.848093">
+The woman has won an award
+</bodyText>
+<sectionHeader confidence="0.346902" genericHeader="method">
+B3P&amp;L/BC1: N/N N S\N S\S (S\S)/N N
+</sectionHeader>
+<bodyText confidence="0.997338285714286">
+To accommodate the presence of two additional
+verbs, both models analyze being as a noun modi-
+fier that takes promoted as an argument. BC1 (cor-
+rectly) stipulates a non-local dependency involv-
+ing promoted, but treats it (arguably incorrectly)
+as a case of object extraction:
+... being promoted has won an award
+</bodyText>
+<equation confidence="0.7765315">
+B3 P&amp;L (N\N)/S S S\N S\S (S\S)/N N
+BC1 (N\N)/(S/N) S/N S\N S\S (S\S)/N N
+</equation>
+<bodyText confidence="0.991617833333333">
+Discovering these, and many of the other sys-
+tematic errors describe here, may be less obvi-
+ous when analyzing unlabeled dependency trees.
+But we would expect similar difficulties for any
+unsupervised approach when sentence complexity
+grows without a specific bias for a given analysis.
+</bodyText>
+<sectionHeader confidence="0.994074" genericHeader="conclusions">
+9 Conclusions
+</sectionHeader>
+<bodyText confidence="0.99997287755102">
+In this paper, we have introduced labeled evalu-
+ation metrics for unsupervised CCG parsers, and
+have shown that these expose many common syn-
+tactic phenomena that are currently out of scope
+for any unsupervised grammar induction systems.
+While we do not wish claim that CCGbank’s anal-
+yses are free of arbitrary decisions, we hope to
+have demonstrated that these labeled metrics en-
+able linguistically informed error analyses, and
+hence allow us to at least in part address the ques-
+tion of where and why the performance of these
+approaches might plateau. We focused our analy-
+sis on English for simplicity, but many of the same
+types of problems exist in other languages and can
+be easily identified as stemming from the same
+lack of supervision. For example, in Japanese
+we would expect problems with post-positions, in
+German with verb clusters, in Chinese with mea-
+sure words, or in Arabic with morphology and
+variable word order.
+We believe that one way to overcome the is-
+sues we have identified is to incorporate a seman-
+tic signal. Lexical semantics, if sparsity can be
+avoided, might suffice; otherwise learning with
+grounding or an extrinsic task could be used to
+bias the choice of predicates, their arity and in turn
+the function words that connect them. Alterna-
+tively, a simpler solution might be to follow the
+lead of Boonkwan and Steedman (2011) or Gar-
+rette et al. (2015) where gold categories are as-
+signed by a linguist or treebank to tags and words.
+It is possible that more limited syntactic supervi-
+sion might be sufficient if focused on the semanti-
+cally ambiguous cases we have isolated.
+More generally, we hope to initiate a conver-
+sation about grammar induction which includes a
+discussion of how these non-trivial constructions
+can be discovered, learned, and modeled. Relat-
+edly, in future extensions to semi-supervised or
+projection based approaches, these types of con-
+structions are probably the most useful to get right
+despite comprising the tail, as analyses without
+them may not be semantically appropriate. In
+summary, we hope to begin to pull back the veil
+on the types of information that a truly unsuper-
+vised system, if one should ever exist, would need
+to learn, and we pose a challenge to the commu-
+nity to find ways that a learner might discover this
+knowledge without hand-engineering it.
+</bodyText>
+<page confidence="0.979823">
+1403
+</page>
+<sectionHeader confidence="0.995712" genericHeader="acknowledgments">
+10 Acknowledgments
+</sectionHeader>
+<bodyText confidence="0.997379857142857">
+This material is based upon work supported by
+the National Science Foundation under Grants No.
+1053856, 1205627 and 1405883. Any opinions,
+findings, and conclusions or recommendations ex-
+pressed in this material are those of the author(s)
+and do not necessarily reflect the views of the Na-
+tional Science Foundation.
+</bodyText>
+<sectionHeader confidence="0.998637" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.99993157">
+Yonatan Bisk and Julia Hockenmaier. 2012. Simple
+Robust Grammar Induction with Combinatory Cat-
+egorial Grammars. In Proceedings of the Twenty-
+Sixth Conference on Artificial Intelligence (AAAI-
+12), pages 1643–1649, Toronto, Canada, July.
+Yonatan Bisk and Julia Hockenmaier. 2013. An HDP
+Model for Inducing Combinatory Categorial Gram-
+mars. Transactions of the Association for Computa-
+tional Linguistics, 1:75–88.
+Phil Blunsom and Trevor Cohn. 2010. Unsupervised
+Induction of Tree Substitution Grammars for Depen-
+dency Parsing. In Proceedings of the 2010 Con-
+ference on Empirical Methods in Natural Language
+Processing, pages 1204–1213, Cambridge, USA,
+October.
+Prachya Boonkwan and Mark Steedman. 2011. Gram-
+mar Induction from Text Using Small Syntactic Pro-
+totypes. In Proceedings of 5th International Joint
+Conference on Natural Language Processing, pages
+438–446, Chiang Mai, Thailand, November.
+Glenn Carroll and M Rooth. 1998. Valence induction
+with a head-lexicalized PCFG. In Proceedings of
+the 3rd Conference on Empirical Methods in Natural
+Language Processing, page 36–45, Granada, Spain.
+Stephen Clark, Julia Hockenmaier, and Mark Steed-
+man. 2002. Building Deep Dependency Structures
+using a Wide-Coverage CCG Parser. In Proceedings
+of 40th Annual Meeting of the Association for Com-
+putational Linguistics, pages 327–334, Philadelphia,
+USA, July.
+Timothy A D Fowler and Gerald Penn. 2010. Accu-
+rate Context-Free Parsing with Combinatory Cate-
+gorial Grammar. In Proceedings of the 48th Annual
+Meeting of the Association for Computational Lin-
+guistics, pages 335–344, Uppsala, Sweden, July.
+Dan Garrette, Chris Dyer, Jason Baldridge, and Noah A
+Smith. 2015. Weakly-Supervised Grammar-
+Informed Bayesian CCG Parser Learning. In Pro-
+ceedings of the Twenty-Ninth AAAI Conference on
+Artificial Intelligence (AAAI-15), Austin, USA.
+William P Headden III, Mark Johnson, and David Mc-
+Closky. 2009. Improving Unsupervised Depen-
+dency Parsing with Richer Contexts and Smoothing.
+In Proceedings of Human Language Technologies:
+The 2009 Annual Conference of the North American
+Chapter of the Association for Computational Lin-
+guistics, pages 101–109, Boulder, USA, June.
+Julia Hockenmaier and Mark Steedman. 2007. CCG-
+bank: A Corpus of CCG Derivations and Depen-
+dency Structures Extracted from the Penn Treebank.
+Computational Linguistics, 33:355–396, September.
+Dan Klein and Christopher D Manning. 2004. Corpus-
+Based Induction of Syntactic Structure: Models of
+Dependency and Constituency. In Proceedings of
+the 42nd Meeting of the Association for Compu-
+tational Linguistics (ACL’04), Main Volume, pages
+478–485, Barcelona, Spain, July.
+Percy Liang, Slav Petrov, Michael I Jordan, and Dan
+Klein. 2007. The Infinite PCFG Using Hierarchi-
+cal Dirichlet Processes. In Proceedings of the 2007
+Joint Conference on Empirical Methods in Natural
+Language Processing and Computational Natural
+Language Learning (EMNLP-CoNLL), pages 688–
+697, Prague, Czech Republic, June.
+David Mareˇcek and Milan Straka. 2013. Stop-
+probability estimates computed on a large corpus
+improve Unsupervised Dependency Parsing. In Pro-
+ceedings of the 51st Annual Meeting of the Associa-
+tion for Computational Linguistics (Volume 1: Long
+Papers), pages 281–290, Sofia, Bulgaria, August.
+Tahira Naseem, Harr Chen, Regina Barzilay, and Mark
+Johnson. 2010. Using Universal Linguistic Knowl-
+edge to Guide Grammar Induction. In Proceed-
+ings of the 2010 Conference on Empirical Methods
+in Natural Language Processing, pages 1234–1244,
+Cambridge, USA, October.
+Valentin I Spitkovsky, Hiyan Alshawi, and Daniel Ju-
+rafsky. 2011. Punctuation: Making a Point in Un-
+supervised Dependency Parsing. In Proceedings of
+the Fifteenth Conference on Computational Natural
+Language Learning, pages 19–28, Portland, USA,
+June.
+Valentin I Spitkovsky, Hiyan Alshawi, and Daniel Ju-
+rafsky. 2013. Breaking Out of Local Optima with
+Count Transforms and Model Recombination: A
+Study in Grammar Induction. In Proceedings of
+the 2013 Conference on Empirical Methods in Natu-
+ral Language Processing, pages 1983–1995, Seattle,
+USA, October.
+Mark Steedman. 2000. The Syntactic Process. The
+MIT Press.
+Yee-Whye Teh, Michael I Jordan, Matthew J Beal, and
+David M Blei. 2006. Hierarchical Dirichlet Pro-
+cesses. Journal of the American Statistical Associa-
+tion, 101(476):1566–1581.
+Hiroyasu Yamada and Yuji Matsumoto. 2003. Statisti-
+cal Dependency Analysis With Support Vector Ma-
+chines. In Proceedings of 8th International Work-
+shop on Parsing Technologies (IWPT), pages 195–
+206, Nancy, France.
+</reference>
+<page confidence="0.996499">
+1404
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.946767">
+<title confidence="0.9988945">Probing the Linguistic Strengths and of Unsupervised Grammar Induction</title>
+<author confidence="0.977317">Bisk</author>
+<affiliation confidence="0.9986195">Department of Computer The University of Illinois at</affiliation>
+<address confidence="0.993684">201 N Goodwin Ave Urbana, IL</address>
+<abstract confidence="0.998645941176471">Work in grammar induction should help shed light on the amount of syntactic structure that is discoverable from raw word or tag sequences. But since most current grammar induction algorithms produce unlabeled dependencies, it is difficult to analyze what types of constructions these algorithms can or cannot capture, and, therefore, to identify where additional supervision may be necessary. This paper provides an in-depth analysis of the errors made by unsupervised CCG parsers by evaluating them against the labeled dependencies in CCGbank, hinting at new research directions necessary for progress in grammar induction.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>Yonatan Bisk</author>
+<author>Julia Hockenmaier</author>
+</authors>
+<title>Simple Robust Grammar Induction with Combinatory Categorial Grammars.</title>
+<date>2012</date>
+<booktitle>In Proceedings of the TwentySixth Conference on Artificial Intelligence (AAAI12),</booktitle>
+<pages>1643--1649</pages>
+<location>Toronto, Canada,</location>
+<contexts>
+<context position="19169" citStr="Bisk and Hockenmaier (2012)" startWordPosition="3304" endWordPosition="3307">the precise CCGbankstyle categories, and dramatically reduce the set of categories without losing expressive power. One distinction that we do not conflate, even though it is currently beyond the scope of the induction algorithm, is the distinction between PP arguments (requiring prepositions to have the category PP/NP) and adjuncts (requiring prepositions to be (NP\NP)/NP or ((S\NP)\(S\NP))/NP). This simplification is consistent with the most basic components of CCG and can therefore be easily used for the evaluation and analysis of any weakly or fully supervised CCG system, not just that of Bisk and Hockenmaier (2012). An example simplification is present in Figure 2, and the reduction in the set of categories can be seen in Table 1. Similar simplifications should also be possible for CCGbanks in other languages. 4 Our approach There are two parts to our approach: 1) inducing a CCG grammar from seed knowledge and 2) learning a probability model over parses. The induction algorithm (Bisk and Hockenmaier, 2012) uses the seed knowledge that nouns can take the CCG category N, that verbs can take the category S and may take N arguments, and that any word may modify a constituent it is adjacent to, to iterativel</context>
+<context position="38332" citStr="Bisk and Hockenmaier (2012)" startWordPosition="6493" endWordPosition="6496">nguage. In Table 9, we compare the lexicons induced by variants of the induction algorithm by their token-based coverage (the percent of tokens in Sections 22 for which the induced tag lexicon contains the correct category), type-based coverage (the percent of category types that the induced lexicon contains), as well as type-based precision (the percent of induced category types that occur in Section 22). This analysis is independent of the learned models, as their probabilities are not taken into account. We see that as the number of lexical categories induced (subject to the constraints of Bisk and Hockenmaier (2012)) increases, the percent that are valid English categories decreases rapidly (type-based precision falls from 81.1% to 36.1%). Despite this, and despite a high token 1402 coverage of up to 90%, we still miss almost 70% of the required category types. This helps explain why performance degrades so much for BC3, the arity three lexicon with complex arguments. 8 Dealing with Non-Local Dependencies While the methodology used here is restricted to CCG based algorithms, we believe the lessons to be very general. The aforementioned constructions involve optional arguments, non-local dependencies, and</context>
+</contexts>
+<marker>Bisk, Hockenmaier, 2012</marker>
+<rawString>Yonatan Bisk and Julia Hockenmaier. 2012. Simple Robust Grammar Induction with Combinatory Categorial Grammars. In Proceedings of the TwentySixth Conference on Artificial Intelligence (AAAI12), pages 1643–1649, Toronto, Canada, July.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yonatan Bisk</author>
+<author>Julia Hockenmaier</author>
+</authors>
+<title>An HDP Model for Inducing Combinatory Categorial Grammars.</title>
+<date>2013</date>
+<journal>Transactions of the Association for Computational Linguistics,</journal>
+<pages>1--75</pages>
+<contexts>
+<context position="2411" citStr="Bisk and Hockenmaier, 2013" startWordPosition="360" endWordPosition="363"> analysis is the fact that most of the work in this domain has focused on parsers that return unlabeled dependencies, which cannot easily be assigned a linguistic interpretation. This paper shows that approaches that are based on categorial grammar (Steedman, 2000) are amenable to more stringent evaluation metrics, which enable detailed analyses of the constructions they capture, while the commonly used unlabeled directed attachment scores hide linguistically important errors. Any categorial grammar based system, whether deriving its grammar from seed knowledge distinguishing nouns and verbs (Bisk and Hockenmaier, 2013), from a lexicon constructed from a simple questionnaire for linguists (Boonkwan and Steedman, 2011), or from sections of a treebank (Garrette et al., 2015), will attach linguistically expressive categories to individual words, and can therefore produce labeled dependencies. We provide a simple proof of concept for how these labeled dependencies can be used to isolate problem areas in CCG induction algorithms. We illustrate how they make the linguistic assumptions and mistakes of the model transparent, and are easily comparable to a treebank where available. They also allow us to identify ling</context>
+<context position="4313" citStr="Bisk and Hockenmaier (2013)" startWordPosition="646" endWordPosition="649">rvised dependency parsers (since they require dependency graphs, instead of trees), and that have motivated the use of categorial grammarbased approaches for supervised parsing. 1395 Proceedings of the 53rd Annual Meeting of the Association for Computational Linguistics and the 7th International Joint Conference on Natural Language Processing, pages 1395–1404, Beijing, China, July 26-31, 2015. c�2015 Association for Computational Linguistics First, we provide a brief introduction to CCG. Next, we define a labeled evaluation metric that allows us to compare the labeled dependencies produced by Bisk and Hockenmaier (2013)’s unsupervised parser with those in CCGbank (Hockenmaier and Steedman, 2007). Third, we extend their induction algorithm to allow it to induce more complex categories, and refine their probability model to handle punctuation and lexicalization, which we show to be necessary when handling the larger grammars induced by our variant of their algorithm. While we also perform a traditional dependency evaluation for comparison to the non-CCG based literature, we focus on our CCG-based labeled evaluation metrics to perform a comparative analysis of Bisk and Hockenmaier (2013)’s parser and our extens</context>
+<context position="19850" citStr="Bisk and Hockenmaier (2013)" startWordPosition="3427" endWordPosition="3430">d the reduction in the set of categories can be seen in Table 1. Similar simplifications should also be possible for CCGbanks in other languages. 4 Our approach There are two parts to our approach: 1) inducing a CCG grammar from seed knowledge and 2) learning a probability model over parses. The induction algorithm (Bisk and Hockenmaier, 2012) uses the seed knowledge that nouns can take the CCG category N, that verbs can take the category S and may take N arguments, and that any word may modify a constituent it is adjacent to, to iteratively induce a CCG lexicon to parse the training data. In Bisk and Hockenmaier (2013), we introduced a model that is based on Hierarchical Dirichlet Processes (Teh et al., 2006). This HDPCCG model gave state-of-the-art performance on a number languages, and qualitative analysis of the resultant lexicons indicated that the system was learning the word order and many of the correct attachments of the tested languages. But this system also had a number of shortcomings: the induction algorithm was restricted to a small fragment of CCG, the model emitted only POS tags rather than words, and punctuation was ignored. Here, we use our previous HDP-CCG system as a baseline, and introdu</context>
+<context position="21153" citStr="Bisk and Hockenmaier (2013)" startWordPosition="3641" endWordPosition="3644">ntal Setup For our experiments we will follow the standard practice in supervised parsing of using WSJ Sections 02-21 for training, Section 22 for development and error analysis, and a final evaluation of the best models on Section 23. Because the induced lexicons are overly general, the memory footprint grows rapidly as the complexity of the grammar increases. For this reason, we only train on sentences that contain up to 20 words (as well as an arbitrary number of punctuation marks). All analyses and evaluation are performed with sentences of all lengths unless otherwise indicated. Finally, Bisk and Hockenmaier (2013) followed Liang et al. (2007) in setting the values of the hyperparameters α to powers (eg. the square) of the number of observed outcomes in the distribution. But when the output consists of words rather than POS tags, the concentration parameter α=V 2 is too large to allow the model to learn. For this reason, experiments will be reported with all hyperparameters set to a constant of 2500.1 1We tested three values (1000, 2500, 5000) and found that the basic model at 2500 performed closest to the previously 1398 Base + Lexicalization + Punctuation + Punc &amp; Lex + Allow (X|X)|X Only Atomic Argum</context>
+<context position="26384" citStr="Bisk and Hockenmaier (2013)" startWordPosition="4526" endWordPosition="4529">ents. Left unconstrained this space of grammatical cat, X\X , , Y , X X/Y X X X\X Y 1399 CCGbank 02-21 WSJ2-21 DA Model LF1 UF1 @10 @20 @∞ Naseem (Universal) 71.9 50.4 Naseem (English) 73.8 66.1 B1 33.8 60.3 70.7 63.1 58.4 BC 34.4 62.0 70.5 65.4 61.9 1 BP&amp;L 38.3 66.2 71.3 65.9 62.3 3 Model Supertagging LF1 UF1 B1 59.2 34.5 60.6 BC 59.9 34.9 63.6 1 62.3 37.1 64.9 BP&amp;L 3 Table 3: Test set performance of the final systems discussed in this paper (Section 23) egories introduced grows very rapidly, introducing a tremendous number of incorrect categories (analyzed later in Table 9). For this reason Bisk and Hockenmaier (2013) applied the HDP-CCG model to a context-free fragment of CCG, limiting the arity of lexical categories (number of arguments they can take) to two and the arity of composition (how many arguments can be passed through composition) to one. We know the space of grammatical constructions is larger than this, so we will allow the model to induce categories with three arguments and use generalized composition (B3). Bisk and Hockenmaier (2013) allow lexical categories to only take atomic arguments, but, as explained above, non-local dependencies require complex arguments of the form S|N. We therefore</context>
+<context position="29789" citStr="Bisk and Hockenmaier (2013)" startWordPosition="5067" endWordPosition="5070">he unlabeled dependencies produced by Yamada and Matsumoto’s (2003) head rules for Sections 02- 21 of the Penn Treebank (Table 4)2. Naseem et al. (2010) only report performance on sentences of up to length 20 (without punctuation marks). Their approach incorporates prior linguistic knowledge either in the form of “universal” constraints (e.g. that adjectives may modify nouns) or “Englishspecific” constraints (e.g. that adjectives tend to modify and precede nouns). These universal constraints are akin to, but more explicit and detailed than the information given to the induction algorithm (see Bisk and Hockenmaier (2013) for a discussion). Comparing these numbers to labeled and unlabeled CCG dependencies on the same corpus (all sentences, hence, @oc), we see that performance increases on CCGbank do not translate to similar gains on these unlabeled dependencies. While we have done our best to convert the predicate argument structure of CCG into dependencies 2BH13 use hyperparameter schemes and report 64.2@20. 1400 Correct LR B1 LR Bs&amp;L LR Bi Category Used instead (%) Used instead (%) Used instead (%) N 82.6 N/N 7.5 74.5 N/N 8.3 77.4 N/N 9.8 N/N 78.5 (S\S)\(S\S) 9.8 71.9 (S\S)\(S\S) 8.7 80.6 N 7.7 S\N 17.3 S\S </context>
+<context position="33595" citStr="Bisk and Hockenmaier (2013)" startWordPosition="5705" endWordPosition="5708">ut were never used by any of the parsers in a Viterbi parse. These include possessives, relative pronouns, modals/auxiliaries, control verbs and ditransitives. We show the categories that the BC1 model uses instead. The gold categories shown correspond to the bold words in Table 6. While the reason many of these cases are difficult is intuitive (e.g. very modifying tall instead of man), a more difficult type of error than previously discussed is that of recovering non-local dependencies. The recovery of nonlocal dependencies is beyond the scope of both standard dependency-based approaches and Bisk and Hockenmaier (2013)’s original induction algorithm. But the parser does not learn to use lexical categories with complex arguments correctly even when the algorithm is extended, to induce them. For example, BC1 prefers to treat auxiliaries or equi verbs like promise as intransitives rather than as an auxiliary that shares its subject with pay. The surface string supports this decision, as it can be parsed without having to capture the nonlocal dependencies (top row) present in the correct (bottom row) analysis: I promise to pay you N S\N (S\S)/S S/N N N (S\N)/(S\N) (S\N)/(S\N) (S\N)/N N 1401 1st Argument 2nd Arg</context>
+</contexts>
+<marker>Bisk, Hockenmaier, 2013</marker>
+<rawString>Yonatan Bisk and Julia Hockenmaier. 2013. An HDP Model for Inducing Combinatory Categorial Grammars. Transactions of the Association for Computational Linguistics, 1:75–88.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Phil Blunsom</author>
+<author>Trevor Cohn</author>
+</authors>
+<title>Unsupervised Induction of Tree Substitution Grammars for Dependency Parsing.</title>
+<date>2010</date>
+<booktitle>In Proceedings of the 2010 Conference on Empirical Methods in Natural Language Processing,</booktitle>
+<pages>1204--1213</pages>
+<location>Cambridge, USA,</location>
+<contexts>
+<context position="1487" citStr="Blunsom and Cohn, 2010" startWordPosition="219" endWordPosition="222">rogress in grammar induction. 1 Introduction Grammar induction aims to develop algorithms that can automatically discover the latent syntactic structure of language from raw or part-of-speech tagged text. While such algorithms would have the greatest utility for low-resource languages for which no treebank is available to train supervised parsers, most work in this area has focused on languages where existing treebanks can be used to measure and compare the performance of the resultant parsers. Despite significant progress in the last decade (Klein and Manning, 2004; Headden III et al., 2009; Blunsom and Cohn, 2010; Spitkovsky et al., 2013; Mareˇcek and Straka, 2013), there has been little analysis performed on the types of errors these induction systems make, and our understanding of what kinds of constructions these parsers can or cannot recover is still rather limited. One likely reason for this lack of analysis is the fact that most of the work in this domain has focused on parsers that return unlabeled dependencies, which cannot easily be assigned a linguistic interpretation. This paper shows that approaches that are based on categorial grammar (Steedman, 2000) are amenable to more stringent evalua</context>
+</contexts>
+<marker>Blunsom, Cohn, 2010</marker>
+<rawString>Phil Blunsom and Trevor Cohn. 2010. Unsupervised Induction of Tree Substitution Grammars for Dependency Parsing. In Proceedings of the 2010 Conference on Empirical Methods in Natural Language Processing, pages 1204–1213, Cambridge, USA, October.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Prachya Boonkwan</author>
+<author>Mark Steedman</author>
+</authors>
+<title>Grammar Induction from Text Using Small Syntactic Prototypes.</title>
+<date>2011</date>
+<booktitle>In Proceedings of 5th International Joint Conference on Natural Language Processing,</booktitle>
+<pages>438--446</pages>
+<location>Chiang Mai, Thailand,</location>
+<contexts>
+<context position="2511" citStr="Boonkwan and Steedman, 2011" startWordPosition="374" endWordPosition="377">eled dependencies, which cannot easily be assigned a linguistic interpretation. This paper shows that approaches that are based on categorial grammar (Steedman, 2000) are amenable to more stringent evaluation metrics, which enable detailed analyses of the constructions they capture, while the commonly used unlabeled directed attachment scores hide linguistically important errors. Any categorial grammar based system, whether deriving its grammar from seed knowledge distinguishing nouns and verbs (Bisk and Hockenmaier, 2013), from a lexicon constructed from a simple questionnaire for linguists (Boonkwan and Steedman, 2011), or from sections of a treebank (Garrette et al., 2015), will attach linguistically expressive categories to individual words, and can therefore produce labeled dependencies. We provide a simple proof of concept for how these labeled dependencies can be used to isolate problem areas in CCG induction algorithms. We illustrate how they make the linguistic assumptions and mistakes of the model transparent, and are easily comparable to a treebank where available. They also allow us to identify linguistic phenomena that require additional supervision or training signal to master. Our analysis will</context>
+<context position="42100" citStr="Boonkwan and Steedman (2011)" startWordPosition="7113" endWordPosition="7116">ck of supervision. For example, in Japanese we would expect problems with post-positions, in German with verb clusters, in Chinese with measure words, or in Arabic with morphology and variable word order. We believe that one way to overcome the issues we have identified is to incorporate a semantic signal. Lexical semantics, if sparsity can be avoided, might suffice; otherwise learning with grounding or an extrinsic task could be used to bias the choice of predicates, their arity and in turn the function words that connect them. Alternatively, a simpler solution might be to follow the lead of Boonkwan and Steedman (2011) or Garrette et al. (2015) where gold categories are assigned by a linguist or treebank to tags and words. It is possible that more limited syntactic supervision might be sufficient if focused on the semantically ambiguous cases we have isolated. More generally, we hope to initiate a conversation about grammar induction which includes a discussion of how these non-trivial constructions can be discovered, learned, and modeled. Relatedly, in future extensions to semi-supervised or projection based approaches, these types of constructions are probably the most useful to get right despite comprisi</context>
+</contexts>
+<marker>Boonkwan, Steedman, 2011</marker>
+<rawString>Prachya Boonkwan and Mark Steedman. 2011. Grammar Induction from Text Using Small Syntactic Prototypes. In Proceedings of 5th International Joint Conference on Natural Language Processing, pages 438–446, Chiang Mai, Thailand, November.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Glenn Carroll</author>
+<author>M Rooth</author>
+</authors>
+<title>Valence induction with a head-lexicalized PCFG.</title>
+<date>1998</date>
+<booktitle>In Proceedings of the 3rd Conference on Empirical Methods in Natural Language Processing,</booktitle>
+<pages>36--45</pages>
+<location>Granada,</location>
+<contexts>
+<context position="22902" citStr="Carroll and Rooth, 1998" startWordPosition="3936" endWordPosition="3939">line model to capture lexicalization and punctuation, and how increasing the complexity of the induced grammars affect performance (Table 2). 6.1 Modeling Lexicalization In keeping with most work in grammar induction from part-of-speech tagged text, Bisk and Hockenmaier’s (2013) HDP-CCG treats POS tags t rather than words w as the terminals it generates based on their lexical categories c. The advantage of this approach is that tag-based emissions p(t|c) are a lot less sparse than word-based emissions p(w|c). It is therefore beneficial to first train a model that emits tags rather than words (Carroll and Rooth, 1998), and then to use this simpler model to initialize a lexicalized model that generates words instead of tags. To perform the switch we simply estimate counts for the parse forests using the unlexicalized model during the E-Step and then apply those counts to the lexicalized model during the M-Step. Inside-Outside then continues as before. Many words, like prepositions, differ systematically in their preferred syntactic role from that of their part-of-speech tags. This change benefits all settings of the model (Column 2 of Table 2). 6.2 Modeling Punctuation Spitkovsky et al. (2011) performed a d</context>
+</contexts>
+<marker>Carroll, Rooth, 1998</marker>
+<rawString>Glenn Carroll and M Rooth. 1998. Valence induction with a head-lexicalized PCFG. In Proceedings of the 3rd Conference on Empirical Methods in Natural Language Processing, page 36–45, Granada, Spain.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Stephen Clark</author>
+<author>Julia Hockenmaier</author>
+<author>Mark Steedman</author>
+</authors>
+<title>Building Deep Dependency Structures using a Wide-Coverage CCG Parser.</title>
+<date>2002</date>
+<booktitle>In Proceedings of 40th Annual Meeting of the Association for Computational Linguistics,</booktitle>
+<pages>327--334</pages>
+<location>Philadelphia, USA,</location>
+<contexts>
+<context position="8066" citStr="Clark et al., 2002" startWordPosition="1311" endWordPosition="1314"> 2 (S�N1)tN2 2 saw he (S category and slot, can be extracted: 4 3 (S�S1)tN2 2 I saw her from afar In this exampl, I fills th fist argumnt of saw. The ue of categorie as dependency lab This is represnted by an edg from saw o I, lamakes CCG labels more fine-grained than a s beled as a transitive verb ((S\N)/N). This proced epy grammar For xamp, j l f iti ranitie d dii dure is followed for every argument of every predverbs are ll SUB in dependency treebanks b icate, leading to a labeld directed graph. take at least three different labels in C Evaluation metrics for supervised CCG parsers w Lbel (Clark et al., 2002) measure labeled f-score (LF1) 2 1 I SUB w � precision of these dependencies (requiring the 2 3 her OBJ functor, argument, lexical category of the functor and slot of the argument to all match). A �� second, looser, evaluation is often also performed OBJ ���� which measures unlabeled, undirected dependency scores (UF1). An addit Non-localdependencies and complex arguronouns or contr verb) which mdiate no ments One advantage of CCG is its ability to l dpns via a ondaton e difyin h nlal dpdeni recover the non-local dependencies involved in e to ditingsh betee sbjet nd objet control, raising, r w</context>
+<context position="11582" citStr="Clark et al. (2002)" startWordPosition="1915" endWordPosition="1918">owing and women , , and Steedman, 2002; Clark and Curran 2007), l is wth se laugng, there is no signal for the learner. s spios ambit ael eimin thi uru a (0) guy is lrgy l h h i i F w alSrv PO SP e 0. r no m o None ofYthe labeled directed CCG dependencies il hd f th S�N w h fro f d Y rg 9are correct.TBut under the moreclenient unlabeled XZ directedZevaluation of Garretteaet al. (2015), and the even mor lenet ulabeed ndirectd metric A full xplaatin of the calculus can be found . discussed in this paper (Section 23) between know and saw dicate missing information which only becomes prep prep of Clark et al. (2002),otwo (or three) of theofour dependencis wuld be deemed corret: I saw her from f teisi n a ar rule o conunt yprang d teny fr jc I saw her from afar if the available laer in the discourse - 7 Final Oveall Model Perform -th argument of the lexical I saw her I saw he h i i . 7 Final Finally, we l Performanc Incorrect parse Crrect parse models again o D of word w� derivation: i Insawaherffrom afar Ipsaw her frommafar d b il d b d Incorct arse eiher “uiv un a arse g (eg. that adj Corret parse aon s peror ti i dard depend attachment pendency) score . r For exampl f tig p -spec v pre , a tie tha p hi</context>
+</contexts>
+<marker>Clark, Hockenmaier, Steedman, 2002</marker>
+<rawString>Stephen Clark, Julia Hockenmaier, and Mark Steedman. 2002. Building Deep Dependency Structures using a Wide-Coverage CCG Parser. In Proceedings of 40th Annual Meeting of the Association for Computational Linguistics, pages 327–334, Philadelphia, USA, July.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Timothy A D Fowler</author>
+<author>Gerald Penn</author>
+</authors>
+<title>Accurate Context-Free Parsing with Combinatory Categorial Grammar.</title>
+<date>2010</date>
+<booktitle>In Proceedings of the 48th Annual Meeting of the Association for Computational Linguistics,</booktitle>
+<pages>335--344</pages>
+<location>Uppsala, Sweden,</location>
+<contexts>
+<context position="15854" citStr="Fowler and Penn, 2010" startWordPosition="2716" endWordPosition="2719">ish CCGA Simplified Labeled Evaluation cess s roces wt a sma amun o Thi ps starts ih ll ot f bank are augmented with morphosyntactic feat b see noee t enes c aomc ae lguge wih e d kwldg th dfi whih i t ll l tures that indicte e.g. whether sentences are declaratives(S[dd]), ornverb phrases are infinitival (S[to]\NP). Prior work on supervisedhparsing i twith CCG found thathmanymofttheseafeaturesmcan ches between the basic set of caegories and - , se used in rebanks We wil fcus on the Enbe rcovered with proper modeling of latent state restrictions, wods can either subcategorize for or splitting (Fowler and Penn, 2010). Since we wih , modify the words they are adjacen to, this process h CCGbank but these details apply with only . t evluat a system that do not am to induce rue lexicl cao of ncan oexpodc a egres resig cmpl nor changes to German and Chinese as well. t. Immee neibors wo t cateores iy. diat gh of ds wh gi such features, we remove them. We also remove Siio S N a dfi h t SS rthe distinction between noun phrases (NP) and mplifiat or my a wi gories � or T eond rnd o indtion a also cause t icl tories uiars, t N�N he sc e lea aeg ou f uc cn nouns (N), which is predicated on knowledge of gd png, he int</context>
+</contexts>
+<marker>Fowler, Penn, 2010</marker>
+<rawString>Timothy A D Fowler and Gerald Penn. 2010. Accurate Context-Free Parsing with Combinatory Categorial Grammar. In Proceedings of the 48th Annual Meeting of the Association for Computational Linguistics, pages 335–344, Uppsala, Sweden, July.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Dan Garrette</author>
+<author>Chris Dyer</author>
+<author>Jason Baldridge</author>
+<author>Noah A Smith</author>
+</authors>
+<title>Weakly-Supervised GrammarInformed Bayesian CCG Parser Learning.</title>
+<date>2015</date>
+<booktitle>In Proceedings of the Twenty-Ninth AAAI Conference on Artificial Intelligence (AAAI-15),</booktitle>
+<location>Austin, USA.</location>
+<contexts>
+<context position="2567" citStr="Garrette et al., 2015" startWordPosition="384" endWordPosition="387">c interpretation. This paper shows that approaches that are based on categorial grammar (Steedman, 2000) are amenable to more stringent evaluation metrics, which enable detailed analyses of the constructions they capture, while the commonly used unlabeled directed attachment scores hide linguistically important errors. Any categorial grammar based system, whether deriving its grammar from seed knowledge distinguishing nouns and verbs (Bisk and Hockenmaier, 2013), from a lexicon constructed from a simple questionnaire for linguists (Boonkwan and Steedman, 2011), or from sections of a treebank (Garrette et al., 2015), will attach linguistically expressive categories to individual words, and can therefore produce labeled dependencies. We provide a simple proof of concept for how these labeled dependencies can be used to isolate problem areas in CCG induction algorithms. We illustrate how they make the linguistic assumptions and mistakes of the model transparent, and are easily comparable to a treebank where available. They also allow us to identify linguistic phenomena that require additional supervision or training signal to master. Our analysis will be based on extensions of our earlier system (Bisk and </context>
+<context position="42126" citStr="Garrette et al. (2015)" startWordPosition="7118" endWordPosition="7122">in Japanese we would expect problems with post-positions, in German with verb clusters, in Chinese with measure words, or in Arabic with morphology and variable word order. We believe that one way to overcome the issues we have identified is to incorporate a semantic signal. Lexical semantics, if sparsity can be avoided, might suffice; otherwise learning with grounding or an extrinsic task could be used to bias the choice of predicates, their arity and in turn the function words that connect them. Alternatively, a simpler solution might be to follow the lead of Boonkwan and Steedman (2011) or Garrette et al. (2015) where gold categories are assigned by a linguist or treebank to tags and words. It is possible that more limited syntactic supervision might be sufficient if focused on the semantically ambiguous cases we have isolated. More generally, we hope to initiate a conversation about grammar induction which includes a discussion of how these non-trivial constructions can be discovered, learned, and modeled. Relatedly, in future extensions to semi-supervised or projection based approaches, these types of constructions are probably the most useful to get right despite comprising the tail, as analyses w</context>
+</contexts>
+<marker>Garrette, Dyer, Baldridge, Smith, 2015</marker>
+<rawString>Dan Garrette, Chris Dyer, Jason Baldridge, and Noah A Smith. 2015. Weakly-Supervised GrammarInformed Bayesian CCG Parser Learning. In Proceedings of the Twenty-Ninth AAAI Conference on Artificial Intelligence (AAAI-15), Austin, USA.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>William P Headden Mark Johnson</author>
+<author>David McClosky</author>
+</authors>
+<title>Improving Unsupervised Dependency Parsing with Richer Contexts and Smoothing.</title>
+<date>2009</date>
+<booktitle>In Proceedings of Human Language Technologies: The 2009 Annual Conference of the North American Chapter of the Association for Computational Linguistics,</booktitle>
+<pages>101--109</pages>
+<location>Boulder, USA,</location>
+<marker>Johnson, McClosky, 2009</marker>
+<rawString>William P Headden III, Mark Johnson, and David McClosky. 2009. Improving Unsupervised Dependency Parsing with Richer Contexts and Smoothing. In Proceedings of Human Language Technologies: The 2009 Annual Conference of the North American Chapter of the Association for Computational Linguistics, pages 101–109, Boulder, USA, June.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Julia Hockenmaier</author>
+<author>Mark Steedman</author>
+</authors>
+<title>CCGbank: A Corpus of CCG Derivations and Dependency Structures Extracted from the Penn Treebank. Computational Linguistics,</title>
+<date>2007</date>
+<pages>33--355</pages>
+<contexts>
+<context position="4390" citStr="Hockenmaier and Steedman, 2007" startWordPosition="657" endWordPosition="661">of trees), and that have motivated the use of categorial grammarbased approaches for supervised parsing. 1395 Proceedings of the 53rd Annual Meeting of the Association for Computational Linguistics and the 7th International Joint Conference on Natural Language Processing, pages 1395–1404, Beijing, China, July 26-31, 2015. c�2015 Association for Computational Linguistics First, we provide a brief introduction to CCG. Next, we define a labeled evaluation metric that allows us to compare the labeled dependencies produced by Bisk and Hockenmaier (2013)’s unsupervised parser with those in CCGbank (Hockenmaier and Steedman, 2007). Third, we extend their induction algorithm to allow it to induce more complex categories, and refine their probability model to handle punctuation and lexicalization, which we show to be necessary when handling the larger grammars induced by our variant of their algorithm. While we also perform a traditional dependency evaluation for comparison to the non-CCG based literature, we focus on our CCG-based labeled evaluation metrics to perform a comparative analysis of Bisk and Hockenmaier (2013)’s parser and our extensions. 2 Combinatory Categorial Grammar CCG categories CCG (Steedman, 2000) is</context>
+</contexts>
+<marker>Hockenmaier, Steedman, 2007</marker>
+<rawString>Julia Hockenmaier and Mark Steedman. 2007. CCGbank: A Corpus of CCG Derivations and Dependency Structures Extracted from the Penn Treebank. Computational Linguistics, 33:355–396, September.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Dan Klein</author>
+<author>Christopher D Manning</author>
+</authors>
+<title>CorpusBased Induction of Syntactic Structure: Models of Dependency and Constituency.</title>
+<date>2004</date>
+<booktitle>In Proceedings of the 42nd Meeting of the Association for Computational Linguistics (ACL’04), Main Volume,</booktitle>
+<pages>478--485</pages>
+<location>Barcelona, Spain,</location>
+<contexts>
+<context position="1437" citStr="Klein and Manning, 2004" startWordPosition="209" endWordPosition="212"> hinting at new research directions necessary for progress in grammar induction. 1 Introduction Grammar induction aims to develop algorithms that can automatically discover the latent syntactic structure of language from raw or part-of-speech tagged text. While such algorithms would have the greatest utility for low-resource languages for which no treebank is available to train supervised parsers, most work in this area has focused on languages where existing treebanks can be used to measure and compare the performance of the resultant parsers. Despite significant progress in the last decade (Klein and Manning, 2004; Headden III et al., 2009; Blunsom and Cohn, 2010; Spitkovsky et al., 2013; Mareˇcek and Straka, 2013), there has been little analysis performed on the types of errors these induction systems make, and our understanding of what kinds of constructions these parsers can or cannot recover is still rather limited. One likely reason for this lack of analysis is the fact that most of the work in this domain has focused on parsers that return unlabeled dependencies, which cannot easily be assigned a linguistic interpretation. This paper shows that approaches that are based on categorial grammar (Ste</context>
+</contexts>
+<marker>Klein, Manning, 2004</marker>
+<rawString>Dan Klein and Christopher D Manning. 2004. CorpusBased Induction of Syntactic Structure: Models of Dependency and Constituency. In Proceedings of the 42nd Meeting of the Association for Computational Linguistics (ACL’04), Main Volume, pages 478–485, Barcelona, Spain, July.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Percy Liang</author>
+<author>Slav Petrov</author>
+<author>Michael I Jordan</author>
+<author>Dan Klein</author>
+</authors>
+<title>The Infinite PCFG Using Hierarchical Dirichlet Processes.</title>
+<date>2007</date>
+<booktitle>In Proceedings of the 2007 Joint Conference on Empirical Methods in Natural Language Processing and Computational Natural Language Learning (EMNLP-CoNLL),</booktitle>
+<pages>688--697</pages>
+<location>Prague, Czech Republic,</location>
+<contexts>
+<context position="21182" citStr="Liang et al. (2007)" startWordPosition="3646" endWordPosition="3649">l follow the standard practice in supervised parsing of using WSJ Sections 02-21 for training, Section 22 for development and error analysis, and a final evaluation of the best models on Section 23. Because the induced lexicons are overly general, the memory footprint grows rapidly as the complexity of the grammar increases. For this reason, we only train on sentences that contain up to 20 words (as well as an arbitrary number of punctuation marks). All analyses and evaluation are performed with sentences of all lengths unless otherwise indicated. Finally, Bisk and Hockenmaier (2013) followed Liang et al. (2007) in setting the values of the hyperparameters α to powers (eg. the square) of the number of observed outcomes in the distribution. But when the output consists of words rather than POS tags, the concentration parameter α=V 2 is too large to allow the model to learn. For this reason, experiments will be reported with all hyperparameters set to a constant of 2500.1 1We tested three values (1000, 2500, 5000) and found that the basic model at 2500 performed closest to the previously 1398 Base + Lexicalization + Punctuation + Punc &amp; Lex + Allow (X|X)|X Only Atomic Arguments B1 34.2 35.2 36.3 36.9 3</context>
+</contexts>
+<marker>Liang, Petrov, Jordan, Klein, 2007</marker>
+<rawString>Percy Liang, Slav Petrov, Michael I Jordan, and Dan Klein. 2007. The Infinite PCFG Using Hierarchical Dirichlet Processes. In Proceedings of the 2007 Joint Conference on Empirical Methods in Natural Language Processing and Computational Natural Language Learning (EMNLP-CoNLL), pages 688– 697, Prague, Czech Republic, June.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>David Mareˇcek</author>
+<author>Milan Straka</author>
+</authors>
+<title>Stopprobability estimates computed on a large corpus improve Unsupervised Dependency Parsing.</title>
+<date>2013</date>
+<booktitle>In Proceedings of the 51st Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers),</booktitle>
+<pages>281--290</pages>
+<location>Sofia, Bulgaria,</location>
+<marker>Mareˇcek, Straka, 2013</marker>
+<rawString>David Mareˇcek and Milan Straka. 2013. Stopprobability estimates computed on a large corpus improve Unsupervised Dependency Parsing. In Proceedings of the 51st Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 281–290, Sofia, Bulgaria, August.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Tahira Naseem</author>
+<author>Harr Chen</author>
+<author>Regina Barzilay</author>
+<author>Mark Johnson</author>
+</authors>
+<title>Using Universal Linguistic Knowledge to Guide Grammar Induction.</title>
+<date>2010</date>
+<booktitle>In Proceedings of the 2010 Conference on Empirical Methods in Natural Language Processing,</booktitle>
+<pages>1234--1244</pages>
+<location>Cambridge, USA,</location>
+<contexts>
+<context position="23955" citStr="Naseem et al. (2010)" startWordPosition="4104" endWordPosition="4107">hat of their part-of-speech tags. This change benefits all settings of the model (Column 2 of Table 2). 6.2 Modeling Punctuation Spitkovsky et al. (2011) performed a detailed analysis of punctuation for dependency-based grammar induction, and proposed a number of constraints that aimed to capture the different ways in which dependencies might cross constituent boundaries implied by punctuation marks. A constituency-based formalism like CCG allows us instead to define a very simple, but effective Dirichlet Process (DP) based Markov gramreported dependency evaluation comparison with the work of Naseem et al. (2010). We fixed this hyperparameter setting for experimental simplicity but a more rigorous grid search might find better parameters for the complex models. mar that emits punctuation marks at the maximal projections of constituents. We note that CCG derivations are binary branching, and that virtually every instance of a binary rule in a normal-form derivation combines a head X or X|Y with an argument Y or modifier X|X. Without reducing the set of strings generated by the grammar, we can therefore assume that punctuation marks can only be attached to the argument Y or the adjunct X|X: To model thi</context>
+<context position="28343" citStr="Naseem et al. (2010)" startWordPosition="4836" endWordPosition="4839">with Bisk and Hockenmaier’s (2013) original model (henceforth: B1, top left). We see that modeling punctuation and lexicalization both increase performance. We also show that allowing categories of the form (X\X)/X and (X/X)\X on top of the lexicalized models with punctuation does not lead to a noticeable decrease in performance. We also see that an increase in grammatical and lexical complexity is only beneficial for the grammars that allow only atomic arguments, and only if both lexicalization Table 4: Performance on CCGbank and CoNLLstyle dependencies (Sections 02-21) for a comparison with Naseem et al. (2010). and punctuation are modeled. Allowing complex arguments is generally not beneficial, and performance drops further if the grammatical complexity is increased to B3. Our further analysis will focus on the three bolded models, B1, Bi (the best model with complex arguments) and BP&amp;L 3 (the best overall model), whose supertag accuracy, labeled (LF1) and unlabeled undirected CCG dependency recovery on Section 23 are shown in Table 3. We see that BC1 and BP&amp;L 3 both outperform B1 on all metrics, although the unlabeled metric (UF1) perhaps misleadingly suggests that Bi leads to a greater improvemen</context>
+</contexts>
+<marker>Naseem, Chen, Barzilay, Johnson, 2010</marker>
+<rawString>Tahira Naseem, Harr Chen, Regina Barzilay, and Mark Johnson. 2010. Using Universal Linguistic Knowledge to Guide Grammar Induction. In Proceedings of the 2010 Conference on Empirical Methods in Natural Language Processing, pages 1234–1244, Cambridge, USA, October.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Valentin I Spitkovsky</author>
+<author>Hiyan Alshawi</author>
+<author>Daniel Jurafsky</author>
+</authors>
+<title>Punctuation: Making a Point in Unsupervised Dependency Parsing.</title>
+<date>2011</date>
+<booktitle>In Proceedings of the Fifteenth Conference on Computational Natural Language Learning,</booktitle>
+<pages>pages</pages>
+<location>Portland, USA,</location>
+<contexts>
+<context position="23488" citStr="Spitkovsky et al. (2011)" startWordPosition="4032" endWordPosition="4035">r than words (Carroll and Rooth, 1998), and then to use this simpler model to initialize a lexicalized model that generates words instead of tags. To perform the switch we simply estimate counts for the parse forests using the unlexicalized model during the E-Step and then apply those counts to the lexicalized model during the M-Step. Inside-Outside then continues as before. Many words, like prepositions, differ systematically in their preferred syntactic role from that of their part-of-speech tags. This change benefits all settings of the model (Column 2 of Table 2). 6.2 Modeling Punctuation Spitkovsky et al. (2011) performed a detailed analysis of punctuation for dependency-based grammar induction, and proposed a number of constraints that aimed to capture the different ways in which dependencies might cross constituent boundaries implied by punctuation marks. A constituency-based formalism like CCG allows us instead to define a very simple, but effective Dirichlet Process (DP) based Markov gramreported dependency evaluation comparison with the work of Naseem et al. (2010). We fixed this hyperparameter setting for experimental simplicity but a more rigorous grid search might find better parameters for t</context>
+</contexts>
+<marker>Spitkovsky, Alshawi, Jurafsky, 2011</marker>
+<rawString>Valentin I Spitkovsky, Hiyan Alshawi, and Daniel Jurafsky. 2011. Punctuation: Making a Point in Unsupervised Dependency Parsing. In Proceedings of the Fifteenth Conference on Computational Natural Language Learning, pages 19–28, Portland, USA, June.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Valentin I Spitkovsky</author>
+<author>Hiyan Alshawi</author>
+<author>Daniel Jurafsky</author>
+</authors>
+<title>Breaking Out of Local Optima with Count Transforms and Model Recombination: A Study in Grammar Induction.</title>
+<date>2013</date>
+<booktitle>In Proceedings of the 2013 Conference on Empirical Methods in Natural Language Processing,</booktitle>
+<pages>1983--1995</pages>
+<location>Seattle, USA,</location>
+<contexts>
+<context position="1512" citStr="Spitkovsky et al., 2013" startWordPosition="223" endWordPosition="226">tion. 1 Introduction Grammar induction aims to develop algorithms that can automatically discover the latent syntactic structure of language from raw or part-of-speech tagged text. While such algorithms would have the greatest utility for low-resource languages for which no treebank is available to train supervised parsers, most work in this area has focused on languages where existing treebanks can be used to measure and compare the performance of the resultant parsers. Despite significant progress in the last decade (Klein and Manning, 2004; Headden III et al., 2009; Blunsom and Cohn, 2010; Spitkovsky et al., 2013; Mareˇcek and Straka, 2013), there has been little analysis performed on the types of errors these induction systems make, and our understanding of what kinds of constructions these parsers can or cannot recover is still rather limited. One likely reason for this lack of analysis is the fact that most of the work in this domain has focused on parsers that return unlabeled dependencies, which cannot easily be assigned a linguistic interpretation. This paper shows that approaches that are based on categorial grammar (Steedman, 2000) are amenable to more stringent evaluation metrics, which enabl</context>
+</contexts>
+<marker>Spitkovsky, Alshawi, Jurafsky, 2013</marker>
+<rawString>Valentin I Spitkovsky, Hiyan Alshawi, and Daniel Jurafsky. 2013. Breaking Out of Local Optima with Count Transforms and Model Recombination: A Study in Grammar Induction. In Proceedings of the 2013 Conference on Empirical Methods in Natural Language Processing, pages 1983–1995, Seattle, USA, October.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Mark Steedman</author>
+</authors>
+<title>The Syntactic Process.</title>
+<date>2000</date>
+<publisher>The MIT Press.</publisher>
+<contexts>
+<context position="2049" citStr="Steedman, 2000" startWordPosition="312" endWordPosition="313">004; Headden III et al., 2009; Blunsom and Cohn, 2010; Spitkovsky et al., 2013; Mareˇcek and Straka, 2013), there has been little analysis performed on the types of errors these induction systems make, and our understanding of what kinds of constructions these parsers can or cannot recover is still rather limited. One likely reason for this lack of analysis is the fact that most of the work in this domain has focused on parsers that return unlabeled dependencies, which cannot easily be assigned a linguistic interpretation. This paper shows that approaches that are based on categorial grammar (Steedman, 2000) are amenable to more stringent evaluation metrics, which enable detailed analyses of the constructions they capture, while the commonly used unlabeled directed attachment scores hide linguistically important errors. Any categorial grammar based system, whether deriving its grammar from seed knowledge distinguishing nouns and verbs (Bisk and Hockenmaier, 2013), from a lexicon constructed from a simple questionnaire for linguists (Boonkwan and Steedman, 2011), or from sections of a treebank (Garrette et al., 2015), will attach linguistically expressive categories to individual words, and can th</context>
+<context position="4987" citStr="Steedman, 2000" startWordPosition="753" endWordPosition="754">nd Steedman, 2007). Third, we extend their induction algorithm to allow it to induce more complex categories, and refine their probability model to handle punctuation and lexicalization, which we show to be necessary when handling the larger grammars induced by our variant of their algorithm. While we also perform a traditional dependency evaluation for comparison to the non-CCG based literature, we focus on our CCG-based labeled evaluation metrics to perform a comparative analysis of Bisk and Hockenmaier (2013)’s parser and our extensions. 2 Combinatory Categorial Grammar CCG categories CCG (Steedman, 2000) is a lexicalized grammar formalism which associates each word with a set of lexical categories that fully specify its syntactic behavior. Lexical categories indicate the expected number, type and relative location of arguments a word should take, or what constituents it may modify. Even without explicit evaluation against a treebank, the CCG lexicon that an unsupervised parser produces provides an easily interpretable snapshot of the assumptions the model has made about a language (Bisk and Hockenmaier, 2013). The set of CCG categories is defined recursively over a small set of atomic categor</context>
+</contexts>
+<marker>Steedman, 2000</marker>
+<rawString>Mark Steedman. 2000. The Syntactic Process. The MIT Press.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yee-Whye Teh</author>
+<author>Michael I Jordan</author>
+<author>Matthew J Beal</author>
+<author>David M Blei</author>
+</authors>
+<title>Hierarchical Dirichlet Processes.</title>
+<date>2006</date>
+<journal>Journal of the American Statistical Association,</journal>
+<volume>101</volume>
+<issue>476</issue>
+<contexts>
+<context position="19942" citStr="Teh et al., 2006" startWordPosition="3442" endWordPosition="3445">e possible for CCGbanks in other languages. 4 Our approach There are two parts to our approach: 1) inducing a CCG grammar from seed knowledge and 2) learning a probability model over parses. The induction algorithm (Bisk and Hockenmaier, 2012) uses the seed knowledge that nouns can take the CCG category N, that verbs can take the category S and may take N arguments, and that any word may modify a constituent it is adjacent to, to iteratively induce a CCG lexicon to parse the training data. In Bisk and Hockenmaier (2013), we introduced a model that is based on Hierarchical Dirichlet Processes (Teh et al., 2006). This HDPCCG model gave state-of-the-art performance on a number languages, and qualitative analysis of the resultant lexicons indicated that the system was learning the word order and many of the correct attachments of the tested languages. But this system also had a number of shortcomings: the induction algorithm was restricted to a small fragment of CCG, the model emitted only POS tags rather than words, and punctuation was ignored. Here, we use our previous HDP-CCG system as a baseline, and introduce three novel extensions that attempt to address these concerns. 5 Experimental Setup For o</context>
+</contexts>
+<marker>Teh, Jordan, Beal, Blei, 2006</marker>
+<rawString>Yee-Whye Teh, Michael I Jordan, Matthew J Beal, and David M Blei. 2006. Hierarchical Dirichlet Processes. Journal of the American Statistical Association, 101(476):1566–1581.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Hiroyasu Yamada</author>
+<author>Yuji Matsumoto</author>
+</authors>
+<title>Statistical Dependency Analysis With Support Vector Machines.</title>
+<date>2003</date>
+<booktitle>In Proceedings of 8th International Workshop on Parsing Technologies (IWPT),</booktitle>
+<pages>195--206</pages>
+<location>Nancy, France.</location>
+<marker>Yamada, Matsumoto, 2003</marker>
+<rawString>Hiroyasu Yamada and Yuji Matsumoto. 2003. Statistical Dependency Analysis With Support Vector Machines. In Proceedings of 8th International Workshop on Parsing Technologies (IWPT), pages 195– 206, Nancy, France.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

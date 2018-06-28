@@ -1,0 +1,1743 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.000052">
+<title confidence="0.9988375">
+A Neural Probabilistic Structured-Prediction Model for Transition-Based
+Dependency Parsing
+</title>
+<author confidence="0.996034">
+Hao Zhou†* Yue Zhang$ Shujian Huang† Jiajun Chen††State Key Laboratory for Novel Software Technology, Nanjing University, China
+</author>
+<affiliation confidence="0.997778">
+$Singapore University of Technology and Design, Singapore
+</affiliation>
+<email confidence="0.984262">
+{zhouh, huangsj, chenjj}@nlp.nju.edu.cn, yue zhang@sutd.edu.sg
+</email>
+<sectionHeader confidence="0.993592" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.999830277777778">
+Neural probabilistic parsers are attrac-
+tive for their capability of automatic fea-
+ture combination and small data sizes.
+A transition-based greedy neural parser
+has given better accuracies over its lin-
+ear counterpart. We propose a neural
+probabilistic structured-prediction model
+for transition-based dependency parsing,
+which integrates search and learning.
+Beam search is used for decoding, and
+contrastive learning is performed for max-
+imizing the sentence-level log-likelihood.
+In standard Penn Treebank experiments,
+the structured neural parser achieves a
+1.8% accuracy improvement upon a com-
+petitive greedy neural parser baseline, giv-
+ing performance comparable to the best
+linear parser.
+</bodyText>
+<sectionHeader confidence="0.99899" genericHeader="keywords">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.999562033333333">
+Transition-based methods have given competitive
+accuracies and efficiencies for dependency pars-
+ing (Yamada and Matsumoto, 2003; Nivre and
+Scholz, 2004; Zhang and Clark, 2008; Huang and
+Sagae, 2010; Zhang and Nivre, 2011; Goldberg
+and Nivre, 2013). These parsers construct depen-
+dency trees by using a sequence of transition ac-
+tions, such as SHIFT and REDUCE, over input sen-
+tences. High accuracies are achieved by using a
+linear model and millions of binary indicator fea-
+tures. Recently, Chen and Manning (2014) pro-
+pose an alternative dependency parser using a neu-
+ral network, which represents atomic features as
+dense vectors, and obtains feature combination au-
+tomatically other than devising high-order features
+manually.
+The greedy neural parser of Chen and Man-
+ning (2014) gives higher accuracies compared to
+Work done while the first author was visiting SUTD.
+the greedy linear MaltParser (Nivre and Scholz,
+2004), but lags behind state-of-the-art linear sys-
+tems with sparse features (Zhang and Nivre,
+2011), which adopt global learning and beam
+search decoding (Zhang and Nivre, 2012). The
+key difference is that Chen and Manning (2014) is
+a local classifier that greedily optimizes each ac-
+tion. In contrast, Zhang and Nivre (2011) leverage
+a structured-prediction model to optimize whole
+sequences of actions, which correspond to tree
+structures.
+In this paper, we propose a novel framework for
+structured neural probabilistic dependency pars-
+ing, which maximizes the likelihood of action se-
+quences instead of individual actions. Follow-
+ing Zhang and Clark (2011), beam search is ap-
+plied to decoding, and global structured learn-
+ing is integrated with beam search using early-
+update (Collins and Roark, 2004). Designing such
+a framework is challenging for two main reasons:
+First, applying global structured learning to
+transition-based neural parsing is non-trivial. A
+direct adaptation of the framework of Zhang and
+Clark (2011) under the neural probabilistic model
+setting does not yield good results. The main rea-
+son is that the parameter space of a neural network
+is much denser compared to that of a linear model
+such as the structured perceptron (Collins, 2002).
+Due to the dense parameter space, for neural mod-
+els, the scores of actions in a sequence are rela-
+tively more dependent than that in the linear mod-
+els. As a result, the log probability of an action se-
+quence can not be modeled just as the sum of log
+probabilities of each action in the sequence, which
+is the case of structured linear model. We address
+the challenge by using a softmax function to di-
+rectly model the distribution of action sequences.
+Second, for the structured model above,
+maximum-likelihood training is computationally
+intractable, requiring summing over all possible
+action sequences, which is difficult for transition-
+</bodyText>
+<page confidence="0.839012">
+1213
+</page>
+<note confidence="0.973594333333333">
+Proceedings of the 53rd Annual Meeting of the Association for Computational Linguistics
+and the 7th International Joint Conference on Natural Language Processing, pages 1213–1222,
+Beijing, China, July 26-31, 2015. c�2015 Association for Computational Linguistics
+</note>
+<bodyText confidence="0.958603466666667">
+based parsing. To address this challenge, we take
+a contrastive learning approach (Hinton, 2002; Le-
+Cun and Huang, 2005; Liang and Jordan, 2008;
+Vickrey et al., 2010; Liu and Sun, 2014). Using
+the sum of log probabilities over the action se-
+quences in the beam to approximate that over all
+possible action sequences.
+In standard PennTreebank (Marcus et al., 1993)
+evaluations, our parser achieves a significant accu-
+racy improvement (+1.8%) over the greedy neu-
+ral parser of Chen and Manning (2014), and gives
+the best reported accuracy by shift-reduce parsers.
+The incremental neural probabilistic framework
+with global contrastive learning and beam search
+could be used in other structured prediction tasks.
+</bodyText>
+<sectionHeader confidence="0.996466" genericHeader="introduction">
+2 Background
+</sectionHeader>
+<subsectionHeader confidence="0.980634">
+2.1 Arc-standard Parsing
+</subsectionHeader>
+<bodyText confidence="0.97742935">
+Transition-based dependency parsers scan an in-
+put sentence from left to right, and perform a se-
+quence of transition actions to predict its parse
+tree (Nivre, 2008). In this paper, we employ
+the arc-standard system (Nivre et al., 2007),
+which maintains partially-constructed outputs us-
+ing a stack, and orders the incoming words in the
+input sentence in a queue. Parsing starts with an
+empty stack and a queue consisting of the whole
+input sentence. At each step, a transition action
+is taken to consume the input and construct the
+output. The process repeats until the input queue
+is empty and stack contains only one dependency
+tree.
+Formally, a parsing state is denoted as ⟨j, S, L⟩,
+where S is a stack of subtrees [... s2, s1, s0], j
+is the head of the queue (i.e. [ q0 = wj, q1 =
+wj+1 · · · ]), and L is a set of dependency arcs. At
+each step, the parser chooses one of the following
+actions:
+</bodyText>
+<listItem confidence="0.996918">
+• SHIFT: move the front word wj from the
+queue onto the stacks.
+</listItem>
+<equation confidence="0.959206615384615">
+input: w0 ... wn_1
+axiom: 0 : ⟨0, ϕ, ϕ, 0⟩
+goal: 2n − 1 : ⟨n, s0, L⟩
+SHIFT k : ⟨j, S, L⟩
+k + 1 : ⟨j + 1, S|wj,L⟩
+k : ⟨j, S|s1|s0, L⟩
+LEFT-ARC(l)
+k + 1 : ⟨j, S|s0, L ∪ {s1 ←− s0}⟩
+l
+k : ⟨j, S|s1|s0, L⟩
+RIGHT-ARC(l)
+k + 1 : ⟨j, S|s1, L ∪ {s1 →− s0}⟩
+l
+</equation>
+<figureCaption confidence="0.996637">
+Figure 1: The deductive system for arc-standard
+dependency parsing.
+</figureCaption>
+<bodyText confidence="0.99857825">
+the current parsing step. For a sentence with size
+n, parsing stops after performing exactly 2n − 1
+actions.
+MaltParser uses an SVM classifier for deter-
+ministic arc-standard parsing. At each step, Malt-
+Parser generates a set of successor states according
+to the current state, and deterministically selects
+the highest-scored one as the next state.
+</bodyText>
+<subsectionHeader confidence="0.999231">
+2.2 Global Learning and Beam Search
+</subsectionHeader>
+<bodyText confidence="0.999643">
+The drawback of deterministic parsing is error
+propagation. An incorrect action will have a nega-
+tive influence to its subsequent actions, leading to
+an incorrect output parse tree.
+To address this issue, global learning and beam
+search (Zhang and Clark, 2011; Bohnet and Nivre,
+2012; Choi and McCallum, 2013) are used. Given
+an input x, the goal of decoding is to find the
+highest-scored action sequence globally.
+</bodyText>
+<equation confidence="0.9992165">
+y = arg max score(y′) (1)
+y′EGEN(x)
+</equation>
+<bodyText confidence="0.984419666666667">
+Where GEN(x) denotes all possible action se-
+quences on x, which correspond to all possible
+parse trees. The score of an action sequence y is:
+</bodyText>
+<listItem confidence="0.945400166666667">
+• LEFT-ARC(l): add an arc with label l between
+the top two trees on the stack (s1 ← s0), and �score(y) = 9 · `b(a) (2)
+remove s1 from the stack. aEy
+• RIGHT-ARC(l): add an arc with label l be-
+tween the top two trees on the stack (s1 →
+s0), and remove s0 from the stack.
+</listItem>
+<bodyText confidence="0.798475375">
+The arc-standard parser can be summarized as
+the deductive system in Figure 1, where k denotes
+Here a is an action in the action sequence y, 4b
+is a feature function for a, and 0 is the parameter
+vector of the linear model. The score of an action
+sequence is the linear sum of the scores of each
+action. During training, action sequence scores are
+globally learned.
+</bodyText>
+<page confidence="0.990184">
+1214
+</page>
+<bodyText confidence="0.999737428571429">
+The parser of Zhang and Nivre (2011) is devel-
+oped using this framework. The structured percep-
+tron (Collins, 2002) with early update (Collins and
+Roark, 2004) is applied for training. By utilizing
+rich manual features, it gives state-of-the-art accu-
+racies in standard Penn Treebank evaluation. We
+take this method as one baseline.
+</bodyText>
+<subsectionHeader confidence="0.999592">
+2.3 Greedy Neural Network Model
+</subsectionHeader>
+<bodyText confidence="0.9986156">
+Chen and Manning (2014) build a greedy neural
+arc-standard parser. The model can be regarded as
+an alternative implementation of MaltParser, using
+a feedforward neural network to replace the SVM
+classifier for deterministic parsing.
+</bodyText>
+<subsectionHeader confidence="0.895944">
+2.3.1 Model
+</subsectionHeader>
+<bodyText confidence="0.999994066666667">
+The greedy neural model extracts n atomic fea-
+tures from a parsing state, which consists of
+words, POS-tags and dependency labels from the
+stack ans queue. Embeddings are used to rep-
+resent word, POS and dependency label atomic
+features. Each embedding is represented as a d-
+dimensional vector ei E R. Therefore, the full
+embedding matrix is E E Rd×V , where V is the
+number of distinct features. A projection layer is
+used to concatenate the n input embeddings into a
+vector x = [e1; e2 ... en], where x E Rd·n. The
+purpose of this layer is to fine-tune the embedding
+features. Then x is mapped to a dh-dimensional
+hidden layer by a mapping matrix W1 E Rdh×d·n
+and a cube activation function:
+</bodyText>
+<equation confidence="0.99881">
+h = (W1x + b1)3 (3)
+</equation>
+<bodyText confidence="0.995245666666667">
+Finally, h is mapped into a softmax output layer
+for modeling the probabilistic distribution of can-
+didate shift-reduce actions:
+</bodyText>
+<table confidence="0.99877075">
+Templates
+Fw s0w, s2w, q0w, q1w, q2w, lc1(s0)w, lc2(s0)w
+s1w, rc2(s0)w, lc1(s1)w, lc2(s1)w, rc2(s1)w
+rc1(s0)w, rc1(s1)w, lc1(lc1(s0))w, lc1(lc1(s1))w
+rc1(rc1(s1))w, rc1(rc1(s0))w
+Ft s0t, q0t, q1t, q2t, rc1(s0)t, lc1(s0)t, lc2(s0)t
+s1t, s2t, lc1(s1)t, lc2(s1)t, rc1(s1)t, rc2(s0)t
+rc2(s1)t, lc1(lc1(s0))t, lc1(lc1(s1))t
+rc1(rc1(s0))t, rc1(rc1(s1))t
+F rc1(s0)l, lc1(s0)l, lc2(s0)l, lc1(s1)l, lc2(s1)l
+rc1(s1)l, rc2(s0)l, rc2(s1)l, lc1(lc1(s0))l
+lc1(lc1(s1))l, rc1(rc1(s0))l, rc1(rc1(s1))l
+</table>
+<tableCaption confidence="0.999892">
+Table 1: Feature templates.
+</tableCaption>
+<bodyText confidence="0.999890444444445">
+into three types: Fw, Ft, Fl, which represents
+word features, POS-tag features and dependency
+label features, respectively.
+For example, s0w and q0w represent the
+first word on the stack and queue, respectively;
+lc1(s0)w and rc1(s0)w represent the leftmost and
+rightmost child of s0, respectively. Similarly,
+lc1(s0)t and lc1(s0)l represent the POS-tag and
+dependency label of the leftmost child of s0, re-
+spectively.
+Chen and Manning (2014) find that the cube
+activation function in Equation (3) is highly ef-
+fective in capturing feature interaction, which is
+a novel contribution of their work. The cube func-
+tion achieves linear combination between atomic
+word, POS and label features via the product of
+three element combinations. Empirically, it works
+better compared to a sigmoid activation function.
+</bodyText>
+<subsectionHeader confidence="0.994218">
+2.4 Training
+</subsectionHeader>
+<bodyText confidence="0.99860775">
+Given a set of training examples, the training ob-
+jective of the greedy neural parser is to minimize
+the cross-entropy loss, plus a l2-regularization
+term:
+</bodyText>
+<equation confidence="0.99736">
+p =softmax(o) (4) � �
+L(0) = − log pi + 2 1 10 112 (6)
+i∈A
+</equation>
+<bodyText confidence="0.746401">
+where
+</bodyText>
+<equation confidence="0.988324">
+o = W2h (5)
+</equation>
+<bodyText confidence="0.947574">
+W2 E Rd-×dh and do is the number of shift-reduce
+actions.
+</bodyText>
+<subsectionHeader confidence="0.487824">
+2.3.2 Features
+</subsectionHeader>
+<bodyText confidence="0.998747909090909">
+One advantage of Chen and Manning (2014) is
+that the neural network parser achieves feature
+combination automatically. Their atomic features
+are defined by following Zhang and Nivre (2011).
+As shown in Table 1, the features are categorized
+0 is the set of all parameters (i.e. W1, W2, b,
+E), and A is the set of all gold actions in the train-
+ing data. AdaGrad (Duchi et al., 2011) with mini-
+batch is adopted for optimization. We take the
+greedy neural parser of Chen and Manning (2014)
+as a second baseline.
+</bodyText>
+<sectionHeader confidence="0.983298" genericHeader="method">
+3 Structured Neural Network Model
+</sectionHeader>
+<bodyText confidence="0.9998716">
+We propose a neural structured-prediction model
+that scores whole sequences of transition actions,
+rather than individual actions. As shown in Ta-
+ble 2, the model can be seen as a neural prob-
+abilistic alternative of Zhang and Nivre (2011),
+</bodyText>
+<page confidence="0.958862">
+1215
+</page>
+<table confidence="0.99619625">
+local structured
+classifier prediction
+linear Section 2.1 Section 2.2
+sparse (Nivre (Zhang and
+et al., 2007) Nivre, 2011)
+neural Section 2.3 this work
+dense (Chen and
+Manning, 2014)
+</table>
+<tableCaption confidence="0.999793">
+Table 2: Correlation between different parsers.
+</tableCaption>
+<bodyText confidence="0.95735675">
+or a structured-prediction alternative of Chen and
+Manning (2014). It combines the advantages of
+both Zhang and Nivre (2011) and Chen and Man-
+ning (2014) over the greedy linear MaltParser.
+</bodyText>
+<subsectionHeader confidence="0.990349">
+3.1 Neural Probabilistic Ranking
+</subsectionHeader>
+<bodyText confidence="0.999962571428571">
+Given the baseline system in Section 2.2, the most
+intuitive structured neural dependency parser is
+to replace the linear scoring model with a neu-
+ral probabilistic model. Following Equation 1, the
+score of an action sequence y, which corresponds
+to its log probability, is sum of log probability
+scores of each action in the sequence.
+</bodyText>
+<equation confidence="0.9428455">
+s(y) = ∑ log pa (7)
+aEy
+</equation>
+<bodyText confidence="0.9999822">
+where pa is defined by the baseline neural model
+of Section 2.3 (Equation 4). The training objec-
+tive is to maximize the score margin between the
+gold action sequences (yg) and these of incorrectly
+predicated action sequences (yp):
+</bodyText>
+<equation confidence="0.8430275">
+λ
+L(θ) = max(0, δ−s(yg)+s(yp))+ 2 11 θ 112 (8)
+</equation>
+<bodyText confidence="0.999986285714286">
+With this ranking model, beam search and
+early-update are used. Given a training instance,
+the negative example is the incorrectly predicted
+output with largest score (Zhang and Nivre, 2011).
+However, we find that the ranking model works
+poorly. One explanation is that the actions in a
+sequence is probabilistically dependent on each
+other, and therefore using the total log probabil-
+ities of each action to compute the log probabil-
+ity of an action sequence (Equation 7) is inaccu-
+rate. Linear models do not suffer from this prob-
+lem, because the parameter space of linear models
+is much more sparse than that of neural models.
+For neural networks, the dense parameter space is
+shared by all the actions in a sequence. Increasing
+the likelihood of a gold action may also change the
+likelihood of incorrect actions through the shared
+parameters. As a result, increasing the scores of a
+gold action sequence and simultaneously reducing
+the scores of an incorrect action sequence does not
+work well for neural models.
+</bodyText>
+<subsectionHeader confidence="0.999901">
+3.2 Sentence-Level Log-Likelihood
+</subsectionHeader>
+<bodyText confidence="0.9900108">
+To overcome the above limitation, we try to di-
+rectly model the probabilistic distribution of whole
+action sequences. Given a sentence x and neural
+networks parameter θ, the probability of the action
+sequence yi is given by the softmax function:
+</bodyText>
+<equation confidence="0.97375375">
+ef(x, θ)i
+p(yi  |x, θ) = ∑ (9)
+ef(x, θ)j
+yjEGEN(x)
+</equation>
+<bodyText confidence="0.696447">
+where
+</bodyText>
+<equation confidence="0.9774825">
+f(x, θ)i = ∑ o(x, yi, k, ak) (10)
+akEyi
+</equation>
+<bodyText confidence="0.996720090909091">
+Here GEN(s) is the set of all possible valid ac-
+tion sequences for a sentence x; o(x, yi, k, ak)
+denotes the neural network score for the action
+ak given x and yi. We use the same sub net-
+work as Chen and Manning (2014) to calculate
+o(x, yi, k, ak) (Equation 5). The same features
+in Table 1 are used.
+Given the training data as (X, Y ), our train-
+ing objective is to minimize the negative log-
+likelihood:
+where
+</bodyText>
+<equation confidence="0.9955285">
+Z(x, θ) = ∑ ef(x, θ)j (14)
+yjEGEN(x)
+</equation>
+<bodyText confidence="0.9983408">
+Here, Z(x, θ) is called the partition function.
+Following Chen and Manning(2014), we apply l2-
+regularization for training.
+For optimization, we need to compute gradients
+for L(θ), which includes gradients of exponential
+</bodyText>
+<equation confidence="0.991001666666667">
+∑
+L(θ) = −
+(xi, yi)E(X,Y)
+∑= −
+(xi, yi)E(X,Y)
+logp(yi  |xi,θ) (11)
+ef(xi,θ)i
+log (12)
+Z(xi, θ)
+∑= log Z(xi, θ) − f(xi, θ)i
+(xi, yi)E(X,Y )
+(13)
+</equation>
+<page confidence="0.8102">
+1216
+</page>
+<bodyText confidence="0.999921166666667">
+numbers of negative examples in partition func-
+tion Z(x, 0). However, beam search is used for
+transition-based parsing, and no efficient optimal
+dynamic program is available to estimate Z(x, 0)
+accurately. We adopt a novel contrastive learning
+approach to approximately compute Z(x, 0).
+</bodyText>
+<subsectionHeader confidence="0.9988">
+3.3 Contrastive Learning
+</subsectionHeader>
+<bodyText confidence="0.999992333333333">
+As an alternative to maximize the likelihood on
+some observed data, contrastive learning (Hinton,
+2002; LeCun and Huang, 2005; Liang and Jordan,
+2008; Vickrey et al., 2010; Liu and Sun, 2014) is
+an approach that assigns higher probabilities to ob-
+served data and lower probabilities to noisy data.
+We adopt the contrastive learning approach, as-
+signing higher probabilities to the gold action se-
+quence compared to incorrect action sequences in
+the beam. Intuitively, this method only penalizes
+incorrect action sequences with high probabilities.
+Our new training objective is approximated as:
+</bodyText>
+<equation confidence="0.905906151515152">
+log p′(yi  |xi, 0) (15)
+ef(xi,θ)i
+log Z′(xi, 0) (16)
+Algorithm 1: Training Algorithm for Struc-
+tured Neural Parsing
+Input: training examples (X, Y)
+Output: 0
+0 +— pretrained embedding
+for i +— 1 to N do
+x, y = RANDOMSAMPLE(X, Y)
+6 = 0
+foreach xj, yj E x, y do
+beam = ϕ
+goldState = null
+terminate = false
+beamGold = true
+while beamGold and not terminate
+do
+L′(0) = − E
+(xi, yi)E(X,Y )
+E= −
+(xi, yi)E(X,Y )
+beam = DECODE(beam, xj, yj)
+goldState =
+GOLDMOVE(goldState, xj, yj)
+if not ISGOLD(beam) then
+beamGold = false
+if ITEMSCOMPLETE(beam) then
+terminate = true;
+6 = 6 + UPDATE(goldState, beam)
+0 = 0 + delta
+E= log Z′(xi, 0) − f(xi, 0)i
+(xi, yi)E(X,Y ) (17)
+</equation>
+<bodyText confidence="0.819336">
+where
+</bodyText>
+<equation confidence="0.9955935">
+Z′(x, 0) = E ef(x, θ)j (18)
+yjEBEAM(x)
+</equation>
+<bodyText confidence="0.962904285714286">
+p′(yi  |x, 0) is the relative probability of the ac-
+tion sequence yi, computed over only the action
+sequences in the beam. Z′(x, 0) is the contrastive
+approximation of Z(x, 0). BEAM(x) returns the
+predicated action sequences in the beam and the
+gold action sequence.
+We assume that the probability mass concen-
+trates on a relatively small number of action se-
+quences, which allows the use of a limited num-
+ber of probable sequences to approximate the full
+set of action sequences. The concentration may be
+enlarged dramatically with an exponential activa-
+tion function of the neural network (i.e. a &gt; b �
+ea » eb ).
+</bodyText>
+<subsectionHeader confidence="0.876957">
+3.4 The Neural Probabilistic
+Structured-Prediction Framework
+</subsectionHeader>
+<bodyText confidence="0.999939523809524">
+We follow Zhang and Clark (2011) to integrate
+search and learning. Our search and learning
+framework for dependency parsing is shown as
+Algorithm 1. In every training iteration i, we
+randomly sample the training instances, and per-
+form online learning with early update (Collins
+and Roark, 2004). In particular, given a training
+example, we use beam-search to decode the sen-
+tence. At any step, if the gold action sequence falls
+out of the beam, we take all the incorrect action
+sequences in the beam as negative examples, and
+the current gold sequence as a positive example
+for parameter update, using the training algorithm
+of Section 3.3. AdaGrad algorithm (Duchi et al.,
+2011) with mini-batch is adopted for optimization.
+In this way, the distribution of ot only full ac-
+tion sequences (i.e. complete parse trees), but also
+partial action sequences (i.e. partial outputs) are
+modeled, which makes training more challenging.
+The advantage of early update is that training is
+used to guide search, minimizing search errors.
+</bodyText>
+<page confidence="0.994892">
+1217
+</page>
+<sectionHeader confidence="0.99872" genericHeader="method">
+4 Experiments
+</sectionHeader>
+<subsectionHeader confidence="0.997585">
+4.1 Set-up
+</subsectionHeader>
+<bodyText confidence="0.99953725">
+Our experiments are performed using the English
+Penn Treebank (PTB; Marcus et al., (1993)). We
+follow the standard splits of PTB3, using sections
+2-21 for training, section 22 for development test-
+ing and section 23 for final testing. For compar-
+ison with previous work, we use Penn2Malt1 to
+convert constituent trees to dependency trees. We
+use the POS-tagger of Collins (2002) to assign
+POS automatically. 10-fold jackknifing is per-
+formed for tagging the training data.
+We follow Chen and Manning (2014), and use
+the set of pre-trained word embeddings2 from
+Collobert et al. (2011) with a dictionary size of
+13,000. The word embeddings were trained on the
+entire English Wikipedia, which contains about
+631 million words.
+</bodyText>
+<subsectionHeader confidence="0.881967">
+4.2 WSJ Experiments
+4.2.1 Development experiments
+</subsectionHeader>
+<bodyText confidence="0.99623968">
+We set the following hyper-parameters according
+to the baseline greedy neural parser (Chen and
+Manning, 2014): embedding size d = 50, hidden
+layer size dh = 200, regularization parameter A =
+10−8, initial learning rate of Adagrad α = 0.01.
+For the structured neural parser, beam size and
+mini-batch size are important to the parsing per-
+formance. We tune them on the development set.
+Beam size. Beam search enlarges the search
+space. More importantly, the larger the beam is,
+the more accurate our training algorithm is. the
+Contrastive learning approximates the exact prob-
+abilities over exponential many action sequences
+by computing the relative probabilities over action
+sequences in the beam (Equation 18). Therefore,
+the larger the beam is, the more accurate the rela-
+tive probability is.
+The first column of Table 3 shows the accura-
+cies of the structured neural parser on the devel-
+opment set with different beam sizes, which im-
+proves as the beam size increases. We set the final
+beam size as 100 according to the accuracies on
+development set.
+The effect of integrating search and learning.
+We also conduct experiments on the parser of
+</bodyText>
+<footnote confidence="0.9999235">
+1http://stp.lingfil.uu.se/ nivre/research/Penn2Malt.html
+2http://ronan.collobert.com/senna/
+</footnote>
+<table confidence="0.996424125">
+Description UAS
+Baseline 91.63
+structured greedy
+beam = 1 74.90 91.63
+beam = 4 84.64 91.92
+beam = 16 91.53 91.90
+beam = 64 93.12 91.84
+beam = 100 93.23 91.81
+</table>
+<tableCaption confidence="0.968782333333333">
+Table 3: Accuracies of structured neural parsing
+and local neural classification parsing with differ-
+ent beam sizes.
+</tableCaption>
+<table confidence="0.99922325">
+Description UAS
+greedy neural parser 91.47
+ranking model 89.08
+beam contrastive learning 93.28
+</table>
+<tableCaption confidence="0.987962">
+Table 4: Comparison between sentence-level log-
+likelihood and ranking model.
+</tableCaption>
+<bodyText confidence="0.999033481481482">
+Chen and Manning (2014) with beam search de-
+coding. The score of a whole action sequence
+is computed by the sum of log action probabili-
+ties (Equation 7). As shown in the second col-
+umn of Table 3, beam search can improve pars-
+ing slightly. When the beam size increases beyond
+16, however, accuracy improvements stop. In con-
+trast, by integrating beam search and global learn-
+ing, our parsing performance benefits from large
+beam sizes much more significantly. With a beam
+size as 16, the structured neural parser gives an
+accuracy close to that of baseline greedy parser3.
+When the beam size is 100, the structured neural
+parser outperforms baseline by 1.6%.
+Zhang and Nivre (2012) find that global learn-
+ing and beam search should be used jointly for
+improving parsing using a linear transition-based
+model. In particular, increasing the beam size,
+the accuracy of ZPar (Zhang and Nivre, 2011) in-
+creases significantly, but that of MaltParser does
+not. For structured neural parsing, our finding is
+similar: integrating search and learning is much
+more effective than using beam search only in de-
+coding.
+Our results in Table 3 are obtained by using
+the same beam sizes for both training and testing.
+Zhang and Nivre (2012) also find that for their lin-
+</bodyText>
+<footnote confidence="0.997139">
+3Our baseline accuracy is a little lower than accuracy re-
+ported in baseline paper (Chen and Manning, 2014), because
+we use Penn2Malt to convert the Penn Treebank, and they use
+LTH Conversion.
+</footnote>
+<page confidence="0.947091">
+1218
+</page>
+<table confidence="0.967034933333333">
+System UAS LAS Speed
+baseline greedy parser 91.47 90.43 0.001
+Huang and Sagae (2010) 92.10 0.04
+Zhang and Nivre (2011) 92.90 91.80 0.03
+Choi and McCallum (2013) 92.96 91.93 0.009
+Ma et al. (2014) 93.06
+Bohnet and Nivre (2012)†t 93.67 92.68 0.4
+Suzuki et al. (2009)† 93.79
+Koo et al. (2008)† 93.16
+Chen et al. (2014)† 93.77
+beam size
+training decoding
+100 100 93.28 92.35 0.07
+100 64 93.20 92.27 0.04
+100 16 92.40 91.95 0.01
+</table>
+<figure confidence="0.956796277777778">
+100
+90
+80
+60
+50
+40
+30
+20
+70
+10
+batch size = 1
+batch size = 10
+batch size = 1000
+batch size = 2000
+batch size = 5000
+0 1000 2000 3000 4000 5000
+iteration
+UAS
+</figure>
+<figureCaption confidence="0.99767">
+Figure 2: Parsing performance with different
+training batch sizes.
+</figureCaption>
+<bodyText confidence="0.999970615384615">
+ear model, the best results are achieved by using
+the same beam sizes during training and testing.
+We find that this observation does not apply to our
+neural parser. In our case, a large training beam al-
+ways leads to better results. This is likely because
+a large beam improves contrastive learning. As a
+result, our training beam size is set to 100 for the
+final test.
+Batch size. Parsing performance using neural
+networks is highly sensitive to the batch size of
+training. In greedy neural parsing (Chen and Man-
+ning, 2014), the accuracy on the development data
+improves from 85% to 91% by setting the batch
+size to 10 and 100000, respectively. In structured
+neural parsing, we fix the beam size as 100 and
+draw the accuracies on the development set by the
+training iteration.
+As shown in Figure 2, in 5000 training itera-
+tions, the parsing accuracies improve as the itera-
+tion grows, yet different batch sizes result in dif-
+ferent convergence accuracies. With a batch size
+of 5000, the parsing accuracy is about 25% higher
+than with a batch size of 1 (i.e. SGD). For the re-
+maining experiments, we set batch size to 5000,
+which achieves the best accuracies on develop-
+ment testing.
+</bodyText>
+<subsectionHeader confidence="0.989081">
+4.2.2 Sentence-level maximum likelihood vs.
+ranking model
+</subsectionHeader>
+<bodyText confidence="0.998573166666667">
+We compare parsing accuracies of the sentence-
+level log-likelihood + beam contrastive learning
+(Section 3.2), and the structured neural parser with
+probabilistic ranking (Section 3.1). As shown
+in Table 4, performance of global learning with
+ranking model is weaker than the baseline greedy
+</bodyText>
+<tableCaption confidence="0.880465">
+Table 5: Results on WSJ. Speed: sentences per
+second. t: semi-supervised learning. t: joint
+POS-tagging and dependency parsing models.
+</tableCaption>
+<bodyText confidence="0.98863175">
+parser. In contrast, structured neural parsing
+with sentence-level log-likelihood and contrastive
+learning gives a 1.8% accuracy improvement upon
+the baseline greedy parser.
+As mentioned in Section 3.1, a likely reason
+for the poor performance of the structured neu-
+ral ranking model may be that, the likelihoods of
+action sequences are highly influenced by each
+other, due to the dense parameter space of neural
+networks. To maximize likelihood of gold action
+sequence, we need to decrease the likelihoods of
+more than one incorrect action sequences.
+</bodyText>
+<subsectionHeader confidence="0.958257">
+4.2.3 Final Results
+</subsectionHeader>
+<bodyText confidence="0.999954714285714">
+Table 5 shows the results of our final parser and
+a line of transition-based parsers on the test set.
+Our structured neural parser achieves an accu-
+racy of 93.28%, 0.38% higher than Zhang and
+Nivre (2011), which employees millions of high-
+order binary indicator features in parsing. The
+model size of ZPar (Zhang and Nivre, 2011) is
+over 250 MB on disk. In contrast, the model size
+of our structured neural parser is only 25 MB. To
+our knowledge, the result is the best reported re-
+sult achieved by shift-reduce parsers on this data
+set.
+Bohnet and Nivre (2012) obtain an accuracy of
+93.67%, which is higher than our parser. How-
+ever, their parser is a joint model of parsing and
+POS-tagging, and they use external data in pars-
+ing. We also list the result of Chen et al. (2014),
+Koo et al. (2008) and Suzuki et al. (2009) in
+Table 5, which make use of large-scale unanno-
+tated text to improve parsing accuracies. The
+input embeddings of our parser are also trained
+</bodyText>
+<page confidence="0.988832">
+1219
+</page>
+<bodyText confidence="0.9999493">
+over large raw text, and in this perspective our
+model is correlated with the semi-supervised mod-
+els. However, because we fine-tune the word em-
+beddings in supervised training, the embeddings
+of in-vocabulary words become systematically dif-
+ferent from these of out-of-vocabulary words af-
+ter training, and the effect of pre-trained out-of-
+vocabulary embeddings become uncertain. In this
+sense, our model can also be regarded as an al-
+most fully supervised model. The same applies to
+the models of Chen and Manning (2014).
+We also compare the speed of the structured
+neural parser on an Intel Core i7 3.40GHz CPU
+with 16GB RAM. The structured neural parser
+runs about as fast as Zhang and Nivre (Zhang and
+Nivre, 2011) and Huang and Sagae (Huang and
+Sagae, 2010). The results show that our parser
+combines the benefits of structured models and
+neural probabilistic models, offering high accura-
+cies, fast speed and slim model size.
+</bodyText>
+<sectionHeader confidence="0.99985" genericHeader="evaluation">
+5 Related Work
+</sectionHeader>
+<bodyText confidence="0.99996820754717">
+Parsing with neural networks. A line of work
+has been proposed to explore the effect of neu-
+ral network models for constituent parsing (Hen-
+derson, 2004; Mayberry III and Miikkulainen,
+2005; Collobert, 2011; Socher et al., 2013;
+Legrand and Collobert, 2014). Performances of
+most of these methods are still well below the
+state-of-the-art, except for Socher et al.(2013),
+who propose a neural reranker based on a PCFG
+parser. For transition-based dependency parsing,
+Stenetorp (2013) applies a compositional vector
+method (Socher et al., 2013), and Chen and Man-
+ning (2014) propose a feed-forward neural parser.
+The performances of these neural parsers lag be-
+hind the state-of-the-art.
+More recently, Dyer et al. (2015) propose a
+greedy transition-based dependency parser, using
+three stack LSTMs to represent the input, the stack
+of partial syntactic trees and the history of parse
+actions, respectively. By modeling more history,
+the parser gives significant better accuracies com-
+pared to the greedy neural parser of Chen and
+Manning (2014).
+Structured neural models. Collobert et
+al. (2011) presents a unified neural network
+architecture for various natural language pro-
+cessing (NLP) tasks. They propose to use
+sentence-level log-likelihood to enhance a neural
+probabilistic model, which inspires our model.
+Sequence labeling is used for graph-based de-
+coding. Using the Viterbi algorithm, they can
+compute the exponential partition function in
+linear time without approximation. However, with
+a dynamic programming decoder, their sequence
+labeling model can only extract local features. In
+contrast, our integrated approximated search and
+learning framework allows rich global features.
+Weiss et al. (2015) also propose a structured
+neural transition-based parser by adopting beam
+search and early updates. Their model is close
+in spirit to ours in performing structured predic-
+tion using a neural network. The main difference
+is that their structured neural parser uses a greedy
+parsing process for pre-training, and fine-tunes
+an additional perceptron layer consisting of the
+pre-trained hidden and output layers using struc-
+tured perceptron updates. Their structured neural
+parser achieves an accuracy of 93.36% on Stan-
+ford conversion of the PTB, which is significant
+higher than the baseline parser of Chen and Man-
+ning (2014). Their results are not directly compa-
+rable with ours due to different dependency con-
+versions.
+</bodyText>
+<sectionHeader confidence="0.999233" genericHeader="conclusions">
+6 Conclusion
+</sectionHeader>
+<bodyText confidence="0.999987">
+We built a structured neural dependency parsing
+model. Compared to the greedy neural parser of
+Chen and Manning (2014), our parser integrates
+beam search and global contrastive learning. In
+standard PTB evaluation, our parser achieved a
+1.8% accuracy improvement over the parser of
+Chen and Manning (2014), which shows the effect
+of combining search and learning. To our knowl-
+edge, the structured neural parser is the first neural
+parser that outperforms the best linear shift-reduce
+dependency parsers. The structured neural proba-
+bilistic framework can be used in other incremen-
+tal structured prediction tasks.
+</bodyText>
+<sectionHeader confidence="0.998742" genericHeader="acknowledgments">
+7 Acknowledgments
+</sectionHeader>
+<bodyText confidence="0.995576333333333">
+We would like to thank the anonymous review-
+ers for their insightful comments. This work
+was partially founded by the Natural Science
+Foundation of China (61170181, 61300158), the
+Jiangsu Provincial Research Foundation for Ba-
+sic Research (BK20130580), Singapore Ministra-
+try of Education Tier 2 Grant T2MOE201301 and
+SRGISTD2012038 from Singapore University of
+Technology and Design.
+</bodyText>
+<page confidence="0.985329">
+1220
+</page>
+<sectionHeader confidence="0.988422" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.982986666666667">
+Bernd Bohnet and Joakim Nivre. 2012. A transition-
+based system for joint part-of-speech tagging and la-
+beled non-projective dependency parsing. In Pro-
+ceedings of the 2012 Joint Conference on Empiri-
+cal Methods in Natural Language Processing and
+Computational Natural Language Learning, pages
+1455–1465. Association for Computational Linguis-
+tics.
+Danqi Chen and Christopher D Manning. 2014. A fast
+and accurate dependency parser using neural net-
+works. In Empirical Methods in Natural Language
+Processing (EMNLP).
+Wenliang Chen, Yue Zhang, and Min Zhang. 2014.
+Feature embedding for dependency parsing. In Pro-
+ceedings of the international conference on Compu-
+tational linguistics. Association for Computational
+Linguistics.
+Jinho D Choi and Andrew McCallum. 2013.
+Transition-based dependency parsing with selec-
+tional branching. In ACL (1), pages 1052–1062.
+Michael Collins and Brian Roark. 2004. Incremen-
+tal parsing with the perceptron algorithm. In Pro-
+ceedings of the 42nd Annual Meeting on Association
+for Computational Linguistics, page 111. Associa-
+tion for Computational Linguistics.
+Michael Collins. 2002. Discriminative training meth-
+ods for hidden markov models: Theory and exper-
+iments with perceptron algorithms. In Proceedings
+of the ACL-02 conference on Empirical methods in
+natural language processing-Volume 10, pages 1–8.
+Association for Computational Linguistics.
+Ronan Collobert, Jason Weston, L´eon Bottou, Michael
+Karlen, Koray Kavukcuoglu, and Pavel Kuksa.
+2011. Natural language processing (almost) from
+scratch. The Journal of Machine Learning Re-
+search, 12:2493–2537.
+R. Collobert. 2011. Deep learning for efficient dis-
+criminative parsing. In AISTATS.
+John Duchi, Elad Hazan, and Yoram Singer. 2011.
+Adaptive subgradient methods for online learning
+and stochastic optimization. The Journal of Ma-
+chine Learning Research, 12:2121–2159.
+Chris Dyer, Miguel Ballesteros, Wang Ling, Austin
+Matthews, and Noah A. Smith. 2015. Transition-
+based dependency parsing with stack long short-
+term memory. In Proceedings of the ACL confer-
+ence. Association for Computational Linguistics.
+Yoav Goldberg and Joakim Nivre. 2013. Training
+deterministic parsers with non-deterministic oracles.
+Transactions of the Association for Computational
+Linguistics, 1:403–414.
+James Henderson. 2004. Discriminative training of a
+neural network statistical parser. In Proceedings of
+the 42nd Annual Meeting on Association for Compu-
+tational Linguistics, page 95. Association for Com-
+putational Linguistics.
+Geoffrey Hinton. 2002. Training products of experts
+by minimizing contrastive divergence. Neural com-
+putation, 14(8):1771–1800.
+Liang Huang and Kenji Sagae. 2010. Dynamic pro-
+gramming for linear-time incremental parsing. In
+Proceedings of the 48th Annual Meeting of the Asso-
+ciation for Computational Linguistics, pages 1077–
+1086. Association for Computational Linguistics.
+Terry Koo, Xavier Carreras, and Michael Collins.
+2008. Simple semi-supervised dependency parsing.
+Yann LeCun and F Huang. 2005. Loss functions
+for discriminative training of energybased models.
+AIStats.
+J. Legrand and R. Collobert. 2014. Recurrent greedy
+parsing with neural networks. In Proceedings of
+the European Conference on Machine Learning and
+Principles and Practice of Knowledge Discovery in
+Databases (ECML-PKDD).
+Percy Liang and Michael I Jordan. 2008. An
+asymptotic analysis of generative, discriminative,
+and pseudolikelihood estimators. In Proceedings of
+the 25th international conference on Machine learn-
+ing, pages 584–591. ACM.
+Yang Liu and Maosong Sun. 2014. Contrastive un-
+supervised word alignment with non-local features.
+arXiv preprint arXiv:1410.2082.
+Ji Ma, Yue Zhang, and Jingbo Zhu. 2014. Punctu-
+ation processing for projective dependency parsing.
+In Proc. of ACL.
+Mitchell P Marcus, Mary Ann Marcinkiewicz, and
+Beatrice Santorini. 1993. Building a large anno-
+tated corpus of english: The penn treebank. Compu-
+tational linguistics, 19(2):313–330.
+Marshall R Mayberry III and Risto Miikkulainen.
+2005. Broad-coverage parsing with neural net-
+works. Neural Processing Letters, 21(2):121–132.
+Joakim Nivre and Mario Scholz. 2004. Deterministic
+dependency parsing of English text. In Proceedings
+of the 20th International Conference on Computa-
+tional Linguistics (COLING), pages 64–70.
+Joakim Nivre, Johan Hall, Jens Nilsson, Atanas
+Chanev, G¨ulsen Eryigit, Sandra K¨ubler, Svetoslav
+Marinov, and Erwin Marsi. 2007. Maltparser:
+A language-independent system for data-driven de-
+pendency parsing. Natural Language Engineering,
+13(2):95–135.
+Joakim Nivre. 2008. Algorithms for deterministic in-
+cremental dependency parsing. Computational Lin-
+guistics, 34(4):513–553.
+</reference>
+<page confidence="0.779865">
+1221
+</page>
+<reference confidence="0.99979455319149">
+Richard Socher, John Bauer, Christopher D Manning,
+and Andrew Y Ng. 2013. Parsing with composi-
+tional vector grammars. In In Proceedings of the
+ACL conference. Citeseer.
+Pontus Stenetorp. 2013. Transition-based dependency
+parsing using recursive neural networks. In NIPS
+Workshop on Deep Learning.
+Jun Suzuki, Hideki Isozaki, Xavier Carreras, and
+Michael Collins. 2009. An empirical study of semi-
+supervised structured conditional models for depen-
+dency parsing. In Proceedings of the 2009 Con-
+ference on Empirical Methods in Natural Language
+Processing: Volume 2-Volume 2, pages 551–560.
+Association for Computational Linguistics.
+David Vickrey, Cliff C Lin, and Daphne Koller. 2010.
+Non-local contrastive objectives. In Proceedings
+of the 27th International Conference on Machine
+Learning (ICML-10), pages 1103–1110.
+David Weiss, Christopher Alberti, Michael Collins, and
+Slav Petrov. 2015. Structured training for neural
+network transition-based parsing. In Proceedings of
+the ACL conference. Association for Computational
+Linguistics.
+Hiroyasu Yamada and Yuji Matsumoto. 2003. Statis-
+tical dependency analysis with support vector ma-
+chines. In Proceedings of IWPT, volume 3.
+Yue Zhang and Stephen Clark. 2008. A tale of
+two parsers: investigating and combining graph-
+based and transition-based dependency parsing us-
+ing beam-search. In Proceedings of the Conference
+on Empirical Methods in Natural Language Pro-
+cessing, pages 562–571. Association for Computa-
+tional Linguistics.
+Yue Zhang and Stephen Clark. 2011. Syntactic pro-
+cessing using the generalized perceptron and beam
+search. Computational Linguistics, 37(1):105–151.
+Yue Zhang and Joakim Nivre. 2011. Transition-based
+dependency parsing with rich non-local features. In
+Proceedings of the 49th Annual Meeting of the Asso-
+ciation for Computational Linguistics: Human Lan-
+guage Technologies: short papers-Volume 2, pages
+188–193. Association for Computational Linguis-
+tics.
+Yue Zhang and Joakim Nivre. 2012. Analyzing
+the effect of global learning and beam-search on
+transition-based dependency parsing. In COLING
+(Posters), pages 1391–1400.
+</reference>
+<page confidence="0.992101">
+1222
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.350893">
+<title confidence="0.8879855">A Neural Probabilistic Structured-Prediction Model for Transition-Based Dependency Parsing</title>
+<affiliation confidence="0.9708785">Yue Key Laboratory for Novel Software Technology, Nanjing University, University of Technology and Design,</affiliation>
+<email confidence="0.5022">huangsj,yuezhang@sutd.edu.sg</email>
+<abstract confidence="0.998529894736842">Neural probabilistic parsers are attractive for their capability of automatic feature combination and small data sizes. A transition-based greedy neural parser has given better accuracies over its linear counterpart. We propose a neural probabilistic structured-prediction model for transition-based dependency parsing, which integrates search and learning. Beam search is used for decoding, and contrastive learning is performed for maximizing the sentence-level log-likelihood. In standard Penn Treebank experiments, the structured neural parser achieves a 1.8% accuracy improvement upon a competitive greedy neural parser baseline, giving performance comparable to the best linear parser.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>Bernd Bohnet</author>
+<author>Joakim Nivre</author>
+</authors>
+<title>A transitionbased system for joint part-of-speech tagging and labeled non-projective dependency parsing.</title>
+<date>2012</date>
+<booktitle>In Proceedings of the 2012 Joint Conference on Empirical Methods in Natural Language Processing and Computational Natural Language Learning,</booktitle>
+<pages>1455--1465</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<contexts>
+<context position="6818" citStr="Bohnet and Nivre, 2012" startWordPosition="1089" endWordPosition="1092">h size n, parsing stops after performing exactly 2n − 1 actions. MaltParser uses an SVM classifier for deterministic arc-standard parsing. At each step, MaltParser generates a set of successor states according to the current state, and deterministically selects the highest-scored one as the next state. 2.2 Global Learning and Beam Search The drawback of deterministic parsing is error propagation. An incorrect action will have a negative influence to its subsequent actions, leading to an incorrect output parse tree. To address this issue, global learning and beam search (Zhang and Clark, 2011; Bohnet and Nivre, 2012; Choi and McCallum, 2013) are used. Given an input x, the goal of decoding is to find the highest-scored action sequence globally. y = arg max score(y′) (1) y′EGEN(x) Where GEN(x) denotes all possible action sequences on x, which correspond to all possible parse trees. The score of an action sequence y is: • LEFT-ARC(l): add an arc with label l between the top two trees on the stack (s1 ← s0), and �score(y) = 9 · `b(a) (2) remove s1 from the stack. aEy • RIGHT-ARC(l): add an arc with label l between the top two trees on the stack (s1 → s0), and remove s0 from the stack. The arc-standard parse</context>
+<context position="22366" citStr="Bohnet and Nivre (2012)" startWordPosition="3670" endWordPosition="3673">re effective than using beam search only in decoding. Our results in Table 3 are obtained by using the same beam sizes for both training and testing. Zhang and Nivre (2012) also find that for their lin3Our baseline accuracy is a little lower than accuracy reported in baseline paper (Chen and Manning, 2014), because we use Penn2Malt to convert the Penn Treebank, and they use LTH Conversion. 1218 System UAS LAS Speed baseline greedy parser 91.47 90.43 0.001 Huang and Sagae (2010) 92.10 0.04 Zhang and Nivre (2011) 92.90 91.80 0.03 Choi and McCallum (2013) 92.96 91.93 0.009 Ma et al. (2014) 93.06 Bohnet and Nivre (2012)†t 93.67 92.68 0.4 Suzuki et al. (2009)† 93.79 Koo et al. (2008)† 93.16 Chen et al. (2014)† 93.77 beam size training decoding 100 100 93.28 92.35 0.07 100 64 93.20 92.27 0.04 100 16 92.40 91.95 0.01 100 90 80 60 50 40 30 20 70 10 batch size = 1 batch size = 10 batch size = 1000 batch size = 2000 batch size = 5000 0 1000 2000 3000 4000 5000 iteration UAS Figure 2: Parsing performance with different training batch sizes. ear model, the best results are achieved by using the same beam sizes during training and testing. We find that this observation does not apply to our neural parser. In our case</context>
+<context position="25580" citStr="Bohnet and Nivre (2012)" startWordPosition="4216" endWordPosition="4219">of more than one incorrect action sequences. 4.2.3 Final Results Table 5 shows the results of our final parser and a line of transition-based parsers on the test set. Our structured neural parser achieves an accuracy of 93.28%, 0.38% higher than Zhang and Nivre (2011), which employees millions of highorder binary indicator features in parsing. The model size of ZPar (Zhang and Nivre, 2011) is over 250 MB on disk. In contrast, the model size of our structured neural parser is only 25 MB. To our knowledge, the result is the best reported result achieved by shift-reduce parsers on this data set. Bohnet and Nivre (2012) obtain an accuracy of 93.67%, which is higher than our parser. However, their parser is a joint model of parsing and POS-tagging, and they use external data in parsing. We also list the result of Chen et al. (2014), Koo et al. (2008) and Suzuki et al. (2009) in Table 5, which make use of large-scale unannotated text to improve parsing accuracies. The input embeddings of our parser are also trained 1219 over large raw text, and in this perspective our model is correlated with the semi-supervised models. However, because we fine-tune the word embeddings in supervised training, the embeddings of</context>
+</contexts>
+<marker>Bohnet, Nivre, 2012</marker>
+<rawString>Bernd Bohnet and Joakim Nivre. 2012. A transitionbased system for joint part-of-speech tagging and labeled non-projective dependency parsing. In Proceedings of the 2012 Joint Conference on Empirical Methods in Natural Language Processing and Computational Natural Language Learning, pages 1455–1465. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Danqi Chen</author>
+<author>Christopher D Manning</author>
+</authors>
+<title>A fast and accurate dependency parser using neural networks.</title>
+<date>2014</date>
+<booktitle>In Empirical Methods in Natural Language Processing (EMNLP).</booktitle>
+<contexts>
+<context position="1565" citStr="Chen and Manning (2014)" startWordPosition="213" endWordPosition="216">ompetitive greedy neural parser baseline, giving performance comparable to the best linear parser. 1 Introduction Transition-based methods have given competitive accuracies and efficiencies for dependency parsing (Yamada and Matsumoto, 2003; Nivre and Scholz, 2004; Zhang and Clark, 2008; Huang and Sagae, 2010; Zhang and Nivre, 2011; Goldberg and Nivre, 2013). These parsers construct dependency trees by using a sequence of transition actions, such as SHIFT and REDUCE, over input sentences. High accuracies are achieved by using a linear model and millions of binary indicator features. Recently, Chen and Manning (2014) propose an alternative dependency parser using a neural network, which represents atomic features as dense vectors, and obtains feature combination automatically other than devising high-order features manually. The greedy neural parser of Chen and Manning (2014) gives higher accuracies compared to Work done while the first author was visiting SUTD. the greedy linear MaltParser (Nivre and Scholz, 2004), but lags behind state-of-the-art linear systems with sparse features (Zhang and Nivre, 2011), which adopt global learning and beam search decoding (Zhang and Nivre, 2012). The key difference i</context>
+<context position="4624" citStr="Chen and Manning (2014)" startWordPosition="693" endWordPosition="696">Natural Language Processing, pages 1213–1222, Beijing, China, July 26-31, 2015. c�2015 Association for Computational Linguistics based parsing. To address this challenge, we take a contrastive learning approach (Hinton, 2002; LeCun and Huang, 2005; Liang and Jordan, 2008; Vickrey et al., 2010; Liu and Sun, 2014). Using the sum of log probabilities over the action sequences in the beam to approximate that over all possible action sequences. In standard PennTreebank (Marcus et al., 1993) evaluations, our parser achieves a significant accuracy improvement (+1.8%) over the greedy neural parser of Chen and Manning (2014), and gives the best reported accuracy by shift-reduce parsers. The incremental neural probabilistic framework with global contrastive learning and beam search could be used in other structured prediction tasks. 2 Background 2.1 Arc-standard Parsing Transition-based dependency parsers scan an input sentence from left to right, and perform a sequence of transition actions to predict its parse tree (Nivre, 2008). In this paper, we employ the arc-standard system (Nivre et al., 2007), which maintains partially-constructed outputs using a stack, and orders the incoming words in the input sentence i</context>
+<context position="8152" citStr="Chen and Manning (2014)" startWordPosition="1330" endWordPosition="1333">ence y, 4b is a feature function for a, and 0 is the parameter vector of the linear model. The score of an action sequence is the linear sum of the scores of each action. During training, action sequence scores are globally learned. 1214 The parser of Zhang and Nivre (2011) is developed using this framework. The structured perceptron (Collins, 2002) with early update (Collins and Roark, 2004) is applied for training. By utilizing rich manual features, it gives state-of-the-art accuracies in standard Penn Treebank evaluation. We take this method as one baseline. 2.3 Greedy Neural Network Model Chen and Manning (2014) build a greedy neural arc-standard parser. The model can be regarded as an alternative implementation of MaltParser, using a feedforward neural network to replace the SVM classifier for deterministic parsing. 2.3.1 Model The greedy neural model extracts n atomic features from a parsing state, which consists of words, POS-tags and dependency labels from the stack ans queue. Embeddings are used to represent word, POS and dependency label atomic features. Each embedding is represented as a ddimensional vector ei E R. Therefore, the full embedding matrix is E E Rd×V , where V is the number of dis</context>
+<context position="10168" citStr="Chen and Manning (2014)" startWordPosition="1634" endWordPosition="1637">, rc1(rc1(s1))t F rc1(s0)l, lc1(s0)l, lc2(s0)l, lc1(s1)l, lc2(s1)l rc1(s1)l, rc2(s0)l, rc2(s1)l, lc1(lc1(s0))l lc1(lc1(s1))l, rc1(rc1(s0))l, rc1(rc1(s1))l Table 1: Feature templates. into three types: Fw, Ft, Fl, which represents word features, POS-tag features and dependency label features, respectively. For example, s0w and q0w represent the first word on the stack and queue, respectively; lc1(s0)w and rc1(s0)w represent the leftmost and rightmost child of s0, respectively. Similarly, lc1(s0)t and lc1(s0)l represent the POS-tag and dependency label of the leftmost child of s0, respectively. Chen and Manning (2014) find that the cube activation function in Equation (3) is highly effective in capturing feature interaction, which is a novel contribution of their work. The cube function achieves linear combination between atomic word, POS and label features via the product of three element combinations. Empirically, it works better compared to a sigmoid activation function. 2.4 Training Given a set of training examples, the training objective of the greedy neural parser is to minimize the cross-entropy loss, plus a l2-regularization term: p =softmax(o) (4) � � L(0) = − log pi + 2 1 10 112 (6) i∈A where o =</context>
+<context position="11815" citStr="Chen and Manning, 2014" startWordPosition="1915" endWordPosition="1918">ng data. AdaGrad (Duchi et al., 2011) with minibatch is adopted for optimization. We take the greedy neural parser of Chen and Manning (2014) as a second baseline. 3 Structured Neural Network Model We propose a neural structured-prediction model that scores whole sequences of transition actions, rather than individual actions. As shown in Table 2, the model can be seen as a neural probabilistic alternative of Zhang and Nivre (2011), 1215 local structured classifier prediction linear Section 2.1 Section 2.2 sparse (Nivre (Zhang and et al., 2007) Nivre, 2011) neural Section 2.3 this work dense (Chen and Manning, 2014) Table 2: Correlation between different parsers. or a structured-prediction alternative of Chen and Manning (2014). It combines the advantages of both Zhang and Nivre (2011) and Chen and Manning (2014) over the greedy linear MaltParser. 3.1 Neural Probabilistic Ranking Given the baseline system in Section 2.2, the most intuitive structured neural dependency parser is to replace the linear scoring model with a neural probabilistic model. Following Equation 1, the score of an action sequence y, which corresponds to its log probability, is sum of log probability scores of each action in the seque</context>
+<context position="14327" citStr="Chen and Manning (2014)" startWordPosition="2342" endWordPosition="2345">t work well for neural models. 3.2 Sentence-Level Log-Likelihood To overcome the above limitation, we try to directly model the probabilistic distribution of whole action sequences. Given a sentence x and neural networks parameter θ, the probability of the action sequence yi is given by the softmax function: ef(x, θ)i p(yi |x, θ) = ∑ (9) ef(x, θ)j yjEGEN(x) where f(x, θ)i = ∑ o(x, yi, k, ak) (10) akEyi Here GEN(s) is the set of all possible valid action sequences for a sentence x; o(x, yi, k, ak) denotes the neural network score for the action ak given x and yi. We use the same sub network as Chen and Manning (2014) to calculate o(x, yi, k, ak) (Equation 5). The same features in Table 1 are used. Given the training data as (X, Y ), our training objective is to minimize the negative loglikelihood: where Z(x, θ) = ∑ ef(x, θ)j (14) yjEGEN(x) Here, Z(x, θ) is called the partition function. Following Chen and Manning(2014), we apply l2- regularization for training. For optimization, we need to compute gradients for L(θ), which includes gradients of exponential ∑ L(θ) = − (xi, yi)E(X,Y) ∑= − (xi, yi)E(X,Y) logp(yi |xi,θ) (11) ef(xi,θ)i log (12) Z(xi, θ) ∑= log Z(xi, θ) − f(xi, θ)i (xi, yi)E(X,Y ) (13) 1216 num</context>
+<context position="18753" citStr="Chen and Manning (2014)" startWordPosition="3084" endWordPosition="3087">ntage of early update is that training is used to guide search, minimizing search errors. 1217 4 Experiments 4.1 Set-up Our experiments are performed using the English Penn Treebank (PTB; Marcus et al., (1993)). We follow the standard splits of PTB3, using sections 2-21 for training, section 22 for development testing and section 23 for final testing. For comparison with previous work, we use Penn2Malt1 to convert constituent trees to dependency trees. We use the POS-tagger of Collins (2002) to assign POS automatically. 10-fold jackknifing is performed for tagging the training data. We follow Chen and Manning (2014), and use the set of pre-trained word embeddings2 from Collobert et al. (2011) with a dictionary size of 13,000. The word embeddings were trained on the entire English Wikipedia, which contains about 631 million words. 4.2 WSJ Experiments 4.2.1 Development experiments We set the following hyper-parameters according to the baseline greedy neural parser (Chen and Manning, 2014): embedding size d = 50, hidden layer size dh = 200, regularization parameter A = 10−8, initial learning rate of Adagrad α = 0.01. For the structured neural parser, beam size and mini-batch size are important to the parsin</context>
+<context position="20722" citStr="Chen and Manning (2014)" startWordPosition="3391" endWordPosition="3394">rch and learning. We also conduct experiments on the parser of 1http://stp.lingfil.uu.se/ nivre/research/Penn2Malt.html 2http://ronan.collobert.com/senna/ Description UAS Baseline 91.63 structured greedy beam = 1 74.90 91.63 beam = 4 84.64 91.92 beam = 16 91.53 91.90 beam = 64 93.12 91.84 beam = 100 93.23 91.81 Table 3: Accuracies of structured neural parsing and local neural classification parsing with different beam sizes. Description UAS greedy neural parser 91.47 ranking model 89.08 beam contrastive learning 93.28 Table 4: Comparison between sentence-level loglikelihood and ranking model. Chen and Manning (2014) with beam search decoding. The score of a whole action sequence is computed by the sum of log action probabilities (Equation 7). As shown in the second column of Table 3, beam search can improve parsing slightly. When the beam size increases beyond 16, however, accuracy improvements stop. In contrast, by integrating beam search and global learning, our parsing performance benefits from large beam sizes much more significantly. With a beam size as 16, the structured neural parser gives an accuracy close to that of baseline greedy parser3. When the beam size is 100, the structured neural parser</context>
+<context position="22050" citStr="Chen and Manning, 2014" startWordPosition="3616" endWordPosition="3619"> used jointly for improving parsing using a linear transition-based model. In particular, increasing the beam size, the accuracy of ZPar (Zhang and Nivre, 2011) increases significantly, but that of MaltParser does not. For structured neural parsing, our finding is similar: integrating search and learning is much more effective than using beam search only in decoding. Our results in Table 3 are obtained by using the same beam sizes for both training and testing. Zhang and Nivre (2012) also find that for their lin3Our baseline accuracy is a little lower than accuracy reported in baseline paper (Chen and Manning, 2014), because we use Penn2Malt to convert the Penn Treebank, and they use LTH Conversion. 1218 System UAS LAS Speed baseline greedy parser 91.47 90.43 0.001 Huang and Sagae (2010) 92.10 0.04 Zhang and Nivre (2011) 92.90 91.80 0.03 Choi and McCallum (2013) 92.96 91.93 0.009 Ma et al. (2014) 93.06 Bohnet and Nivre (2012)†t 93.67 92.68 0.4 Suzuki et al. (2009)† 93.79 Koo et al. (2008)† 93.16 Chen et al. (2014)† 93.77 beam size training decoding 100 100 93.28 92.35 0.07 100 64 93.20 92.27 0.04 100 16 92.40 91.95 0.01 100 90 80 60 50 40 30 20 70 10 batch size = 1 batch size = 10 batch size = 1000 batch</context>
+<context position="23313" citStr="Chen and Manning, 2014" startWordPosition="3845" endWordPosition="3849">00 3000 4000 5000 iteration UAS Figure 2: Parsing performance with different training batch sizes. ear model, the best results are achieved by using the same beam sizes during training and testing. We find that this observation does not apply to our neural parser. In our case, a large training beam always leads to better results. This is likely because a large beam improves contrastive learning. As a result, our training beam size is set to 100 for the final test. Batch size. Parsing performance using neural networks is highly sensitive to the batch size of training. In greedy neural parsing (Chen and Manning, 2014), the accuracy on the development data improves from 85% to 91% by setting the batch size to 10 and 100000, respectively. In structured neural parsing, we fix the beam size as 100 and draw the accuracies on the development set by the training iteration. As shown in Figure 2, in 5000 training iterations, the parsing accuracies improve as the iteration grows, yet different batch sizes result in different convergence accuracies. With a batch size of 5000, the parsing accuracy is about 25% higher than with a batch size of 1 (i.e. SGD). For the remaining experiments, we set batch size to 5000, whic</context>
+</contexts>
+<marker>Chen, Manning, 2014</marker>
+<rawString>Danqi Chen and Christopher D Manning. 2014. A fast and accurate dependency parser using neural networks. In Empirical Methods in Natural Language Processing (EMNLP).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Wenliang Chen</author>
+<author>Yue Zhang</author>
+<author>Min Zhang</author>
+</authors>
+<title>Feature embedding for dependency parsing.</title>
+<date>2014</date>
+<booktitle>In Proceedings of the international conference on Computational linguistics. Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="22456" citStr="Chen et al. (2014)" startWordPosition="3687" endWordPosition="3690">ing the same beam sizes for both training and testing. Zhang and Nivre (2012) also find that for their lin3Our baseline accuracy is a little lower than accuracy reported in baseline paper (Chen and Manning, 2014), because we use Penn2Malt to convert the Penn Treebank, and they use LTH Conversion. 1218 System UAS LAS Speed baseline greedy parser 91.47 90.43 0.001 Huang and Sagae (2010) 92.10 0.04 Zhang and Nivre (2011) 92.90 91.80 0.03 Choi and McCallum (2013) 92.96 91.93 0.009 Ma et al. (2014) 93.06 Bohnet and Nivre (2012)†t 93.67 92.68 0.4 Suzuki et al. (2009)† 93.79 Koo et al. (2008)† 93.16 Chen et al. (2014)† 93.77 beam size training decoding 100 100 93.28 92.35 0.07 100 64 93.20 92.27 0.04 100 16 92.40 91.95 0.01 100 90 80 60 50 40 30 20 70 10 batch size = 1 batch size = 10 batch size = 1000 batch size = 2000 batch size = 5000 0 1000 2000 3000 4000 5000 iteration UAS Figure 2: Parsing performance with different training batch sizes. ear model, the best results are achieved by using the same beam sizes during training and testing. We find that this observation does not apply to our neural parser. In our case, a large training beam always leads to better results. This is likely because a large bea</context>
+<context position="25795" citStr="Chen et al. (2014)" startWordPosition="4257" endWordPosition="4260">93.28%, 0.38% higher than Zhang and Nivre (2011), which employees millions of highorder binary indicator features in parsing. The model size of ZPar (Zhang and Nivre, 2011) is over 250 MB on disk. In contrast, the model size of our structured neural parser is only 25 MB. To our knowledge, the result is the best reported result achieved by shift-reduce parsers on this data set. Bohnet and Nivre (2012) obtain an accuracy of 93.67%, which is higher than our parser. However, their parser is a joint model of parsing and POS-tagging, and they use external data in parsing. We also list the result of Chen et al. (2014), Koo et al. (2008) and Suzuki et al. (2009) in Table 5, which make use of large-scale unannotated text to improve parsing accuracies. The input embeddings of our parser are also trained 1219 over large raw text, and in this perspective our model is correlated with the semi-supervised models. However, because we fine-tune the word embeddings in supervised training, the embeddings of in-vocabulary words become systematically different from these of out-of-vocabulary words after training, and the effect of pre-trained out-ofvocabulary embeddings become uncertain. In this sense, our model can als</context>
+</contexts>
+<marker>Chen, Zhang, Zhang, 2014</marker>
+<rawString>Wenliang Chen, Yue Zhang, and Min Zhang. 2014. Feature embedding for dependency parsing. In Proceedings of the international conference on Computational linguistics. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jinho D Choi</author>
+<author>Andrew McCallum</author>
+</authors>
+<title>Transition-based dependency parsing with selectional branching.</title>
+<date>2013</date>
+<booktitle>In ACL (1),</booktitle>
+<pages>1052--1062</pages>
+<contexts>
+<context position="6844" citStr="Choi and McCallum, 2013" startWordPosition="1093" endWordPosition="1096">after performing exactly 2n − 1 actions. MaltParser uses an SVM classifier for deterministic arc-standard parsing. At each step, MaltParser generates a set of successor states according to the current state, and deterministically selects the highest-scored one as the next state. 2.2 Global Learning and Beam Search The drawback of deterministic parsing is error propagation. An incorrect action will have a negative influence to its subsequent actions, leading to an incorrect output parse tree. To address this issue, global learning and beam search (Zhang and Clark, 2011; Bohnet and Nivre, 2012; Choi and McCallum, 2013) are used. Given an input x, the goal of decoding is to find the highest-scored action sequence globally. y = arg max score(y′) (1) y′EGEN(x) Where GEN(x) denotes all possible action sequences on x, which correspond to all possible parse trees. The score of an action sequence y is: • LEFT-ARC(l): add an arc with label l between the top two trees on the stack (s1 ← s0), and �score(y) = 9 · `b(a) (2) remove s1 from the stack. aEy • RIGHT-ARC(l): add an arc with label l between the top two trees on the stack (s1 → s0), and remove s0 from the stack. The arc-standard parser can be summarized as the</context>
+<context position="22301" citStr="Choi and McCallum (2013)" startWordPosition="3658" endWordPosition="3661">our finding is similar: integrating search and learning is much more effective than using beam search only in decoding. Our results in Table 3 are obtained by using the same beam sizes for both training and testing. Zhang and Nivre (2012) also find that for their lin3Our baseline accuracy is a little lower than accuracy reported in baseline paper (Chen and Manning, 2014), because we use Penn2Malt to convert the Penn Treebank, and they use LTH Conversion. 1218 System UAS LAS Speed baseline greedy parser 91.47 90.43 0.001 Huang and Sagae (2010) 92.10 0.04 Zhang and Nivre (2011) 92.90 91.80 0.03 Choi and McCallum (2013) 92.96 91.93 0.009 Ma et al. (2014) 93.06 Bohnet and Nivre (2012)†t 93.67 92.68 0.4 Suzuki et al. (2009)† 93.79 Koo et al. (2008)† 93.16 Chen et al. (2014)† 93.77 beam size training decoding 100 100 93.28 92.35 0.07 100 64 93.20 92.27 0.04 100 16 92.40 91.95 0.01 100 90 80 60 50 40 30 20 70 10 batch size = 1 batch size = 10 batch size = 1000 batch size = 2000 batch size = 5000 0 1000 2000 3000 4000 5000 iteration UAS Figure 2: Parsing performance with different training batch sizes. ear model, the best results are achieved by using the same beam sizes during training and testing. We find that </context>
+</contexts>
+<marker>Choi, McCallum, 2013</marker>
+<rawString>Jinho D Choi and Andrew McCallum. 2013. Transition-based dependency parsing with selectional branching. In ACL (1), pages 1052–1062.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Michael Collins</author>
+<author>Brian Roark</author>
+</authors>
+<title>Incremental parsing with the perceptron algorithm.</title>
+<date>2004</date>
+<booktitle>In Proceedings of the 42nd Annual Meeting on Association for Computational Linguistics,</booktitle>
+<pages>111</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<contexts>
+<context position="2764" citStr="Collins and Roark, 2004" startWordPosition="398" endWordPosition="401">12). The key difference is that Chen and Manning (2014) is a local classifier that greedily optimizes each action. In contrast, Zhang and Nivre (2011) leverage a structured-prediction model to optimize whole sequences of actions, which correspond to tree structures. In this paper, we propose a novel framework for structured neural probabilistic dependency parsing, which maximizes the likelihood of action sequences instead of individual actions. Following Zhang and Clark (2011), beam search is applied to decoding, and global structured learning is integrated with beam search using earlyupdate (Collins and Roark, 2004). Designing such a framework is challenging for two main reasons: First, applying global structured learning to transition-based neural parsing is non-trivial. A direct adaptation of the framework of Zhang and Clark (2011) under the neural probabilistic model setting does not yield good results. The main reason is that the parameter space of a neural network is much denser compared to that of a linear model such as the structured perceptron (Collins, 2002). Due to the dense parameter space, for neural models, the scores of actions in a sequence are relatively more dependent than that in the li</context>
+<context position="7924" citStr="Collins and Roark, 2004" startWordPosition="1295" endWordPosition="1298">rc with label l between the top two trees on the stack (s1 → s0), and remove s0 from the stack. The arc-standard parser can be summarized as the deductive system in Figure 1, where k denotes Here a is an action in the action sequence y, 4b is a feature function for a, and 0 is the parameter vector of the linear model. The score of an action sequence is the linear sum of the scores of each action. During training, action sequence scores are globally learned. 1214 The parser of Zhang and Nivre (2011) is developed using this framework. The structured perceptron (Collins, 2002) with early update (Collins and Roark, 2004) is applied for training. By utilizing rich manual features, it gives state-of-the-art accuracies in standard Penn Treebank evaluation. We take this method as one baseline. 2.3 Greedy Neural Network Model Chen and Manning (2014) build a greedy neural arc-standard parser. The model can be regarded as an alternative implementation of MaltParser, using a feedforward neural network to replace the SVM classifier for deterministic parsing. 2.3.1 Model The greedy neural model extracts n atomic features from a parsing state, which consists of words, POS-tags and dependency labels from the stack ans qu</context>
+<context position="17491" citStr="Collins and Roark, 2004" startWordPosition="2880" endWordPosition="2883">r of action sequences, which allows the use of a limited number of probable sequences to approximate the full set of action sequences. The concentration may be enlarged dramatically with an exponential activation function of the neural network (i.e. a &gt; b � ea » eb ). 3.4 The Neural Probabilistic Structured-Prediction Framework We follow Zhang and Clark (2011) to integrate search and learning. Our search and learning framework for dependency parsing is shown as Algorithm 1. In every training iteration i, we randomly sample the training instances, and perform online learning with early update (Collins and Roark, 2004). In particular, given a training example, we use beam-search to decode the sentence. At any step, if the gold action sequence falls out of the beam, we take all the incorrect action sequences in the beam as negative examples, and the current gold sequence as a positive example for parameter update, using the training algorithm of Section 3.3. AdaGrad algorithm (Duchi et al., 2011) with mini-batch is adopted for optimization. In this way, the distribution of ot only full action sequences (i.e. complete parse trees), but also partial action sequences (i.e. partial outputs) are modeled, which ma</context>
+</contexts>
+<marker>Collins, Roark, 2004</marker>
+<rawString>Michael Collins and Brian Roark. 2004. Incremental parsing with the perceptron algorithm. In Proceedings of the 42nd Annual Meeting on Association for Computational Linguistics, page 111. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Michael Collins</author>
+</authors>
+<title>Discriminative training methods for hidden markov models: Theory and experiments with perceptron algorithms.</title>
+<date>2002</date>
+<booktitle>In Proceedings of the ACL-02 conference on Empirical methods in natural language processing-Volume 10,</booktitle>
+<pages>1--8</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<contexts>
+<context position="3224" citStr="Collins, 2002" startWordPosition="473" endWordPosition="474">lark (2011), beam search is applied to decoding, and global structured learning is integrated with beam search using earlyupdate (Collins and Roark, 2004). Designing such a framework is challenging for two main reasons: First, applying global structured learning to transition-based neural parsing is non-trivial. A direct adaptation of the framework of Zhang and Clark (2011) under the neural probabilistic model setting does not yield good results. The main reason is that the parameter space of a neural network is much denser compared to that of a linear model such as the structured perceptron (Collins, 2002). Due to the dense parameter space, for neural models, the scores of actions in a sequence are relatively more dependent than that in the linear models. As a result, the log probability of an action sequence can not be modeled just as the sum of log probabilities of each action in the sequence, which is the case of structured linear model. We address the challenge by using a softmax function to directly model the distribution of action sequences. Second, for the structured model above, maximum-likelihood training is computationally intractable, requiring summing over all possible action sequen</context>
+<context position="7880" citStr="Collins, 2002" startWordPosition="1290" endWordPosition="1291">tack. aEy • RIGHT-ARC(l): add an arc with label l between the top two trees on the stack (s1 → s0), and remove s0 from the stack. The arc-standard parser can be summarized as the deductive system in Figure 1, where k denotes Here a is an action in the action sequence y, 4b is a feature function for a, and 0 is the parameter vector of the linear model. The score of an action sequence is the linear sum of the scores of each action. During training, action sequence scores are globally learned. 1214 The parser of Zhang and Nivre (2011) is developed using this framework. The structured perceptron (Collins, 2002) with early update (Collins and Roark, 2004) is applied for training. By utilizing rich manual features, it gives state-of-the-art accuracies in standard Penn Treebank evaluation. We take this method as one baseline. 2.3 Greedy Neural Network Model Chen and Manning (2014) build a greedy neural arc-standard parser. The model can be regarded as an alternative implementation of MaltParser, using a feedforward neural network to replace the SVM classifier for deterministic parsing. 2.3.1 Model The greedy neural model extracts n atomic features from a parsing state, which consists of words, POS-tags</context>
+<context position="18626" citStr="Collins (2002)" startWordPosition="3066" endWordPosition="3067"> but also partial action sequences (i.e. partial outputs) are modeled, which makes training more challenging. The advantage of early update is that training is used to guide search, minimizing search errors. 1217 4 Experiments 4.1 Set-up Our experiments are performed using the English Penn Treebank (PTB; Marcus et al., (1993)). We follow the standard splits of PTB3, using sections 2-21 for training, section 22 for development testing and section 23 for final testing. For comparison with previous work, we use Penn2Malt1 to convert constituent trees to dependency trees. We use the POS-tagger of Collins (2002) to assign POS automatically. 10-fold jackknifing is performed for tagging the training data. We follow Chen and Manning (2014), and use the set of pre-trained word embeddings2 from Collobert et al. (2011) with a dictionary size of 13,000. The word embeddings were trained on the entire English Wikipedia, which contains about 631 million words. 4.2 WSJ Experiments 4.2.1 Development experiments We set the following hyper-parameters according to the baseline greedy neural parser (Chen and Manning, 2014): embedding size d = 50, hidden layer size dh = 200, regularization parameter A = 10−8, initial</context>
+</contexts>
+<marker>Collins, 2002</marker>
+<rawString>Michael Collins. 2002. Discriminative training methods for hidden markov models: Theory and experiments with perceptron algorithms. In Proceedings of the ACL-02 conference on Empirical methods in natural language processing-Volume 10, pages 1–8. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ronan Collobert</author>
+<author>Jason Weston</author>
+<author>L´eon Bottou</author>
+<author>Michael Karlen</author>
+<author>Koray Kavukcuoglu</author>
+<author>Pavel Kuksa</author>
+</authors>
+<title>Natural language processing (almost) from scratch.</title>
+<date>2011</date>
+<journal>The Journal of Machine Learning Research,</journal>
+<pages>12--2493</pages>
+<contexts>
+<context position="18831" citStr="Collobert et al. (2011)" startWordPosition="3097" endWordPosition="3100">rch errors. 1217 4 Experiments 4.1 Set-up Our experiments are performed using the English Penn Treebank (PTB; Marcus et al., (1993)). We follow the standard splits of PTB3, using sections 2-21 for training, section 22 for development testing and section 23 for final testing. For comparison with previous work, we use Penn2Malt1 to convert constituent trees to dependency trees. We use the POS-tagger of Collins (2002) to assign POS automatically. 10-fold jackknifing is performed for tagging the training data. We follow Chen and Manning (2014), and use the set of pre-trained word embeddings2 from Collobert et al. (2011) with a dictionary size of 13,000. The word embeddings were trained on the entire English Wikipedia, which contains about 631 million words. 4.2 WSJ Experiments 4.2.1 Development experiments We set the following hyper-parameters according to the baseline greedy neural parser (Chen and Manning, 2014): embedding size d = 50, hidden layer size dh = 200, regularization parameter A = 10−8, initial learning rate of Adagrad α = 0.01. For the structured neural parser, beam size and mini-batch size are important to the parsing performance. We tune them on the development set. Beam size. Beam search enl</context>
+<context position="28018" citStr="Collobert et al. (2011)" startWordPosition="4613" endWordPosition="4616">enetorp (2013) applies a compositional vector method (Socher et al., 2013), and Chen and Manning (2014) propose a feed-forward neural parser. The performances of these neural parsers lag behind the state-of-the-art. More recently, Dyer et al. (2015) propose a greedy transition-based dependency parser, using three stack LSTMs to represent the input, the stack of partial syntactic trees and the history of parse actions, respectively. By modeling more history, the parser gives significant better accuracies compared to the greedy neural parser of Chen and Manning (2014). Structured neural models. Collobert et al. (2011) presents a unified neural network architecture for various natural language processing (NLP) tasks. They propose to use sentence-level log-likelihood to enhance a neural probabilistic model, which inspires our model. Sequence labeling is used for graph-based decoding. Using the Viterbi algorithm, they can compute the exponential partition function in linear time without approximation. However, with a dynamic programming decoder, their sequence labeling model can only extract local features. In contrast, our integrated approximated search and learning framework allows rich global features. Wei</context>
+</contexts>
+<marker>Collobert, Weston, Bottou, Karlen, Kavukcuoglu, Kuksa, 2011</marker>
+<rawString>Ronan Collobert, Jason Weston, L´eon Bottou, Michael Karlen, Koray Kavukcuoglu, and Pavel Kuksa. 2011. Natural language processing (almost) from scratch. The Journal of Machine Learning Research, 12:2493–2537.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>R Collobert</author>
+</authors>
+<title>Deep learning for efficient discriminative parsing.</title>
+<date>2011</date>
+<booktitle>In AISTATS.</booktitle>
+<contexts>
+<context position="27132" citStr="Collobert, 2011" startWordPosition="4481" endWordPosition="4482">are the speed of the structured neural parser on an Intel Core i7 3.40GHz CPU with 16GB RAM. The structured neural parser runs about as fast as Zhang and Nivre (Zhang and Nivre, 2011) and Huang and Sagae (Huang and Sagae, 2010). The results show that our parser combines the benefits of structured models and neural probabilistic models, offering high accuracies, fast speed and slim model size. 5 Related Work Parsing with neural networks. A line of work has been proposed to explore the effect of neural network models for constituent parsing (Henderson, 2004; Mayberry III and Miikkulainen, 2005; Collobert, 2011; Socher et al., 2013; Legrand and Collobert, 2014). Performances of most of these methods are still well below the state-of-the-art, except for Socher et al.(2013), who propose a neural reranker based on a PCFG parser. For transition-based dependency parsing, Stenetorp (2013) applies a compositional vector method (Socher et al., 2013), and Chen and Manning (2014) propose a feed-forward neural parser. The performances of these neural parsers lag behind the state-of-the-art. More recently, Dyer et al. (2015) propose a greedy transition-based dependency parser, using three stack LSTMs to represe</context>
+</contexts>
+<marker>Collobert, 2011</marker>
+<rawString>R. Collobert. 2011. Deep learning for efficient discriminative parsing. In AISTATS.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>John Duchi</author>
+<author>Elad Hazan</author>
+<author>Yoram Singer</author>
+</authors>
+<title>Adaptive subgradient methods for online learning and stochastic optimization.</title>
+<date>2011</date>
+<journal>The Journal of Machine Learning Research,</journal>
+<pages>12--2121</pages>
+<contexts>
+<context position="11229" citStr="Duchi et al., 2011" startWordPosition="1820" endWordPosition="1823">reedy neural parser is to minimize the cross-entropy loss, plus a l2-regularization term: p =softmax(o) (4) � � L(0) = − log pi + 2 1 10 112 (6) i∈A where o = W2h (5) W2 E Rd-×dh and do is the number of shift-reduce actions. 2.3.2 Features One advantage of Chen and Manning (2014) is that the neural network parser achieves feature combination automatically. Their atomic features are defined by following Zhang and Nivre (2011). As shown in Table 1, the features are categorized 0 is the set of all parameters (i.e. W1, W2, b, E), and A is the set of all gold actions in the training data. AdaGrad (Duchi et al., 2011) with minibatch is adopted for optimization. We take the greedy neural parser of Chen and Manning (2014) as a second baseline. 3 Structured Neural Network Model We propose a neural structured-prediction model that scores whole sequences of transition actions, rather than individual actions. As shown in Table 2, the model can be seen as a neural probabilistic alternative of Zhang and Nivre (2011), 1215 local structured classifier prediction linear Section 2.1 Section 2.2 sparse (Nivre (Zhang and et al., 2007) Nivre, 2011) neural Section 2.3 this work dense (Chen and Manning, 2014) Table 2: Corr</context>
+<context position="17875" citStr="Duchi et al., 2011" startWordPosition="2945" endWordPosition="2948">arning. Our search and learning framework for dependency parsing is shown as Algorithm 1. In every training iteration i, we randomly sample the training instances, and perform online learning with early update (Collins and Roark, 2004). In particular, given a training example, we use beam-search to decode the sentence. At any step, if the gold action sequence falls out of the beam, we take all the incorrect action sequences in the beam as negative examples, and the current gold sequence as a positive example for parameter update, using the training algorithm of Section 3.3. AdaGrad algorithm (Duchi et al., 2011) with mini-batch is adopted for optimization. In this way, the distribution of ot only full action sequences (i.e. complete parse trees), but also partial action sequences (i.e. partial outputs) are modeled, which makes training more challenging. The advantage of early update is that training is used to guide search, minimizing search errors. 1217 4 Experiments 4.1 Set-up Our experiments are performed using the English Penn Treebank (PTB; Marcus et al., (1993)). We follow the standard splits of PTB3, using sections 2-21 for training, section 22 for development testing and section 23 for final </context>
+</contexts>
+<marker>Duchi, Hazan, Singer, 2011</marker>
+<rawString>John Duchi, Elad Hazan, and Yoram Singer. 2011. Adaptive subgradient methods for online learning and stochastic optimization. The Journal of Machine Learning Research, 12:2121–2159.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Chris Dyer</author>
+<author>Miguel Ballesteros</author>
+<author>Wang Ling</author>
+<author>Austin Matthews</author>
+<author>Noah A Smith</author>
+</authors>
+<title>Transitionbased dependency parsing with stack long shortterm memory.</title>
+<date>2015</date>
+<booktitle>In Proceedings of the ACL conference. Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="27644" citStr="Dyer et al. (2015)" startWordPosition="4557" endWordPosition="4560">work models for constituent parsing (Henderson, 2004; Mayberry III and Miikkulainen, 2005; Collobert, 2011; Socher et al., 2013; Legrand and Collobert, 2014). Performances of most of these methods are still well below the state-of-the-art, except for Socher et al.(2013), who propose a neural reranker based on a PCFG parser. For transition-based dependency parsing, Stenetorp (2013) applies a compositional vector method (Socher et al., 2013), and Chen and Manning (2014) propose a feed-forward neural parser. The performances of these neural parsers lag behind the state-of-the-art. More recently, Dyer et al. (2015) propose a greedy transition-based dependency parser, using three stack LSTMs to represent the input, the stack of partial syntactic trees and the history of parse actions, respectively. By modeling more history, the parser gives significant better accuracies compared to the greedy neural parser of Chen and Manning (2014). Structured neural models. Collobert et al. (2011) presents a unified neural network architecture for various natural language processing (NLP) tasks. They propose to use sentence-level log-likelihood to enhance a neural probabilistic model, which inspires our model. Sequence</context>
+</contexts>
+<marker>Dyer, Ballesteros, Ling, Matthews, Smith, 2015</marker>
+<rawString>Chris Dyer, Miguel Ballesteros, Wang Ling, Austin Matthews, and Noah A. Smith. 2015. Transitionbased dependency parsing with stack long shortterm memory. In Proceedings of the ACL conference. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yoav Goldberg</author>
+<author>Joakim Nivre</author>
+</authors>
+<title>Training deterministic parsers with non-deterministic oracles.</title>
+<date>2013</date>
+<journal>Transactions of the Association for Computational Linguistics,</journal>
+<pages>1--403</pages>
+<contexts>
+<context position="1302" citStr="Goldberg and Nivre, 2013" startWordPosition="169" endWordPosition="172">tegrates search and learning. Beam search is used for decoding, and contrastive learning is performed for maximizing the sentence-level log-likelihood. In standard Penn Treebank experiments, the structured neural parser achieves a 1.8% accuracy improvement upon a competitive greedy neural parser baseline, giving performance comparable to the best linear parser. 1 Introduction Transition-based methods have given competitive accuracies and efficiencies for dependency parsing (Yamada and Matsumoto, 2003; Nivre and Scholz, 2004; Zhang and Clark, 2008; Huang and Sagae, 2010; Zhang and Nivre, 2011; Goldberg and Nivre, 2013). These parsers construct dependency trees by using a sequence of transition actions, such as SHIFT and REDUCE, over input sentences. High accuracies are achieved by using a linear model and millions of binary indicator features. Recently, Chen and Manning (2014) propose an alternative dependency parser using a neural network, which represents atomic features as dense vectors, and obtains feature combination automatically other than devising high-order features manually. The greedy neural parser of Chen and Manning (2014) gives higher accuracies compared to Work done while the first author was</context>
+</contexts>
+<marker>Goldberg, Nivre, 2013</marker>
+<rawString>Yoav Goldberg and Joakim Nivre. 2013. Training deterministic parsers with non-deterministic oracles. Transactions of the Association for Computational Linguistics, 1:403–414.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>James Henderson</author>
+</authors>
+<title>Discriminative training of a neural network statistical parser.</title>
+<date>2004</date>
+<booktitle>In Proceedings of the 42nd Annual Meeting on Association for Computational Linguistics,</booktitle>
+<pages>page</pages>
+<contexts>
+<context position="27078" citStr="Henderson, 2004" startWordPosition="4473" endWordPosition="4475">to the models of Chen and Manning (2014). We also compare the speed of the structured neural parser on an Intel Core i7 3.40GHz CPU with 16GB RAM. The structured neural parser runs about as fast as Zhang and Nivre (Zhang and Nivre, 2011) and Huang and Sagae (Huang and Sagae, 2010). The results show that our parser combines the benefits of structured models and neural probabilistic models, offering high accuracies, fast speed and slim model size. 5 Related Work Parsing with neural networks. A line of work has been proposed to explore the effect of neural network models for constituent parsing (Henderson, 2004; Mayberry III and Miikkulainen, 2005; Collobert, 2011; Socher et al., 2013; Legrand and Collobert, 2014). Performances of most of these methods are still well below the state-of-the-art, except for Socher et al.(2013), who propose a neural reranker based on a PCFG parser. For transition-based dependency parsing, Stenetorp (2013) applies a compositional vector method (Socher et al., 2013), and Chen and Manning (2014) propose a feed-forward neural parser. The performances of these neural parsers lag behind the state-of-the-art. More recently, Dyer et al. (2015) propose a greedy transition-based</context>
+</contexts>
+<marker>Henderson, 2004</marker>
+<rawString>James Henderson. 2004. Discriminative training of a neural network statistical parser. In Proceedings of the 42nd Annual Meeting on Association for Computational Linguistics, page 95. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Geoffrey Hinton</author>
+</authors>
+<title>Training products of experts by minimizing contrastive divergence.</title>
+<date>2002</date>
+<booktitle>Neural computation,</booktitle>
+<pages>14--8</pages>
+<contexts>
+<context position="4225" citStr="Hinton, 2002" startWordPosition="628" endWordPosition="629">ction to directly model the distribution of action sequences. Second, for the structured model above, maximum-likelihood training is computationally intractable, requiring summing over all possible action sequences, which is difficult for transition1213 Proceedings of the 53rd Annual Meeting of the Association for Computational Linguistics and the 7th International Joint Conference on Natural Language Processing, pages 1213–1222, Beijing, China, July 26-31, 2015. c�2015 Association for Computational Linguistics based parsing. To address this challenge, we take a contrastive learning approach (Hinton, 2002; LeCun and Huang, 2005; Liang and Jordan, 2008; Vickrey et al., 2010; Liu and Sun, 2014). Using the sum of log probabilities over the action sequences in the beam to approximate that over all possible action sequences. In standard PennTreebank (Marcus et al., 1993) evaluations, our parser achieves a significant accuracy improvement (+1.8%) over the greedy neural parser of Chen and Manning (2014), and gives the best reported accuracy by shift-reduce parsers. The incremental neural probabilistic framework with global contrastive learning and beam search could be used in other structured predict</context>
+<context position="15337" citStr="Hinton, 2002" startWordPosition="2511" endWordPosition="2512"> for L(θ), which includes gradients of exponential ∑ L(θ) = − (xi, yi)E(X,Y) ∑= − (xi, yi)E(X,Y) logp(yi |xi,θ) (11) ef(xi,θ)i log (12) Z(xi, θ) ∑= log Z(xi, θ) − f(xi, θ)i (xi, yi)E(X,Y ) (13) 1216 numbers of negative examples in partition function Z(x, 0). However, beam search is used for transition-based parsing, and no efficient optimal dynamic program is available to estimate Z(x, 0) accurately. We adopt a novel contrastive learning approach to approximately compute Z(x, 0). 3.3 Contrastive Learning As an alternative to maximize the likelihood on some observed data, contrastive learning (Hinton, 2002; LeCun and Huang, 2005; Liang and Jordan, 2008; Vickrey et al., 2010; Liu and Sun, 2014) is an approach that assigns higher probabilities to observed data and lower probabilities to noisy data. We adopt the contrastive learning approach, assigning higher probabilities to the gold action sequence compared to incorrect action sequences in the beam. Intuitively, this method only penalizes incorrect action sequences with high probabilities. Our new training objective is approximated as: log p′(yi |xi, 0) (15) ef(xi,θ)i log Z′(xi, 0) (16) Algorithm 1: Training Algorithm for Structured Neural Parsi</context>
+</contexts>
+<marker>Hinton, 2002</marker>
+<rawString>Geoffrey Hinton. 2002. Training products of experts by minimizing contrastive divergence. Neural computation, 14(8):1771–1800.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Liang Huang</author>
+<author>Kenji Sagae</author>
+</authors>
+<title>Dynamic programming for linear-time incremental parsing.</title>
+<date>2010</date>
+<booktitle>In Proceedings of the 48th Annual Meeting of the Association for Computational Linguistics,</booktitle>
+<pages>1077--1086</pages>
+<institution>Association for Computational Linguistics.</institution>
+<contexts>
+<context position="1252" citStr="Huang and Sagae, 2010" startWordPosition="161" endWordPosition="164"> transition-based dependency parsing, which integrates search and learning. Beam search is used for decoding, and contrastive learning is performed for maximizing the sentence-level log-likelihood. In standard Penn Treebank experiments, the structured neural parser achieves a 1.8% accuracy improvement upon a competitive greedy neural parser baseline, giving performance comparable to the best linear parser. 1 Introduction Transition-based methods have given competitive accuracies and efficiencies for dependency parsing (Yamada and Matsumoto, 2003; Nivre and Scholz, 2004; Zhang and Clark, 2008; Huang and Sagae, 2010; Zhang and Nivre, 2011; Goldberg and Nivre, 2013). These parsers construct dependency trees by using a sequence of transition actions, such as SHIFT and REDUCE, over input sentences. High accuracies are achieved by using a linear model and millions of binary indicator features. Recently, Chen and Manning (2014) propose an alternative dependency parser using a neural network, which represents atomic features as dense vectors, and obtains feature combination automatically other than devising high-order features manually. The greedy neural parser of Chen and Manning (2014) gives higher accuracie</context>
+<context position="22225" citStr="Huang and Sagae (2010)" startWordPosition="3645" endWordPosition="3648">ficantly, but that of MaltParser does not. For structured neural parsing, our finding is similar: integrating search and learning is much more effective than using beam search only in decoding. Our results in Table 3 are obtained by using the same beam sizes for both training and testing. Zhang and Nivre (2012) also find that for their lin3Our baseline accuracy is a little lower than accuracy reported in baseline paper (Chen and Manning, 2014), because we use Penn2Malt to convert the Penn Treebank, and they use LTH Conversion. 1218 System UAS LAS Speed baseline greedy parser 91.47 90.43 0.001 Huang and Sagae (2010) 92.10 0.04 Zhang and Nivre (2011) 92.90 91.80 0.03 Choi and McCallum (2013) 92.96 91.93 0.009 Ma et al. (2014) 93.06 Bohnet and Nivre (2012)†t 93.67 92.68 0.4 Suzuki et al. (2009)† 93.79 Koo et al. (2008)† 93.16 Chen et al. (2014)† 93.77 beam size training decoding 100 100 93.28 92.35 0.07 100 64 93.20 92.27 0.04 100 16 92.40 91.95 0.01 100 90 80 60 50 40 30 20 70 10 batch size = 1 batch size = 10 batch size = 1000 batch size = 2000 batch size = 5000 0 1000 2000 3000 4000 5000 iteration UAS Figure 2: Parsing performance with different training batch sizes. ear model, the best results are achi</context>
+<context position="26744" citStr="Huang and Sagae, 2010" startWordPosition="4417" endWordPosition="4420"> word embeddings in supervised training, the embeddings of in-vocabulary words become systematically different from these of out-of-vocabulary words after training, and the effect of pre-trained out-ofvocabulary embeddings become uncertain. In this sense, our model can also be regarded as an almost fully supervised model. The same applies to the models of Chen and Manning (2014). We also compare the speed of the structured neural parser on an Intel Core i7 3.40GHz CPU with 16GB RAM. The structured neural parser runs about as fast as Zhang and Nivre (Zhang and Nivre, 2011) and Huang and Sagae (Huang and Sagae, 2010). The results show that our parser combines the benefits of structured models and neural probabilistic models, offering high accuracies, fast speed and slim model size. 5 Related Work Parsing with neural networks. A line of work has been proposed to explore the effect of neural network models for constituent parsing (Henderson, 2004; Mayberry III and Miikkulainen, 2005; Collobert, 2011; Socher et al., 2013; Legrand and Collobert, 2014). Performances of most of these methods are still well below the state-of-the-art, except for Socher et al.(2013), who propose a neural reranker based on a PCFG </context>
+</contexts>
+<marker>Huang, Sagae, 2010</marker>
+<rawString>Liang Huang and Kenji Sagae. 2010. Dynamic programming for linear-time incremental parsing. In Proceedings of the 48th Annual Meeting of the Association for Computational Linguistics, pages 1077– 1086. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Terry Koo</author>
+<author>Xavier Carreras</author>
+<author>Michael Collins</author>
+</authors>
+<date>2008</date>
+<note>Simple semi-supervised dependency parsing.</note>
+<contexts>
+<context position="22430" citStr="Koo et al. (2008)" startWordPosition="3682" endWordPosition="3685">able 3 are obtained by using the same beam sizes for both training and testing. Zhang and Nivre (2012) also find that for their lin3Our baseline accuracy is a little lower than accuracy reported in baseline paper (Chen and Manning, 2014), because we use Penn2Malt to convert the Penn Treebank, and they use LTH Conversion. 1218 System UAS LAS Speed baseline greedy parser 91.47 90.43 0.001 Huang and Sagae (2010) 92.10 0.04 Zhang and Nivre (2011) 92.90 91.80 0.03 Choi and McCallum (2013) 92.96 91.93 0.009 Ma et al. (2014) 93.06 Bohnet and Nivre (2012)†t 93.67 92.68 0.4 Suzuki et al. (2009)† 93.79 Koo et al. (2008)† 93.16 Chen et al. (2014)† 93.77 beam size training decoding 100 100 93.28 92.35 0.07 100 64 93.20 92.27 0.04 100 16 92.40 91.95 0.01 100 90 80 60 50 40 30 20 70 10 batch size = 1 batch size = 10 batch size = 1000 batch size = 2000 batch size = 5000 0 1000 2000 3000 4000 5000 iteration UAS Figure 2: Parsing performance with different training batch sizes. ear model, the best results are achieved by using the same beam sizes during training and testing. We find that this observation does not apply to our neural parser. In our case, a large training beam always leads to better results. This is </context>
+<context position="25814" citStr="Koo et al. (2008)" startWordPosition="4261" endWordPosition="4264"> than Zhang and Nivre (2011), which employees millions of highorder binary indicator features in parsing. The model size of ZPar (Zhang and Nivre, 2011) is over 250 MB on disk. In contrast, the model size of our structured neural parser is only 25 MB. To our knowledge, the result is the best reported result achieved by shift-reduce parsers on this data set. Bohnet and Nivre (2012) obtain an accuracy of 93.67%, which is higher than our parser. However, their parser is a joint model of parsing and POS-tagging, and they use external data in parsing. We also list the result of Chen et al. (2014), Koo et al. (2008) and Suzuki et al. (2009) in Table 5, which make use of large-scale unannotated text to improve parsing accuracies. The input embeddings of our parser are also trained 1219 over large raw text, and in this perspective our model is correlated with the semi-supervised models. However, because we fine-tune the word embeddings in supervised training, the embeddings of in-vocabulary words become systematically different from these of out-of-vocabulary words after training, and the effect of pre-trained out-ofvocabulary embeddings become uncertain. In this sense, our model can also be regarded as an</context>
+</contexts>
+<marker>Koo, Carreras, Collins, 2008</marker>
+<rawString>Terry Koo, Xavier Carreras, and Michael Collins. 2008. Simple semi-supervised dependency parsing.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yann LeCun</author>
+<author>F Huang</author>
+</authors>
+<title>Loss functions for discriminative training of energybased models.</title>
+<date>2005</date>
+<publisher>AIStats.</publisher>
+<contexts>
+<context position="4248" citStr="LeCun and Huang, 2005" startWordPosition="630" endWordPosition="634">tly model the distribution of action sequences. Second, for the structured model above, maximum-likelihood training is computationally intractable, requiring summing over all possible action sequences, which is difficult for transition1213 Proceedings of the 53rd Annual Meeting of the Association for Computational Linguistics and the 7th International Joint Conference on Natural Language Processing, pages 1213–1222, Beijing, China, July 26-31, 2015. c�2015 Association for Computational Linguistics based parsing. To address this challenge, we take a contrastive learning approach (Hinton, 2002; LeCun and Huang, 2005; Liang and Jordan, 2008; Vickrey et al., 2010; Liu and Sun, 2014). Using the sum of log probabilities over the action sequences in the beam to approximate that over all possible action sequences. In standard PennTreebank (Marcus et al., 1993) evaluations, our parser achieves a significant accuracy improvement (+1.8%) over the greedy neural parser of Chen and Manning (2014), and gives the best reported accuracy by shift-reduce parsers. The incremental neural probabilistic framework with global contrastive learning and beam search could be used in other structured prediction tasks. 2 Background</context>
+<context position="15360" citStr="LeCun and Huang, 2005" startWordPosition="2513" endWordPosition="2516">ch includes gradients of exponential ∑ L(θ) = − (xi, yi)E(X,Y) ∑= − (xi, yi)E(X,Y) logp(yi |xi,θ) (11) ef(xi,θ)i log (12) Z(xi, θ) ∑= log Z(xi, θ) − f(xi, θ)i (xi, yi)E(X,Y ) (13) 1216 numbers of negative examples in partition function Z(x, 0). However, beam search is used for transition-based parsing, and no efficient optimal dynamic program is available to estimate Z(x, 0) accurately. We adopt a novel contrastive learning approach to approximately compute Z(x, 0). 3.3 Contrastive Learning As an alternative to maximize the likelihood on some observed data, contrastive learning (Hinton, 2002; LeCun and Huang, 2005; Liang and Jordan, 2008; Vickrey et al., 2010; Liu and Sun, 2014) is an approach that assigns higher probabilities to observed data and lower probabilities to noisy data. We adopt the contrastive learning approach, assigning higher probabilities to the gold action sequence compared to incorrect action sequences in the beam. Intuitively, this method only penalizes incorrect action sequences with high probabilities. Our new training objective is approximated as: log p′(yi |xi, 0) (15) ef(xi,θ)i log Z′(xi, 0) (16) Algorithm 1: Training Algorithm for Structured Neural Parsing Input: training exam</context>
+</contexts>
+<marker>LeCun, Huang, 2005</marker>
+<rawString>Yann LeCun and F Huang. 2005. Loss functions for discriminative training of energybased models. AIStats.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J Legrand</author>
+<author>R Collobert</author>
+</authors>
+<title>Recurrent greedy parsing with neural networks.</title>
+<date>2014</date>
+<booktitle>In Proceedings of the European Conference on Machine Learning and Principles and Practice of Knowledge Discovery in Databases (ECML-PKDD).</booktitle>
+<contexts>
+<context position="27183" citStr="Legrand and Collobert, 2014" startWordPosition="4487" endWordPosition="4490"> parser on an Intel Core i7 3.40GHz CPU with 16GB RAM. The structured neural parser runs about as fast as Zhang and Nivre (Zhang and Nivre, 2011) and Huang and Sagae (Huang and Sagae, 2010). The results show that our parser combines the benefits of structured models and neural probabilistic models, offering high accuracies, fast speed and slim model size. 5 Related Work Parsing with neural networks. A line of work has been proposed to explore the effect of neural network models for constituent parsing (Henderson, 2004; Mayberry III and Miikkulainen, 2005; Collobert, 2011; Socher et al., 2013; Legrand and Collobert, 2014). Performances of most of these methods are still well below the state-of-the-art, except for Socher et al.(2013), who propose a neural reranker based on a PCFG parser. For transition-based dependency parsing, Stenetorp (2013) applies a compositional vector method (Socher et al., 2013), and Chen and Manning (2014) propose a feed-forward neural parser. The performances of these neural parsers lag behind the state-of-the-art. More recently, Dyer et al. (2015) propose a greedy transition-based dependency parser, using three stack LSTMs to represent the input, the stack of partial syntactic trees </context>
+</contexts>
+<marker>Legrand, Collobert, 2014</marker>
+<rawString>J. Legrand and R. Collobert. 2014. Recurrent greedy parsing with neural networks. In Proceedings of the European Conference on Machine Learning and Principles and Practice of Knowledge Discovery in Databases (ECML-PKDD).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Percy Liang</author>
+<author>Michael I Jordan</author>
+</authors>
+<title>An asymptotic analysis of generative, discriminative, and pseudolikelihood estimators.</title>
+<date>2008</date>
+<booktitle>In Proceedings of the 25th international conference on Machine learning,</booktitle>
+<pages>584--591</pages>
+<publisher>ACM.</publisher>
+<contexts>
+<context position="4272" citStr="Liang and Jordan, 2008" startWordPosition="635" endWordPosition="638">ion of action sequences. Second, for the structured model above, maximum-likelihood training is computationally intractable, requiring summing over all possible action sequences, which is difficult for transition1213 Proceedings of the 53rd Annual Meeting of the Association for Computational Linguistics and the 7th International Joint Conference on Natural Language Processing, pages 1213–1222, Beijing, China, July 26-31, 2015. c�2015 Association for Computational Linguistics based parsing. To address this challenge, we take a contrastive learning approach (Hinton, 2002; LeCun and Huang, 2005; Liang and Jordan, 2008; Vickrey et al., 2010; Liu and Sun, 2014). Using the sum of log probabilities over the action sequences in the beam to approximate that over all possible action sequences. In standard PennTreebank (Marcus et al., 1993) evaluations, our parser achieves a significant accuracy improvement (+1.8%) over the greedy neural parser of Chen and Manning (2014), and gives the best reported accuracy by shift-reduce parsers. The incremental neural probabilistic framework with global contrastive learning and beam search could be used in other structured prediction tasks. 2 Background 2.1 Arc-standard Parsin</context>
+<context position="15384" citStr="Liang and Jordan, 2008" startWordPosition="2517" endWordPosition="2520">f exponential ∑ L(θ) = − (xi, yi)E(X,Y) ∑= − (xi, yi)E(X,Y) logp(yi |xi,θ) (11) ef(xi,θ)i log (12) Z(xi, θ) ∑= log Z(xi, θ) − f(xi, θ)i (xi, yi)E(X,Y ) (13) 1216 numbers of negative examples in partition function Z(x, 0). However, beam search is used for transition-based parsing, and no efficient optimal dynamic program is available to estimate Z(x, 0) accurately. We adopt a novel contrastive learning approach to approximately compute Z(x, 0). 3.3 Contrastive Learning As an alternative to maximize the likelihood on some observed data, contrastive learning (Hinton, 2002; LeCun and Huang, 2005; Liang and Jordan, 2008; Vickrey et al., 2010; Liu and Sun, 2014) is an approach that assigns higher probabilities to observed data and lower probabilities to noisy data. We adopt the contrastive learning approach, assigning higher probabilities to the gold action sequence compared to incorrect action sequences in the beam. Intuitively, this method only penalizes incorrect action sequences with high probabilities. Our new training objective is approximated as: log p′(yi |xi, 0) (15) ef(xi,θ)i log Z′(xi, 0) (16) Algorithm 1: Training Algorithm for Structured Neural Parsing Input: training examples (X, Y) Output: 0 0 </context>
+</contexts>
+<marker>Liang, Jordan, 2008</marker>
+<rawString>Percy Liang and Michael I Jordan. 2008. An asymptotic analysis of generative, discriminative, and pseudolikelihood estimators. In Proceedings of the 25th international conference on Machine learning, pages 584–591. ACM.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yang Liu</author>
+<author>Maosong Sun</author>
+</authors>
+<title>Contrastive unsupervised word alignment with non-local features. arXiv preprint arXiv:1410.2082.</title>
+<date>2014</date>
+<contexts>
+<context position="4314" citStr="Liu and Sun, 2014" startWordPosition="643" endWordPosition="646">tured model above, maximum-likelihood training is computationally intractable, requiring summing over all possible action sequences, which is difficult for transition1213 Proceedings of the 53rd Annual Meeting of the Association for Computational Linguistics and the 7th International Joint Conference on Natural Language Processing, pages 1213–1222, Beijing, China, July 26-31, 2015. c�2015 Association for Computational Linguistics based parsing. To address this challenge, we take a contrastive learning approach (Hinton, 2002; LeCun and Huang, 2005; Liang and Jordan, 2008; Vickrey et al., 2010; Liu and Sun, 2014). Using the sum of log probabilities over the action sequences in the beam to approximate that over all possible action sequences. In standard PennTreebank (Marcus et al., 1993) evaluations, our parser achieves a significant accuracy improvement (+1.8%) over the greedy neural parser of Chen and Manning (2014), and gives the best reported accuracy by shift-reduce parsers. The incremental neural probabilistic framework with global contrastive learning and beam search could be used in other structured prediction tasks. 2 Background 2.1 Arc-standard Parsing Transition-based dependency parsers scan</context>
+<context position="15426" citStr="Liu and Sun, 2014" startWordPosition="2525" endWordPosition="2528">xi, yi)E(X,Y) logp(yi |xi,θ) (11) ef(xi,θ)i log (12) Z(xi, θ) ∑= log Z(xi, θ) − f(xi, θ)i (xi, yi)E(X,Y ) (13) 1216 numbers of negative examples in partition function Z(x, 0). However, beam search is used for transition-based parsing, and no efficient optimal dynamic program is available to estimate Z(x, 0) accurately. We adopt a novel contrastive learning approach to approximately compute Z(x, 0). 3.3 Contrastive Learning As an alternative to maximize the likelihood on some observed data, contrastive learning (Hinton, 2002; LeCun and Huang, 2005; Liang and Jordan, 2008; Vickrey et al., 2010; Liu and Sun, 2014) is an approach that assigns higher probabilities to observed data and lower probabilities to noisy data. We adopt the contrastive learning approach, assigning higher probabilities to the gold action sequence compared to incorrect action sequences in the beam. Intuitively, this method only penalizes incorrect action sequences with high probabilities. Our new training objective is approximated as: log p′(yi |xi, 0) (15) ef(xi,θ)i log Z′(xi, 0) (16) Algorithm 1: Training Algorithm for Structured Neural Parsing Input: training examples (X, Y) Output: 0 0 +— pretrained embedding for i +— 1 to N do</context>
+</contexts>
+<marker>Liu, Sun, 2014</marker>
+<rawString>Yang Liu and Maosong Sun. 2014. Contrastive unsupervised word alignment with non-local features. arXiv preprint arXiv:1410.2082.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ji Ma</author>
+<author>Yue Zhang</author>
+<author>Jingbo Zhu</author>
+</authors>
+<title>Punctuation processing for projective dependency parsing.</title>
+<date>2014</date>
+<booktitle>In Proc. of ACL.</booktitle>
+<contexts>
+<context position="22336" citStr="Ma et al. (2014)" startWordPosition="3665" endWordPosition="3668">and learning is much more effective than using beam search only in decoding. Our results in Table 3 are obtained by using the same beam sizes for both training and testing. Zhang and Nivre (2012) also find that for their lin3Our baseline accuracy is a little lower than accuracy reported in baseline paper (Chen and Manning, 2014), because we use Penn2Malt to convert the Penn Treebank, and they use LTH Conversion. 1218 System UAS LAS Speed baseline greedy parser 91.47 90.43 0.001 Huang and Sagae (2010) 92.10 0.04 Zhang and Nivre (2011) 92.90 91.80 0.03 Choi and McCallum (2013) 92.96 91.93 0.009 Ma et al. (2014) 93.06 Bohnet and Nivre (2012)†t 93.67 92.68 0.4 Suzuki et al. (2009)† 93.79 Koo et al. (2008)† 93.16 Chen et al. (2014)† 93.77 beam size training decoding 100 100 93.28 92.35 0.07 100 64 93.20 92.27 0.04 100 16 92.40 91.95 0.01 100 90 80 60 50 40 30 20 70 10 batch size = 1 batch size = 10 batch size = 1000 batch size = 2000 batch size = 5000 0 1000 2000 3000 4000 5000 iteration UAS Figure 2: Parsing performance with different training batch sizes. ear model, the best results are achieved by using the same beam sizes during training and testing. We find that this observation does not apply to </context>
+</contexts>
+<marker>Ma, Zhang, Zhu, 2014</marker>
+<rawString>Ji Ma, Yue Zhang, and Jingbo Zhu. 2014. Punctuation processing for projective dependency parsing. In Proc. of ACL.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Mitchell P Marcus</author>
+<author>Mary Ann Marcinkiewicz</author>
+<author>Beatrice Santorini</author>
+</authors>
+<title>Building a large annotated corpus of english: The penn treebank.</title>
+<date>1993</date>
+<booktitle>Computational linguistics,</booktitle>
+<pages>19--2</pages>
+<contexts>
+<context position="4491" citStr="Marcus et al., 1993" startWordPosition="672" endWordPosition="675">eedings of the 53rd Annual Meeting of the Association for Computational Linguistics and the 7th International Joint Conference on Natural Language Processing, pages 1213–1222, Beijing, China, July 26-31, 2015. c�2015 Association for Computational Linguistics based parsing. To address this challenge, we take a contrastive learning approach (Hinton, 2002; LeCun and Huang, 2005; Liang and Jordan, 2008; Vickrey et al., 2010; Liu and Sun, 2014). Using the sum of log probabilities over the action sequences in the beam to approximate that over all possible action sequences. In standard PennTreebank (Marcus et al., 1993) evaluations, our parser achieves a significant accuracy improvement (+1.8%) over the greedy neural parser of Chen and Manning (2014), and gives the best reported accuracy by shift-reduce parsers. The incremental neural probabilistic framework with global contrastive learning and beam search could be used in other structured prediction tasks. 2 Background 2.1 Arc-standard Parsing Transition-based dependency parsers scan an input sentence from left to right, and perform a sequence of transition actions to predict its parse tree (Nivre, 2008). In this paper, we employ the arc-standard system (Ni</context>
+<context position="18339" citStr="Marcus et al., (1993)" startWordPosition="3017" endWordPosition="3020">and the current gold sequence as a positive example for parameter update, using the training algorithm of Section 3.3. AdaGrad algorithm (Duchi et al., 2011) with mini-batch is adopted for optimization. In this way, the distribution of ot only full action sequences (i.e. complete parse trees), but also partial action sequences (i.e. partial outputs) are modeled, which makes training more challenging. The advantage of early update is that training is used to guide search, minimizing search errors. 1217 4 Experiments 4.1 Set-up Our experiments are performed using the English Penn Treebank (PTB; Marcus et al., (1993)). We follow the standard splits of PTB3, using sections 2-21 for training, section 22 for development testing and section 23 for final testing. For comparison with previous work, we use Penn2Malt1 to convert constituent trees to dependency trees. We use the POS-tagger of Collins (2002) to assign POS automatically. 10-fold jackknifing is performed for tagging the training data. We follow Chen and Manning (2014), and use the set of pre-trained word embeddings2 from Collobert et al. (2011) with a dictionary size of 13,000. The word embeddings were trained on the entire English Wikipedia, which c</context>
+</contexts>
+<marker>Marcus, Marcinkiewicz, Santorini, 1993</marker>
+<rawString>Mitchell P Marcus, Mary Ann Marcinkiewicz, and Beatrice Santorini. 1993. Building a large annotated corpus of english: The penn treebank. Computational linguistics, 19(2):313–330.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Marshall R Mayberry</author>
+<author>Risto Miikkulainen</author>
+</authors>
+<title>Broad-coverage parsing with neural networks.</title>
+<date>2005</date>
+<journal>Neural Processing Letters,</journal>
+<volume>21</volume>
+<issue>2</issue>
+<marker>Mayberry, Miikkulainen, 2005</marker>
+<rawString>Marshall R Mayberry III and Risto Miikkulainen. 2005. Broad-coverage parsing with neural networks. Neural Processing Letters, 21(2):121–132.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Joakim Nivre</author>
+<author>Mario Scholz</author>
+</authors>
+<title>Deterministic dependency parsing of English text.</title>
+<date>2004</date>
+<booktitle>In Proceedings of the 20th International Conference on Computational Linguistics (COLING),</booktitle>
+<pages>64--70</pages>
+<contexts>
+<context position="1206" citStr="Nivre and Scholz, 2004" startWordPosition="153" endWordPosition="156">l probabilistic structured-prediction model for transition-based dependency parsing, which integrates search and learning. Beam search is used for decoding, and contrastive learning is performed for maximizing the sentence-level log-likelihood. In standard Penn Treebank experiments, the structured neural parser achieves a 1.8% accuracy improvement upon a competitive greedy neural parser baseline, giving performance comparable to the best linear parser. 1 Introduction Transition-based methods have given competitive accuracies and efficiencies for dependency parsing (Yamada and Matsumoto, 2003; Nivre and Scholz, 2004; Zhang and Clark, 2008; Huang and Sagae, 2010; Zhang and Nivre, 2011; Goldberg and Nivre, 2013). These parsers construct dependency trees by using a sequence of transition actions, such as SHIFT and REDUCE, over input sentences. High accuracies are achieved by using a linear model and millions of binary indicator features. Recently, Chen and Manning (2014) propose an alternative dependency parser using a neural network, which represents atomic features as dense vectors, and obtains feature combination automatically other than devising high-order features manually. The greedy neural parser of </context>
+</contexts>
+<marker>Nivre, Scholz, 2004</marker>
+<rawString>Joakim Nivre and Mario Scholz. 2004. Deterministic dependency parsing of English text. In Proceedings of the 20th International Conference on Computational Linguistics (COLING), pages 64–70.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Joakim Nivre</author>
+<author>Johan Hall</author>
+<author>Jens Nilsson</author>
+</authors>
+<title>Atanas Chanev, G¨ulsen Eryigit, Sandra K¨ubler, Svetoslav Marinov, and Erwin Marsi.</title>
+<date>2007</date>
+<journal>Natural Language Engineering,</journal>
+<volume>13</volume>
+<issue>2</issue>
+<contexts>
+<context position="5108" citStr="Nivre et al., 2007" startWordPosition="766" endWordPosition="769">3) evaluations, our parser achieves a significant accuracy improvement (+1.8%) over the greedy neural parser of Chen and Manning (2014), and gives the best reported accuracy by shift-reduce parsers. The incremental neural probabilistic framework with global contrastive learning and beam search could be used in other structured prediction tasks. 2 Background 2.1 Arc-standard Parsing Transition-based dependency parsers scan an input sentence from left to right, and perform a sequence of transition actions to predict its parse tree (Nivre, 2008). In this paper, we employ the arc-standard system (Nivre et al., 2007), which maintains partially-constructed outputs using a stack, and orders the incoming words in the input sentence in a queue. Parsing starts with an empty stack and a queue consisting of the whole input sentence. At each step, a transition action is taken to consume the input and construct the output. The process repeats until the input queue is empty and stack contains only one dependency tree. Formally, a parsing state is denoted as ⟨j, S, L⟩, where S is a stack of subtrees [... s2, s1, s0], j is the head of the queue (i.e. [ q0 = wj, q1 = wj+1 · · · ]), and L is a set of dependency arcs. A</context>
+</contexts>
+<marker>Nivre, Hall, Nilsson, 2007</marker>
+<rawString>Joakim Nivre, Johan Hall, Jens Nilsson, Atanas Chanev, G¨ulsen Eryigit, Sandra K¨ubler, Svetoslav Marinov, and Erwin Marsi. 2007. Maltparser: A language-independent system for data-driven dependency parsing. Natural Language Engineering, 13(2):95–135.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Joakim Nivre</author>
+</authors>
+<title>Algorithms for deterministic incremental dependency parsing.</title>
+<date>2008</date>
+<journal>Computational Linguistics,</journal>
+<volume>34</volume>
+<issue>4</issue>
+<contexts>
+<context position="5037" citStr="Nivre, 2008" startWordPosition="756" endWordPosition="757">e action sequences. In standard PennTreebank (Marcus et al., 1993) evaluations, our parser achieves a significant accuracy improvement (+1.8%) over the greedy neural parser of Chen and Manning (2014), and gives the best reported accuracy by shift-reduce parsers. The incremental neural probabilistic framework with global contrastive learning and beam search could be used in other structured prediction tasks. 2 Background 2.1 Arc-standard Parsing Transition-based dependency parsers scan an input sentence from left to right, and perform a sequence of transition actions to predict its parse tree (Nivre, 2008). In this paper, we employ the arc-standard system (Nivre et al., 2007), which maintains partially-constructed outputs using a stack, and orders the incoming words in the input sentence in a queue. Parsing starts with an empty stack and a queue consisting of the whole input sentence. At each step, a transition action is taken to consume the input and construct the output. The process repeats until the input queue is empty and stack contains only one dependency tree. Formally, a parsing state is denoted as ⟨j, S, L⟩, where S is a stack of subtrees [... s2, s1, s0], j is the head of the queue (i</context>
+</contexts>
+<marker>Nivre, 2008</marker>
+<rawString>Joakim Nivre. 2008. Algorithms for deterministic incremental dependency parsing. Computational Linguistics, 34(4):513–553.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Richard Socher</author>
+<author>John Bauer</author>
+<author>Christopher D Manning</author>
+<author>Andrew Y Ng</author>
+</authors>
+<title>Parsing with compositional vector grammars. In</title>
+<date>2013</date>
+<booktitle>In Proceedings of the ACL conference. Citeseer.</booktitle>
+<contexts>
+<context position="27153" citStr="Socher et al., 2013" startWordPosition="4483" endWordPosition="4486">the structured neural parser on an Intel Core i7 3.40GHz CPU with 16GB RAM. The structured neural parser runs about as fast as Zhang and Nivre (Zhang and Nivre, 2011) and Huang and Sagae (Huang and Sagae, 2010). The results show that our parser combines the benefits of structured models and neural probabilistic models, offering high accuracies, fast speed and slim model size. 5 Related Work Parsing with neural networks. A line of work has been proposed to explore the effect of neural network models for constituent parsing (Henderson, 2004; Mayberry III and Miikkulainen, 2005; Collobert, 2011; Socher et al., 2013; Legrand and Collobert, 2014). Performances of most of these methods are still well below the state-of-the-art, except for Socher et al.(2013), who propose a neural reranker based on a PCFG parser. For transition-based dependency parsing, Stenetorp (2013) applies a compositional vector method (Socher et al., 2013), and Chen and Manning (2014) propose a feed-forward neural parser. The performances of these neural parsers lag behind the state-of-the-art. More recently, Dyer et al. (2015) propose a greedy transition-based dependency parser, using three stack LSTMs to represent the input, the sta</context>
+</contexts>
+<marker>Socher, Bauer, Manning, Ng, 2013</marker>
+<rawString>Richard Socher, John Bauer, Christopher D Manning, and Andrew Y Ng. 2013. Parsing with compositional vector grammars. In In Proceedings of the ACL conference. Citeseer.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Pontus Stenetorp</author>
+</authors>
+<title>Transition-based dependency parsing using recursive neural networks.</title>
+<date>2013</date>
+<booktitle>In NIPS Workshop on Deep Learning.</booktitle>
+<contexts>
+<context position="27409" citStr="Stenetorp (2013)" startWordPosition="4522" endWordPosition="4523">enefits of structured models and neural probabilistic models, offering high accuracies, fast speed and slim model size. 5 Related Work Parsing with neural networks. A line of work has been proposed to explore the effect of neural network models for constituent parsing (Henderson, 2004; Mayberry III and Miikkulainen, 2005; Collobert, 2011; Socher et al., 2013; Legrand and Collobert, 2014). Performances of most of these methods are still well below the state-of-the-art, except for Socher et al.(2013), who propose a neural reranker based on a PCFG parser. For transition-based dependency parsing, Stenetorp (2013) applies a compositional vector method (Socher et al., 2013), and Chen and Manning (2014) propose a feed-forward neural parser. The performances of these neural parsers lag behind the state-of-the-art. More recently, Dyer et al. (2015) propose a greedy transition-based dependency parser, using three stack LSTMs to represent the input, the stack of partial syntactic trees and the history of parse actions, respectively. By modeling more history, the parser gives significant better accuracies compared to the greedy neural parser of Chen and Manning (2014). Structured neural models. Collobert et a</context>
+</contexts>
+<marker>Stenetorp, 2013</marker>
+<rawString>Pontus Stenetorp. 2013. Transition-based dependency parsing using recursive neural networks. In NIPS Workshop on Deep Learning.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jun Suzuki</author>
+<author>Hideki Isozaki</author>
+<author>Xavier Carreras</author>
+<author>Michael Collins</author>
+</authors>
+<title>An empirical study of semisupervised structured conditional models for dependency parsing.</title>
+<date>2009</date>
+<booktitle>In Proceedings of the 2009 Conference on Empirical Methods in Natural Language Processing: Volume</booktitle>
+<volume>2</volume>
+<pages>551--560</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<contexts>
+<context position="22405" citStr="Suzuki et al. (2009)" startWordPosition="3677" endWordPosition="3680">n decoding. Our results in Table 3 are obtained by using the same beam sizes for both training and testing. Zhang and Nivre (2012) also find that for their lin3Our baseline accuracy is a little lower than accuracy reported in baseline paper (Chen and Manning, 2014), because we use Penn2Malt to convert the Penn Treebank, and they use LTH Conversion. 1218 System UAS LAS Speed baseline greedy parser 91.47 90.43 0.001 Huang and Sagae (2010) 92.10 0.04 Zhang and Nivre (2011) 92.90 91.80 0.03 Choi and McCallum (2013) 92.96 91.93 0.009 Ma et al. (2014) 93.06 Bohnet and Nivre (2012)†t 93.67 92.68 0.4 Suzuki et al. (2009)† 93.79 Koo et al. (2008)† 93.16 Chen et al. (2014)† 93.77 beam size training decoding 100 100 93.28 92.35 0.07 100 64 93.20 92.27 0.04 100 16 92.40 91.95 0.01 100 90 80 60 50 40 30 20 70 10 batch size = 1 batch size = 10 batch size = 1000 batch size = 2000 batch size = 5000 0 1000 2000 3000 4000 5000 iteration UAS Figure 2: Parsing performance with different training batch sizes. ear model, the best results are achieved by using the same beam sizes during training and testing. We find that this observation does not apply to our neural parser. In our case, a large training beam always leads to</context>
+<context position="25839" citStr="Suzuki et al. (2009)" startWordPosition="4266" endWordPosition="4269">(2011), which employees millions of highorder binary indicator features in parsing. The model size of ZPar (Zhang and Nivre, 2011) is over 250 MB on disk. In contrast, the model size of our structured neural parser is only 25 MB. To our knowledge, the result is the best reported result achieved by shift-reduce parsers on this data set. Bohnet and Nivre (2012) obtain an accuracy of 93.67%, which is higher than our parser. However, their parser is a joint model of parsing and POS-tagging, and they use external data in parsing. We also list the result of Chen et al. (2014), Koo et al. (2008) and Suzuki et al. (2009) in Table 5, which make use of large-scale unannotated text to improve parsing accuracies. The input embeddings of our parser are also trained 1219 over large raw text, and in this perspective our model is correlated with the semi-supervised models. However, because we fine-tune the word embeddings in supervised training, the embeddings of in-vocabulary words become systematically different from these of out-of-vocabulary words after training, and the effect of pre-trained out-ofvocabulary embeddings become uncertain. In this sense, our model can also be regarded as an almost fully supervised </context>
+</contexts>
+<marker>Suzuki, Isozaki, Carreras, Collins, 2009</marker>
+<rawString>Jun Suzuki, Hideki Isozaki, Xavier Carreras, and Michael Collins. 2009. An empirical study of semisupervised structured conditional models for dependency parsing. In Proceedings of the 2009 Conference on Empirical Methods in Natural Language Processing: Volume 2-Volume 2, pages 551–560. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>David Vickrey</author>
+<author>Cliff C Lin</author>
+<author>Daphne Koller</author>
+</authors>
+<title>Non-local contrastive objectives.</title>
+<date>2010</date>
+<booktitle>In Proceedings of the 27th International Conference on Machine Learning (ICML-10),</booktitle>
+<pages>1103--1110</pages>
+<contexts>
+<context position="4294" citStr="Vickrey et al., 2010" startWordPosition="639" endWordPosition="642"> Second, for the structured model above, maximum-likelihood training is computationally intractable, requiring summing over all possible action sequences, which is difficult for transition1213 Proceedings of the 53rd Annual Meeting of the Association for Computational Linguistics and the 7th International Joint Conference on Natural Language Processing, pages 1213–1222, Beijing, China, July 26-31, 2015. c�2015 Association for Computational Linguistics based parsing. To address this challenge, we take a contrastive learning approach (Hinton, 2002; LeCun and Huang, 2005; Liang and Jordan, 2008; Vickrey et al., 2010; Liu and Sun, 2014). Using the sum of log probabilities over the action sequences in the beam to approximate that over all possible action sequences. In standard PennTreebank (Marcus et al., 1993) evaluations, our parser achieves a significant accuracy improvement (+1.8%) over the greedy neural parser of Chen and Manning (2014), and gives the best reported accuracy by shift-reduce parsers. The incremental neural probabilistic framework with global contrastive learning and beam search could be used in other structured prediction tasks. 2 Background 2.1 Arc-standard Parsing Transition-based dep</context>
+<context position="15406" citStr="Vickrey et al., 2010" startWordPosition="2521" endWordPosition="2524"> (xi, yi)E(X,Y) ∑= − (xi, yi)E(X,Y) logp(yi |xi,θ) (11) ef(xi,θ)i log (12) Z(xi, θ) ∑= log Z(xi, θ) − f(xi, θ)i (xi, yi)E(X,Y ) (13) 1216 numbers of negative examples in partition function Z(x, 0). However, beam search is used for transition-based parsing, and no efficient optimal dynamic program is available to estimate Z(x, 0) accurately. We adopt a novel contrastive learning approach to approximately compute Z(x, 0). 3.3 Contrastive Learning As an alternative to maximize the likelihood on some observed data, contrastive learning (Hinton, 2002; LeCun and Huang, 2005; Liang and Jordan, 2008; Vickrey et al., 2010; Liu and Sun, 2014) is an approach that assigns higher probabilities to observed data and lower probabilities to noisy data. We adopt the contrastive learning approach, assigning higher probabilities to the gold action sequence compared to incorrect action sequences in the beam. Intuitively, this method only penalizes incorrect action sequences with high probabilities. Our new training objective is approximated as: log p′(yi |xi, 0) (15) ef(xi,θ)i log Z′(xi, 0) (16) Algorithm 1: Training Algorithm for Structured Neural Parsing Input: training examples (X, Y) Output: 0 0 +— pretrained embeddin</context>
+</contexts>
+<marker>Vickrey, Lin, Koller, 2010</marker>
+<rawString>David Vickrey, Cliff C Lin, and Daphne Koller. 2010. Non-local contrastive objectives. In Proceedings of the 27th International Conference on Machine Learning (ICML-10), pages 1103–1110.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>David Weiss</author>
+<author>Christopher Alberti</author>
+<author>Michael Collins</author>
+<author>Slav Petrov</author>
+</authors>
+<title>Structured training for neural network transition-based parsing.</title>
+<date>2015</date>
+<booktitle>In Proceedings of the ACL conference. Association for Computational Linguistics.</booktitle>
+<contexts>
+<context position="28634" citStr="Weiss et al. (2015)" startWordPosition="4699" endWordPosition="4702">11) presents a unified neural network architecture for various natural language processing (NLP) tasks. They propose to use sentence-level log-likelihood to enhance a neural probabilistic model, which inspires our model. Sequence labeling is used for graph-based decoding. Using the Viterbi algorithm, they can compute the exponential partition function in linear time without approximation. However, with a dynamic programming decoder, their sequence labeling model can only extract local features. In contrast, our integrated approximated search and learning framework allows rich global features. Weiss et al. (2015) also propose a structured neural transition-based parser by adopting beam search and early updates. Their model is close in spirit to ours in performing structured prediction using a neural network. The main difference is that their structured neural parser uses a greedy parsing process for pre-training, and fine-tunes an additional perceptron layer consisting of the pre-trained hidden and output layers using structured perceptron updates. Their structured neural parser achieves an accuracy of 93.36% on Stanford conversion of the PTB, which is significant higher than the baseline parser of Ch</context>
+</contexts>
+<marker>Weiss, Alberti, Collins, Petrov, 2015</marker>
+<rawString>David Weiss, Christopher Alberti, Michael Collins, and Slav Petrov. 2015. Structured training for neural network transition-based parsing. In Proceedings of the ACL conference. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Hiroyasu Yamada</author>
+<author>Yuji Matsumoto</author>
+</authors>
+<title>Statistical dependency analysis with support vector machines.</title>
+<date>2003</date>
+<booktitle>In Proceedings of IWPT,</booktitle>
+<volume>3</volume>
+<contexts>
+<context position="1182" citStr="Yamada and Matsumoto, 2003" startWordPosition="149" endWordPosition="152">nterpart. We propose a neural probabilistic structured-prediction model for transition-based dependency parsing, which integrates search and learning. Beam search is used for decoding, and contrastive learning is performed for maximizing the sentence-level log-likelihood. In standard Penn Treebank experiments, the structured neural parser achieves a 1.8% accuracy improvement upon a competitive greedy neural parser baseline, giving performance comparable to the best linear parser. 1 Introduction Transition-based methods have given competitive accuracies and efficiencies for dependency parsing (Yamada and Matsumoto, 2003; Nivre and Scholz, 2004; Zhang and Clark, 2008; Huang and Sagae, 2010; Zhang and Nivre, 2011; Goldberg and Nivre, 2013). These parsers construct dependency trees by using a sequence of transition actions, such as SHIFT and REDUCE, over input sentences. High accuracies are achieved by using a linear model and millions of binary indicator features. Recently, Chen and Manning (2014) propose an alternative dependency parser using a neural network, which represents atomic features as dense vectors, and obtains feature combination automatically other than devising high-order features manually. The </context>
+</contexts>
+<marker>Yamada, Matsumoto, 2003</marker>
+<rawString>Hiroyasu Yamada and Yuji Matsumoto. 2003. Statistical dependency analysis with support vector machines. In Proceedings of IWPT, volume 3.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yue Zhang</author>
+<author>Stephen Clark</author>
+</authors>
+<title>A tale of two parsers: investigating and combining graphbased and transition-based dependency parsing using beam-search.</title>
+<date>2008</date>
+<booktitle>In Proceedings of the Conference on Empirical Methods in Natural Language Processing,</booktitle>
+<pages>562--571</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<contexts>
+<context position="1229" citStr="Zhang and Clark, 2008" startWordPosition="157" endWordPosition="160">ed-prediction model for transition-based dependency parsing, which integrates search and learning. Beam search is used for decoding, and contrastive learning is performed for maximizing the sentence-level log-likelihood. In standard Penn Treebank experiments, the structured neural parser achieves a 1.8% accuracy improvement upon a competitive greedy neural parser baseline, giving performance comparable to the best linear parser. 1 Introduction Transition-based methods have given competitive accuracies and efficiencies for dependency parsing (Yamada and Matsumoto, 2003; Nivre and Scholz, 2004; Zhang and Clark, 2008; Huang and Sagae, 2010; Zhang and Nivre, 2011; Goldberg and Nivre, 2013). These parsers construct dependency trees by using a sequence of transition actions, such as SHIFT and REDUCE, over input sentences. High accuracies are achieved by using a linear model and millions of binary indicator features. Recently, Chen and Manning (2014) propose an alternative dependency parser using a neural network, which represents atomic features as dense vectors, and obtains feature combination automatically other than devising high-order features manually. The greedy neural parser of Chen and Manning (2014)</context>
+</contexts>
+<marker>Zhang, Clark, 2008</marker>
+<rawString>Yue Zhang and Stephen Clark. 2008. A tale of two parsers: investigating and combining graphbased and transition-based dependency parsing using beam-search. In Proceedings of the Conference on Empirical Methods in Natural Language Processing, pages 562–571. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yue Zhang</author>
+<author>Stephen Clark</author>
+</authors>
+<title>Syntactic processing using the generalized perceptron and beam search.</title>
+<date>2011</date>
+<journal>Computational Linguistics,</journal>
+<volume>37</volume>
+<issue>1</issue>
+<contexts>
+<context position="2621" citStr="Zhang and Clark (2011)" startWordPosition="374" endWordPosition="377">he-art linear systems with sparse features (Zhang and Nivre, 2011), which adopt global learning and beam search decoding (Zhang and Nivre, 2012). The key difference is that Chen and Manning (2014) is a local classifier that greedily optimizes each action. In contrast, Zhang and Nivre (2011) leverage a structured-prediction model to optimize whole sequences of actions, which correspond to tree structures. In this paper, we propose a novel framework for structured neural probabilistic dependency parsing, which maximizes the likelihood of action sequences instead of individual actions. Following Zhang and Clark (2011), beam search is applied to decoding, and global structured learning is integrated with beam search using earlyupdate (Collins and Roark, 2004). Designing such a framework is challenging for two main reasons: First, applying global structured learning to transition-based neural parsing is non-trivial. A direct adaptation of the framework of Zhang and Clark (2011) under the neural probabilistic model setting does not yield good results. The main reason is that the parameter space of a neural network is much denser compared to that of a linear model such as the structured perceptron (Collins, 20</context>
+<context position="6794" citStr="Zhang and Clark, 2011" startWordPosition="1085" endWordPosition="1088">tep. For a sentence with size n, parsing stops after performing exactly 2n − 1 actions. MaltParser uses an SVM classifier for deterministic arc-standard parsing. At each step, MaltParser generates a set of successor states according to the current state, and deterministically selects the highest-scored one as the next state. 2.2 Global Learning and Beam Search The drawback of deterministic parsing is error propagation. An incorrect action will have a negative influence to its subsequent actions, leading to an incorrect output parse tree. To address this issue, global learning and beam search (Zhang and Clark, 2011; Bohnet and Nivre, 2012; Choi and McCallum, 2013) are used. Given an input x, the goal of decoding is to find the highest-scored action sequence globally. y = arg max score(y′) (1) y′EGEN(x) Where GEN(x) denotes all possible action sequences on x, which correspond to all possible parse trees. The score of an action sequence y is: • LEFT-ARC(l): add an arc with label l between the top two trees on the stack (s1 ← s0), and �score(y) = 9 · `b(a) (2) remove s1 from the stack. aEy • RIGHT-ARC(l): add an arc with label l between the top two trees on the stack (s1 → s0), and remove s0 from the stack</context>
+<context position="17229" citStr="Zhang and Clark (2011)" startWordPosition="2839" endWordPosition="2842"> only the action sequences in the beam. Z′(x, 0) is the contrastive approximation of Z(x, 0). BEAM(x) returns the predicated action sequences in the beam and the gold action sequence. We assume that the probability mass concentrates on a relatively small number of action sequences, which allows the use of a limited number of probable sequences to approximate the full set of action sequences. The concentration may be enlarged dramatically with an exponential activation function of the neural network (i.e. a &gt; b � ea » eb ). 3.4 The Neural Probabilistic Structured-Prediction Framework We follow Zhang and Clark (2011) to integrate search and learning. Our search and learning framework for dependency parsing is shown as Algorithm 1. In every training iteration i, we randomly sample the training instances, and perform online learning with early update (Collins and Roark, 2004). In particular, given a training example, we use beam-search to decode the sentence. At any step, if the gold action sequence falls out of the beam, we take all the incorrect action sequences in the beam as negative examples, and the current gold sequence as a positive example for parameter update, using the training algorithm of Secti</context>
+</contexts>
+<marker>Zhang, Clark, 2011</marker>
+<rawString>Yue Zhang and Stephen Clark. 2011. Syntactic processing using the generalized perceptron and beam search. Computational Linguistics, 37(1):105–151.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yue Zhang</author>
+<author>Joakim Nivre</author>
+</authors>
+<title>Transition-based dependency parsing with rich non-local features.</title>
+<date>2011</date>
+<booktitle>In Proceedings of the 49th Annual Meeting of the Association for Computational Linguistics: Human Language Technologies: short papers-Volume 2,</booktitle>
+<pages>188--193</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<contexts>
+<context position="1275" citStr="Zhang and Nivre, 2011" startWordPosition="165" endWordPosition="168">dency parsing, which integrates search and learning. Beam search is used for decoding, and contrastive learning is performed for maximizing the sentence-level log-likelihood. In standard Penn Treebank experiments, the structured neural parser achieves a 1.8% accuracy improvement upon a competitive greedy neural parser baseline, giving performance comparable to the best linear parser. 1 Introduction Transition-based methods have given competitive accuracies and efficiencies for dependency parsing (Yamada and Matsumoto, 2003; Nivre and Scholz, 2004; Zhang and Clark, 2008; Huang and Sagae, 2010; Zhang and Nivre, 2011; Goldberg and Nivre, 2013). These parsers construct dependency trees by using a sequence of transition actions, such as SHIFT and REDUCE, over input sentences. High accuracies are achieved by using a linear model and millions of binary indicator features. Recently, Chen and Manning (2014) propose an alternative dependency parser using a neural network, which represents atomic features as dense vectors, and obtains feature combination automatically other than devising high-order features manually. The greedy neural parser of Chen and Manning (2014) gives higher accuracies compared to Work done</context>
+<context position="7803" citStr="Zhang and Nivre (2011)" startWordPosition="1276" endWordPosition="1279"> two trees on the stack (s1 ← s0), and �score(y) = 9 · `b(a) (2) remove s1 from the stack. aEy • RIGHT-ARC(l): add an arc with label l between the top two trees on the stack (s1 → s0), and remove s0 from the stack. The arc-standard parser can be summarized as the deductive system in Figure 1, where k denotes Here a is an action in the action sequence y, 4b is a feature function for a, and 0 is the parameter vector of the linear model. The score of an action sequence is the linear sum of the scores of each action. During training, action sequence scores are globally learned. 1214 The parser of Zhang and Nivre (2011) is developed using this framework. The structured perceptron (Collins, 2002) with early update (Collins and Roark, 2004) is applied for training. By utilizing rich manual features, it gives state-of-the-art accuracies in standard Penn Treebank evaluation. We take this method as one baseline. 2.3 Greedy Neural Network Model Chen and Manning (2014) build a greedy neural arc-standard parser. The model can be regarded as an alternative implementation of MaltParser, using a feedforward neural network to replace the SVM classifier for deterministic parsing. 2.3.1 Model The greedy neural model extra</context>
+<context position="11038" citStr="Zhang and Nivre (2011)" startWordPosition="1780" endWordPosition="1783"> the product of three element combinations. Empirically, it works better compared to a sigmoid activation function. 2.4 Training Given a set of training examples, the training objective of the greedy neural parser is to minimize the cross-entropy loss, plus a l2-regularization term: p =softmax(o) (4) � � L(0) = − log pi + 2 1 10 112 (6) i∈A where o = W2h (5) W2 E Rd-×dh and do is the number of shift-reduce actions. 2.3.2 Features One advantage of Chen and Manning (2014) is that the neural network parser achieves feature combination automatically. Their atomic features are defined by following Zhang and Nivre (2011). As shown in Table 1, the features are categorized 0 is the set of all parameters (i.e. W1, W2, b, E), and A is the set of all gold actions in the training data. AdaGrad (Duchi et al., 2011) with minibatch is adopted for optimization. We take the greedy neural parser of Chen and Manning (2014) as a second baseline. 3 Structured Neural Network Model We propose a neural structured-prediction model that scores whole sequences of transition actions, rather than individual actions. As shown in Table 2, the model can be seen as a neural probabilistic alternative of Zhang and Nivre (2011), 1215 loca</context>
+<context position="12912" citStr="Zhang and Nivre, 2011" startWordPosition="2094" endWordPosition="2097"> an action sequence y, which corresponds to its log probability, is sum of log probability scores of each action in the sequence. s(y) = ∑ log pa (7) aEy where pa is defined by the baseline neural model of Section 2.3 (Equation 4). The training objective is to maximize the score margin between the gold action sequences (yg) and these of incorrectly predicated action sequences (yp): λ L(θ) = max(0, δ−s(yg)+s(yp))+ 2 11 θ 112 (8) With this ranking model, beam search and early-update are used. Given a training instance, the negative example is the incorrectly predicted output with largest score (Zhang and Nivre, 2011). However, we find that the ranking model works poorly. One explanation is that the actions in a sequence is probabilistically dependent on each other, and therefore using the total log probabilities of each action to compute the log probability of an action sequence (Equation 7) is inaccurate. Linear models do not suffer from this problem, because the parameter space of linear models is much more sparse than that of neural models. For neural networks, the dense parameter space is shared by all the actions in a sequence. Increasing the likelihood of a gold action may also change the likelihood</context>
+<context position="21587" citStr="Zhang and Nivre, 2011" startWordPosition="3537" endWordPosition="3540">beyond 16, however, accuracy improvements stop. In contrast, by integrating beam search and global learning, our parsing performance benefits from large beam sizes much more significantly. With a beam size as 16, the structured neural parser gives an accuracy close to that of baseline greedy parser3. When the beam size is 100, the structured neural parser outperforms baseline by 1.6%. Zhang and Nivre (2012) find that global learning and beam search should be used jointly for improving parsing using a linear transition-based model. In particular, increasing the beam size, the accuracy of ZPar (Zhang and Nivre, 2011) increases significantly, but that of MaltParser does not. For structured neural parsing, our finding is similar: integrating search and learning is much more effective than using beam search only in decoding. Our results in Table 3 are obtained by using the same beam sizes for both training and testing. Zhang and Nivre (2012) also find that for their lin3Our baseline accuracy is a little lower than accuracy reported in baseline paper (Chen and Manning, 2014), because we use Penn2Malt to convert the Penn Treebank, and they use LTH Conversion. 1218 System UAS LAS Speed baseline greedy parser 91</context>
+<context position="25225" citStr="Zhang and Nivre (2011)" startWordPosition="4153" endWordPosition="4156">seline greedy parser. As mentioned in Section 3.1, a likely reason for the poor performance of the structured neural ranking model may be that, the likelihoods of action sequences are highly influenced by each other, due to the dense parameter space of neural networks. To maximize likelihood of gold action sequence, we need to decrease the likelihoods of more than one incorrect action sequences. 4.2.3 Final Results Table 5 shows the results of our final parser and a line of transition-based parsers on the test set. Our structured neural parser achieves an accuracy of 93.28%, 0.38% higher than Zhang and Nivre (2011), which employees millions of highorder binary indicator features in parsing. The model size of ZPar (Zhang and Nivre, 2011) is over 250 MB on disk. In contrast, the model size of our structured neural parser is only 25 MB. To our knowledge, the result is the best reported result achieved by shift-reduce parsers on this data set. Bohnet and Nivre (2012) obtain an accuracy of 93.67%, which is higher than our parser. However, their parser is a joint model of parsing and POS-tagging, and they use external data in parsing. We also list the result of Chen et al. (2014), Koo et al. (2008) and Suzuki</context>
+<context position="26700" citStr="Zhang and Nivre, 2011" startWordPosition="4409" endWordPosition="4412">ed models. However, because we fine-tune the word embeddings in supervised training, the embeddings of in-vocabulary words become systematically different from these of out-of-vocabulary words after training, and the effect of pre-trained out-ofvocabulary embeddings become uncertain. In this sense, our model can also be regarded as an almost fully supervised model. The same applies to the models of Chen and Manning (2014). We also compare the speed of the structured neural parser on an Intel Core i7 3.40GHz CPU with 16GB RAM. The structured neural parser runs about as fast as Zhang and Nivre (Zhang and Nivre, 2011) and Huang and Sagae (Huang and Sagae, 2010). The results show that our parser combines the benefits of structured models and neural probabilistic models, offering high accuracies, fast speed and slim model size. 5 Related Work Parsing with neural networks. A line of work has been proposed to explore the effect of neural network models for constituent parsing (Henderson, 2004; Mayberry III and Miikkulainen, 2005; Collobert, 2011; Socher et al., 2013; Legrand and Collobert, 2014). Performances of most of these methods are still well below the state-of-the-art, except for Socher et al.(2013), wh</context>
+</contexts>
+<marker>Zhang, Nivre, 2011</marker>
+<rawString>Yue Zhang and Joakim Nivre. 2011. Transition-based dependency parsing with rich non-local features. In Proceedings of the 49th Annual Meeting of the Association for Computational Linguistics: Human Language Technologies: short papers-Volume 2, pages 188–193. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yue Zhang</author>
+<author>Joakim Nivre</author>
+</authors>
+<title>Analyzing the effect of global learning and beam-search on transition-based dependency parsing.</title>
+<date>2012</date>
+<booktitle>In COLING (Posters),</booktitle>
+<pages>1391--1400</pages>
+<contexts>
+<context position="2143" citStr="Zhang and Nivre, 2012" startWordPosition="301" endWordPosition="304"> features. Recently, Chen and Manning (2014) propose an alternative dependency parser using a neural network, which represents atomic features as dense vectors, and obtains feature combination automatically other than devising high-order features manually. The greedy neural parser of Chen and Manning (2014) gives higher accuracies compared to Work done while the first author was visiting SUTD. the greedy linear MaltParser (Nivre and Scholz, 2004), but lags behind state-of-the-art linear systems with sparse features (Zhang and Nivre, 2011), which adopt global learning and beam search decoding (Zhang and Nivre, 2012). The key difference is that Chen and Manning (2014) is a local classifier that greedily optimizes each action. In contrast, Zhang and Nivre (2011) leverage a structured-prediction model to optimize whole sequences of actions, which correspond to tree structures. In this paper, we propose a novel framework for structured neural probabilistic dependency parsing, which maximizes the likelihood of action sequences instead of individual actions. Following Zhang and Clark (2011), beam search is applied to decoding, and global structured learning is integrated with beam search using earlyupdate (Col</context>
+<context position="21375" citStr="Zhang and Nivre (2012)" startWordPosition="3503" endWordPosition="3506"> score of a whole action sequence is computed by the sum of log action probabilities (Equation 7). As shown in the second column of Table 3, beam search can improve parsing slightly. When the beam size increases beyond 16, however, accuracy improvements stop. In contrast, by integrating beam search and global learning, our parsing performance benefits from large beam sizes much more significantly. With a beam size as 16, the structured neural parser gives an accuracy close to that of baseline greedy parser3. When the beam size is 100, the structured neural parser outperforms baseline by 1.6%. Zhang and Nivre (2012) find that global learning and beam search should be used jointly for improving parsing using a linear transition-based model. In particular, increasing the beam size, the accuracy of ZPar (Zhang and Nivre, 2011) increases significantly, but that of MaltParser does not. For structured neural parsing, our finding is similar: integrating search and learning is much more effective than using beam search only in decoding. Our results in Table 3 are obtained by using the same beam sizes for both training and testing. Zhang and Nivre (2012) also find that for their lin3Our baseline accuracy is a lit</context>
+</contexts>
+<marker>Zhang, Nivre, 2012</marker>
+<rawString>Yue Zhang and Joakim Nivre. 2012. Analyzing the effect of global learning and beam-search on transition-based dependency parsing. In COLING (Posters), pages 1391–1400.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

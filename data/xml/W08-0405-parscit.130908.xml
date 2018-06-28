@@ -1,0 +1,1391 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.001077">
+<title confidence="0.997627">
+A Rule-Driven Dynamic Programming Decoder for Statistical MT
+</title>
+<author confidence="0.872657">
+Christoph Tillmann
+</author>
+<affiliation confidence="0.596748">
+IBM T.J. Watson Research Center
+</affiliation>
+<address confidence="0.620881">
+Yorktown Heights, N.Y. 10598
+</address>
+<email confidence="0.987276">
+ctill@us.ibm.com
+</email>
+<sectionHeader confidence="0.995465" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.999409785714286">
+The paper presents an extension of a dynamic
+programming (DP) decoder for phrase-based
+SMT (Koehn, 2004; Och and Ney, 2004) that
+tightly integrates POS-based re-order rules
+(Crego and Marino, 2006) into a left-to-right
+beam-search algorithm, rather than handling
+them in a pre-processing or re-order graph
+generation step. The novel decoding algo-
+rithm can handle tens of thousands of rules
+efficiently. An improvement over a standard
+phrase-based decoder is shown on an Arabic-
+English translation task with respect to trans-
+lation accuracy and speed for large re-order
+window sizes.
+</bodyText>
+<sectionHeader confidence="0.998994" genericHeader="introduction">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.999892882352941">
+The paper presents an extension of a dynamic
+programming (DP) decoder for phrase-based SMT
+(Koehn, 2004; Och and Ney, 2004) where POS-
+based re-order rules (Crego and Marino, 2006) are
+tightly integrated into a left-to-right run over the
+input sentence. In the literature, re-order rules are
+applied to the source and/or target sentence as a
+pre-processing step (Xia and McCord, 2004; Collins
+et al., 2005; Wang et al., 2007) where the rules can
+be applied on both training and test data. Another
+way of incorporating re-order rules is via extended
+monotone search graphs (Crego and Marino, 2006)
+or lattices (Zhang et al., 2007; Paulik et al., 2007).
+This paper presents a way of handling POS-based
+re-order rules as an edge generation process: the
+POS-based re-order rules are tightly integrated into
+a left to right beam search decoder in a way that
+</bodyText>
+<page confidence="0.990573">
+37
+</page>
+<bodyText confidence="0.999827606060606">
+29 000 rules which may overlap in an arbitrary
+way (but not recursively) are handled efficiently.
+Example rules which are used to control the novel
+DP-based decoder are shown in Table 1, where each
+POS sequence is associated with possibly several
+permutations 7r. In order to apply the rules, the input
+sentences are POS-tagged. If a POS sequence of a
+rule matches some identical POS sequence in the in-
+put sentence the corresponding words are re-ordered
+according to 7r. The contributions of this paper are
+as follows: 1) The novel DP decoder can handle
+tens of thousands of POS-based rules efficiently
+rather than a few dozen rules as is typically reported
+in the SMT literature by tightly integrating them
+into a beam search algorithm. As a result phrase
+re-ordering with a large distortion window can be
+carried out efficiently and reliably. 2) The current
+rule-driven decoder is a first step towards including
+more complex rules, i.e. syntax-based rules as in
+(Wang et al., 2007) or chunk rules as in (Zhang et
+al., 2007) using a decoding algorithm that is con-
+ceptually similar to an Earley-style parser (Earley,
+1970). More generally, ’rule-driven’ decoding is
+tightly linked to standard phrase-based decoding. In
+future, the edge generation technique presented in
+this paper might be extended to handle hierarchical
+rules (Chiang, 2007) in a simple left-to-right beam
+search decoder.
+In the next section, we briefly summarize the
+baseline decoder. Section 3 shows the novel rule-
+driven DP decoder. Section 4 shows how the current
+decoder is related to both DP-based decoding algo-
+rithms in speech recognition and parsing. Finally,
+</bodyText>
+<note confidence="0.986295">
+Proceedings of the Second ACL Workshop on Syntax and Structure in Statistical Translation (SSST-2), pages 37–45,
+ACL-08: HLT, Columbus, Ohio, USA, June 2008. c�2008 Association for Computational Linguistics
+</note>
+<tableCaption confidence="0.997721">
+Table 1: A list of 28 878 reorder rules sorted according to the rule occurrence count N(r) is used in this paper.
+</tableCaption>
+<table confidence="0.9165299">
+For each POS sequence the corresponding permutation π is shown. Rule ID is the ordinal number of a rule in
+the sorted list. The maximum rule length that can be handled efficiently is surprisingly long: about 20 words.
+Rule ID r POS sequence π N(r)
+1 DET NOUN DET ADJ → 2 3 0 1 4 421
+2 DET NOUN NSUFF-FEM-SG DET ADJ NSUFF-FEM-SG → 3 4 5 0 1 2 2 257
+... ... ...
+3 000 NOUN CASE-INDEF-ACC ADJ NSUFF-FEM-SG CONJ ADJ NSUFF-FEM-SG → 2 3 4 5 6 0 1 6
+... ... ...
+28 878 PREP DET NOUN DET ADJ PREP NOUN-PROP ADJ → 0 1 2 7 8 3 4
+NSUFF-MASC-SG-ACC-INDEF CONJ IV3MS IV IVSUFF-DO:3FS 9 10 11 12 5 6 2
+</table>
+<bodyText confidence="0.70116">
+Section 5 shows experimental results.
+</bodyText>
+<sectionHeader confidence="0.948403" genericHeader="method">
+2 Baseline DP Decoder
+</sectionHeader>
+<bodyText confidence="0.999946052631579">
+The translation model used in this paper is a phrase-
+based model (Koehn et al., 2003), where the trans-
+lation units are so-called blocks: a block b is a pair
+consisting of a source phrase s and a target phrase
+t which are translations of each other. The ex-
+pression block is used here to emphasize that pairs
+of phrases (especially longer phrases) tend to form
+closely linked units in such a way that the transla-
+tion process can be formalized as a block segmen-
+tation process (Nagata et al., 2006; Tillmann and
+Zhang, 2007). Here, the input sentence is segmented
+from left to right while simultaneously generating
+the target sentence, one block at a time. In prac-
+tice, phrase-based or block-based translation mod-
+els which largely monotone decoding algorithms ob-
+tain close to state-of-the-art performance by using
+skip and window-based restrictions to reduce the
+search space (Berger et al., 1996). During decod-
+ing, we maximize the score sw(bn1) of a phrase-pair
+</bodyText>
+<equation confidence="0.876112">
+sequence bn1 = (si, ti)n1:
+n
+sw(bn1) = wT · f(bi, bi−1), (1)
+i=1
+</equation>
+<bodyText confidence="0.999106384615385">
+where bi is a block, bi−1 is its predecessor block,
+and f(bi, bi−1) is a 8-dimensional feature vector
+where the features are derived from some probabilis-
+tic models: language model, translation model, and
+distortion model probabilities. n is the number of
+blocks in the translation and the weight vector w is
+trained in a way as to maximize the decoder BLEU
+score on some training data using an on-line algo-
+rithm (Tillmann and Zhang, 2008). The decoder that
+carries out the optimization in Eq. 1 is similar to a
+standard phrase-based decoder (Koehn, 2004; Och
+and Ney, 2004), where states are tuples of the fol-
+lowing type:
+</bodyText>
+<equation confidence="0.997574">
+[ C ; [i,j] ], (2)
+</equation>
+<bodyText confidence="0.999444470588235">
+where C is the so-called coverage vector that keeps
+track of the already processed source position, [i, j]
+is the source interval covered by the last source
+phrase match. In comparison, (Koehn, 2004) uses
+only the position of the final word of the last source
+phrase translated. Since we are using the distortion
+model in (Al-Onaizan and Papineni, 2006) the entire
+last source phrase interval needs to be stored. Hy-
+pothesis score and language model history are omit-
+ted for brevity reasons. The states are stored in lists
+or stacks and DP recombination is used to reduce the
+size of the search space while extending states.
+The algorithm described in this paper uses an in-
+termediate data structure called an edge that repre-
+sents a source phrase together with a target phrase
+that is one of its possible translation. Formally, we
+define:
+</bodyText>
+<equation confidence="0.870176">
+[ [i,j] , tN1 ], (3)
+</equation>
+<bodyText confidence="0.999809545454546">
+where tN1 is the target phrase linked to the source
+phrase si, · · · , sj. The edges are stored in a so-called
+chart. For each input interval that is matched by
+some source phrase in the block set, a list of pos-
+sible target phrase translations is stored in the chart.
+Here, simple edges as in Eq. 3 are used to gener-
+ate so-called rule edges that are defined later in the
+paper. A similar data structure corresponding to an
+edge is called translation option in (Koehn, 2004).
+While the edge generation potentially slows down
+the overall decoding process, for the baseline de-
+</bodyText>
+<page confidence="0.985747">
+38
+</page>
+<figure confidence="0.822549866666667">
+e = 2
+e = 1
+e = 5
+a
+1
+a
+2
+a
+4
+a
+3
+e = 3
+e = 4
+a
+0
+</figure>
+<equation confidence="0.863332631578947">
+e = 1
+e = 2
+e = 3
+e = 5
+e = 4
+’Simple’
+Edges’
+e=2, r=1
+p=BEG
+O R I G = [ 1 , 2 ]
+e=1, r=1
+p=END
+O R I G = [ 0 , 1 ]
+e=3, r=2
+p=BEG
+O R I G = [ 1 , 3 ]
+e=1, r=2
+p=END
+O R I G = [ 0 , 1 ]
+</equation>
+<figure confidence="0.999243393939394">
+Additional
+’Rule’ Edge
+Copies
+’Extended’
+Chart
+’Original’
+Chart
+’Simple’
+’Edges’
+p
+0
+p
+0
+p
+e=1, r=3
+p=BEGIN
+O R I G = [ 0 , 1 ]
+a
+0
+0
+e=4, r=3 e=3, r=3
+p=INTER p=END
+ORIG=[3,4] O R I G = [ 1 , 2 ]
+a a a a
+1 2 3 4
+p
+p 1 p
+1 2
+p p p p
+1 2 3 4
+1 0
+0 3 4 1 2
+1 2 0
+</figure>
+<figureCaption confidence="0.9980985">
+Figure 1: Addition of rule edges to a chart containing 5 simple edges (some rule edges are not shown). The simple
+edges remain in the chart after the rule edges have been added: they are used to carry out monotone translations.
+</figureCaption>
+<bodyText confidence="0.980067">
+coder generating all the simple edges takes less than
+0.3 % of the overall decoding time.
+</bodyText>
+<sectionHeader confidence="0.795381" genericHeader="method">
+3 DP-Search with Rules
+</sectionHeader>
+<bodyText confidence="0.992332055555555">
+This section explains the handling of the re-order
+rules as an edge generation process. Assuming a
+monotone translation, for the baseline DP decoder
+(Koehn, 2004) each edge ending at position j can be
+continued by any edge starting at position j + 1, i.e.
+the simple edges are fully connected with respect to
+their start and ending positions. For the rule-driven
+decoder, all the re-ordering is handled by generat-
+ing additional edges which are ’copies’ of the sim-
+ple edges in each rule context in which they occur.
+Here, a rule edge copy ending at position j is not
+fully connected with all other edges starting at po-
+sition j + 1. Once a rule edge copy for a particular
+rule id r has been processed that edge can be con-
+tinued only by an edge copy for the same rule until
+the end of the rule has been reached. To formalize
+the approach, the search state definition in Eq. 2 is
+modified as follows:
+</bodyText>
+<equation confidence="0.679123">
+[ s ; [i, j] , r , sr , e E {false, true} ] (4)
+</equation>
+<bodyText confidence="0.999942636363636">
+Here, the coverage vector C is replaced by a single
+number s: a monotone search is carried out and all
+the source positions up to position s (including s)
+are covered. [i, j] is the coverage interval for the last
+source phrase translated (the same as in Eq. 2). r is
+the rule identifier, i.e. a rule position in the list in
+Table 1. sr is the starting position for the rule match
+of rule r in the input sentence, and e is a flag that
+indicates whether the hypothesis h has covered the
+entire span of rule r yet. The search starts with the
+following initial state:
+</bodyText>
+<equation confidence="0.901055">
+[ −1 ; [−1,−1] ,−1 , −1 , e=true], (5)
+</equation>
+<bodyText confidence="0.999638714285714">
+where the starting positions s, sr, and the coverage
+interval [i, j] are all initialized with −1, a virtual
+source position to the left of the uncovered source
+input. Throughout the search, a rule id of −1 in-
+dicates that no rule is currently applied for that hy-
+pothesis, i.e. a contiguous source interval to the left
+of s is covered.
+</bodyText>
+<page confidence="0.99658">
+39
+</page>
+<bodyText confidence="0.999941711111111">
+States are extended by finding matching edges
+and the generation of these edges is illustrated in
+Fig. 1 for the use of 3 overlapping rules on a source
+segment of 5 words a0, • • • , a4 1. Edges are shown
+as rectangles where the number on the left inside the
+box corresponds to the enumeration of the simple
+edges. In the top half of the picture the simple edges
+which correspond to 5 phrase-to-phrase translations
+are shown. In the bottom half all the edges after the
+rule edge extension are shown (including simple and
+rule edges). A rule edge contains additional compo-
+nents: the rule id r, a relative edge position p (ex-
+plained below), and the original source interval of a
+rule edge before it has been re-ordered. A rule edge
+is generated from a simple edge via a re-order rule
+application: the newly generated edges are added
+into the chart as shown in the lower half of Figure 1.
+Here, rule 1 and 2 generate two new edges and rule
+3 generates three new edges that are added into the
+chart at their new re-ordered positions, e.g. copies
+of edge 1 are added for the rule id r = 1 at start
+position 2, for rule r = 2 at start position 3, and for
+rule r = 3 at start position 0. Even if an edge copy
+is added at the same position as the original edge a
+new copy is needed. The three rules correspond to
+matching POS sequences, i.e. the Arabic input sen-
+tence has been POS tagged and a POS pj has been
+assigned to each Arabic word aj. The same POS
+sequence might generate several different permuta-
+tions which is not shown here.
+More formally, the edge generation process is car-
+ried out as follows. First, for each source interval
+[k, l] all the matching phrase pairs are found and
+added into the chart as simple edges. In a second
+run over the input sentence for each source inter-
+val [k, l] all matching POS sequences are computed
+and the corresponding source words ak, • • • , al are
+re-ordered according to the rule permutation. On
+the re-ordered word sequence phrase matches are
+computed only for those source phrases that already
+occurred in the original (un-reordered) source sen-
+tence. Both edge generation steps together still take
+less than 1 % of the overall decoding time as shown
+in Section 5: most of the decoding time is needed to
+access the translation and the language model prob-
+</bodyText>
+<footnote confidence="0.949813">
+1Rule edges and simple edges may overlap arbitrarily, but
+the final translation constitutes a non-overlapping boundary se-
+quence.
+</footnote>
+<bodyText confidence="0.999710857142857">
+abilities when extending partial decoder hypotheses
+2. Typically rule matches are much longer than edge
+matches where several simple edges are needed to
+cover the entire rule interval, i.e. three edges for rule
+r = 3 in Fig. 1. As the edge copies corresponding
+to the same rule must be processed in sequence they
+are assigned one out of three possible positions p:
+</bodyText>
+<listItem confidence="0.996636333333333">
+• BEG: Edge copy matches at the begin of rule
+match.
+• INTER: Edge copy lies within rule match inter-
+val.
+• END: Edge copy matches at the end of rule
+match.
+</listItem>
+<bodyText confidence="0.996633666666667">
+Formally, the rule edges in Fig. 1 are defined as fol-
+lows, where a rule edge includes all the components
+of a simple edge:
+</bodyText>
+<equation confidence="0.985869">
+[
+[i, j] , t�1 , r,p, [π(i), π(j)] , (6)
+</equation>
+<bodyText confidence="0.999937782608696">
+where r is the rule id and p is the relative edge po-
+sition. [π(i), π(j)] is the original coverage inter-
+val where the edge matched before being re-ordered.
+The original interval is not a necessary component of
+the rule-driven algorithm but it makes a direct com-
+parison with the window-based decoder straight-
+forward as explained below. The rule edge defi-
+nition for a rule r that matches at position sr is
+slightly simplified: the processing interval is ac-
+tually [sr + i, sr + j] and the original interval is
+[sr+π(i), sr+π(j)]. For simplicity reasons, the off-
+set sr is omitted in Fig 1. Using the original interval
+has the following advantage: as the edges are pro-
+cessed from left-to-right and the re-ordering is con-
+trolled by the rules the translation score computation
+is based on the original source interval [π(i), π(j)]
+and the monotone processing is based on the match-
+ing interval [i, j]. For the rule-driven decoder it
+looks like the re-ordering is carried out like in a reg-
+ular decoder with a window-based re-ordering re-
+striction, but the rule-induced window can be large,
+i.e. up to 15 source word positions. In particular
+a distortion model can be applied when using the
+</bodyText>
+<footnote confidence="0.8074705">
+2Strictly speaking, the edge generation constitutes two addi-
+tional runs over the input sentence. In future, the rule edges can
+be computed ’on demand’ for each input position j resulting in
+an even stricter implementation of the beam search concept.
+</footnote>
+<page confidence="0.978294">
+40
+</page>
+<figure confidence="0.999467777777778">
+e = 4
+a
+0
+2. RULE:
+3 . RULE:
+1. RULE:
+h h h 3 h 4 h 5 h h7
+1 2 6
+e = 5
+e = 1
+6 , BEGIN
+7 , BEGIN
+a
+1
+2 0 1
+1 0 3 2
+h
+14
+h 11
+5,INTER
+7,BEGIN
+e = 6
+a
+2
+1 2 3 0
+2,BEGIN
+1 , E N D
+h
+8
+h
+12
+8 , INTER
+8,INTER
+e = 2
+e = 7
+a
+3
+h
+13
+h 9 h 10
+e = 8
+3 , INTER
+7 , E N D
+a
+4
+e = 3
+6, END
+e = 9
+a
+5
+e = 1 1
+e = 1 0
+a
+6
+</figure>
+<figureCaption confidence="0.9989445">
+Figure 2: Search lattice for the rule-driven decoder. The gray circles indicated partial hypotheses. An hypothesis is
+expanded by applying an edge. DP recombination is used to restrict the search space throughout the rule lattice.
+</figureCaption>
+<bodyText confidence="0.99708965">
+re-order rules. Additionally, rule-based probabilities
+can be used as well. This concept allows to directly
+compare a window-based decoder and the current
+rule based decoder in Section 5.
+The search space for the rule-driven decoder is il-
+lustrated in Fig. 2. The gray shaded circles represent
+translation hypotheses according to Eq. 4. A trans-
+lation hypothesis h1 is extended by an edge which
+covers some uncovered portion of the input sen-
+tence to produce a new hypothesis h2. The decoder
+searches monotonically through the entire chart of
+edges, and word re-ordering is possible only through
+the use of rule edges. The top half of the picture
+shows the way simple edges contribute to the search
+process: they are used to carry out a monotone trans-
+lation. The dashed arrows indicate that hypotheses
+can be recombined: when extending hypothesis h3
+by edge e = 2 and hypothesis h4 by edge e = 8
+only a single hypothesis h5 is kept as the history of
+edge extensions can be ignored for future decoder
+decisions with respect to the uncovered source posi-
+tions. Here, the distortion model and the language
+model history are ignored for illustration purposes.
+As it can be seen in Fig. 2, the rule edge generation
+step has created 3 copies of the simple edge e = 7,
+which are marked by a dashed borderline. Hypothe-
+ses covering the same input may not be merged, i.e.
+hypotheses h9 and h13 for rules r = 1 and r = 2
+have to be kept separate from the hypothesis h4. But
+state merging may occur for states generated by rule
+edges for the same rule r, i.e. rule r = 1 and state
+h9.
+Since rule edges have to be processed in a sequen-
+tial order, looking up those that can extend a given
+hypothesis h is more complicated than a phrase
+translation look-up in a regular decoder. Given the
+search state definition in Eq. 4, for a given rule id r
+and coverage position s we have to be able to look-
+up all possible edge extensions efficiently. This is
+implemented by storing two lists:
+</bodyText>
+<listItem confidence="0.979413444444444">
+1. For each source position j a list of possible
+’starting’ edges: these are all the simple edges
+plus all rule edges with relative edge position
+p = BEG. This list is used to expand hypotheses
+according to the definition in Eq. 4 where the
+rule flag e = true, i.e. the search has finished
+covering an entire rule interval.
+2. The second list is for continuing edges (p =
+INTER or p = END). For each rule id r, rule
+</listItem>
+<page confidence="0.998965">
+41
+</page>
+<bodyText confidence="0.999978142857143">
+start position sr and source position j a list of
+rule edges has to be stored that can continue an
+already started rule coverage. This list is used
+to expand hypotheses for which the rule flag e
+is e = false, i.e. the hypothesis has not yet
+finished covering the current rule interval, e.g.
+the hypotheses h9 and h11 in Fig. 2.
+The two lists are computed by a single run over
+the chart after all chart edges have been generated
+and before the search is carried out (the CPU time
+to generate these lists is included in the edge gener-
+ation CPU time reported in Section 5). The two lists
+are used to find the successor edges for each hypoth-
+esis h that corresponds to a rule r efficiently: only
+a small fraction of the chart edges starting at posi-
+tion j needs to be retrieved for an extension. The
+rule start position sr has to be included for the sec-
+ond list: it is possible that the same rule r matches
+the input sentences for two intervals [i, j] and [i′, j′]
+which overlap. This results in an invalid search state
+configuration. Based on the two lists a monotone
+search is carried out over the extended rule edge set
+which implicitly generates a reordering lattice as in
+similar approaches (Crego and Marino, 2006; Zhang
+et al., 2007). But because the handling of the edges
+is tightly integrated into the beam search algorithm
+by applying the same beam thresholds it potentially
+handles 10’s of thousands of rules efficiently.
+</bodyText>
+<sectionHeader confidence="0.999362" genericHeader="method">
+4 DP Search
+</sectionHeader>
+<bodyText confidence="0.999948784615385">
+The DP decoder described in the previous section
+bears some resemblance with search algorithms for
+large vocabulary speech recognition. For exam-
+ple, (Jelinek, 1998) presents a Viterbi decoder that
+searches a composite trellis consisting of smaller
+HMM acoustic trellises that are combined with lan-
+guage model states in the case a trigram language
+model. Multiple ’copies’ of the same acoustic sub
+models are incorporated into the overall trellis. The
+highest probability word sequences is obtained us-
+ing a Viterbi shortest path finding algorithm in a
+possibly huge composite HMM (cf. Fig. 5.3 of
+(Jelinek, 1998)). In comparison, in this paper the
+edge ’copies’ are used to generate hypotheses that
+are hypotheses ’copies’ of the same phrase match,
+e.g. in Fig. 2 the states h4, h8, and h14 all result
+from covering the same simple edge e7 as the most
+recent phrase match. The states form a potentially
+huge lattice as shown in Fig. 2. Similarly, (Ort-
+manns and Ney, 2000) presents a DP search algo-
+rithm where the interdependent decisions between
+non-linear time alignment, word boundary detec-
+tion, and word identification (the pronunciation lex-
+icon is organized efficiently as a lexical tree) are all
+carried out by searching a shortest path trough a pos-
+sibly huge composite trellis or HMM. The similar-
+ity between those speech recognition algorithms and
+the current rule decoder derives from the following
+observation: the use of a language model in speech
+recognition introduces a coupling between adjacent
+acoustic word models. Similarly, a rule match which
+typically spans several source phrase matches intro-
+duces a coupling between adjacent simple edges.
+Viewed in this way, the handling of copies is a
+technique of incorporating higher-level knowledge
+sources into a simple one-step search process: ei-
+ther by processing acoustic models in the context of
+a language model or by processing simple edges in
+the context of bigger re-ordering units, which exploit
+a richer linguistic context.
+The Earley parser in the presentation (Jurafsky
+and Martin, 2000) also uses the notion of edges
+which represent partial constituents derived in the
+parsing process. These constituents are interpreted
+as edges in a directed acyclic graph (DAG) which
+represents the set of all sub parse trees considered.
+This paper uses the notion of edges as well fol-
+lowing (Tillmann, 2006) where phrase-based decod-
+ing is also linked to a DAG path finding problem.
+Since the re-order rules are not applied recursively,
+the rule-driven algorithm can be linked to an Earley
+parser where parsing is done with a linear grammar
+(for a definition of linear grammar see (Harrison,
+1978)). A formal analysis of the rule-driven decoder
+might be important because of the following consid-
+eration: in phrase-based machine translation the tar-
+get sentence is generated from left-to-right by con-
+catenating target phrases linked to source phrases
+that cover some source positions. Here, a coverage
+vector is typically used to ensure that each source
+position is covered a limited number of times (typi-
+cally once). Including a coverage vector C into the
+search state definition results in an inherently expo-
+nential complexity: for an input sentence of length
+J there are 2J coverage vectors (Koehn, 2004). On
+</bodyText>
+<page confidence="0.99949">
+42
+</page>
+<tableCaption confidence="0.99784">
+Table 2: Translation results on the MT06 data. w is the distortion limit.
+</tableCaption>
+<table confidence="0.985503166666667">
+words / sec generation [%] BLEU PREC TER
+Baseline decoder w = 0 171.6 1.90 34.6 35.2 65.3
+w = 2 25.4 0.29 36.6 37.7 63.5
+w = 5 8.2 0.10 35.0 36.1 65.1
+Rule decoder N(r) &gt; 2 9.1 0.75 37.1 38.2 63.5
+(w = 15) N(r) &gt; 5 10.5 0.43 37.2 38.2 63.5
+</table>
+<bodyText confidence="0.999849">
+the contrary, the search state definition in Eq. 4 ex-
+plicitly avoids the use of a coverage vector result-
+ing in an essentially linear time decoding algorithm
+(Section 5 reports the size of the the extended search
+graph in terms of number of edges and shows that
+the number of permutations per POS sequence is
+less than 2 on average). The rule-driven algorithm
+might be formally correct in the following sense. A
+phrase-based decoder has to generate a phrase align-
+ment where each source position needs to be cov-
+ered by exactly one source phrase. The rule-based
+decoder achieves this by local computation only: 1)
+no coverage vector is used, 2) the rule edge genera-
+tion is local to each individual rule, i.e. looking only
+at the span of that rule, and 3) rules whose appli-
+cation spans overlap arbitrarily (but not recursively)
+are handled correctly. In future, a formal correctness
+proof might be given.
+</bodyText>
+<sectionHeader confidence="0.991242" genericHeader="method">
+5 Experimental Results
+</sectionHeader>
+<bodyText confidence="0.999987787234043">
+We test the novel edge generation algorithm on
+a standard Arabic-to-English translation tasks: the
+MT06 Arabic-English DARPA evaluation set con-
+sisting of 1529 sentences with 58 331 Arabic words
+and 4 English reference translations . The transla-
+tion model is defined in Eq. 1 where 8 probabilis-
+tic features (language, translation,distortion model)
+are used. The distortion model is similar to (Al-
+Onaizan and Papineni, 2006). An on-line algorithm
+similar to (Tillmann and Zhang, 2008) is used to
+train the weight vector w. The decoder uses a 5-
+gram language model, and the phrase table consists
+of about 3.2 million phrase pairs. The phrase table
+as well as the probabilistic features are trained on a
+much larger training data consisting of 3.8 million
+sentences. Translation results are given in terms of
+the automatic BLEU evaluation metric (Papineni et
+al., 2002) as well as the TER metric (Snover et al.,
+2006).
+Our baseline decoder is similar to (Koehn, 2004;
+Moore and Quirk, 2007). The goal of the current
+paper is not to demonstrate an improvement in de-
+coding speed but show the validity of the rule edge
+generation algorithm. While the baseline and the
+rule-driven decoder are compared with respect to
+speed, they are both run with conservatively large
+beam thresholds, e.g. a beam limit of 500 hypothe-
+ses and a beam threshold of 7.5 (logarithmic scale)
+per source position j. The baseline decoder and the
+rule decoder use only 2 stacks to carry out the search
+(rather than a stack for each source position) (Till-
+mann, 2006). No rest-cost estimation is employed.
+For the results in line 2 the number of phrase ’holes’
+n in the coverage vector for a left to right traver-
+sal of the input sentence is restricted using a typi-
+cal skip-based decoder (Berger et al., 1996). Up to
+2 phrases can be skipped. Additionally, the phrase
+re-ordering is restricted to take place within a given
+window size w. The 28,878 rules used in this paper
+are obtained from 14 989 manually aligned Arabic-
+English sentences where the Arabic sentences have
+been segmented and POS tagged . The rule selec-
+tion procedure is similar to the one used in (Grego
+and Marino, 2006) and rules are extracted that oc-
+cur at least twice. The rule-based re-ordering uses
+an additional probabilistic feature which is derived
+from the rule unigram count N(r) shown in Table. 1:
+</bodyText>
+<equation confidence="0.958117">
+p(r) = N(r)
+</equation>
+<bodyText confidence="0.9700651">
+N(r′). The average number of POS se-
+r′
+quence matches per input sentence is 34.9 where the
+average number of permutations that generate edges
+is 57.7. The average number of simple edges i.e.
+phrase pairs per input sentence is 751.1. For the
+rule-based decoder the average number of edges is
+3187.8 which includes the simple edges.
+Table 2 presents results that compare the base-
+line decoder with the rule-driven decoder in terms
+</bodyText>
+<page confidence="0.999249">
+43
+</page>
+<bodyText confidence="0.999956489361702">
+of translation performance and decoding speed. The
+second column shows the distortion limit used by
+the two decoders. For the rule-based decoder a max-
+imum distortion limit w is implemented by filter-
+ing out all the rule matches where the size of the
+rule in terms of number of POS symbols is greater
+than w, i.e. the rule edges are processed mono-
+tonically but a monotone rule edge sequence for
+the same rule id may not span more than w source
+positions. The third column shows the translation
+speed in terms of words per second. The fourth
+column shows the percentage of CPU time needed
+for the edge generation (including both simple and
+rule edges). The final three columns report transla-
+tion results in terms of BLEU , BLEU precision
+score (PREC), and TER. The rule-based reorder-
+ing restriction obtains the best translation scores on
+the MT06 data: a BLEU score of 37.2 compared
+to a BLEU score of 36.6 for the baseline decoder.
+The statistical significance interval is rather large:
+2.9 % on this test set as text from various gen-
+res is included. Additional visual evaluation on the
+dev set data shows that some successful phrase re-
+ordering is carried out by the rule decoder which is
+not handled correctly by the baseline decoder. As
+can be seen from the results reducing the number
+of rules by filtering all rules that occur at least 5
+times (about 10 000 rules) slightly improves trans-
+lation performance from 37.1 to 37.2. The edge
+generation accounts for only a small fraction of the
+overall decoding time. Fig. 3 and Fig. 4 demonstrate
+additional advantages when using the rule-based de-
+coder. Fig. 3 shows the translation BLEU score as
+a function of the distortion limit window w. The
+BLEU score actually decreases for the baseline de-
+coder as the size w is increased. The optimal win-
+dow size is surprisingly small: w = 2. A simi-
+lar behavior is also reported in (Moore and Quirk,
+2007) where w = 5 is used. For the rule-driven de-
+coder however the BLEU score does not decrease
+for large w: the rules restrict the local re-ordering in
+the context of potentially very long POS sequences
+which makes the re-ordering more reliable. Fig. 4
+which shows the decoding speed as a function of the
+window size w demonstrates that the rule-based de-
+coder actually runs faster than the baseline decoder
+for window sizes w &gt; 5.
+</bodyText>
+<figure confidence="0.97184">
+0 2 4 6 8 10 12 14 16
+maximum window size
+</figure>
+<figureCaption confidence="0.984148">
+Figure 3: BLEU score as a function of window size w.
+</figureCaption>
+<figure confidence="0.99597">
+10
+0 2 4 6 8 10 12 14 16
+maximum window size
+</figure>
+<figureCaption confidence="0.984076">
+Figure 4: Decoding speed as a function of window size
+w.
+</figureCaption>
+<sectionHeader confidence="0.995572" genericHeader="evaluation">
+6 Discussion and Future Work
+</sectionHeader>
+<bodyText confidence="0.999989">
+The handling of the re-order rules is most similar to
+work in (Crego and Marino, 2006) where the rules
+are used to create re-order lattices. To make this
+feasible, the rules have been vigorously filtered in
+(Crego and Marino, 2006): only about 30 rules are
+used in their experiments. On the contrary, the cur-
+rent approach tightly integrates the re-order rules
+into a phrase-based decoder such that 29 000 rules
+can be handled efficiently. In future work our novel
+approach might allow to make use of lexicalized re-
+order rules as in (Xia and McCord, 2004) or syntac-
+tic rules as in (Wang et al., 2007).
+</bodyText>
+<sectionHeader confidence="0.997936" genericHeader="conclusions">
+7 Acknowledgment
+</sectionHeader>
+<bodyText confidence="0.999727">
+This work was supported by the DARPA GALE
+project under the contract number HR0011-06-2-
+00001. The authors would like to thank the anony-
+mous reviewers for their detailed criticism.
+</bodyText>
+<figure confidence="0.989388733333333">
+rule-driven decoder N(r)&gt;=5
+rule-driven decoder N(r)&gt;=2
+distortion-limited phrase decoder
+rule-driven decoder N(r)&gt;=5
+rule-driven decoder N(r)&gt;=2
+distortion-limited phrase decoder
+BLEU 0.39
+0.38
+0.37
+0.36
+0.35
+0.34
+0.33
+100
+CPU [words / sec]
+</figure>
+<page confidence="0.996643">
+44
+</page>
+<sectionHeader confidence="0.995594" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.999927584269663">
+Yaser Al-Onaizan and Kishore Papineni. 2006. Dis-
+tortion Models for Statistical Machine Translation.
+In Proceedings of ACL-COLING’06, pages 529–536,
+Sydney, Australia, July.
+Adam L. Berger, Peter F. Brown, Stephen A. Della
+Pietra, Vincent J. Della Pietra, Andrew S. Kehler, and
+Robert L. Mercer. 1996. Language Translation Ap-
+paratus and Method of Using Context-Based Trans-
+lation Models. United States Patent, Patent Number
+5510981, April.
+David Chiang. 2007. Hierarchical Machine Translation.
+Computational Linguistics, 33(2):201–228.
+Michael Collins, Philipp Koehn, and Ivona Kucerova.
+2005. Clause restructuring for statistical machine
+translation. In Proc. of ACL’05, pages 531–540, Ann
+Arbor, Michigan, June. Association for Computational
+Linguistics.
+J.M. Crego and Jos´e B. Marino. 2006. Integration of
+POStag-based Source Reordering into SMT Decoding
+by an Extended Search Graph. In Proc. of AMTA06,
+pages 29–36, Cambridge, MA, August.
+Jay Earley. 1970. An Efficient Context-Free Parsing Al-
+gorithm. Communications of the ACM, 13(2):94–102.
+Michael A. Harrison. 1978. Introduction to Formal Lan-
+guage Theory. Addison Wesley.
+Fred Jelinek. 1998. Statistical Methods for Speech
+Recognition. The MIT Press, Cambridge, MA.
+Daniel Jurafsky and James H. Martin. 2000. Speech and
+Language Processing. Prentice Hall.
+Philipp Koehn, Franz J. Och, and Daniel Marcu.
+2003. Statistical phrase-based translation. In HLT-
+NAACL’03: Main Proceedings, pages 127–133, Ed-
+monton, Alberta, Canada, May 27 - June 1.
+Philipp Koehn. 2004. Pharaoh: a Beam Search De-
+coder for Phrase-Based Statistical Machine Transla-
+tion Models. In Proceedings ofAMTA’04, Washington
+DC, September-October.
+Robet C. Moore and Chris Quirk. 2007. Faster Beam-
+search Decoding for Phrasal SMT. Proc. of the MT
+Summit XI, pages 321–327, September.
+Masaaki Nagata, Kuniko Saito, Kazuhide Yamamoto,
+and Kazuteru Ohashi. 2006. A Clustered Global
+Phrase Reordering Model for Statistical Machine
+Translation. In Proceedings of ACL-COLING’06,
+pages 713–720, Sydney, Australia, July.
+Franz-Josef Och and Hermann Ney. 2004. The Align-
+ment Template Approach to Statistical Machine Trans-
+lation. Computational Linguistics, 30(4):417–450.
+Stefan Ortmanns and Hermann Ney. 2000. Progress in
+Dynamic Programming Search for LVCSR. Proc. of
+the IEEE, 88(8):1224–1240.
+Kishore Papineni, Salim Roukos, Todd Ward, and Wei-
+Jing Zhu. 2002. BLEU: A Method for Auto-
+matic Evaluation of Machine Translation. In Proc. of
+ACL’02, pages 311–318, Philadelphia, PA, July.
+Matthias Paulik, Kay Rottmann, Jan Niehues, Silja
+Hildebrand, and Stephan Vogel. 2007. The ISL
+Phrase-Based MT System for the 2007 ACL Workshop
+on SMT. In Proc. of the ACL 2007 Second Workshop
+on SMT, June.
+Matthew Snover, Bonnie Dorr, Richard Schwartz, Lin-
+nea Micciulla, and John Makhoul. 2006. A Study of
+Translation Edit Rate with Targeted Human Annota-
+tion. In Proc. ofAMTA 2006, Boston,MA.
+Christoph Tillmann and Tong Zhang. 2007. A Block Bi-
+gram Prediction Model for Statistical Machine Trans-
+lation. ACM-TSLP, 4(6):1–31, July.
+Christoph Tillmann and Tong Zhang. 2008. An Online
+Relevant Set Algorithm for Statistical Machine Trans-
+lation. Accepted for publication in IEEE Transaction
+on Audio, Speech, and Language Processing.
+Christoph Tillmann. 2006. Efficient Dynamic Program-
+ming Search Algorithms for Phrase-based SMT. In
+Proceedings of the Workshop CHPSLP at HLT’06,
+pages 9–16, New York City, NY, June.
+Chao Wang, Michael Collins, and Philipp Koehn. 2007.
+Chinese Syntactic reordering for statistical machine
+translation. In Proc. of EMNLP-CoNLL’07, pages
+737–745, Prague, Czech Republic, July.
+Fei Xia and Michael McCord. 2004. Improving a sta-
+tistical mt system with automatically learned rewrite
+patterns. In Proc. of Coling 2004, pages 508–514,
+Geneva, Switzerland, Aug 23–Aug 27. COLING.
+Yuqi Zhang, Richard Zens, and Hermann Ney. 2007.
+Chunk-level Reordering of Source Language Sen-
+tences with Automatically Learned Rules for Statis-
+tical Machine Translation. In Proc. of SSST, NAACL-
+HLT’07 / AMTA Workshop, pages 1–8, Rochester, NY,
+April.
+</reference>
+<page confidence="0.999387">
+45
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.853417">
+<title confidence="0.999208">A Rule-Driven Dynamic Programming Decoder for Statistical MT</title>
+<author confidence="0.994242">Christoph</author>
+<affiliation confidence="0.932438">IBM T.J. Watson Research Yorktown Heights, N.Y.</affiliation>
+<email confidence="0.999426">ctill@us.ibm.com</email>
+<abstract confidence="0.9994684">The paper presents an extension of a dynamic programming (DP) decoder for phrase-based SMT (Koehn, 2004; Och and Ney, 2004) that tightly integrates POS-based re-order rules (Crego and Marino, 2006) into a left-to-right beam-search algorithm, rather than handling them in a pre-processing or re-order graph generation step. The novel decoding algorithm can handle tens of thousands of rules efficiently. An improvement over a standard phrase-based decoder is shown on an Arabic- English translation task with respect to translation accuracy and speed for large re-order window sizes.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>Yaser Al-Onaizan</author>
+<author>Kishore Papineni</author>
+</authors>
+<title>Distortion Models for Statistical Machine Translation.</title>
+<date>2006</date>
+<booktitle>In Proceedings of ACL-COLING’06,</booktitle>
+<pages>529--536</pages>
+<location>Sydney, Australia,</location>
+<contexts>
+<context position="6238" citStr="Al-Onaizan and Papineni, 2006" startWordPosition="1048" endWordPosition="1051">n some training data using an on-line algorithm (Tillmann and Zhang, 2008). The decoder that carries out the optimization in Eq. 1 is similar to a standard phrase-based decoder (Koehn, 2004; Och and Ney, 2004), where states are tuples of the following type: [ C ; [i,j] ], (2) where C is the so-called coverage vector that keeps track of the already processed source position, [i, j] is the source interval covered by the last source phrase match. In comparison, (Koehn, 2004) uses only the position of the final word of the last source phrase translated. Since we are using the distortion model in (Al-Onaizan and Papineni, 2006) the entire last source phrase interval needs to be stored. Hypothesis score and language model history are omitted for brevity reasons. The states are stored in lists or stacks and DP recombination is used to reduce the size of the search space while extending states. The algorithm described in this paper uses an intermediate data structure called an edge that represents a source phrase together with a target phrase that is one of its possible translation. Formally, we define: [ [i,j] , tN1 ], (3) where tN1 is the target phrase linked to the source phrase si, · · · , sj. The edges are stored </context>
+</contexts>
+<marker>Al-Onaizan, Papineni, 2006</marker>
+<rawString>Yaser Al-Onaizan and Kishore Papineni. 2006. Distortion Models for Statistical Machine Translation. In Proceedings of ACL-COLING’06, pages 529–536, Sydney, Australia, July.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Adam L Berger</author>
+<author>Peter F Brown</author>
+<author>Stephen A Della Pietra</author>
+<author>Vincent J Della Pietra</author>
+<author>Andrew S Kehler</author>
+<author>Robert L Mercer</author>
+</authors>
+<title>Language Translation Apparatus and Method of Using Context-Based Translation Models. United States Patent, Patent Number 5510981,</title>
+<date>1996</date>
+<contexts>
+<context position="5113" citStr="Berger et al., 1996" startWordPosition="851" endWordPosition="854">used here to emphasize that pairs of phrases (especially longer phrases) tend to form closely linked units in such a way that the translation process can be formalized as a block segmentation process (Nagata et al., 2006; Tillmann and Zhang, 2007). Here, the input sentence is segmented from left to right while simultaneously generating the target sentence, one block at a time. In practice, phrase-based or block-based translation models which largely monotone decoding algorithms obtain close to state-of-the-art performance by using skip and window-based restrictions to reduce the search space (Berger et al., 1996). During decoding, we maximize the score sw(bn1) of a phrase-pair sequence bn1 = (si, ti)n1: n sw(bn1) = wT · f(bi, bi−1), (1) i=1 where bi is a block, bi−1 is its predecessor block, and f(bi, bi−1) is a 8-dimensional feature vector where the features are derived from some probabilistic models: language model, translation model, and distortion model probabilities. n is the number of blocks in the translation and the weight vector w is trained in a way as to maximize the decoder BLEU score on some training data using an on-line algorithm (Tillmann and Zhang, 2008). The decoder that carries out </context>
+<context position="25221" citStr="Berger et al., 1996" startWordPosition="4563" endWordPosition="4566">and the rule-driven decoder are compared with respect to speed, they are both run with conservatively large beam thresholds, e.g. a beam limit of 500 hypotheses and a beam threshold of 7.5 (logarithmic scale) per source position j. The baseline decoder and the rule decoder use only 2 stacks to carry out the search (rather than a stack for each source position) (Tillmann, 2006). No rest-cost estimation is employed. For the results in line 2 the number of phrase ’holes’ n in the coverage vector for a left to right traversal of the input sentence is restricted using a typical skip-based decoder (Berger et al., 1996). Up to 2 phrases can be skipped. Additionally, the phrase re-ordering is restricted to take place within a given window size w. The 28,878 rules used in this paper are obtained from 14 989 manually aligned ArabicEnglish sentences where the Arabic sentences have been segmented and POS tagged . The rule selection procedure is similar to the one used in (Grego and Marino, 2006) and rules are extracted that occur at least twice. The rule-based re-ordering uses an additional probabilistic feature which is derived from the rule unigram count N(r) shown in Table. 1: p(r) = N(r) N(r′). The average nu</context>
+</contexts>
+<marker>Berger, Brown, Pietra, Pietra, Kehler, Mercer, 1996</marker>
+<rawString>Adam L. Berger, Peter F. Brown, Stephen A. Della Pietra, Vincent J. Della Pietra, Andrew S. Kehler, and Robert L. Mercer. 1996. Language Translation Apparatus and Method of Using Context-Based Translation Models. United States Patent, Patent Number 5510981, April.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>David Chiang</author>
+</authors>
+<date>2007</date>
+<booktitle>Hierarchical Machine Translation. Computational Linguistics,</booktitle>
+<volume>33</volume>
+<issue>2</issue>
+<contexts>
+<context position="2959" citStr="Chiang, 2007" startWordPosition="469" endWordPosition="470">gorithm. As a result phrase re-ordering with a large distortion window can be carried out efficiently and reliably. 2) The current rule-driven decoder is a first step towards including more complex rules, i.e. syntax-based rules as in (Wang et al., 2007) or chunk rules as in (Zhang et al., 2007) using a decoding algorithm that is conceptually similar to an Earley-style parser (Earley, 1970). More generally, ’rule-driven’ decoding is tightly linked to standard phrase-based decoding. In future, the edge generation technique presented in this paper might be extended to handle hierarchical rules (Chiang, 2007) in a simple left-to-right beam search decoder. In the next section, we briefly summarize the baseline decoder. Section 3 shows the novel ruledriven DP decoder. Section 4 shows how the current decoder is related to both DP-based decoding algorithms in speech recognition and parsing. Finally, Proceedings of the Second ACL Workshop on Syntax and Structure in Statistical Translation (SSST-2), pages 37–45, ACL-08: HLT, Columbus, Ohio, USA, June 2008. c�2008 Association for Computational Linguistics Table 1: A list of 28 878 reorder rules sorted according to the rule occurrence count N(r) is used i</context>
+</contexts>
+<marker>Chiang, 2007</marker>
+<rawString>David Chiang. 2007. Hierarchical Machine Translation. Computational Linguistics, 33(2):201–228.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Michael Collins</author>
+<author>Philipp Koehn</author>
+<author>Ivona Kucerova</author>
+</authors>
+<title>Clause restructuring for statistical machine translation.</title>
+<date>2005</date>
+<booktitle>In Proc. of ACL’05,</booktitle>
+<pages>531--540</pages>
+<publisher>Association</publisher>
+<institution>for Computational Linguistics.</institution>
+<location>Ann Arbor, Michigan,</location>
+<contexts>
+<context position="1166" citStr="Collins et al., 2005" startWordPosition="172" endWordPosition="175">s of rules efficiently. An improvement over a standard phrase-based decoder is shown on an ArabicEnglish translation task with respect to translation accuracy and speed for large re-order window sizes. 1 Introduction The paper presents an extension of a dynamic programming (DP) decoder for phrase-based SMT (Koehn, 2004; Och and Ney, 2004) where POSbased re-order rules (Crego and Marino, 2006) are tightly integrated into a left-to-right run over the input sentence. In the literature, re-order rules are applied to the source and/or target sentence as a pre-processing step (Xia and McCord, 2004; Collins et al., 2005; Wang et al., 2007) where the rules can be applied on both training and test data. Another way of incorporating re-order rules is via extended monotone search graphs (Crego and Marino, 2006) or lattices (Zhang et al., 2007; Paulik et al., 2007). This paper presents a way of handling POS-based re-order rules as an edge generation process: the POS-based re-order rules are tightly integrated into a left to right beam search decoder in a way that 37 29 000 rules which may overlap in an arbitrary way (but not recursively) are handled efficiently. Example rules which are used to control the novel D</context>
+</contexts>
+<marker>Collins, Koehn, Kucerova, 2005</marker>
+<rawString>Michael Collins, Philipp Koehn, and Ivona Kucerova. 2005. Clause restructuring for statistical machine translation. In Proc. of ACL’05, pages 531–540, Ann Arbor, Michigan, June. Association for Computational Linguistics.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J M Crego</author>
+<author>Jos´e B Marino</author>
+</authors>
+<title>Integration of POStag-based Source Reordering into SMT Decoding by an Extended Search Graph.</title>
+<date>2006</date>
+<booktitle>In Proc. of AMTA06,</booktitle>
+<pages>29--36</pages>
+<location>Cambridge, MA,</location>
+<contexts>
+<context position="941" citStr="Crego and Marino, 2006" startWordPosition="136" endWordPosition="139">-based re-order rules (Crego and Marino, 2006) into a left-to-right beam-search algorithm, rather than handling them in a pre-processing or re-order graph generation step. The novel decoding algorithm can handle tens of thousands of rules efficiently. An improvement over a standard phrase-based decoder is shown on an ArabicEnglish translation task with respect to translation accuracy and speed for large re-order window sizes. 1 Introduction The paper presents an extension of a dynamic programming (DP) decoder for phrase-based SMT (Koehn, 2004; Och and Ney, 2004) where POSbased re-order rules (Crego and Marino, 2006) are tightly integrated into a left-to-right run over the input sentence. In the literature, re-order rules are applied to the source and/or target sentence as a pre-processing step (Xia and McCord, 2004; Collins et al., 2005; Wang et al., 2007) where the rules can be applied on both training and test data. Another way of incorporating re-order rules is via extended monotone search graphs (Crego and Marino, 2006) or lattices (Zhang et al., 2007; Paulik et al., 2007). This paper presents a way of handling POS-based re-order rules as an edge generation process: the POS-based re-order rules are t</context>
+<context position="18713" citStr="Crego and Marino, 2006" startWordPosition="3477" endWordPosition="3480">ed to find the successor edges for each hypothesis h that corresponds to a rule r efficiently: only a small fraction of the chart edges starting at position j needs to be retrieved for an extension. The rule start position sr has to be included for the second list: it is possible that the same rule r matches the input sentences for two intervals [i, j] and [i′, j′] which overlap. This results in an invalid search state configuration. Based on the two lists a monotone search is carried out over the extended rule edge set which implicitly generates a reordering lattice as in similar approaches (Crego and Marino, 2006; Zhang et al., 2007). But because the handling of the edges is tightly integrated into the beam search algorithm by applying the same beam thresholds it potentially handles 10’s of thousands of rules efficiently. 4 DP Search The DP decoder described in the previous section bears some resemblance with search algorithms for large vocabulary speech recognition. For example, (Jelinek, 1998) presents a Viterbi decoder that searches a composite trellis consisting of smaller HMM acoustic trellises that are combined with language model states in the case a trigram language model. Multiple ’copies’ of</context>
+<context position="28860" citStr="Crego and Marino, 2006" startWordPosition="5214" endWordPosition="5217">strict the local re-ordering in the context of potentially very long POS sequences which makes the re-ordering more reliable. Fig. 4 which shows the decoding speed as a function of the window size w demonstrates that the rule-based decoder actually runs faster than the baseline decoder for window sizes w &gt; 5. 0 2 4 6 8 10 12 14 16 maximum window size Figure 3: BLEU score as a function of window size w. 10 0 2 4 6 8 10 12 14 16 maximum window size Figure 4: Decoding speed as a function of window size w. 6 Discussion and Future Work The handling of the re-order rules is most similar to work in (Crego and Marino, 2006) where the rules are used to create re-order lattices. To make this feasible, the rules have been vigorously filtered in (Crego and Marino, 2006): only about 30 rules are used in their experiments. On the contrary, the current approach tightly integrates the re-order rules into a phrase-based decoder such that 29 000 rules can be handled efficiently. In future work our novel approach might allow to make use of lexicalized reorder rules as in (Xia and McCord, 2004) or syntactic rules as in (Wang et al., 2007). 7 Acknowledgment This work was supported by the DARPA GALE project under the contract</context>
+</contexts>
+<marker>Crego, Marino, 2006</marker>
+<rawString>J.M. Crego and Jos´e B. Marino. 2006. Integration of POStag-based Source Reordering into SMT Decoding by an Extended Search Graph. In Proc. of AMTA06, pages 29–36, Cambridge, MA, August.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Jay Earley</author>
+</authors>
+<title>An Efficient Context-Free Parsing Algorithm.</title>
+<date>1970</date>
+<journal>Communications of the ACM,</journal>
+<volume>13</volume>
+<issue>2</issue>
+<contexts>
+<context position="2739" citStr="Earley, 1970" startWordPosition="439" endWordPosition="440"> follows: 1) The novel DP decoder can handle tens of thousands of POS-based rules efficiently rather than a few dozen rules as is typically reported in the SMT literature by tightly integrating them into a beam search algorithm. As a result phrase re-ordering with a large distortion window can be carried out efficiently and reliably. 2) The current rule-driven decoder is a first step towards including more complex rules, i.e. syntax-based rules as in (Wang et al., 2007) or chunk rules as in (Zhang et al., 2007) using a decoding algorithm that is conceptually similar to an Earley-style parser (Earley, 1970). More generally, ’rule-driven’ decoding is tightly linked to standard phrase-based decoding. In future, the edge generation technique presented in this paper might be extended to handle hierarchical rules (Chiang, 2007) in a simple left-to-right beam search decoder. In the next section, we briefly summarize the baseline decoder. Section 3 shows the novel ruledriven DP decoder. Section 4 shows how the current decoder is related to both DP-based decoding algorithms in speech recognition and parsing. Finally, Proceedings of the Second ACL Workshop on Syntax and Structure in Statistical Translati</context>
+</contexts>
+<marker>Earley, 1970</marker>
+<rawString>Jay Earley. 1970. An Efficient Context-Free Parsing Algorithm. Communications of the ACM, 13(2):94–102.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Michael A Harrison</author>
+</authors>
+<title>Introduction to Formal Language Theory.</title>
+<date>1978</date>
+<publisher>Addison Wesley.</publisher>
+<contexts>
+<context position="21593" citStr="Harrison, 1978" startWordPosition="3941" endWordPosition="3942"> and Martin, 2000) also uses the notion of edges which represent partial constituents derived in the parsing process. These constituents are interpreted as edges in a directed acyclic graph (DAG) which represents the set of all sub parse trees considered. This paper uses the notion of edges as well following (Tillmann, 2006) where phrase-based decoding is also linked to a DAG path finding problem. Since the re-order rules are not applied recursively, the rule-driven algorithm can be linked to an Earley parser where parsing is done with a linear grammar (for a definition of linear grammar see (Harrison, 1978)). A formal analysis of the rule-driven decoder might be important because of the following consideration: in phrase-based machine translation the target sentence is generated from left-to-right by concatenating target phrases linked to source phrases that cover some source positions. Here, a coverage vector is typically used to ensure that each source position is covered a limited number of times (typically once). Including a coverage vector C into the search state definition results in an inherently exponential complexity: for an input sentence of length J there are 2J coverage vectors (Koeh</context>
+</contexts>
+<marker>Harrison, 1978</marker>
+<rawString>Michael A. Harrison. 1978. Introduction to Formal Language Theory. Addison Wesley.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Fred Jelinek</author>
+</authors>
+<title>Statistical Methods for Speech Recognition.</title>
+<date>1998</date>
+<publisher>The MIT Press,</publisher>
+<location>Cambridge, MA.</location>
+<contexts>
+<context position="19103" citStr="Jelinek, 1998" startWordPosition="3540" endWordPosition="3541"> an invalid search state configuration. Based on the two lists a monotone search is carried out over the extended rule edge set which implicitly generates a reordering lattice as in similar approaches (Crego and Marino, 2006; Zhang et al., 2007). But because the handling of the edges is tightly integrated into the beam search algorithm by applying the same beam thresholds it potentially handles 10’s of thousands of rules efficiently. 4 DP Search The DP decoder described in the previous section bears some resemblance with search algorithms for large vocabulary speech recognition. For example, (Jelinek, 1998) presents a Viterbi decoder that searches a composite trellis consisting of smaller HMM acoustic trellises that are combined with language model states in the case a trigram language model. Multiple ’copies’ of the same acoustic sub models are incorporated into the overall trellis. The highest probability word sequences is obtained using a Viterbi shortest path finding algorithm in a possibly huge composite HMM (cf. Fig. 5.3 of (Jelinek, 1998)). In comparison, in this paper the edge ’copies’ are used to generate hypotheses that are hypotheses ’copies’ of the same phrase match, e.g. in Fig. 2 t</context>
+</contexts>
+<marker>Jelinek, 1998</marker>
+<rawString>Fred Jelinek. 1998. Statistical Methods for Speech Recognition. The MIT Press, Cambridge, MA.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Daniel Jurafsky</author>
+<author>James H Martin</author>
+</authors>
+<title>Speech and Language Processing.</title>
+<date>2000</date>
+<publisher>Prentice Hall.</publisher>
+<contexts>
+<context position="20996" citStr="Jurafsky and Martin, 2000" startWordPosition="3841" endWordPosition="3844">language model in speech recognition introduces a coupling between adjacent acoustic word models. Similarly, a rule match which typically spans several source phrase matches introduces a coupling between adjacent simple edges. Viewed in this way, the handling of copies is a technique of incorporating higher-level knowledge sources into a simple one-step search process: either by processing acoustic models in the context of a language model or by processing simple edges in the context of bigger re-ordering units, which exploit a richer linguistic context. The Earley parser in the presentation (Jurafsky and Martin, 2000) also uses the notion of edges which represent partial constituents derived in the parsing process. These constituents are interpreted as edges in a directed acyclic graph (DAG) which represents the set of all sub parse trees considered. This paper uses the notion of edges as well following (Tillmann, 2006) where phrase-based decoding is also linked to a DAG path finding problem. Since the re-order rules are not applied recursively, the rule-driven algorithm can be linked to an Earley parser where parsing is done with a linear grammar (for a definition of linear grammar see (Harrison, 1978)). </context>
+</contexts>
+<marker>Jurafsky, Martin, 2000</marker>
+<rawString>Daniel Jurafsky and James H. Martin. 2000. Speech and Language Processing. Prentice Hall.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Philipp Koehn</author>
+<author>Franz J Och</author>
+<author>Daniel Marcu</author>
+</authors>
+<title>Statistical phrase-based translation.</title>
+<date>2003</date>
+<booktitle>In HLTNAACL’03: Main Proceedings,</booktitle>
+<pages>127--133</pages>
+<location>Edmonton, Alberta, Canada,</location>
+<contexts>
+<context position="4305" citStr="Koehn et al., 2003" startWordPosition="716" endWordPosition="719">rted list. The maximum rule length that can be handled efficiently is surprisingly long: about 20 words. Rule ID r POS sequence π N(r) 1 DET NOUN DET ADJ → 2 3 0 1 4 421 2 DET NOUN NSUFF-FEM-SG DET ADJ NSUFF-FEM-SG → 3 4 5 0 1 2 2 257 ... ... ... 3 000 NOUN CASE-INDEF-ACC ADJ NSUFF-FEM-SG CONJ ADJ NSUFF-FEM-SG → 2 3 4 5 6 0 1 6 ... ... ... 28 878 PREP DET NOUN DET ADJ PREP NOUN-PROP ADJ → 0 1 2 7 8 3 4 NSUFF-MASC-SG-ACC-INDEF CONJ IV3MS IV IVSUFF-DO:3FS 9 10 11 12 5 6 2 Section 5 shows experimental results. 2 Baseline DP Decoder The translation model used in this paper is a phrasebased model (Koehn et al., 2003), where the translation units are so-called blocks: a block b is a pair consisting of a source phrase s and a target phrase t which are translations of each other. The expression block is used here to emphasize that pairs of phrases (especially longer phrases) tend to form closely linked units in such a way that the translation process can be formalized as a block segmentation process (Nagata et al., 2006; Tillmann and Zhang, 2007). Here, the input sentence is segmented from left to right while simultaneously generating the target sentence, one block at a time. In practice, phrase-based or blo</context>
+</contexts>
+<marker>Koehn, Och, Marcu, 2003</marker>
+<rawString>Philipp Koehn, Franz J. Och, and Daniel Marcu. 2003. Statistical phrase-based translation. In HLTNAACL’03: Main Proceedings, pages 127–133, Edmonton, Alberta, Canada, May 27 - June 1.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Philipp Koehn</author>
+</authors>
+<title>Pharaoh: a Beam Search Decoder for Phrase-Based Statistical Machine Translation Models.</title>
+<date>2004</date>
+<booktitle>In Proceedings ofAMTA’04,</booktitle>
+<location>Washington DC, September-October.</location>
+<contexts>
+<context position="866" citStr="Koehn, 2004" startWordPosition="125" endWordPosition="126">MT (Koehn, 2004; Och and Ney, 2004) that tightly integrates POS-based re-order rules (Crego and Marino, 2006) into a left-to-right beam-search algorithm, rather than handling them in a pre-processing or re-order graph generation step. The novel decoding algorithm can handle tens of thousands of rules efficiently. An improvement over a standard phrase-based decoder is shown on an ArabicEnglish translation task with respect to translation accuracy and speed for large re-order window sizes. 1 Introduction The paper presents an extension of a dynamic programming (DP) decoder for phrase-based SMT (Koehn, 2004; Och and Ney, 2004) where POSbased re-order rules (Crego and Marino, 2006) are tightly integrated into a left-to-right run over the input sentence. In the literature, re-order rules are applied to the source and/or target sentence as a pre-processing step (Xia and McCord, 2004; Collins et al., 2005; Wang et al., 2007) where the rules can be applied on both training and test data. Another way of incorporating re-order rules is via extended monotone search graphs (Crego and Marino, 2006) or lattices (Zhang et al., 2007; Paulik et al., 2007). This paper presents a way of handling POS-based re-or</context>
+<context position="5797" citStr="Koehn, 2004" startWordPosition="972" endWordPosition="973">e bn1 = (si, ti)n1: n sw(bn1) = wT · f(bi, bi−1), (1) i=1 where bi is a block, bi−1 is its predecessor block, and f(bi, bi−1) is a 8-dimensional feature vector where the features are derived from some probabilistic models: language model, translation model, and distortion model probabilities. n is the number of blocks in the translation and the weight vector w is trained in a way as to maximize the decoder BLEU score on some training data using an on-line algorithm (Tillmann and Zhang, 2008). The decoder that carries out the optimization in Eq. 1 is similar to a standard phrase-based decoder (Koehn, 2004; Och and Ney, 2004), where states are tuples of the following type: [ C ; [i,j] ], (2) where C is the so-called coverage vector that keeps track of the already processed source position, [i, j] is the source interval covered by the last source phrase match. In comparison, (Koehn, 2004) uses only the position of the final word of the last source phrase translated. Since we are using the distortion model in (Al-Onaizan and Papineni, 2006) the entire last source phrase interval needs to be stored. Hypothesis score and language model history are omitted for brevity reasons. The states are stored </context>
+<context position="7215" citStr="Koehn, 2004" startWordPosition="1229" endWordPosition="1230">epresents a source phrase together with a target phrase that is one of its possible translation. Formally, we define: [ [i,j] , tN1 ], (3) where tN1 is the target phrase linked to the source phrase si, · · · , sj. The edges are stored in a so-called chart. For each input interval that is matched by some source phrase in the block set, a list of possible target phrase translations is stored in the chart. Here, simple edges as in Eq. 3 are used to generate so-called rule edges that are defined later in the paper. A similar data structure corresponding to an edge is called translation option in (Koehn, 2004). While the edge generation potentially slows down the overall decoding process, for the baseline de38 e = 2 e = 1 e = 5 a 1 a 2 a 4 a 3 e = 3 e = 4 a 0 e = 1 e = 2 e = 3 e = 5 e = 4 ’Simple’ Edges’ e=2, r=1 p=BEG O R I G = [ 1 , 2 ] e=1, r=1 p=END O R I G = [ 0 , 1 ] e=3, r=2 p=BEG O R I G = [ 1 , 3 ] e=1, r=2 p=END O R I G = [ 0 , 1 ] Additional ’Rule’ Edge Copies ’Extended’ Chart ’Original’ Chart ’Simple’ ’Edges’ p 0 p 0 p e=1, r=3 p=BEGIN O R I G = [ 0 , 1 ] a 0 0 e=4, r=3 e=3, r=3 p=INTER p=END ORIG=[3,4] O R I G = [ 1 , 2 ] a a a a 1 2 3 4 p p 1 p 1 2 p p p p 1 2 3 4 1 0 0 3 4 1 2 1 2 0 </context>
+<context position="22201" citStr="Koehn, 2004" startWordPosition="4037" endWordPosition="4038">978)). A formal analysis of the rule-driven decoder might be important because of the following consideration: in phrase-based machine translation the target sentence is generated from left-to-right by concatenating target phrases linked to source phrases that cover some source positions. Here, a coverage vector is typically used to ensure that each source position is covered a limited number of times (typically once). Including a coverage vector C into the search state definition results in an inherently exponential complexity: for an input sentence of length J there are 2J coverage vectors (Koehn, 2004). On 42 Table 2: Translation results on the MT06 data. w is the distortion limit. words / sec generation [%] BLEU PREC TER Baseline decoder w = 0 171.6 1.90 34.6 35.2 65.3 w = 2 25.4 0.29 36.6 37.7 63.5 w = 5 8.2 0.10 35.0 36.1 65.1 Rule decoder N(r) &gt; 2 9.1 0.75 37.1 38.2 63.5 (w = 15) N(r) &gt; 5 10.5 0.43 37.2 38.2 63.5 the contrary, the search state definition in Eq. 4 explicitly avoids the use of a coverage vector resulting in an essentially linear time decoding algorithm (Section 5 reports the size of the the extended search graph in terms of number of edges and shows that the number of per</context>
+<context position="24410" citStr="Koehn, 2004" startWordPosition="4422" endWordPosition="4423">sed. The distortion model is similar to (AlOnaizan and Papineni, 2006). An on-line algorithm similar to (Tillmann and Zhang, 2008) is used to train the weight vector w. The decoder uses a 5- gram language model, and the phrase table consists of about 3.2 million phrase pairs. The phrase table as well as the probabilistic features are trained on a much larger training data consisting of 3.8 million sentences. Translation results are given in terms of the automatic BLEU evaluation metric (Papineni et al., 2002) as well as the TER metric (Snover et al., 2006). Our baseline decoder is similar to (Koehn, 2004; Moore and Quirk, 2007). The goal of the current paper is not to demonstrate an improvement in decoding speed but show the validity of the rule edge generation algorithm. While the baseline and the rule-driven decoder are compared with respect to speed, they are both run with conservatively large beam thresholds, e.g. a beam limit of 500 hypotheses and a beam threshold of 7.5 (logarithmic scale) per source position j. The baseline decoder and the rule decoder use only 2 stacks to carry out the search (rather than a stack for each source position) (Tillmann, 2006). No rest-cost estimation is e</context>
+</contexts>
+<marker>Koehn, 2004</marker>
+<rawString>Philipp Koehn. 2004. Pharaoh: a Beam Search Decoder for Phrase-Based Statistical Machine Translation Models. In Proceedings ofAMTA’04, Washington DC, September-October.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Robet C Moore</author>
+<author>Chris Quirk</author>
+</authors>
+<title>Faster Beamsearch Decoding for Phrasal SMT.</title>
+<date>2007</date>
+<booktitle>Proc. of the MT Summit XI,</booktitle>
+<pages>321--327</pages>
+<contexts>
+<context position="24434" citStr="Moore and Quirk, 2007" startWordPosition="4424" endWordPosition="4427">ortion model is similar to (AlOnaizan and Papineni, 2006). An on-line algorithm similar to (Tillmann and Zhang, 2008) is used to train the weight vector w. The decoder uses a 5- gram language model, and the phrase table consists of about 3.2 million phrase pairs. The phrase table as well as the probabilistic features are trained on a much larger training data consisting of 3.8 million sentences. Translation results are given in terms of the automatic BLEU evaluation metric (Papineni et al., 2002) as well as the TER metric (Snover et al., 2006). Our baseline decoder is similar to (Koehn, 2004; Moore and Quirk, 2007). The goal of the current paper is not to demonstrate an improvement in decoding speed but show the validity of the rule edge generation algorithm. While the baseline and the rule-driven decoder are compared with respect to speed, they are both run with conservatively large beam thresholds, e.g. a beam limit of 500 hypotheses and a beam threshold of 7.5 (logarithmic scale) per source position j. The baseline decoder and the rule decoder use only 2 stacks to carry out the search (rather than a stack for each source position) (Tillmann, 2006). No rest-cost estimation is employed. For the results</context>
+<context position="28121" citStr="Moore and Quirk, 2007" startWordPosition="5070" endWordPosition="5073">ucing the number of rules by filtering all rules that occur at least 5 times (about 10 000 rules) slightly improves translation performance from 37.1 to 37.2. The edge generation accounts for only a small fraction of the overall decoding time. Fig. 3 and Fig. 4 demonstrate additional advantages when using the rule-based decoder. Fig. 3 shows the translation BLEU score as a function of the distortion limit window w. The BLEU score actually decreases for the baseline decoder as the size w is increased. The optimal window size is surprisingly small: w = 2. A similar behavior is also reported in (Moore and Quirk, 2007) where w = 5 is used. For the rule-driven decoder however the BLEU score does not decrease for large w: the rules restrict the local re-ordering in the context of potentially very long POS sequences which makes the re-ordering more reliable. Fig. 4 which shows the decoding speed as a function of the window size w demonstrates that the rule-based decoder actually runs faster than the baseline decoder for window sizes w &gt; 5. 0 2 4 6 8 10 12 14 16 maximum window size Figure 3: BLEU score as a function of window size w. 10 0 2 4 6 8 10 12 14 16 maximum window size Figure 4: Decoding speed as a fun</context>
+</contexts>
+<marker>Moore, Quirk, 2007</marker>
+<rawString>Robet C. Moore and Chris Quirk. 2007. Faster Beamsearch Decoding for Phrasal SMT. Proc. of the MT Summit XI, pages 321–327, September.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Masaaki Nagata</author>
+<author>Kuniko Saito</author>
+<author>Kazuhide Yamamoto</author>
+<author>Kazuteru Ohashi</author>
+</authors>
+<title>A Clustered Global Phrase Reordering Model for Statistical Machine Translation.</title>
+<date>2006</date>
+<booktitle>In Proceedings of ACL-COLING’06,</booktitle>
+<pages>713--720</pages>
+<location>Sydney, Australia,</location>
+<contexts>
+<context position="4713" citStr="Nagata et al., 2006" startWordPosition="791" endWordPosition="794">UFF-MASC-SG-ACC-INDEF CONJ IV3MS IV IVSUFF-DO:3FS 9 10 11 12 5 6 2 Section 5 shows experimental results. 2 Baseline DP Decoder The translation model used in this paper is a phrasebased model (Koehn et al., 2003), where the translation units are so-called blocks: a block b is a pair consisting of a source phrase s and a target phrase t which are translations of each other. The expression block is used here to emphasize that pairs of phrases (especially longer phrases) tend to form closely linked units in such a way that the translation process can be formalized as a block segmentation process (Nagata et al., 2006; Tillmann and Zhang, 2007). Here, the input sentence is segmented from left to right while simultaneously generating the target sentence, one block at a time. In practice, phrase-based or block-based translation models which largely monotone decoding algorithms obtain close to state-of-the-art performance by using skip and window-based restrictions to reduce the search space (Berger et al., 1996). During decoding, we maximize the score sw(bn1) of a phrase-pair sequence bn1 = (si, ti)n1: n sw(bn1) = wT · f(bi, bi−1), (1) i=1 where bi is a block, bi−1 is its predecessor block, and f(bi, bi−1) i</context>
+</contexts>
+<marker>Nagata, Saito, Yamamoto, Ohashi, 2006</marker>
+<rawString>Masaaki Nagata, Kuniko Saito, Kazuhide Yamamoto, and Kazuteru Ohashi. 2006. A Clustered Global Phrase Reordering Model for Statistical Machine Translation. In Proceedings of ACL-COLING’06, pages 713–720, Sydney, Australia, July.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Franz-Josef Och</author>
+<author>Hermann Ney</author>
+</authors>
+<title>The Alignment Template Approach to Statistical Machine Translation.</title>
+<date>2004</date>
+<journal>Computational Linguistics,</journal>
+<volume>30</volume>
+<issue>4</issue>
+<contexts>
+<context position="886" citStr="Och and Ney, 2004" startWordPosition="127" endWordPosition="130">04; Och and Ney, 2004) that tightly integrates POS-based re-order rules (Crego and Marino, 2006) into a left-to-right beam-search algorithm, rather than handling them in a pre-processing or re-order graph generation step. The novel decoding algorithm can handle tens of thousands of rules efficiently. An improvement over a standard phrase-based decoder is shown on an ArabicEnglish translation task with respect to translation accuracy and speed for large re-order window sizes. 1 Introduction The paper presents an extension of a dynamic programming (DP) decoder for phrase-based SMT (Koehn, 2004; Och and Ney, 2004) where POSbased re-order rules (Crego and Marino, 2006) are tightly integrated into a left-to-right run over the input sentence. In the literature, re-order rules are applied to the source and/or target sentence as a pre-processing step (Xia and McCord, 2004; Collins et al., 2005; Wang et al., 2007) where the rules can be applied on both training and test data. Another way of incorporating re-order rules is via extended monotone search graphs (Crego and Marino, 2006) or lattices (Zhang et al., 2007; Paulik et al., 2007). This paper presents a way of handling POS-based re-order rules as an edge</context>
+<context position="5817" citStr="Och and Ney, 2004" startWordPosition="974" endWordPosition="977">ti)n1: n sw(bn1) = wT · f(bi, bi−1), (1) i=1 where bi is a block, bi−1 is its predecessor block, and f(bi, bi−1) is a 8-dimensional feature vector where the features are derived from some probabilistic models: language model, translation model, and distortion model probabilities. n is the number of blocks in the translation and the weight vector w is trained in a way as to maximize the decoder BLEU score on some training data using an on-line algorithm (Tillmann and Zhang, 2008). The decoder that carries out the optimization in Eq. 1 is similar to a standard phrase-based decoder (Koehn, 2004; Och and Ney, 2004), where states are tuples of the following type: [ C ; [i,j] ], (2) where C is the so-called coverage vector that keeps track of the already processed source position, [i, j] is the source interval covered by the last source phrase match. In comparison, (Koehn, 2004) uses only the position of the final word of the last source phrase translated. Since we are using the distortion model in (Al-Onaizan and Papineni, 2006) the entire last source phrase interval needs to be stored. Hypothesis score and language model history are omitted for brevity reasons. The states are stored in lists or stacks a</context>
+</contexts>
+<marker>Och, Ney, 2004</marker>
+<rawString>Franz-Josef Och and Hermann Ney. 2004. The Alignment Template Approach to Statistical Machine Translation. Computational Linguistics, 30(4):417–450.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Stefan Ortmanns</author>
+<author>Hermann Ney</author>
+</authors>
+<date>2000</date>
+<booktitle>Progress in Dynamic Programming Search for LVCSR. Proc. of the IEEE,</booktitle>
+<pages>88--8</pages>
+<contexts>
+<context position="19909" citStr="Ortmanns and Ney, 2000" startWordPosition="3673" endWordPosition="3677">model. Multiple ’copies’ of the same acoustic sub models are incorporated into the overall trellis. The highest probability word sequences is obtained using a Viterbi shortest path finding algorithm in a possibly huge composite HMM (cf. Fig. 5.3 of (Jelinek, 1998)). In comparison, in this paper the edge ’copies’ are used to generate hypotheses that are hypotheses ’copies’ of the same phrase match, e.g. in Fig. 2 the states h4, h8, and h14 all result from covering the same simple edge e7 as the most recent phrase match. The states form a potentially huge lattice as shown in Fig. 2. Similarly, (Ortmanns and Ney, 2000) presents a DP search algorithm where the interdependent decisions between non-linear time alignment, word boundary detection, and word identification (the pronunciation lexicon is organized efficiently as a lexical tree) are all carried out by searching a shortest path trough a possibly huge composite trellis or HMM. The similarity between those speech recognition algorithms and the current rule decoder derives from the following observation: the use of a language model in speech recognition introduces a coupling between adjacent acoustic word models. Similarly, a rule match which typically s</context>
+</contexts>
+<marker>Ortmanns, Ney, 2000</marker>
+<rawString>Stefan Ortmanns and Hermann Ney. 2000. Progress in Dynamic Programming Search for LVCSR. Proc. of the IEEE, 88(8):1224–1240.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Kishore Papineni</author>
+<author>Salim Roukos</author>
+<author>Todd Ward</author>
+<author>WeiJing Zhu</author>
+</authors>
+<title>BLEU: A Method for Automatic Evaluation of Machine Translation.</title>
+<date>2002</date>
+<booktitle>In Proc. of ACL’02,</booktitle>
+<pages>311--318</pages>
+<location>Philadelphia, PA,</location>
+<contexts>
+<context position="24313" citStr="Papineni et al., 2002" startWordPosition="4402" endWordPosition="4405">tion model is defined in Eq. 1 where 8 probabilistic features (language, translation,distortion model) are used. The distortion model is similar to (AlOnaizan and Papineni, 2006). An on-line algorithm similar to (Tillmann and Zhang, 2008) is used to train the weight vector w. The decoder uses a 5- gram language model, and the phrase table consists of about 3.2 million phrase pairs. The phrase table as well as the probabilistic features are trained on a much larger training data consisting of 3.8 million sentences. Translation results are given in terms of the automatic BLEU evaluation metric (Papineni et al., 2002) as well as the TER metric (Snover et al., 2006). Our baseline decoder is similar to (Koehn, 2004; Moore and Quirk, 2007). The goal of the current paper is not to demonstrate an improvement in decoding speed but show the validity of the rule edge generation algorithm. While the baseline and the rule-driven decoder are compared with respect to speed, they are both run with conservatively large beam thresholds, e.g. a beam limit of 500 hypotheses and a beam threshold of 7.5 (logarithmic scale) per source position j. The baseline decoder and the rule decoder use only 2 stacks to carry out the sea</context>
+</contexts>
+<marker>Papineni, Roukos, Ward, Zhu, 2002</marker>
+<rawString>Kishore Papineni, Salim Roukos, Todd Ward, and WeiJing Zhu. 2002. BLEU: A Method for Automatic Evaluation of Machine Translation. In Proc. of ACL’02, pages 311–318, Philadelphia, PA, July.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Matthias Paulik</author>
+<author>Kay Rottmann</author>
+<author>Jan Niehues</author>
+<author>Silja Hildebrand</author>
+<author>Stephan Vogel</author>
+</authors>
+<date>2007</date>
+<booktitle>The ISL Phrase-Based MT System for the 2007 ACL Workshop on SMT. In Proc. of the ACL 2007 Second Workshop on SMT,</booktitle>
+<contexts>
+<context position="1411" citStr="Paulik et al., 2007" startWordPosition="214" endWordPosition="217">ion of a dynamic programming (DP) decoder for phrase-based SMT (Koehn, 2004; Och and Ney, 2004) where POSbased re-order rules (Crego and Marino, 2006) are tightly integrated into a left-to-right run over the input sentence. In the literature, re-order rules are applied to the source and/or target sentence as a pre-processing step (Xia and McCord, 2004; Collins et al., 2005; Wang et al., 2007) where the rules can be applied on both training and test data. Another way of incorporating re-order rules is via extended monotone search graphs (Crego and Marino, 2006) or lattices (Zhang et al., 2007; Paulik et al., 2007). This paper presents a way of handling POS-based re-order rules as an edge generation process: the POS-based re-order rules are tightly integrated into a left to right beam search decoder in a way that 37 29 000 rules which may overlap in an arbitrary way (but not recursively) are handled efficiently. Example rules which are used to control the novel DP-based decoder are shown in Table 1, where each POS sequence is associated with possibly several permutations 7r. In order to apply the rules, the input sentences are POS-tagged. If a POS sequence of a rule matches some identical POS sequence i</context>
+</contexts>
+<marker>Paulik, Rottmann, Niehues, Hildebrand, Vogel, 2007</marker>
+<rawString>Matthias Paulik, Kay Rottmann, Jan Niehues, Silja Hildebrand, and Stephan Vogel. 2007. The ISL Phrase-Based MT System for the 2007 ACL Workshop on SMT. In Proc. of the ACL 2007 Second Workshop on SMT, June.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Matthew Snover</author>
+<author>Bonnie Dorr</author>
+<author>Richard Schwartz</author>
+<author>Linnea Micciulla</author>
+<author>John Makhoul</author>
+</authors>
+<title>A Study of Translation Edit Rate with Targeted Human Annotation.</title>
+<date>2006</date>
+<booktitle>In Proc. ofAMTA 2006,</booktitle>
+<location>Boston,MA.</location>
+<contexts>
+<context position="24361" citStr="Snover et al., 2006" startWordPosition="4412" endWordPosition="4415">ic features (language, translation,distortion model) are used. The distortion model is similar to (AlOnaizan and Papineni, 2006). An on-line algorithm similar to (Tillmann and Zhang, 2008) is used to train the weight vector w. The decoder uses a 5- gram language model, and the phrase table consists of about 3.2 million phrase pairs. The phrase table as well as the probabilistic features are trained on a much larger training data consisting of 3.8 million sentences. Translation results are given in terms of the automatic BLEU evaluation metric (Papineni et al., 2002) as well as the TER metric (Snover et al., 2006). Our baseline decoder is similar to (Koehn, 2004; Moore and Quirk, 2007). The goal of the current paper is not to demonstrate an improvement in decoding speed but show the validity of the rule edge generation algorithm. While the baseline and the rule-driven decoder are compared with respect to speed, they are both run with conservatively large beam thresholds, e.g. a beam limit of 500 hypotheses and a beam threshold of 7.5 (logarithmic scale) per source position j. The baseline decoder and the rule decoder use only 2 stacks to carry out the search (rather than a stack for each source positio</context>
+</contexts>
+<marker>Snover, Dorr, Schwartz, Micciulla, Makhoul, 2006</marker>
+<rawString>Matthew Snover, Bonnie Dorr, Richard Schwartz, Linnea Micciulla, and John Makhoul. 2006. A Study of Translation Edit Rate with Targeted Human Annotation. In Proc. ofAMTA 2006, Boston,MA.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Christoph Tillmann</author>
+<author>Tong Zhang</author>
+</authors>
+<title>A Block Bigram Prediction Model for Statistical Machine Translation.</title>
+<date>2007</date>
+<journal>ACM-TSLP,</journal>
+<volume>4</volume>
+<issue>6</issue>
+<contexts>
+<context position="4740" citStr="Tillmann and Zhang, 2007" startWordPosition="795" endWordPosition="798"> CONJ IV3MS IV IVSUFF-DO:3FS 9 10 11 12 5 6 2 Section 5 shows experimental results. 2 Baseline DP Decoder The translation model used in this paper is a phrasebased model (Koehn et al., 2003), where the translation units are so-called blocks: a block b is a pair consisting of a source phrase s and a target phrase t which are translations of each other. The expression block is used here to emphasize that pairs of phrases (especially longer phrases) tend to form closely linked units in such a way that the translation process can be formalized as a block segmentation process (Nagata et al., 2006; Tillmann and Zhang, 2007). Here, the input sentence is segmented from left to right while simultaneously generating the target sentence, one block at a time. In practice, phrase-based or block-based translation models which largely monotone decoding algorithms obtain close to state-of-the-art performance by using skip and window-based restrictions to reduce the search space (Berger et al., 1996). During decoding, we maximize the score sw(bn1) of a phrase-pair sequence bn1 = (si, ti)n1: n sw(bn1) = wT · f(bi, bi−1), (1) i=1 where bi is a block, bi−1 is its predecessor block, and f(bi, bi−1) is a 8-dimensional feature v</context>
+</contexts>
+<marker>Tillmann, Zhang, 2007</marker>
+<rawString>Christoph Tillmann and Tong Zhang. 2007. A Block Bigram Prediction Model for Statistical Machine Translation. ACM-TSLP, 4(6):1–31, July.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Christoph Tillmann</author>
+<author>Tong Zhang</author>
+</authors>
+<title>An Online Relevant Set Algorithm for Statistical Machine Translation. Accepted for publication</title>
+<date>2008</date>
+<booktitle>in IEEE Transaction on Audio, Speech, and Language Processing.</booktitle>
+<contexts>
+<context position="5682" citStr="Tillmann and Zhang, 2008" startWordPosition="951" endWordPosition="954">ictions to reduce the search space (Berger et al., 1996). During decoding, we maximize the score sw(bn1) of a phrase-pair sequence bn1 = (si, ti)n1: n sw(bn1) = wT · f(bi, bi−1), (1) i=1 where bi is a block, bi−1 is its predecessor block, and f(bi, bi−1) is a 8-dimensional feature vector where the features are derived from some probabilistic models: language model, translation model, and distortion model probabilities. n is the number of blocks in the translation and the weight vector w is trained in a way as to maximize the decoder BLEU score on some training data using an on-line algorithm (Tillmann and Zhang, 2008). The decoder that carries out the optimization in Eq. 1 is similar to a standard phrase-based decoder (Koehn, 2004; Och and Ney, 2004), where states are tuples of the following type: [ C ; [i,j] ], (2) where C is the so-called coverage vector that keeps track of the already processed source position, [i, j] is the source interval covered by the last source phrase match. In comparison, (Koehn, 2004) uses only the position of the final word of the last source phrase translated. Since we are using the distortion model in (Al-Onaizan and Papineni, 2006) the entire last source phrase interval need</context>
+<context position="23929" citStr="Tillmann and Zhang, 2008" startWordPosition="4337" endWordPosition="4340"> overlap arbitrarily (but not recursively) are handled correctly. In future, a formal correctness proof might be given. 5 Experimental Results We test the novel edge generation algorithm on a standard Arabic-to-English translation tasks: the MT06 Arabic-English DARPA evaluation set consisting of 1529 sentences with 58 331 Arabic words and 4 English reference translations . The translation model is defined in Eq. 1 where 8 probabilistic features (language, translation,distortion model) are used. The distortion model is similar to (AlOnaizan and Papineni, 2006). An on-line algorithm similar to (Tillmann and Zhang, 2008) is used to train the weight vector w. The decoder uses a 5- gram language model, and the phrase table consists of about 3.2 million phrase pairs. The phrase table as well as the probabilistic features are trained on a much larger training data consisting of 3.8 million sentences. Translation results are given in terms of the automatic BLEU evaluation metric (Papineni et al., 2002) as well as the TER metric (Snover et al., 2006). Our baseline decoder is similar to (Koehn, 2004; Moore and Quirk, 2007). The goal of the current paper is not to demonstrate an improvement in decoding speed but show</context>
+</contexts>
+<marker>Tillmann, Zhang, 2008</marker>
+<rawString>Christoph Tillmann and Tong Zhang. 2008. An Online Relevant Set Algorithm for Statistical Machine Translation. Accepted for publication in IEEE Transaction on Audio, Speech, and Language Processing.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Christoph Tillmann</author>
+</authors>
+<title>Efficient Dynamic Programming Search Algorithms for Phrase-based SMT.</title>
+<date>2006</date>
+<booktitle>In Proceedings of the Workshop CHPSLP at HLT’06,</booktitle>
+<pages>9--16</pages>
+<location>New York City, NY,</location>
+<contexts>
+<context position="21304" citStr="Tillmann, 2006" startWordPosition="3893" endWordPosition="3894">ledge sources into a simple one-step search process: either by processing acoustic models in the context of a language model or by processing simple edges in the context of bigger re-ordering units, which exploit a richer linguistic context. The Earley parser in the presentation (Jurafsky and Martin, 2000) also uses the notion of edges which represent partial constituents derived in the parsing process. These constituents are interpreted as edges in a directed acyclic graph (DAG) which represents the set of all sub parse trees considered. This paper uses the notion of edges as well following (Tillmann, 2006) where phrase-based decoding is also linked to a DAG path finding problem. Since the re-order rules are not applied recursively, the rule-driven algorithm can be linked to an Earley parser where parsing is done with a linear grammar (for a definition of linear grammar see (Harrison, 1978)). A formal analysis of the rule-driven decoder might be important because of the following consideration: in phrase-based machine translation the target sentence is generated from left-to-right by concatenating target phrases linked to source phrases that cover some source positions. Here, a coverage vector i</context>
+<context position="24980" citStr="Tillmann, 2006" startWordPosition="4520" endWordPosition="4522">r baseline decoder is similar to (Koehn, 2004; Moore and Quirk, 2007). The goal of the current paper is not to demonstrate an improvement in decoding speed but show the validity of the rule edge generation algorithm. While the baseline and the rule-driven decoder are compared with respect to speed, they are both run with conservatively large beam thresholds, e.g. a beam limit of 500 hypotheses and a beam threshold of 7.5 (logarithmic scale) per source position j. The baseline decoder and the rule decoder use only 2 stacks to carry out the search (rather than a stack for each source position) (Tillmann, 2006). No rest-cost estimation is employed. For the results in line 2 the number of phrase ’holes’ n in the coverage vector for a left to right traversal of the input sentence is restricted using a typical skip-based decoder (Berger et al., 1996). Up to 2 phrases can be skipped. Additionally, the phrase re-ordering is restricted to take place within a given window size w. The 28,878 rules used in this paper are obtained from 14 989 manually aligned ArabicEnglish sentences where the Arabic sentences have been segmented and POS tagged . The rule selection procedure is similar to the one used in (Greg</context>
+</contexts>
+<marker>Tillmann, 2006</marker>
+<rawString>Christoph Tillmann. 2006. Efficient Dynamic Programming Search Algorithms for Phrase-based SMT. In Proceedings of the Workshop CHPSLP at HLT’06, pages 9–16, New York City, NY, June.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Chao Wang</author>
+<author>Michael Collins</author>
+<author>Philipp Koehn</author>
+</authors>
+<title>Chinese Syntactic reordering for statistical machine translation.</title>
+<date>2007</date>
+<booktitle>In Proc. of EMNLP-CoNLL’07,</booktitle>
+<pages>737--745</pages>
+<location>Prague, Czech Republic,</location>
+<contexts>
+<context position="1186" citStr="Wang et al., 2007" startWordPosition="176" endWordPosition="179">. An improvement over a standard phrase-based decoder is shown on an ArabicEnglish translation task with respect to translation accuracy and speed for large re-order window sizes. 1 Introduction The paper presents an extension of a dynamic programming (DP) decoder for phrase-based SMT (Koehn, 2004; Och and Ney, 2004) where POSbased re-order rules (Crego and Marino, 2006) are tightly integrated into a left-to-right run over the input sentence. In the literature, re-order rules are applied to the source and/or target sentence as a pre-processing step (Xia and McCord, 2004; Collins et al., 2005; Wang et al., 2007) where the rules can be applied on both training and test data. Another way of incorporating re-order rules is via extended monotone search graphs (Crego and Marino, 2006) or lattices (Zhang et al., 2007; Paulik et al., 2007). This paper presents a way of handling POS-based re-order rules as an edge generation process: the POS-based re-order rules are tightly integrated into a left to right beam search decoder in a way that 37 29 000 rules which may overlap in an arbitrary way (but not recursively) are handled efficiently. Example rules which are used to control the novel DP-based decoder are </context>
+<context position="2600" citStr="Wang et al., 2007" startWordPosition="413" endWordPosition="416">some identical POS sequence in the input sentence the corresponding words are re-ordered according to 7r. The contributions of this paper are as follows: 1) The novel DP decoder can handle tens of thousands of POS-based rules efficiently rather than a few dozen rules as is typically reported in the SMT literature by tightly integrating them into a beam search algorithm. As a result phrase re-ordering with a large distortion window can be carried out efficiently and reliably. 2) The current rule-driven decoder is a first step towards including more complex rules, i.e. syntax-based rules as in (Wang et al., 2007) or chunk rules as in (Zhang et al., 2007) using a decoding algorithm that is conceptually similar to an Earley-style parser (Earley, 1970). More generally, ’rule-driven’ decoding is tightly linked to standard phrase-based decoding. In future, the edge generation technique presented in this paper might be extended to handle hierarchical rules (Chiang, 2007) in a simple left-to-right beam search decoder. In the next section, we briefly summarize the baseline decoder. Section 3 shows the novel ruledriven DP decoder. Section 4 shows how the current decoder is related to both DP-based decoding alg</context>
+</contexts>
+<marker>Wang, Collins, Koehn, 2007</marker>
+<rawString>Chao Wang, Michael Collins, and Philipp Koehn. 2007. Chinese Syntactic reordering for statistical machine translation. In Proc. of EMNLP-CoNLL’07, pages 737–745, Prague, Czech Republic, July.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Fei Xia</author>
+<author>Michael McCord</author>
+</authors>
+<title>Improving a statistical mt system with automatically learned rewrite patterns.</title>
+<date>2004</date>
+<booktitle>In Proc. of Coling</booktitle>
+<pages>508--514</pages>
+<publisher>COLING.</publisher>
+<location>Geneva, Switzerland,</location>
+<contexts>
+<context position="1144" citStr="Xia and McCord, 2004" startWordPosition="168" endWordPosition="171">andle tens of thousands of rules efficiently. An improvement over a standard phrase-based decoder is shown on an ArabicEnglish translation task with respect to translation accuracy and speed for large re-order window sizes. 1 Introduction The paper presents an extension of a dynamic programming (DP) decoder for phrase-based SMT (Koehn, 2004; Och and Ney, 2004) where POSbased re-order rules (Crego and Marino, 2006) are tightly integrated into a left-to-right run over the input sentence. In the literature, re-order rules are applied to the source and/or target sentence as a pre-processing step (Xia and McCord, 2004; Collins et al., 2005; Wang et al., 2007) where the rules can be applied on both training and test data. Another way of incorporating re-order rules is via extended monotone search graphs (Crego and Marino, 2006) or lattices (Zhang et al., 2007; Paulik et al., 2007). This paper presents a way of handling POS-based re-order rules as an edge generation process: the POS-based re-order rules are tightly integrated into a left to right beam search decoder in a way that 37 29 000 rules which may overlap in an arbitrary way (but not recursively) are handled efficiently. Example rules which are used </context>
+</contexts>
+<marker>Xia, McCord, 2004</marker>
+<rawString>Fei Xia and Michael McCord. 2004. Improving a statistical mt system with automatically learned rewrite patterns. In Proc. of Coling 2004, pages 508–514, Geneva, Switzerland, Aug 23–Aug 27. COLING.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yuqi Zhang</author>
+<author>Richard Zens</author>
+<author>Hermann Ney</author>
+</authors>
+<title>Chunk-level Reordering of Source Language Sentences with Automatically Learned Rules for Statistical Machine Translation.</title>
+<date>2007</date>
+<booktitle>In Proc. of SSST, NAACLHLT’07 / AMTA Workshop,</booktitle>
+<pages>1--8</pages>
+<location>Rochester, NY,</location>
+<contexts>
+<context position="1389" citStr="Zhang et al., 2007" startWordPosition="210" endWordPosition="213">r presents an extension of a dynamic programming (DP) decoder for phrase-based SMT (Koehn, 2004; Och and Ney, 2004) where POSbased re-order rules (Crego and Marino, 2006) are tightly integrated into a left-to-right run over the input sentence. In the literature, re-order rules are applied to the source and/or target sentence as a pre-processing step (Xia and McCord, 2004; Collins et al., 2005; Wang et al., 2007) where the rules can be applied on both training and test data. Another way of incorporating re-order rules is via extended monotone search graphs (Crego and Marino, 2006) or lattices (Zhang et al., 2007; Paulik et al., 2007). This paper presents a way of handling POS-based re-order rules as an edge generation process: the POS-based re-order rules are tightly integrated into a left to right beam search decoder in a way that 37 29 000 rules which may overlap in an arbitrary way (but not recursively) are handled efficiently. Example rules which are used to control the novel DP-based decoder are shown in Table 1, where each POS sequence is associated with possibly several permutations 7r. In order to apply the rules, the input sentences are POS-tagged. If a POS sequence of a rule matches some id</context>
+<context position="2642" citStr="Zhang et al., 2007" startWordPosition="422" endWordPosition="425">sentence the corresponding words are re-ordered according to 7r. The contributions of this paper are as follows: 1) The novel DP decoder can handle tens of thousands of POS-based rules efficiently rather than a few dozen rules as is typically reported in the SMT literature by tightly integrating them into a beam search algorithm. As a result phrase re-ordering with a large distortion window can be carried out efficiently and reliably. 2) The current rule-driven decoder is a first step towards including more complex rules, i.e. syntax-based rules as in (Wang et al., 2007) or chunk rules as in (Zhang et al., 2007) using a decoding algorithm that is conceptually similar to an Earley-style parser (Earley, 1970). More generally, ’rule-driven’ decoding is tightly linked to standard phrase-based decoding. In future, the edge generation technique presented in this paper might be extended to handle hierarchical rules (Chiang, 2007) in a simple left-to-right beam search decoder. In the next section, we briefly summarize the baseline decoder. Section 3 shows the novel ruledriven DP decoder. Section 4 shows how the current decoder is related to both DP-based decoding algorithms in speech recognition and parsing.</context>
+<context position="18734" citStr="Zhang et al., 2007" startWordPosition="3481" endWordPosition="3484"> edges for each hypothesis h that corresponds to a rule r efficiently: only a small fraction of the chart edges starting at position j needs to be retrieved for an extension. The rule start position sr has to be included for the second list: it is possible that the same rule r matches the input sentences for two intervals [i, j] and [i′, j′] which overlap. This results in an invalid search state configuration. Based on the two lists a monotone search is carried out over the extended rule edge set which implicitly generates a reordering lattice as in similar approaches (Crego and Marino, 2006; Zhang et al., 2007). But because the handling of the edges is tightly integrated into the beam search algorithm by applying the same beam thresholds it potentially handles 10’s of thousands of rules efficiently. 4 DP Search The DP decoder described in the previous section bears some resemblance with search algorithms for large vocabulary speech recognition. For example, (Jelinek, 1998) presents a Viterbi decoder that searches a composite trellis consisting of smaller HMM acoustic trellises that are combined with language model states in the case a trigram language model. Multiple ’copies’ of the same acoustic su</context>
+</contexts>
+<marker>Zhang, Zens, Ney, 2007</marker>
+<rawString>Yuqi Zhang, Richard Zens, and Hermann Ney. 2007. Chunk-level Reordering of Source Language Sentences with Automatically Learned Rules for Statistical Machine Translation. In Proc. of SSST, NAACLHLT’07 / AMTA Workshop, pages 1–8, Rochester, NY, April.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

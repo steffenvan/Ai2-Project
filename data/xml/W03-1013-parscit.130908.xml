@@ -1,0 +1,1226 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.001701">
+<title confidence="0.996648">
+Log-Linear Models for Wide-Coverage CCG Parsing
+</title>
+<author confidence="0.997207">
+Stephen Clark and James R. Curran
+</author>
+<affiliation confidence="0.947383666666667">
+School of Informatics
+University of Edinburgh
+2 Buccleuch Place, Edinburgh. EH8 9LW
+</affiliation>
+<email confidence="0.995841">
+{stephenc,jamesc}@cogsci.ed.ac.uk
+</email>
+<sectionHeader confidence="0.996635" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.999911055555556">
+This paper describes log-linear pars-
+ing models for Combinatory Categorial
+Grammar (CCG). Log-linear models can
+easily encode the long-range dependen-
+cies inherent in coordination and extrac-
+tion phenomena, which CCG was designed
+to handle. Log-linear models have pre-
+viously been applied to statistical pars-
+ing, under the assumption that all possible
+parses for a sentence can be enumerated.
+Enumerating all parses is infeasible for
+large grammars; however, dynamic pro-
+gramming over a packed chart can be used
+to efficiently estimate the model parame-
+ters. We describe a parellelised implemen-
+tation which runs on a Beowulf cluster and
+allows the complete WSJ Penn Treebank
+to be used for estimation.
+</bodyText>
+<sectionHeader confidence="0.998883" genericHeader="keywords">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.997758">
+Statistical parsing models have recently been de-
+veloped for Combinatory Categorial Grammar
+(CCG, Steedman (2000)) and used in wide-coverage
+parsers applied to the WSJ Penn Treebank (Clark et
+al., 2002; Hockenmaier and Steedman, 2002). An
+attraction of CCG is its elegant treatment of coor-
+dination and extraction, allowing recovery of the
+long-range dependencies inherent in these construc-
+tions. We would like the parsing model to include
+long-range dependencies, but this introduces prob-
+lems for generative parsing models similar to those
+described by Abney (1997) for attribute-value gram-
+mars; hence Hockenmaier and Steedman do not in-
+clude such dependencies in their model, and Clark
+et al. include the dependencies but use an incon-
+sistent model. Following Abney, we propose a log-
+linear framework which incorporates long-range de-
+pendencies as features without loss of consistency.
+Log-linear models have previously been ap-
+plied to statistical parsing (Johnson et al., 1999;
+Toutanova et al., 2002; Riezler et al., 2002; Os-
+borne, 2000). Typically, these approaches have enu-
+merated all possible parses for model estimation
+and finding the most probable parse. For gram-
+mars extracted from the Penn Treebank (in our case
+CCGbank (Hockenmaier, 2003)), enumerating all
+parses is infeasible. One approach to this prob-
+lem is to sample the parse space for estimation, e.g.
+Osborne (2000). In this paper we use a dynamic pro-
+gramming technique applied to a packed chart, simi-
+lar to those proposed by Geman and Johnson (2002)
+and Miyao and Tsujii (2002), which efficiently esti-
+mates the model parameters over the complete space
+without enumerating parses. The estimation method
+is similar to the inside-outside algorithm used for es-
+timating a PCFG (Lari and Young, 1990).
+Miyao and Tsujii (2002) apply their estimation
+technique to an automatically extracted Tree Adjoin-
+ing Grammar using Improved Iterative Scaling (IIS,
+Della Pietra et al. (1997)). However, their model
+has significant memory requirements which limits
+them to using 868 sentences as training data. We use
+a parallelised version of Generalised Iterative Scal-
+ing (GIS, Darroch and Ratcliff (1972)) on a Beowulf
+cluster which allows the complete WSJ Penn Tree-
+bank to be used as training data.
+This paper assumes a basic knowledge of CCG;
+see Steedman (2000) and Clark et al. (2002) for an
+introduction.
+</bodyText>
+<sectionHeader confidence="0.917197" genericHeader="introduction">
+2 The Grammar
+</sectionHeader>
+<bodyText confidence="0.998343">
+Following Clark et al. (2002), we augment CCG lex-
+ical categories with head and dependency informa-
+tion. For example, the extended category for per-
+suade is as follows:
+</bodyText>
+<equation confidence="0.708271">
+persuade :=((S[dcl]persuade\NP1)/(S[to]2\NPX))/NPX,3 (1)
+</equation>
+<bodyText confidence="0.974322096774194">
+The feature [dcl] indicates a declarative sentence; the
+resulting S[dcl] is headed by persuade; and the num-
+bers indicate dependency relations. The variable X
+denotes a head, identifying the head of the infiniti-
+val complement’s subject with the head of the ob-
+ject, thus capturing the object control relation. For
+example, in Microsoft persuades IBM to buy Lotus,
+IBM fills the subject slot of buy.
+Formally, a dependency is defined as a 5-tuple:
+(hf, f, s, ha, l), where hf is the head word of the
+functor, f is the functor category (extended with
+head and dependency information), s is the argu-
+ment slot, and ha is the head word of the argument.
+The l is an additional field used to encode whether
+the dependency is long-range. For example, the de-
+pendency encoding Lotus as the object of bought (as
+in IBM bought Lotus) is represented as follows:
+(bought, (S[dcl]bought\NP1)/NP2, 2, Lotus, null) (2)
+If the object has been extracted using a relative pro-
+noun with the category (NP\NP)/(S[dcl]/NP) (as in
+the company that IBM bought), the dependency is as
+follows:
+(bought, (S[dcl]bought\NP1)/NP2, 2, company, *) (3)
+where * is the category (NP\NP)/(S[dcl]/NP) as-
+signed to the relative pronoun. A dependency struc-
+ture is simply a set of these dependencies.
+Every argument in every lexical category is en-
+coded as a dependency. Unlike Clark et al., we do
+not require dependencies to be always marked on
+atomic categories. For example, the marked up cat-
+egory for about (as in about 5,000 pounds) is:
+</bodyText>
+<equation confidence="0.978653">
+(NX/NX)Y/(N/N)Y,1 (4)
+</equation>
+<bodyText confidence="0.999346625">
+If 5,000 has the category (NX/NX)5,000, the depen-
+dency relation marked on the (N/N)Y,1 argument in
+(4) allows the dependency between about and 5,000
+to be captured.
+Clark et al. (2002) give examples showing how
+heads can fill dependency slots during a derivation,
+and how long-range dependencies can be recovered
+through unification of co-indexed head variables.
+</bodyText>
+<sectionHeader confidence="0.994664" genericHeader="method">
+3 Log-Linear Models for CCG
+</sectionHeader>
+<bodyText confidence="0.999730470588235">
+Previous parsing models for CCG include a genera-
+tive model over normal-form derivations (Hocken-
+maier and Steedman, 2002) and a conditional model
+over dependency structures (Clark et al., 2002).
+We follow Clark et al. in modelling dependency
+structures, but, unlike Clark et al., do so in terms
+of derivations. An advantage of our approach is
+that the model can potentially include derivation-
+specific features in addition to dependency informa-
+tion. Also, modelling derivations provides a close
+link between the model and the parsing algorithm,
+which makes it easier to define dynamic program-
+ming techniques for efficient model estimation and
+decoding1, and also apply beam search to reduce the
+search space.
+The probability of a dependency structure,  E IT,
+given a sentence, S, is defined as follows:
+</bodyText>
+<equation confidence="0.989303">
+P(|S) = � P(d, |S) (5)
+dEA(,S)
+</equation>
+<bodyText confidence="0.979290333333333">
+where A(, S) is the set of derivations for S which
+lead to  and IT is the set of dependency structures.
+Note that A(, S) includes the non-standard deriva-
+tions allowed by CCG. This model allows the pos-
+sibility of including features from the non-standard
+derivations, such as features encoding the use of
+type-raising or function composition.
+A log-linear model of a parse,  E SZ, given a
+sentence S, is defined as follows:
+</bodyText>
+<equation confidence="0.9981745">
+P(|S) = 1 HP()(6)
+ZS i
+</equation>
+<bodyText confidence="0.994736333333333">
+This model can be applied to any kind of parse, but
+for this paper a parse, , is a (d, ) pair (as given
+in (5)). The function fi is a feature of the parse
+</bodyText>
+<footnote confidence="0.8301">
+1We use the term decoding to refer to the process of finding
+the most probable dependency structure from a packed chart.
+</footnote>
+<bodyText confidence="0.981288">
+which can be any real-valued function over the space
+of parses SZ. In this paper fi() is a count of the num-
+ber of times some dependency occurs in . Each
+feature fi has an associated weight µi which is a pa-
+rameter of the model to be estimated. ZS is a normal-
+ising constant which ensures that P(|S) is a proba-
+bility distribution:
+</bodyText>
+<equation confidence="0.9985365">
+zZS = � µfi() (7)
+(S) i i
+</equation>
+<bodyText confidence="0.998785357142857">
+where (S)  SZ is the set of possible parses for S.
+The advantage of a log-linear model is that the
+features can be arbitrary functions over parses. This
+means that any dependencies – including overlap-
+ping and long-range dependencies – can be included
+in the model, irrespective of whether those depen-
+dencies are independent.
+The theory underlying log-linear models
+is described in Della Pietra et al. (1997) and
+Berger et al. (1996). Briefly, the log-linear form in
+(6) is derived by choosing the model with maximum
+entropy from a set of models that satisfy a certain
+set of constraints (Rosenfeld, 1996). The constraints
+are that, for each feature fi:
+</bodyText>
+<equation confidence="0.776189333333333">
+z z ˜P(, S)fi() (8)
+,S ˜P(S)P(|S) fi() =
+,S
+</equation>
+<bodyText confidence="0.9999835">
+where the sums are over all possible parse-sentence
+pairs and ˜P(S) is the relative frequency of sentence
+S in the data. The value on the left of (8) is the
+expected value of fi according to the model, Ep fi,
+and the value on the right is the empirical expected
+value of fi, Ep˜ fi.
+Estimating the parameters of a log-linear model
+requires the values in (8) to be calculated for each
+feature. Calculating the empirical expected val-
+ues requires a treebank of CCG derivations plus
+dependency structures. For this we use CCG-
+bank (Hockenmaier, 2003), a corpus of normal-
+form CCG derivations derived semi-automatically
+from the Penn Treebank. Following Clark et al.,
+gold standard dependency structures are obtained for
+each derivation by running a dependency-producing
+parser over the derivations. The empirical expected
+value of a feature fi is calculated as follows:
+</bodyText>
+<equation confidence="0.984970833333333">
+Ep˜ fi =
+1
+Nz
+j=1
+fi(j) (9)
+N
+</equation>
+<bodyText confidence="0.999982375">
+where 1 ... N are the parses in the training data
+(consisting of a normal-form derivation plus depen-
+dency structure) and fi(j) is the number of times fi
+appears in parse j.2
+Parameter estimation also requires calculation of
+expected values of the features according to the
+model, Ep fi. This requires summing over all parses
+(derivation plus dependency structure) for the sen-
+tences in the data, a difficult task since the total num-
+ber of parses can grow exponentially with sentence
+length. For some sentences in CCGbank, the parser
+described in Section 6 produces trillions of parses.
+The next section shows how a packed chart can ef-
+ficiently represent the parse space, and how GIS ap-
+plied to the packed chart can be used to estimate the
+parameters.
+</bodyText>
+<sectionHeader confidence="0.99468" genericHeader="method">
+4 Packed Charts
+</sectionHeader>
+<bodyText confidence="0.999844">
+Geman and Johnson (2002) have proposed a
+dynamic programming estimation method for
+packed representations of unification-based parses.
+Miyao and Tsujii (2002) have proposed a similar
+method for feature forests which they apply to
+the derivations of an automatically extracted Tree-
+Adjoining Grammar. We apply Miyao and Tsujii’s
+method to the derivations and dependency structures
+produced by our CCG parser.
+The dynamic programming method relies on a
+packed chart, in which chart entries of the same
+type in the same cell are grouped together, and back
+pointers to the daughters keep track of how an indi-
+vidual entry was created. The intuition behind the
+dynamic programming is that, for the purposes of
+building a dependency structure, chart entries of the
+same type are equivalent. Consider the following
+composition of will with buy using the forward com-
+position rule:
+</bodyText>
+<equation confidence="0.9608905">
+((S[dcl]will\NP)/NP)
+((S[dcl]will\NP)/(S[b]\NP)) ((S[b]buy\NP)/NP)
+</equation>
+<bodyText confidence="0.916740352941177">
+The type of the resulting chart entry is deter-
+mined by the CCG category plus heads, in this case
+((S[dcl]will\NP)/NP), plus the dependencies yet to
+be filled. The dependencies are not shown, but there
+2An alternative is to use feature counts from all derivations
+leading to the gold standard dependency structure, including the
+non-standard derivations, to calculate E˜p fi.
+are two subject dependencies on the first NP, one
+encoding the subject of will and one encoding the
+subject of buy3, and there is an object dependency
+on the second NP encoding the object of buy. En-
+tries of the same type are identical for the purposes
+of creating new dependencies for the remainder of
+the parsing.
+Any rule instantiation4 used by the parser creates
+both a set of dependencies and a set of features. For
+the previous example, one dependency is created:
+</bodyText>
+<equation confidence="0.642119">
+(will, (S[dcl]will\NPX,1)/(S[b]2\NPX), 2, buy)
+</equation>
+<bodyText confidence="0.999945838709677">
+This dependency will be a feature created by the rule
+instantiation. We also use less specific features, such
+as the dependency with the words replaced by POS
+tags. Section 7 describes the features used.
+The feature forests of Miyao and Tsujii are de-
+fined in terms of conjunctive and disjunctive nodes.
+For our purposes, a conjunctive node is an individual
+entry in a cell, including the features created when
+the entry was derived, plus pointers to the entry’s
+daughters. A disjunctive node represents an equiva-
+lence class of nodes in a cell, using the type equiva-
+lence relation described above. A conjunctive node
+results from either the combination of two disjunc-
+tive nodes using a binary rule, e.g. forward composi-
+tion; or results from a single disjunctive node using
+a unary rule, e.g. type-raising; or is a leaf node (a
+word plus lexical category).
+Features in the model can only result from a sin-
+gle rule instantiation. It is possible to define features
+covering a larger part of the dependency structure;
+for example we might encode all three elements of
+the triple in a PP-attachment as a single feature. The
+disadvantage of using such features is that this re-
+duces the efficiency of the dynamic programming.
+Note, however, that the equivalence relation defin-
+ing disjunctive nodes takes into account unfilled de-
+pendencies, which may be long-range dependencies
+being “passed up” the derivation tree. This means
+that long-range dependencies can be features in our
+model, even though the lexical items involved may
+be far apart in the sentence.
+</bodyText>
+<footnote confidence="0.959840833333333">
+3In this example, the co-indexing of heads in the markedup
+category for will ((S[dcl]will\NPX,1)/(S[b]2\NPX)) ensures the
+subject dependency for buy is “passed up” to the subject NP
+of the resulting category.
+4By rule instantiation we mean the local tree arising from
+the application of a CCG combinatory rule.
+</footnote>
+<bodyText confidence="0.996765">
+The packed structure we have described is an ex-
+ample of a feature forest (Miyao and Tsujii, 2002),
+defined as follows:
+A feature forest (D is a tuple (C, D, R, γ, ) where
+</bodyText>
+<listItem confidence="0.9998708">
+• C is a set of conjunctive nodes;
+• D is a set of disjunctive nodes;
+• R c D is a set of root disjunctive nodes;5
+• γ : D 2C is a conjunctive daughter function;
+•  : C 2D is a disjunctive daughter function.
+</listItem>
+<bodyText confidence="0.986889666666667">
+For each feature function fi : SZ ---&gt; N, there is
+a corresponding feature function fi : C ---&gt; N which
+counts the number of times fi appears on a particular
+conjunctive node.6 The value of fi for a parse is then
+the sum of the values of fi for each conjunctive node
+in the parse.
+</bodyText>
+<sectionHeader confidence="0.966857" genericHeader="method">
+5 Estimation using GIS
+</sectionHeader>
+<bodyText confidence="0.9996895">
+GIS is a very simple algorithm for estimating the pa-
+rameters of a log-linear model. The parameters are
+initialised to some arbitrary constant and the follow-
+ing update rule is applied until convergence:
+</bodyText>
+<equation confidence="0.74490375">
+1
+&apos;O t+1) = µ(t) (Ep(t) fi Ep˜fi ) C (10)
+where (t) is the iteration index and the constant C
+�
+</equation>
+<bodyText confidence="0.999943285714286">
+is defined as max,S i fi(). In practice C is max-
+imised over the sentences in the training data. Im-
+plementations of GIS typically use a “correction fea-
+ture”, but following Curran and Clark (2003) we do
+not use such a feature, which simplifies the algo-
+rithm.
+Calculating Ep(t) fi requires summing over all
+derivations which include fi for each packed chart
+in the training data. The key to performing this sum
+efficiently is to write the sum in terms of inside and
+outside scores for each conjunctive node. The inside
+and outside scores can be defined recursively, as in
+the inside-outside algorithm for PCFGs. If the inside
+score for a conjunctive node c is denoted c, and the
+</bodyText>
+<footnote confidence="0.9990654">
+5Miyao and Tsujii have a single root conjunctive node; the
+disjunctive root nodes we define correspond to the roots of CCG
+derivations.
+6The value of fi(c) for c E C will typically be 0 or 1, but it
+is possible for the count to be greater than 1.
+</footnote>
+<figureCaption confidence="0.999794">
+Figure 1: Example feature forest
+</figureCaption>
+<bodyText confidence="0.991314">
+outside score denoted c, then the expected value of
+fi can be written as follows:7
+where Cs is the set of conjunctive nodes for S.
+Consider the example feature forest in Figure 1.
+The figure shows the nodes used to calculate the in-
+side and outside scores for conjunctive node c5. The
+inside score for a disjunctive node, d, is the sum of
+the inside scores for its conjunctive node daughters:
+</bodyText>
+<equation confidence="0.984532">
+d = c (12)
+cγ(d)
+</equation>
+<bodyText confidence="0.9937305">
+The inside score for a conjunctive node, c, can then
+be defined recursively:
+</bodyText>
+<equation confidence="0.9946625">
+µfi(c) (13)
+i
+</equation>
+<bodyText confidence="0.999894">
+The intuition for calculating outside scores is sim-
+ilar, but a little more involved. The outside score for
+a conjunctive node, c, is the outside score for its
+disjunctive node mother:
+</bodyText>
+<equation confidence="0.760722">
+c = d where c  γ(d) (14)
+</equation>
+<bodyText confidence="0.99989125">
+The outside score for a disjunctive node is a sum
+over the mother nodes, of the product of the outside
+score of the mother, the inside score of the sister, and
+the feature weights on the mother.8 For example, the
+</bodyText>
+<footnote confidence="0.98850575">
+7The notation is taken from Miyao and Tsujii (2002).
+8Miyao and Tsujii (2002) ignore the feature weights on the
+mother, but this ignores some of the probability mass for the
+outside (at least for the feature forests we have defined).
+</footnote>
+<bodyText confidence="0.999059888888889">
+outside score of d4 in Figure 1 is the sum of the fol-
+lowing two values: the product of the outside score
+of c5, the inside score of d5 and the feature weights
+at c5; and the product of the outside score of c2, the
+inside score of d3 and the feature weights at c2. The
+recursive definition is as follows. The outside score
+for a root disjunctive node is 1, otherwise:
+The normalisation constant ZS is the sum of the
+inside scores for the root disjunctive nodes:
+</bodyText>
+<equation confidence="0.996334">
+ZS = dr (16)
+drR
+</equation>
+<bodyText confidence="0.999923142857143">
+In order to calculate inside scores, the scores for
+daughter nodes need to be calculated before the
+scores for mother nodes (and vice versa for the out-
+side scores). This can easily be achieved by ordering
+the nodes in the bottom-up CKY parsing order.
+Note that the inside-outside approach can be com-
+bined with any maximum entropy estimation proce-
+dure, such as those evaluated by Malouf (2002).
+Finally, in order to avoid overfitting, we use a
+Gaussian prior on the parameters of the model (Chen
+and Rosenfeld, 1999), which requires a slight modi-
+fication to the update rule in (10). A Gaussian prior
+also handles the problem of “pseudo-maximal” fea-
+tures (Johnson et al., 1999).
+</bodyText>
+<sectionHeader confidence="0.978623" genericHeader="method">
+6 The Parser
+</sectionHeader>
+<bodyText confidence="0.999963666666666">
+The parser is based on Clark et al. (2002) and takes
+as input a POS-tagged sentence with a set of possi-
+ble lexical categories assigned to each word. The
+supertagger of Clark (2002) provides the lexical cat-
+egories, with a parameter setting which assigns
+around 4 categories per word on average. The pars-
+ing algorithm is the CKY bottom-up chart-parsing
+algorithm described in Steedman (2000). The com-
+binatory rules used by the parser are functional ap-
+plication (forward and backward), generalised for-
+ward composition, backward composition, gener-
+alised backward-crossed composition, and type rais-
+ing. There is also a coordination rule which con-
+joins categories of the same type. Restrictions are
+placed on some of the rules, such as that given by
+</bodyText>
+<equation confidence="0.958104833333333">
+d1
+c2
+d3
+c3 c4 c5 c6 c7
+c1
+d2
+d4 d5
+d6
+c8 c9 c10
+inside outside
+Epfi =  fi(c) c c (11)
+S ˜P(S) 1
+ZS cCs
+c = d
+d(c) i
+d = c d  (15)
+{c|d(c)} {d|d(c),d#d} i µfi(c)
+i 
+</equation>
+<bodyText confidence="0.999224823529412">
+Steedman (2000, p.62) for backward-crossed com-
+position.
+Type-raising is applied to the categories NP, PP
+and S[adj]\NP (adjectival phrase), and is imple-
+mented by adding the relevant set of type-raised
+categories to the chart whenever an NP, PP or
+S[adj]\NP is present. The sets of type-raised cate-
+gories are based on the most commonly used type-
+raising rule instantiations in sections 2-21 of CCG-
+bank, and contain 8 type-raised categories for NP
+and 1 each for PP and S[adj]\NP.
+The parser also uses a number of lexical rules and
+punctuation rules. These rules are based on those
+occurring roughly more than 200 times in sections
+2-21 of CCGbank. An example of a lexical rule used
+by the parser is the following, which takes a passive
+form of a verb and creates a nominal modifier:
+</bodyText>
+<equation confidence="0.973868">
+S[pss]\NP =&gt; NPX\NPX,1 (17)
+</equation>
+<bodyText confidence="0.999788555555555">
+This rule is used to create NPs such as the role
+played by Kim Cattrall. Note that there is a de-
+pendency relation on the resulting category; in the
+previous example role would fill a nominal modifier
+dependency headed by played.
+Currently, the only punctuation marks handled by
+the parser are commas, and all other punctuation is
+removed after the supertagging phase. An example
+of a comma rule is the following:
+</bodyText>
+<equation confidence="0.504764">
+SX/SX , =&gt; SX/SX (18)
+</equation>
+<bodyText confidence="0.999973666666667">
+This rule takes a sentential modifier followed by
+a comma (for example Currently , in the sentence
+above in the text) and returns a sentential modifier
+of the same type.
+The next section describes the efficient implemen-
+tation of the parser and model estimator.
+</bodyText>
+<sectionHeader confidence="0.998489" genericHeader="method">
+7 Implementation
+</sectionHeader>
+<subsectionHeader confidence="0.998552">
+7.1 Parser Implementation
+</subsectionHeader>
+<bodyText confidence="0.99999435483871">
+The non-standard derivations allowed by CCG, to-
+gether with the wide coverage grammar, result in
+extremely large charts. This means that efficient im-
+plementation of the parsing process is imperative for
+performing large-scale experiments.
+The packed chart prevents combinatorial explo-
+sion in the number of category combinations by
+grouping equivalent categories into a single entry.
+The speed of the parser is heavily dependent on the
+efficiency of equivalence testing, and category uni-
+fication and construction. These are performed effi-
+ciently by always creating categories in a canonical
+form which can then be compared rapidly using hash
+functions over categories.
+The parser produces a packed chart from which
+the most probable dependency structure can be re-
+covered. Since the same dependency structure can
+be generated by more than one derivation, a depen-
+dency structure’s score is the sum of the log-linear
+scores for each derivation. Finding the structure
+with the highest score is not trivial, since filled de-
+pendencies are only stored at the conjunctive nodes
+where they are created. This means that a depen-
+dency appearing in a structure can be created in dif-
+ferent parts of the chart for different derivations. We
+solve this in practice using a hash function over de-
+pendencies, which can be used to quickly determine
+whether two derivations lead to the same structure.
+For each node in the chart, we can keep track of the
+derivation leading to the set of dependencies with
+the highest score for that node.
+</bodyText>
+<subsectionHeader confidence="0.998804">
+7.2 Data Generation
+</subsectionHeader>
+<bodyText confidence="0.988940666666667">
+Data for model estimation is created in two steps.
+First, the parser is run over the normal-form deriva-
+tions in Sections 2-21 of CCGbank outputting the
+corresponding dependencies and other features. The
+features used in our preliminary implementation are
+as follows:
+</bodyText>
+<listItem confidence="0.999453">
+• dependency features;
+• lexical category features;
+• root category features.
+</listItem>
+<bodyText confidence="0.999801958333333">
+Dependency features are 5-tuples as defined in
+Section 2. Further dependency features are formed
+by substituting POS tags for the words, which leads
+to a total of 4 features for each dependency. Lexical
+category features are word category pairs on the leaf
+nodes and root features are head-word category pairs
+on root nodes. Extra features are formed by replac-
+ing words with their POS tags. The total number of
+features is 817,658, but we reduce this to 243,603 by
+only including features which appear at least twice
+in the data.
+The second step of data generation involves using
+the parser to create a feature forest for each sentence,
+using the feature set extracted from CCGbank. The
+parser is interrupted if a sentence takes longer than
+60 seconds to process or if more than 500,000 con-
+junctive nodes are created in the chart. If this oc-
+curs, the process is repeated but with a smaller num-
+ber of categories assigned to each word by the su-
+pertagger. Approximately 93% of the sentences in
+sections 2-21 can be processed in this way, giving
+36,400 training sentences. Creating the forests takes
+approximately one hour using 40 nodes of our Be-
+owulf cluster, and produces 19.9 GB of data.
+</bodyText>
+<subsectionHeader confidence="0.913331">
+7.3 Estimation
+</subsectionHeader>
+<bodyText confidence="0.999848151515151">
+The parse forests regularly represent trillions of pos-
+sible parses for a sentence. The estimation pro-
+cess involves summing feature weights over all these
+parses, a total which cannot be represented using
+double precision arithmetic (limited to less than
+10308). Our implementation uses the sum, rather
+than product, form of (6), so that logarithms can be
+used to avoid numerical overflow. For converting the
+sum of products in Equation 15 to log space, we use
+a technique commonly used in speech recognition
+(p.c. Simon King).
+We have implemented a parallel version of our
+GIS code using the MPICH library (Gropp et al.,
+1996), an open-source implementation of the Mes-
+sage Passing Interface (MPI) standard. MPI parallel
+programming involves explicit synchronisation and
+information transfer between the parallel processes
+using messages. It is ideal for development of paral-
+lel programs for cluster architectures.
+GIS over parse forests is straightforward to par-
+allelise. The parse forests are divided among the
+machines in the cluster (in our current implemen-
+tation, each machine receives 979 forests). Each
+machine calculates the inside and outside scores for
+each node in the parse forest and updates the es-
+timated feature expectations. The feature expecta-
+tions are then summed across all of the machines
+using a global operation (called a reduce operation).
+Every machine receives this sum which is then used
+to calculate the normal GIS weight update. In our
+preliminary tests, each process used approximately
+750 MB of RAM, giving a total usage of 30 GB across
+the cluster. One iteration of GIS takes approximately
+</bodyText>
+<table confidence="0.9911795">
+GIS - CCG IIS - TAG
+number of features 243,603 5,715
+number of sentences 36,400 868
+avg. num. of nodes 52,000 17,412
+memory usage 30 GB 1.5 GB
+disk usage 19.9 GB –
+</table>
+<tableCaption confidence="0.999975">
+Table 1: Results compared with Miyao and Tsujii
+</tableCaption>
+<bodyText confidence="0.959578333333333">
+1 minute. Given the large number of features, we
+estimate at least 1,000 iterations will be needed for
+convergence.
+</bodyText>
+<sectionHeader confidence="0.992497" genericHeader="conclusions">
+8 Conclusions and Further Work
+</sectionHeader>
+<bodyText confidence="0.99993295">
+Table 1 gives the overall statistics for the model
+estimation process, and compares them with
+Miyao and Tsujii (2002). These numbers represent
+the largest-scale parsing model of which we are
+aware. Parsing and model estimation on this scale
+introduce a number of interesting theoretical and
+computational challenges. We have demonstrated
+how packed charts and feature forests can be com-
+bined to meet the theoretical challenges. We have
+also described an MPI implementation of GIS which
+solves the computational challenges. These tech-
+niques are necessary for discriminative estimation
+techniques applied to wide-coverage parsing.
+We have just begun the process of evaluating
+parsing performance using the same test data as
+Clark et al. (2002). We are especially interested in
+the effectiveness of incorporating long-range depen-
+dencies as features, which CCG was designed to han-
+dle and for which we expect a log-linear model to be
+particularly effective.
+</bodyText>
+<sectionHeader confidence="0.996177" genericHeader="acknowledgments">
+Acknowledgements
+</sectionHeader>
+<bodyText confidence="0.999935625">
+We would like to thank Mark Steedman, Julia Hock-
+enmaier, Jason Baldridge, David Chiang, Yusuke
+Miyao, Mark Johnson, Yuval Krymolowski, Tara
+Murphy and the anonymous reviewers for their help-
+ful comments. This research is supported by EPSRC
+grant GR/M96889, and a Commonwealth scholar-
+ship and a Sydney University Travelling scholarship
+to the second author.
+</bodyText>
+<sectionHeader confidence="0.994341" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.99955513253012">
+Steven Abney. 1997. Stochastic attribute-value gram-
+mars. Computational Linguistics, 23(4):597–618.
+Adam Berger, Stephen Della Pietra, and Vincent Della
+Pietra. 1996. A maximum entropy approach to nat-
+ural language processing. Computational Linguistics,
+22(1):39–71.
+Stanley Chen and Ronald Rosenfeld. 1999. A Gaussian
+prior for smoothing maximum entropy models. Tech-
+nical report, Carnegie Mellon University, Pittsburgh,
+PA.
+Stephen Clark, Julia Hockenmaier, and Mark Steedman.
+2002. Building deep dependency structures with a
+wide-coverage CCG parser. In Proceedings of the 40th
+Meeting of the ACL, pages 327–334, Philadelphia, PA.
+Stephen Clark. 2002. A supertagger for combinatory cat-
+egorial grammar. In Proceedings of the TAG+ Work-
+shop, pages 19–24, Venice, Italy.
+James R. Curran and Stephen Clark. 2003. Investigat-
+ing GIS and smoothing for maximum entropy taggers.
+In Proceedings of the 10th Meeting of the EACL (to
+appear), Budapest, Hungary.
+J. N. Darroch and D. Ratcliff. 1972. Generalized it-
+erative scaling for log-linear models. The Annals of
+Mathematical Statistics, 43(5):1470–1480.
+Stephen Della Pietra, Vincent Della Pietra, and John
+Lafferty. 1997. Inducing features of random fields.
+IEEE Transactions Pattern Analysis and Machine In-
+telligence, 19(4):380–393.
+Stuart Geman and Mark Johnson. 2002. Dynamic
+programming for parsing and estimation of stochas-
+tic unification-based grammars. In Proceedings of the
+40th Meeting of the ACL, pages 279–286, Philadel-
+phia, PA.
+W. Gropp, E. Lusk, N. Doss, and A. Skjellum. 1996.
+A high-performance, portable implementation of the
+MPI message passing interface standard. Parallel
+Computing, 22(6):789–828, September.
+Julia Hockenmaier and Mark Steedman. 2002. Gener-
+ative models for statistical parsing with Combinatory
+Categorial Grammar. In Proceedings ofthe 40th Meet-
+ing of the ACL, pages 335–342, Philadelphia, PA.
+Julia Hockenmaier. 2003. Data and Models for Statis-
+tical Parsing with Combinatory Categorial Grammar.
+Ph.D. thesis, University of Edinburgh.
+Mark Johnson, Stuart Geman, Stephen Canon, Zhiyi Chi,
+and Stefan Riezler. 1999. Estimators for stochastic
+‘unification-based’ grammars. In Proceedings of the
+37th Meeting of the ACL, pages 535–541, University
+of Maryland, MD.
+K. Lari and S. J. Young. 1990. The estimation of stochas-
+tic context-free grammars using the inside-outside al-
+gorithm. Computer Speech and Language, 4(1):35–
+56.
+Robert Malouf. 2002. A comparison of algorithms
+for maximum entropy parameter estimation. In Pro-
+ceedings of the Sixth Workshop on Natural Language
+Learning, pages 49–55, Taipei, Taiwan.
+Yusuke Miyao and Jun’ichi Tsujii. 2002. Maximum en-
+tropy estimation for feature forests. In Proceedings
+of the Human Language Technology Conference, San
+Diego, CA.
+Miles Osborne. 2000. Estimation of stochastic
+attribute-value grammars using an informative sam-
+ple. In Proceedings of the 18th International Con-
+ference on Computational Linguistics, pages 586–592,
+Saarbr¨ucken, Germany.
+Stefan Riezler, Tracy H. King, Ronald M. Kaplan,
+Richard Crouch, John T. Maxwell III, and Mark John-
+son. 2002. Parsing the Wall Street Journal using a
+Lexical-Functional Grammar and discriminative esti-
+mation techniques. In Proceedings of the 40th Meet-
+ing of the ACL, pages 271–278, Philadelphia, PA.
+Ronald Rosenfeld. 1996. A maximum entropy approach
+to adaptive statistical language modeling. Computer,
+Speech and Language, 10:187–228.
+Mark Steedman. 2000. The Syntactic Process. The MIT
+Press, Cambridge, MA.
+Kristina Toutanova, Christopher Manning, Stuart
+Shieber, Dan Flickinger, and Stephan Oepen. 2002.
+Parse disambiguation for a rich HPSG grammar. In
+Proceedings of the First Workshop on Treebanks
+and Linguistic Theories, pages 253–263, Sozopol,
+Bulgaria.
+</reference>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.348771">
+<title confidence="0.999897">Log-Linear Models for Wide-Coverage CCG Parsing</title>
+<author confidence="0.998226">Stephen Clark</author>
+<author confidence="0.998226">R James</author>
+<affiliation confidence="0.995581">School of University of</affiliation>
+<address confidence="0.393896">2 Buccleuch Place, Edinburgh. EH8</address>
+<abstract confidence="0.993520684210526">This paper describes log-linear parsing models for Combinatory Categorial Log-linear models can easily encode the long-range dependencies inherent in coordination and extracphenomena, which designed to handle. Log-linear models have previously been applied to statistical parsing, under the assumption that all possible parses for a sentence can be enumerated. Enumerating all parses is infeasible for large grammars; however, dynamic programming over a packed chart can be used to efficiently estimate the model parameters. We describe a parellelised implementation which runs on a Beowulf cluster and the complete Treebank to be used for estimation.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>Steven Abney</author>
+</authors>
+<title>Stochastic attribute-value grammars.</title>
+<date>1997</date>
+<journal>Computational Linguistics,</journal>
+<volume>23</volume>
+<issue>4</issue>
+<contexts>
+<context position="1484" citStr="Abney (1997)" startWordPosition="218" endWordPosition="219">ebank to be used for estimation. 1 Introduction Statistical parsing models have recently been developed for Combinatory Categorial Grammar (CCG, Steedman (2000)) and used in wide-coverage parsers applied to the WSJ Penn Treebank (Clark et al., 2002; Hockenmaier and Steedman, 2002). An attraction of CCG is its elegant treatment of coordination and extraction, allowing recovery of the long-range dependencies inherent in these constructions. We would like the parsing model to include long-range dependencies, but this introduces problems for generative parsing models similar to those described by Abney (1997) for attribute-value grammars; hence Hockenmaier and Steedman do not include such dependencies in their model, and Clark et al. include the dependencies but use an inconsistent model. Following Abney, we propose a loglinear framework which incorporates long-range dependencies as features without loss of consistency. Log-linear models have previously been applied to statistical parsing (Johnson et al., 1999; Toutanova et al., 2002; Riezler et al., 2002; Osborne, 2000). Typically, these approaches have enumerated all possible parses for model estimation and finding the most probable parse. For g</context>
+</contexts>
+<marker>Abney, 1997</marker>
+<rawString>Steven Abney. 1997. Stochastic attribute-value grammars. Computational Linguistics, 23(4):597–618.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Adam Berger</author>
+<author>Stephen Della Pietra</author>
+<author>Vincent Della Pietra</author>
+</authors>
+<title>A maximum entropy approach to natural language processing.</title>
+<date>1996</date>
+<journal>Computational Linguistics,</journal>
+<volume>22</volume>
+<issue>1</issue>
+<contexts>
+<context position="7784" citStr="Berger et al. (1996)" startWordPosition="1268" endWordPosition="1271">ciated weight µi which is a parameter of the model to be estimated. ZS is a normalising constant which ensures that P(|S) is a probability distribution: zZS = � µfi() (7) (S) i i where (S)  SZ is the set of possible parses for S. The advantage of a log-linear model is that the features can be arbitrary functions over parses. This means that any dependencies – including overlapping and long-range dependencies – can be included in the model, irrespective of whether those dependencies are independent. The theory underlying log-linear models is described in Della Pietra et al. (1997) and Berger et al. (1996). Briefly, the log-linear form in (6) is derived by choosing the model with maximum entropy from a set of models that satisfy a certain set of constraints (Rosenfeld, 1996). The constraints are that, for each feature fi: z z ˜P(, S)fi() (8) ,S ˜P(S)P(|S) fi() = ,S where the sums are over all possible parse-sentence pairs and ˜P(S) is the relative frequency of sentence S in the data. The value on the left of (8) is the expected value of fi according to the model, Ep fi, and the value on the right is the empirical expected value of fi, Ep˜ fi. Estimating the parameters of a log-linear mode</context>
+</contexts>
+<marker>Berger, Pietra, Pietra, 1996</marker>
+<rawString>Adam Berger, Stephen Della Pietra, and Vincent Della Pietra. 1996. A maximum entropy approach to natural language processing. Computational Linguistics, 22(1):39–71.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Stanley Chen</author>
+<author>Ronald Rosenfeld</author>
+</authors>
+<title>A Gaussian prior for smoothing maximum entropy models.</title>
+<date>1999</date>
+<tech>Technical report,</tech>
+<institution>Carnegie Mellon University,</institution>
+<location>Pittsburgh, PA.</location>
+<contexts>
+<context position="17516" citStr="Chen and Rosenfeld, 1999" startWordPosition="2948" endWordPosition="2951">normalisation constant ZS is the sum of the inside scores for the root disjunctive nodes: ZS = dr (16) drR In order to calculate inside scores, the scores for daughter nodes need to be calculated before the scores for mother nodes (and vice versa for the outside scores). This can easily be achieved by ordering the nodes in the bottom-up CKY parsing order. Note that the inside-outside approach can be combined with any maximum entropy estimation procedure, such as those evaluated by Malouf (2002). Finally, in order to avoid overfitting, we use a Gaussian prior on the parameters of the model (Chen and Rosenfeld, 1999), which requires a slight modification to the update rule in (10). A Gaussian prior also handles the problem of “pseudo-maximal” features (Johnson et al., 1999). 6 The Parser The parser is based on Clark et al. (2002) and takes as input a POS-tagged sentence with a set of possible lexical categories assigned to each word. The supertagger of Clark (2002) provides the lexical categories, with a parameter setting which assigns around 4 categories per word on average. The parsing algorithm is the CKY bottom-up chart-parsing algorithm described in Steedman (2000). The combinatory rules used by the </context>
+</contexts>
+<marker>Chen, Rosenfeld, 1999</marker>
+<rawString>Stanley Chen and Ronald Rosenfeld. 1999. A Gaussian prior for smoothing maximum entropy models. Technical report, Carnegie Mellon University, Pittsburgh, PA.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Stephen Clark</author>
+<author>Julia Hockenmaier</author>
+<author>Mark Steedman</author>
+</authors>
+<title>Building deep dependency structures with a wide-coverage CCG parser.</title>
+<date>2002</date>
+<booktitle>In Proceedings of the 40th Meeting of the ACL,</booktitle>
+<pages>327--334</pages>
+<location>Philadelphia, PA.</location>
+<contexts>
+<context position="1120" citStr="Clark et al., 2002" startWordPosition="162" endWordPosition="165">stical parsing, under the assumption that all possible parses for a sentence can be enumerated. Enumerating all parses is infeasible for large grammars; however, dynamic programming over a packed chart can be used to efficiently estimate the model parameters. We describe a parellelised implementation which runs on a Beowulf cluster and allows the complete WSJ Penn Treebank to be used for estimation. 1 Introduction Statistical parsing models have recently been developed for Combinatory Categorial Grammar (CCG, Steedman (2000)) and used in wide-coverage parsers applied to the WSJ Penn Treebank (Clark et al., 2002; Hockenmaier and Steedman, 2002). An attraction of CCG is its elegant treatment of coordination and extraction, allowing recovery of the long-range dependencies inherent in these constructions. We would like the parsing model to include long-range dependencies, but this introduces problems for generative parsing models similar to those described by Abney (1997) for attribute-value grammars; hence Hockenmaier and Steedman do not include such dependencies in their model, and Clark et al. include the dependencies but use an inconsistent model. Following Abney, we propose a loglinear framework wh</context>
+<context position="3255" citStr="Clark et al. (2002)" startWordPosition="499" endWordPosition="502">or estimating a PCFG (Lari and Young, 1990). Miyao and Tsujii (2002) apply their estimation technique to an automatically extracted Tree Adjoining Grammar using Improved Iterative Scaling (IIS, Della Pietra et al. (1997)). However, their model has significant memory requirements which limits them to using 868 sentences as training data. We use a parallelised version of Generalised Iterative Scaling (GIS, Darroch and Ratcliff (1972)) on a Beowulf cluster which allows the complete WSJ Penn Treebank to be used as training data. This paper assumes a basic knowledge of CCG; see Steedman (2000) and Clark et al. (2002) for an introduction. 2 The Grammar Following Clark et al. (2002), we augment CCG lexical categories with head and dependency information. For example, the extended category for persuade is as follows: persuade :=((S[dcl]persuade\NP1)/(S[to]2\NPX))/NPX,3 (1) The feature [dcl] indicates a declarative sentence; the resulting S[dcl] is headed by persuade; and the numbers indicate dependency relations. The variable X denotes a head, identifying the head of the infinitival complement’s subject with the head of the object, thus capturing the object control relation. For example, in Microsoft persuad</context>
+<context position="5215" citStr="Clark et al. (2002)" startWordPosition="822" endWordPosition="825">ght\NP1)/NP2, 2, company, *) (3) where * is the category (NP\NP)/(S[dcl]/NP) assigned to the relative pronoun. A dependency structure is simply a set of these dependencies. Every argument in every lexical category is encoded as a dependency. Unlike Clark et al., we do not require dependencies to be always marked on atomic categories. For example, the marked up category for about (as in about 5,000 pounds) is: (NX/NX)Y/(N/N)Y,1 (4) If 5,000 has the category (NX/NX)5,000, the dependency relation marked on the (N/N)Y,1 argument in (4) allows the dependency between about and 5,000 to be captured. Clark et al. (2002) give examples showing how heads can fill dependency slots during a derivation, and how long-range dependencies can be recovered through unification of co-indexed head variables. 3 Log-Linear Models for CCG Previous parsing models for CCG include a generative model over normal-form derivations (Hockenmaier and Steedman, 2002) and a conditional model over dependency structures (Clark et al., 2002). We follow Clark et al. in modelling dependency structures, but, unlike Clark et al., do so in terms of derivations. An advantage of our approach is that the model can potentially include derivationsp</context>
+<context position="17733" citStr="Clark et al. (2002)" startWordPosition="2987" endWordPosition="2990">ther nodes (and vice versa for the outside scores). This can easily be achieved by ordering the nodes in the bottom-up CKY parsing order. Note that the inside-outside approach can be combined with any maximum entropy estimation procedure, such as those evaluated by Malouf (2002). Finally, in order to avoid overfitting, we use a Gaussian prior on the parameters of the model (Chen and Rosenfeld, 1999), which requires a slight modification to the update rule in (10). A Gaussian prior also handles the problem of “pseudo-maximal” features (Johnson et al., 1999). 6 The Parser The parser is based on Clark et al. (2002) and takes as input a POS-tagged sentence with a set of possible lexical categories assigned to each word. The supertagger of Clark (2002) provides the lexical categories, with a parameter setting which assigns around 4 categories per word on average. The parsing algorithm is the CKY bottom-up chart-parsing algorithm described in Steedman (2000). The combinatory rules used by the parser are functional application (forward and backward), generalised forward composition, backward composition, generalised backward-crossed composition, and type raising. There is also a coordination rule which conj</context>
+</contexts>
+<marker>Clark, Hockenmaier, Steedman, 2002</marker>
+<rawString>Stephen Clark, Julia Hockenmaier, and Mark Steedman. 2002. Building deep dependency structures with a wide-coverage CCG parser. In Proceedings of the 40th Meeting of the ACL, pages 327–334, Philadelphia, PA.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Stephen Clark</author>
+</authors>
+<title>A supertagger for combinatory categorial grammar.</title>
+<date>2002</date>
+<booktitle>In Proceedings of the TAG+ Workshop,</booktitle>
+<pages>pages</pages>
+<location>Venice, Italy.</location>
+<contexts>
+<context position="17871" citStr="Clark (2002)" startWordPosition="3013" endWordPosition="3014">at the inside-outside approach can be combined with any maximum entropy estimation procedure, such as those evaluated by Malouf (2002). Finally, in order to avoid overfitting, we use a Gaussian prior on the parameters of the model (Chen and Rosenfeld, 1999), which requires a slight modification to the update rule in (10). A Gaussian prior also handles the problem of “pseudo-maximal” features (Johnson et al., 1999). 6 The Parser The parser is based on Clark et al. (2002) and takes as input a POS-tagged sentence with a set of possible lexical categories assigned to each word. The supertagger of Clark (2002) provides the lexical categories, with a parameter setting which assigns around 4 categories per word on average. The parsing algorithm is the CKY bottom-up chart-parsing algorithm described in Steedman (2000). The combinatory rules used by the parser are functional application (forward and backward), generalised forward composition, backward composition, generalised backward-crossed composition, and type raising. There is also a coordination rule which conjoins categories of the same type. Restrictions are placed on some of the rules, such as that given by d1 c2 d3 c3 c4 c5 c6 c7 c1 d2 d4 d5 </context>
+</contexts>
+<marker>Clark, 2002</marker>
+<rawString>Stephen Clark. 2002. A supertagger for combinatory categorial grammar. In Proceedings of the TAG+ Workshop, pages 19–24, Venice, Italy.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>James R Curran</author>
+<author>Stephen Clark</author>
+</authors>
+<title>Investigating GIS and smoothing for maximum entropy taggers.</title>
+<date>2003</date>
+<booktitle>In Proceedings of the 10th Meeting of the EACL (to appear),</booktitle>
+<location>Budapest, Hungary.</location>
+<contexts>
+<context position="14590" citStr="Curran and Clark (2003)" startWordPosition="2419" endWordPosition="2422">6 The value of fi for a parse is then the sum of the values of fi for each conjunctive node in the parse. 5 Estimation using GIS GIS is a very simple algorithm for estimating the parameters of a log-linear model. The parameters are initialised to some arbitrary constant and the following update rule is applied until convergence: 1 &apos;O t+1) = µ(t) (Ep(t) fi Ep˜fi ) C (10) where (t) is the iteration index and the constant C � is defined as max,S i fi(). In practice C is maximised over the sentences in the training data. Implementations of GIS typically use a “correction feature”, but following Curran and Clark (2003) we do not use such a feature, which simplifies the algorithm. Calculating Ep(t) fi requires summing over all derivations which include fi for each packed chart in the training data. The key to performing this sum efficiently is to write the sum in terms of inside and outside scores for each conjunctive node. The inside and outside scores can be defined recursively, as in the inside-outside algorithm for PCFGs. If the inside score for a conjunctive node c is denoted c, and the 5Miyao and Tsujii have a single root conjunctive node; the disjunctive root nodes we define correspond to the roots o</context>
+</contexts>
+<marker>Curran, Clark, 2003</marker>
+<rawString>James R. Curran and Stephen Clark. 2003. Investigating GIS and smoothing for maximum entropy taggers. In Proceedings of the 10th Meeting of the EACL (to appear), Budapest, Hungary.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J N Darroch</author>
+<author>D Ratcliff</author>
+</authors>
+<title>Generalized iterative scaling for log-linear models.</title>
+<date>1972</date>
+<journal>The Annals of Mathematical Statistics,</journal>
+<volume>43</volume>
+<issue>5</issue>
+<contexts>
+<context position="3071" citStr="Darroch and Ratcliff (1972)" startWordPosition="465" endWordPosition="468"> and Tsujii (2002), which efficiently estimates the model parameters over the complete space without enumerating parses. The estimation method is similar to the inside-outside algorithm used for estimating a PCFG (Lari and Young, 1990). Miyao and Tsujii (2002) apply their estimation technique to an automatically extracted Tree Adjoining Grammar using Improved Iterative Scaling (IIS, Della Pietra et al. (1997)). However, their model has significant memory requirements which limits them to using 868 sentences as training data. We use a parallelised version of Generalised Iterative Scaling (GIS, Darroch and Ratcliff (1972)) on a Beowulf cluster which allows the complete WSJ Penn Treebank to be used as training data. This paper assumes a basic knowledge of CCG; see Steedman (2000) and Clark et al. (2002) for an introduction. 2 The Grammar Following Clark et al. (2002), we augment CCG lexical categories with head and dependency information. For example, the extended category for persuade is as follows: persuade :=((S[dcl]persuade\NP1)/(S[to]2\NPX))/NPX,3 (1) The feature [dcl] indicates a declarative sentence; the resulting S[dcl] is headed by persuade; and the numbers indicate dependency relations. The variable X</context>
+</contexts>
+<marker>Darroch, Ratcliff, 1972</marker>
+<rawString>J. N. Darroch and D. Ratcliff. 1972. Generalized iterative scaling for log-linear models. The Annals of Mathematical Statistics, 43(5):1470–1480.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Stephen Della Pietra</author>
+<author>Vincent Della Pietra</author>
+<author>John Lafferty</author>
+</authors>
+<title>Inducing features of random fields.</title>
+<date>1997</date>
+<journal>IEEE Transactions Pattern Analysis and Machine Intelligence,</journal>
+<volume>19</volume>
+<issue>4</issue>
+<contexts>
+<context position="2856" citStr="Pietra et al. (1997)" startWordPosition="433" endWordPosition="436">s to sample the parse space for estimation, e.g. Osborne (2000). In this paper we use a dynamic programming technique applied to a packed chart, similar to those proposed by Geman and Johnson (2002) and Miyao and Tsujii (2002), which efficiently estimates the model parameters over the complete space without enumerating parses. The estimation method is similar to the inside-outside algorithm used for estimating a PCFG (Lari and Young, 1990). Miyao and Tsujii (2002) apply their estimation technique to an automatically extracted Tree Adjoining Grammar using Improved Iterative Scaling (IIS, Della Pietra et al. (1997)). However, their model has significant memory requirements which limits them to using 868 sentences as training data. We use a parallelised version of Generalised Iterative Scaling (GIS, Darroch and Ratcliff (1972)) on a Beowulf cluster which allows the complete WSJ Penn Treebank to be used as training data. This paper assumes a basic knowledge of CCG; see Steedman (2000) and Clark et al. (2002) for an introduction. 2 The Grammar Following Clark et al. (2002), we augment CCG lexical categories with head and dependency information. For example, the extended category for persuade is as follows:</context>
+<context position="7759" citStr="Pietra et al. (1997)" startWordPosition="1263" endWordPosition="1266">ch feature fi has an associated weight µi which is a parameter of the model to be estimated. ZS is a normalising constant which ensures that P(|S) is a probability distribution: zZS = � µfi() (7) (S) i i where (S)  SZ is the set of possible parses for S. The advantage of a log-linear model is that the features can be arbitrary functions over parses. This means that any dependencies – including overlapping and long-range dependencies – can be included in the model, irrespective of whether those dependencies are independent. The theory underlying log-linear models is described in Della Pietra et al. (1997) and Berger et al. (1996). Briefly, the log-linear form in (6) is derived by choosing the model with maximum entropy from a set of models that satisfy a certain set of constraints (Rosenfeld, 1996). The constraints are that, for each feature fi: z z ˜P(, S)fi() (8) ,S ˜P(S)P(|S) fi() = ,S where the sums are over all possible parse-sentence pairs and ˜P(S) is the relative frequency of sentence S in the data. The value on the left of (8) is the expected value of fi according to the model, Ep fi, and the value on the right is the empirical expected value of fi, Ep˜ fi. Estimating the parame</context>
+</contexts>
+<marker>Pietra, Pietra, Lafferty, 1997</marker>
+<rawString>Stephen Della Pietra, Vincent Della Pietra, and John Lafferty. 1997. Inducing features of random fields. IEEE Transactions Pattern Analysis and Machine Intelligence, 19(4):380–393.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Stuart Geman</author>
+<author>Mark Johnson</author>
+</authors>
+<title>Dynamic programming for parsing and estimation of stochastic unification-based grammars.</title>
+<date>2002</date>
+<booktitle>In Proceedings of the 40th Meeting of the ACL,</booktitle>
+<pages>279--286</pages>
+<location>Philadelphia, PA.</location>
+<contexts>
+<context position="2434" citStr="Geman and Johnson (2002)" startWordPosition="369" endWordPosition="372">ar models have previously been applied to statistical parsing (Johnson et al., 1999; Toutanova et al., 2002; Riezler et al., 2002; Osborne, 2000). Typically, these approaches have enumerated all possible parses for model estimation and finding the most probable parse. For grammars extracted from the Penn Treebank (in our case CCGbank (Hockenmaier, 2003)), enumerating all parses is infeasible. One approach to this problem is to sample the parse space for estimation, e.g. Osborne (2000). In this paper we use a dynamic programming technique applied to a packed chart, similar to those proposed by Geman and Johnson (2002) and Miyao and Tsujii (2002), which efficiently estimates the model parameters over the complete space without enumerating parses. The estimation method is similar to the inside-outside algorithm used for estimating a PCFG (Lari and Young, 1990). Miyao and Tsujii (2002) apply their estimation technique to an automatically extracted Tree Adjoining Grammar using Improved Iterative Scaling (IIS, Della Pietra et al. (1997)). However, their model has significant memory requirements which limits them to using 868 sentences as training data. We use a parallelised version of Generalised Iterative Scal</context>
+<context position="9744" citStr="Geman and Johnson (2002)" startWordPosition="1601" endWordPosition="1604">se j.2 Parameter estimation also requires calculation of expected values of the features according to the model, Ep fi. This requires summing over all parses (derivation plus dependency structure) for the sentences in the data, a difficult task since the total number of parses can grow exponentially with sentence length. For some sentences in CCGbank, the parser described in Section 6 produces trillions of parses. The next section shows how a packed chart can efficiently represent the parse space, and how GIS applied to the packed chart can be used to estimate the parameters. 4 Packed Charts Geman and Johnson (2002) have proposed a dynamic programming estimation method for packed representations of unification-based parses. Miyao and Tsujii (2002) have proposed a similar method for feature forests which they apply to the derivations of an automatically extracted TreeAdjoining Grammar. We apply Miyao and Tsujii’s method to the derivations and dependency structures produced by our CCG parser. The dynamic programming method relies on a packed chart, in which chart entries of the same type in the same cell are grouped together, and back pointers to the daughters keep track of how an individual entry was crea</context>
+</contexts>
+<marker>Geman, Johnson, 2002</marker>
+<rawString>Stuart Geman and Mark Johnson. 2002. Dynamic programming for parsing and estimation of stochastic unification-based grammars. In Proceedings of the 40th Meeting of the ACL, pages 279–286, Philadelphia, PA.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>W Gropp</author>
+<author>E Lusk</author>
+<author>N Doss</author>
+<author>A Skjellum</author>
+</authors>
+<title>A high-performance, portable implementation of the MPI message passing interface standard.</title>
+<date>1996</date>
+<journal>Parallel Computing,</journal>
+<volume>22</volume>
+<issue>6</issue>
+<contexts>
+<context position="23900" citStr="Gropp et al., 1996" startWordPosition="4019" endWordPosition="4022">se forests regularly represent trillions of possible parses for a sentence. The estimation process involves summing feature weights over all these parses, a total which cannot be represented using double precision arithmetic (limited to less than 10308). Our implementation uses the sum, rather than product, form of (6), so that logarithms can be used to avoid numerical overflow. For converting the sum of products in Equation 15 to log space, we use a technique commonly used in speech recognition (p.c. Simon King). We have implemented a parallel version of our GIS code using the MPICH library (Gropp et al., 1996), an open-source implementation of the Message Passing Interface (MPI) standard. MPI parallel programming involves explicit synchronisation and information transfer between the parallel processes using messages. It is ideal for development of parallel programs for cluster architectures. GIS over parse forests is straightforward to parallelise. The parse forests are divided among the machines in the cluster (in our current implementation, each machine receives 979 forests). Each machine calculates the inside and outside scores for each node in the parse forest and updates the estimated feature </context>
+</contexts>
+<marker>Gropp, Lusk, Doss, Skjellum, 1996</marker>
+<rawString>W. Gropp, E. Lusk, N. Doss, and A. Skjellum. 1996. A high-performance, portable implementation of the MPI message passing interface standard. Parallel Computing, 22(6):789–828, September.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Julia Hockenmaier</author>
+<author>Mark Steedman</author>
+</authors>
+<title>Generative models for statistical parsing with Combinatory Categorial Grammar.</title>
+<date>2002</date>
+<booktitle>In Proceedings ofthe 40th Meeting of the ACL,</booktitle>
+<pages>335--342</pages>
+<location>Philadelphia, PA.</location>
+<contexts>
+<context position="1153" citStr="Hockenmaier and Steedman, 2002" startWordPosition="166" endWordPosition="169">r the assumption that all possible parses for a sentence can be enumerated. Enumerating all parses is infeasible for large grammars; however, dynamic programming over a packed chart can be used to efficiently estimate the model parameters. We describe a parellelised implementation which runs on a Beowulf cluster and allows the complete WSJ Penn Treebank to be used for estimation. 1 Introduction Statistical parsing models have recently been developed for Combinatory Categorial Grammar (CCG, Steedman (2000)) and used in wide-coverage parsers applied to the WSJ Penn Treebank (Clark et al., 2002; Hockenmaier and Steedman, 2002). An attraction of CCG is its elegant treatment of coordination and extraction, allowing recovery of the long-range dependencies inherent in these constructions. We would like the parsing model to include long-range dependencies, but this introduces problems for generative parsing models similar to those described by Abney (1997) for attribute-value grammars; hence Hockenmaier and Steedman do not include such dependencies in their model, and Clark et al. include the dependencies but use an inconsistent model. Following Abney, we propose a loglinear framework which incorporates long-range depen</context>
+<context position="5542" citStr="Hockenmaier and Steedman, 2002" startWordPosition="869" endWordPosition="873">n atomic categories. For example, the marked up category for about (as in about 5,000 pounds) is: (NX/NX)Y/(N/N)Y,1 (4) If 5,000 has the category (NX/NX)5,000, the dependency relation marked on the (N/N)Y,1 argument in (4) allows the dependency between about and 5,000 to be captured. Clark et al. (2002) give examples showing how heads can fill dependency slots during a derivation, and how long-range dependencies can be recovered through unification of co-indexed head variables. 3 Log-Linear Models for CCG Previous parsing models for CCG include a generative model over normal-form derivations (Hockenmaier and Steedman, 2002) and a conditional model over dependency structures (Clark et al., 2002). We follow Clark et al. in modelling dependency structures, but, unlike Clark et al., do so in terms of derivations. An advantage of our approach is that the model can potentially include derivationspecific features in addition to dependency information. Also, modelling derivations provides a close link between the model and the parsing algorithm, which makes it easier to define dynamic programming techniques for efficient model estimation and decoding1, and also apply beam search to reduce the search space. The probabili</context>
+</contexts>
+<marker>Hockenmaier, Steedman, 2002</marker>
+<rawString>Julia Hockenmaier and Mark Steedman. 2002. Generative models for statistical parsing with Combinatory Categorial Grammar. In Proceedings ofthe 40th Meeting of the ACL, pages 335–342, Philadelphia, PA.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Julia Hockenmaier</author>
+</authors>
+<title>Data and Models for Statistical Parsing with Combinatory Categorial Grammar.</title>
+<date>2003</date>
+<tech>Ph.D. thesis,</tech>
+<institution>University of Edinburgh.</institution>
+<contexts>
+<context position="2165" citStr="Hockenmaier, 2003" startWordPosition="324" endWordPosition="325">o not include such dependencies in their model, and Clark et al. include the dependencies but use an inconsistent model. Following Abney, we propose a loglinear framework which incorporates long-range dependencies as features without loss of consistency. Log-linear models have previously been applied to statistical parsing (Johnson et al., 1999; Toutanova et al., 2002; Riezler et al., 2002; Osborne, 2000). Typically, these approaches have enumerated all possible parses for model estimation and finding the most probable parse. For grammars extracted from the Penn Treebank (in our case CCGbank (Hockenmaier, 2003)), enumerating all parses is infeasible. One approach to this problem is to sample the parse space for estimation, e.g. Osborne (2000). In this paper we use a dynamic programming technique applied to a packed chart, similar to those proposed by Geman and Johnson (2002) and Miyao and Tsujii (2002), which efficiently estimates the model parameters over the complete space without enumerating parses. The estimation method is similar to the inside-outside algorithm used for estimating a PCFG (Lari and Young, 1990). Miyao and Tsujii (2002) apply their estimation technique to an automatically extract</context>
+<context position="8600" citStr="Hockenmaier, 2003" startWordPosition="1413" endWordPosition="1414">, for each feature fi: z z ˜P(, S)fi() (8) ,S ˜P(S)P(|S) fi() = ,S where the sums are over all possible parse-sentence pairs and ˜P(S) is the relative frequency of sentence S in the data. The value on the left of (8) is the expected value of fi according to the model, Ep fi, and the value on the right is the empirical expected value of fi, Ep˜ fi. Estimating the parameters of a log-linear model requires the values in (8) to be calculated for each feature. Calculating the empirical expected values requires a treebank of CCG derivations plus dependency structures. For this we use CCGbank (Hockenmaier, 2003), a corpus of normalform CCG derivations derived semi-automatically from the Penn Treebank. Following Clark et al., gold standard dependency structures are obtained for each derivation by running a dependency-producing parser over the derivations. The empirical expected value of a feature fi is calculated as follows: Ep˜ fi = 1 Nz j=1 fi(j) (9) N where 1 ... N are the parses in the training data (consisting of a normal-form derivation plus dependency structure) and fi(j) is the number of times fi appears in parse j.2 Parameter estimation also requires calculation of expected values of the</context>
+</contexts>
+<marker>Hockenmaier, 2003</marker>
+<rawString>Julia Hockenmaier. 2003. Data and Models for Statistical Parsing with Combinatory Categorial Grammar. Ph.D. thesis, University of Edinburgh.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Mark Johnson</author>
+<author>Stuart Geman</author>
+<author>Stephen Canon</author>
+<author>Zhiyi Chi</author>
+<author>Stefan Riezler</author>
+</authors>
+<title>Estimators for stochastic ‘unification-based’ grammars.</title>
+<date>1999</date>
+<booktitle>In Proceedings of the 37th Meeting of the ACL,</booktitle>
+<pages>535--541</pages>
+<institution>University of Maryland, MD.</institution>
+<contexts>
+<context position="1893" citStr="Johnson et al., 1999" startWordPosition="279" endWordPosition="282">ndencies inherent in these constructions. We would like the parsing model to include long-range dependencies, but this introduces problems for generative parsing models similar to those described by Abney (1997) for attribute-value grammars; hence Hockenmaier and Steedman do not include such dependencies in their model, and Clark et al. include the dependencies but use an inconsistent model. Following Abney, we propose a loglinear framework which incorporates long-range dependencies as features without loss of consistency. Log-linear models have previously been applied to statistical parsing (Johnson et al., 1999; Toutanova et al., 2002; Riezler et al., 2002; Osborne, 2000). Typically, these approaches have enumerated all possible parses for model estimation and finding the most probable parse. For grammars extracted from the Penn Treebank (in our case CCGbank (Hockenmaier, 2003)), enumerating all parses is infeasible. One approach to this problem is to sample the parse space for estimation, e.g. Osborne (2000). In this paper we use a dynamic programming technique applied to a packed chart, similar to those proposed by Geman and Johnson (2002) and Miyao and Tsujii (2002), which efficiently estimates t</context>
+<context position="17676" citStr="Johnson et al., 1999" startWordPosition="2975" endWordPosition="2978">ughter nodes need to be calculated before the scores for mother nodes (and vice versa for the outside scores). This can easily be achieved by ordering the nodes in the bottom-up CKY parsing order. Note that the inside-outside approach can be combined with any maximum entropy estimation procedure, such as those evaluated by Malouf (2002). Finally, in order to avoid overfitting, we use a Gaussian prior on the parameters of the model (Chen and Rosenfeld, 1999), which requires a slight modification to the update rule in (10). A Gaussian prior also handles the problem of “pseudo-maximal” features (Johnson et al., 1999). 6 The Parser The parser is based on Clark et al. (2002) and takes as input a POS-tagged sentence with a set of possible lexical categories assigned to each word. The supertagger of Clark (2002) provides the lexical categories, with a parameter setting which assigns around 4 categories per word on average. The parsing algorithm is the CKY bottom-up chart-parsing algorithm described in Steedman (2000). The combinatory rules used by the parser are functional application (forward and backward), generalised forward composition, backward composition, generalised backward-crossed composition, and t</context>
+</contexts>
+<marker>Johnson, Geman, Canon, Chi, Riezler, 1999</marker>
+<rawString>Mark Johnson, Stuart Geman, Stephen Canon, Zhiyi Chi, and Stefan Riezler. 1999. Estimators for stochastic ‘unification-based’ grammars. In Proceedings of the 37th Meeting of the ACL, pages 535–541, University of Maryland, MD.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>K Lari</author>
+<author>S J Young</author>
+</authors>
+<title>The estimation of stochastic context-free grammars using the inside-outside algorithm.</title>
+<date>1990</date>
+<journal>Computer Speech and Language,</journal>
+<volume>4</volume>
+<issue>1</issue>
+<pages>56</pages>
+<contexts>
+<context position="2679" citStr="Lari and Young, 1990" startWordPosition="407" endWordPosition="410">most probable parse. For grammars extracted from the Penn Treebank (in our case CCGbank (Hockenmaier, 2003)), enumerating all parses is infeasible. One approach to this problem is to sample the parse space for estimation, e.g. Osborne (2000). In this paper we use a dynamic programming technique applied to a packed chart, similar to those proposed by Geman and Johnson (2002) and Miyao and Tsujii (2002), which efficiently estimates the model parameters over the complete space without enumerating parses. The estimation method is similar to the inside-outside algorithm used for estimating a PCFG (Lari and Young, 1990). Miyao and Tsujii (2002) apply their estimation technique to an automatically extracted Tree Adjoining Grammar using Improved Iterative Scaling (IIS, Della Pietra et al. (1997)). However, their model has significant memory requirements which limits them to using 868 sentences as training data. We use a parallelised version of Generalised Iterative Scaling (GIS, Darroch and Ratcliff (1972)) on a Beowulf cluster which allows the complete WSJ Penn Treebank to be used as training data. This paper assumes a basic knowledge of CCG; see Steedman (2000) and Clark et al. (2002) for an introduction. 2 </context>
+</contexts>
+<marker>Lari, Young, 1990</marker>
+<rawString>K. Lari and S. J. Young. 1990. The estimation of stochastic context-free grammars using the inside-outside algorithm. Computer Speech and Language, 4(1):35– 56.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Robert Malouf</author>
+</authors>
+<title>A comparison of algorithms for maximum entropy parameter estimation.</title>
+<date>2002</date>
+<booktitle>In Proceedings of the Sixth Workshop on Natural Language Learning,</booktitle>
+<pages>49--55</pages>
+<location>Taipei, Taiwan.</location>
+<contexts>
+<context position="17393" citStr="Malouf (2002)" startWordPosition="2929" endWordPosition="2930">c2. The recursive definition is as follows. The outside score for a root disjunctive node is 1, otherwise: The normalisation constant ZS is the sum of the inside scores for the root disjunctive nodes: ZS = dr (16) drR In order to calculate inside scores, the scores for daughter nodes need to be calculated before the scores for mother nodes (and vice versa for the outside scores). This can easily be achieved by ordering the nodes in the bottom-up CKY parsing order. Note that the inside-outside approach can be combined with any maximum entropy estimation procedure, such as those evaluated by Malouf (2002). Finally, in order to avoid overfitting, we use a Gaussian prior on the parameters of the model (Chen and Rosenfeld, 1999), which requires a slight modification to the update rule in (10). A Gaussian prior also handles the problem of “pseudo-maximal” features (Johnson et al., 1999). 6 The Parser The parser is based on Clark et al. (2002) and takes as input a POS-tagged sentence with a set of possible lexical categories assigned to each word. The supertagger of Clark (2002) provides the lexical categories, with a parameter setting which assigns around 4 categories per word on average. The pars</context>
+</contexts>
+<marker>Malouf, 2002</marker>
+<rawString>Robert Malouf. 2002. A comparison of algorithms for maximum entropy parameter estimation. In Proceedings of the Sixth Workshop on Natural Language Learning, pages 49–55, Taipei, Taiwan.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Yusuke Miyao</author>
+<author>Jun’ichi Tsujii</author>
+</authors>
+<title>Maximum entropy estimation for feature forests.</title>
+<date>2002</date>
+<booktitle>In Proceedings of the Human Language Technology Conference,</booktitle>
+<location>San Diego, CA.</location>
+<contexts>
+<context position="2462" citStr="Miyao and Tsujii (2002)" startWordPosition="374" endWordPosition="377">n applied to statistical parsing (Johnson et al., 1999; Toutanova et al., 2002; Riezler et al., 2002; Osborne, 2000). Typically, these approaches have enumerated all possible parses for model estimation and finding the most probable parse. For grammars extracted from the Penn Treebank (in our case CCGbank (Hockenmaier, 2003)), enumerating all parses is infeasible. One approach to this problem is to sample the parse space for estimation, e.g. Osborne (2000). In this paper we use a dynamic programming technique applied to a packed chart, similar to those proposed by Geman and Johnson (2002) and Miyao and Tsujii (2002), which efficiently estimates the model parameters over the complete space without enumerating parses. The estimation method is similar to the inside-outside algorithm used for estimating a PCFG (Lari and Young, 1990). Miyao and Tsujii (2002) apply their estimation technique to an automatically extracted Tree Adjoining Grammar using Improved Iterative Scaling (IIS, Della Pietra et al. (1997)). However, their model has significant memory requirements which limits them to using 868 sentences as training data. We use a parallelised version of Generalised Iterative Scaling (GIS, Darroch and Ratcli</context>
+<context position="9878" citStr="Miyao and Tsujii (2002)" startWordPosition="1618" endWordPosition="1621">summing over all parses (derivation plus dependency structure) for the sentences in the data, a difficult task since the total number of parses can grow exponentially with sentence length. For some sentences in CCGbank, the parser described in Section 6 produces trillions of parses. The next section shows how a packed chart can efficiently represent the parse space, and how GIS applied to the packed chart can be used to estimate the parameters. 4 Packed Charts Geman and Johnson (2002) have proposed a dynamic programming estimation method for packed representations of unification-based parses. Miyao and Tsujii (2002) have proposed a similar method for feature forests which they apply to the derivations of an automatically extracted TreeAdjoining Grammar. We apply Miyao and Tsujii’s method to the derivations and dependency structures produced by our CCG parser. The dynamic programming method relies on a packed chart, in which chart entries of the same type in the same cell are grouped together, and back pointers to the daughters keep track of how an individual entry was created. The intuition behind the dynamic programming is that, for the purposes of building a dependency structure, chart entries of the s</context>
+<context position="13508" citStr="Miyao and Tsujii, 2002" startWordPosition="2206" endWordPosition="2209">h may be long-range dependencies being “passed up” the derivation tree. This means that long-range dependencies can be features in our model, even though the lexical items involved may be far apart in the sentence. 3In this example, the co-indexing of heads in the markedup category for will ((S[dcl]will\NPX,1)/(S[b]2\NPX)) ensures the subject dependency for buy is “passed up” to the subject NP of the resulting category. 4By rule instantiation we mean the local tree arising from the application of a CCG combinatory rule. The packed structure we have described is an example of a feature forest (Miyao and Tsujii, 2002), defined as follows: A feature forest (D is a tuple (C, D, R, γ, ) where • C is a set of conjunctive nodes; • D is a set of disjunctive nodes; • R c D is a set of root disjunctive nodes;5 • γ : D 2C is a conjunctive daughter function; •  : C 2D is a disjunctive daughter function. For each feature function fi : SZ ---&gt; N, there is a corresponding feature function fi : C ---&gt; N which counts the number of times fi appears on a particular conjunctive node.6 The value of fi for a parse is then the sum of the values of fi for each conjunctive node in the parse. 5 Estimation using GIS GIS is a ver</context>
+<context position="16337" citStr="Miyao and Tsujii (2002)" startWordPosition="2736" endWordPosition="2739"> its conjunctive node daughters: d = c (12) cγ(d) The inside score for a conjunctive node, c, can then be defined recursively: µfi(c) (13) i The intuition for calculating outside scores is similar, but a little more involved. The outside score for a conjunctive node, c, is the outside score for its disjunctive node mother: c = d where c  γ(d) (14) The outside score for a disjunctive node is a sum over the mother nodes, of the product of the outside score of the mother, the inside score of the sister, and the feature weights on the mother.8 For example, the 7The notation is taken from Miyao and Tsujii (2002). 8Miyao and Tsujii (2002) ignore the feature weights on the mother, but this ignores some of the probability mass for the outside (at least for the feature forests we have defined). outside score of d4 in Figure 1 is the sum of the following two values: the product of the outside score of c5, the inside score of d5 and the feature weights at c5; and the product of the outside score of c2, the inside score of d3 and the feature weights at c2. The recursive definition is as follows. The outside score for a root disjunctive node is 1, otherwise: The normalisation constant ZS is the sum of the in</context>
+<context position="25370" citStr="Miyao and Tsujii (2002)" startWordPosition="4257" endWordPosition="4260">y tests, each process used approximately 750 MB of RAM, giving a total usage of 30 GB across the cluster. One iteration of GIS takes approximately GIS - CCG IIS - TAG number of features 243,603 5,715 number of sentences 36,400 868 avg. num. of nodes 52,000 17,412 memory usage 30 GB 1.5 GB disk usage 19.9 GB – Table 1: Results compared with Miyao and Tsujii 1 minute. Given the large number of features, we estimate at least 1,000 iterations will be needed for convergence. 8 Conclusions and Further Work Table 1 gives the overall statistics for the model estimation process, and compares them with Miyao and Tsujii (2002). These numbers represent the largest-scale parsing model of which we are aware. Parsing and model estimation on this scale introduce a number of interesting theoretical and computational challenges. We have demonstrated how packed charts and feature forests can be combined to meet the theoretical challenges. We have also described an MPI implementation of GIS which solves the computational challenges. These techniques are necessary for discriminative estimation techniques applied to wide-coverage parsing. We have just begun the process of evaluating parsing performance using the same test dat</context>
+</contexts>
+<marker>Miyao, Tsujii, 2002</marker>
+<rawString>Yusuke Miyao and Jun’ichi Tsujii. 2002. Maximum entropy estimation for feature forests. In Proceedings of the Human Language Technology Conference, San Diego, CA.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Miles Osborne</author>
+</authors>
+<title>Estimation of stochastic attribute-value grammars using an informative sample.</title>
+<date>2000</date>
+<booktitle>In Proceedings of the 18th International Conference on Computational Linguistics,</booktitle>
+<pages>586--592</pages>
+<location>Saarbr¨ucken, Germany.</location>
+<contexts>
+<context position="1955" citStr="Osborne, 2000" startWordPosition="291" endWordPosition="293">model to include long-range dependencies, but this introduces problems for generative parsing models similar to those described by Abney (1997) for attribute-value grammars; hence Hockenmaier and Steedman do not include such dependencies in their model, and Clark et al. include the dependencies but use an inconsistent model. Following Abney, we propose a loglinear framework which incorporates long-range dependencies as features without loss of consistency. Log-linear models have previously been applied to statistical parsing (Johnson et al., 1999; Toutanova et al., 2002; Riezler et al., 2002; Osborne, 2000). Typically, these approaches have enumerated all possible parses for model estimation and finding the most probable parse. For grammars extracted from the Penn Treebank (in our case CCGbank (Hockenmaier, 2003)), enumerating all parses is infeasible. One approach to this problem is to sample the parse space for estimation, e.g. Osborne (2000). In this paper we use a dynamic programming technique applied to a packed chart, similar to those proposed by Geman and Johnson (2002) and Miyao and Tsujii (2002), which efficiently estimates the model parameters over the complete space without enumeratin</context>
+</contexts>
+<marker>Osborne, 2000</marker>
+<rawString>Miles Osborne. 2000. Estimation of stochastic attribute-value grammars using an informative sample. In Proceedings of the 18th International Conference on Computational Linguistics, pages 586–592, Saarbr¨ucken, Germany.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Stefan Riezler</author>
+<author>Tracy H King</author>
+<author>Ronald M Kaplan</author>
+<author>Richard Crouch</author>
+<author>John T Maxwell</author>
+<author>Mark Johnson</author>
+</authors>
+<title>Parsing the Wall Street Journal using a Lexical-Functional Grammar and discriminative estimation techniques.</title>
+<date>2002</date>
+<booktitle>In Proceedings of the 40th Meeting of the ACL,</booktitle>
+<pages>271--278</pages>
+<location>Philadelphia, PA.</location>
+<contexts>
+<context position="1939" citStr="Riezler et al., 2002" startWordPosition="287" endWordPosition="290">ould like the parsing model to include long-range dependencies, but this introduces problems for generative parsing models similar to those described by Abney (1997) for attribute-value grammars; hence Hockenmaier and Steedman do not include such dependencies in their model, and Clark et al. include the dependencies but use an inconsistent model. Following Abney, we propose a loglinear framework which incorporates long-range dependencies as features without loss of consistency. Log-linear models have previously been applied to statistical parsing (Johnson et al., 1999; Toutanova et al., 2002; Riezler et al., 2002; Osborne, 2000). Typically, these approaches have enumerated all possible parses for model estimation and finding the most probable parse. For grammars extracted from the Penn Treebank (in our case CCGbank (Hockenmaier, 2003)), enumerating all parses is infeasible. One approach to this problem is to sample the parse space for estimation, e.g. Osborne (2000). In this paper we use a dynamic programming technique applied to a packed chart, similar to those proposed by Geman and Johnson (2002) and Miyao and Tsujii (2002), which efficiently estimates the model parameters over the complete space wi</context>
+</contexts>
+<marker>Riezler, King, Kaplan, Crouch, Maxwell, Johnson, 2002</marker>
+<rawString>Stefan Riezler, Tracy H. King, Ronald M. Kaplan, Richard Crouch, John T. Maxwell III, and Mark Johnson. 2002. Parsing the Wall Street Journal using a Lexical-Functional Grammar and discriminative estimation techniques. In Proceedings of the 40th Meeting of the ACL, pages 271–278, Philadelphia, PA.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Ronald Rosenfeld</author>
+</authors>
+<title>A maximum entropy approach to adaptive statistical language modeling.</title>
+<date>1996</date>
+<journal>Computer, Speech and Language,</journal>
+<pages>10--187</pages>
+<contexts>
+<context position="7956" citStr="Rosenfeld, 1996" startWordPosition="1299" endWordPosition="1300">(S) i i where (S)  SZ is the set of possible parses for S. The advantage of a log-linear model is that the features can be arbitrary functions over parses. This means that any dependencies – including overlapping and long-range dependencies – can be included in the model, irrespective of whether those dependencies are independent. The theory underlying log-linear models is described in Della Pietra et al. (1997) and Berger et al. (1996). Briefly, the log-linear form in (6) is derived by choosing the model with maximum entropy from a set of models that satisfy a certain set of constraints (Rosenfeld, 1996). The constraints are that, for each feature fi: z z ˜P(, S)fi() (8) ,S ˜P(S)P(|S) fi() = ,S where the sums are over all possible parse-sentence pairs and ˜P(S) is the relative frequency of sentence S in the data. The value on the left of (8) is the expected value of fi according to the model, Ep fi, and the value on the right is the empirical expected value of fi, Ep˜ fi. Estimating the parameters of a log-linear model requires the values in (8) to be calculated for each feature. Calculating the empirical expected values requires a treebank of CCG derivations plus dependency structures.</context>
+</contexts>
+<marker>Rosenfeld, 1996</marker>
+<rawString>Ronald Rosenfeld. 1996. A maximum entropy approach to adaptive statistical language modeling. Computer, Speech and Language, 10:187–228.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Mark Steedman</author>
+</authors>
+<title>The Syntactic Process.</title>
+<date>2000</date>
+<publisher>The MIT Press,</publisher>
+<location>Cambridge, MA.</location>
+<contexts>
+<context position="1032" citStr="Steedman (2000)" startWordPosition="149" endWordPosition="150">h CCG was designed to handle. Log-linear models have previously been applied to statistical parsing, under the assumption that all possible parses for a sentence can be enumerated. Enumerating all parses is infeasible for large grammars; however, dynamic programming over a packed chart can be used to efficiently estimate the model parameters. We describe a parellelised implementation which runs on a Beowulf cluster and allows the complete WSJ Penn Treebank to be used for estimation. 1 Introduction Statistical parsing models have recently been developed for Combinatory Categorial Grammar (CCG, Steedman (2000)) and used in wide-coverage parsers applied to the WSJ Penn Treebank (Clark et al., 2002; Hockenmaier and Steedman, 2002). An attraction of CCG is its elegant treatment of coordination and extraction, allowing recovery of the long-range dependencies inherent in these constructions. We would like the parsing model to include long-range dependencies, but this introduces problems for generative parsing models similar to those described by Abney (1997) for attribute-value grammars; hence Hockenmaier and Steedman do not include such dependencies in their model, and Clark et al. include the dependen</context>
+<context position="3231" citStr="Steedman (2000)" startWordPosition="496" endWordPosition="497">ide algorithm used for estimating a PCFG (Lari and Young, 1990). Miyao and Tsujii (2002) apply their estimation technique to an automatically extracted Tree Adjoining Grammar using Improved Iterative Scaling (IIS, Della Pietra et al. (1997)). However, their model has significant memory requirements which limits them to using 868 sentences as training data. We use a parallelised version of Generalised Iterative Scaling (GIS, Darroch and Ratcliff (1972)) on a Beowulf cluster which allows the complete WSJ Penn Treebank to be used as training data. This paper assumes a basic knowledge of CCG; see Steedman (2000) and Clark et al. (2002) for an introduction. 2 The Grammar Following Clark et al. (2002), we augment CCG lexical categories with head and dependency information. For example, the extended category for persuade is as follows: persuade :=((S[dcl]persuade\NP1)/(S[to]2\NPX))/NPX,3 (1) The feature [dcl] indicates a declarative sentence; the resulting S[dcl] is headed by persuade; and the numbers indicate dependency relations. The variable X denotes a head, identifying the head of the infinitival complement’s subject with the head of the object, thus capturing the object control relation. For examp</context>
+<context position="18080" citStr="Steedman (2000)" startWordPosition="3045" endWordPosition="3046"> parameters of the model (Chen and Rosenfeld, 1999), which requires a slight modification to the update rule in (10). A Gaussian prior also handles the problem of “pseudo-maximal” features (Johnson et al., 1999). 6 The Parser The parser is based on Clark et al. (2002) and takes as input a POS-tagged sentence with a set of possible lexical categories assigned to each word. The supertagger of Clark (2002) provides the lexical categories, with a parameter setting which assigns around 4 categories per word on average. The parsing algorithm is the CKY bottom-up chart-parsing algorithm described in Steedman (2000). The combinatory rules used by the parser are functional application (forward and backward), generalised forward composition, backward composition, generalised backward-crossed composition, and type raising. There is also a coordination rule which conjoins categories of the same type. Restrictions are placed on some of the rules, such as that given by d1 c2 d3 c3 c4 c5 c6 c7 c1 d2 d4 d5 d6 c8 c9 c10 inside outside Epfi =  fi(c) c c (11) S ˜P(S) 1 ZS cCs c = d d(c) i d = c d  (15) {c|d(c)} {d|d(c),d#d} i µfi(c) i  Steedman (2000, p.62) for backward-cr</context>
+</contexts>
+<marker>Steedman, 2000</marker>
+<rawString>Mark Steedman. 2000. The Syntactic Process. The MIT Press, Cambridge, MA.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>Kristina Toutanova</author>
+<author>Christopher Manning</author>
+<author>Stuart Shieber</author>
+<author>Dan Flickinger</author>
+<author>Stephan Oepen</author>
+</authors>
+<title>Parse disambiguation for a rich HPSG grammar.</title>
+<date>2002</date>
+<booktitle>In Proceedings of the First Workshop on Treebanks and Linguistic Theories,</booktitle>
+<pages>253--263</pages>
+<location>Sozopol, Bulgaria.</location>
+<contexts>
+<context position="1917" citStr="Toutanova et al., 2002" startWordPosition="283" endWordPosition="286">hese constructions. We would like the parsing model to include long-range dependencies, but this introduces problems for generative parsing models similar to those described by Abney (1997) for attribute-value grammars; hence Hockenmaier and Steedman do not include such dependencies in their model, and Clark et al. include the dependencies but use an inconsistent model. Following Abney, we propose a loglinear framework which incorporates long-range dependencies as features without loss of consistency. Log-linear models have previously been applied to statistical parsing (Johnson et al., 1999; Toutanova et al., 2002; Riezler et al., 2002; Osborne, 2000). Typically, these approaches have enumerated all possible parses for model estimation and finding the most probable parse. For grammars extracted from the Penn Treebank (in our case CCGbank (Hockenmaier, 2003)), enumerating all parses is infeasible. One approach to this problem is to sample the parse space for estimation, e.g. Osborne (2000). In this paper we use a dynamic programming technique applied to a packed chart, similar to those proposed by Geman and Johnson (2002) and Miyao and Tsujii (2002), which efficiently estimates the model parameters over</context>
+</contexts>
+<marker>Toutanova, Manning, Shieber, Flickinger, Oepen, 2002</marker>
+<rawString>Kristina Toutanova, Christopher Manning, Stuart Shieber, Dan Flickinger, and Stephan Oepen. 2002. Parse disambiguation for a rich HPSG grammar. In Proceedings of the First Workshop on Treebanks and Linguistic Theories, pages 253–263, Sozopol, Bulgaria.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>

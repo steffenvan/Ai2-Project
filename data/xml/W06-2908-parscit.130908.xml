@@ -1,0 +1,1226 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<algorithms version="110505">
+<algorithm name="SectLabel" version="110505">
+<variant no="0" confidence="0.000004">
+<title confidence="0.951336">
+Semantic Role Recognition using Kernels on Weighted Marked Ordered
+Labeled Trees
+</title>
+<author confidence="0.993115">
+Jun’ichi Kazama and Kentaro Torisawa
+</author>
+<affiliation confidence="0.99758">
+Japan Advanced Institute of Science and Technology (JAIST)
+</affiliation>
+<address confidence="0.68531">
+Asahidai 1-1, Nomi, Ishikawa, 923-1292 Japan
+</address>
+<email confidence="0.992665">
+{kazama, torisawa}@jaist.ac.jp
+</email>
+<sectionHeader confidence="0.997305" genericHeader="abstract">
+Abstract
+</sectionHeader>
+<bodyText confidence="0.999995857142857">
+We present a method for recognizing se-
+mantic role arguments using a kernel on
+weighted marked ordered labeled trees
+(the WMOLT kernel). We extend the
+kernels on marked ordered labeled trees
+(Kazama and Torisawa, 2005) so that the
+mark can be weighted according to its im-
+portance. We improve the accuracy by
+giving more weights on subtrees that con-
+tain the predicate and the argument nodes
+with this ability. Although Kazama and
+Torisawa (2005) presented fast training
+with tree kernels, the slow classification
+during runtime remained to be solved. In
+this paper, we give a solution that uses an
+efficient DP updating procedure applica-
+ble in argument recognition. We demon-
+strate that the WMOLT kernel improves
+the accuracy, and our speed-up method
+makes the recognition more than 40 times
+faster than the naive classification.
+</bodyText>
+<sectionHeader confidence="0.999471" genericHeader="introduction">
+1 Introduction
+</sectionHeader>
+<bodyText confidence="0.998005785714286">
+Semantic role labeling (SRL) is a task that recog-
+nizes the arguments of a predicate (verb) in a sen-
+tence and assigns the correct role to each argument.
+As this task is recognized as an important step after
+(or the last step of) syntactic analysis, many stud-
+ies have been conducted to achieve accurate seman-
+tic role labeling (Gildea and Jurafsky, 2002; Mos-
+chitti, 2004; Hacioglu et al., 2004; Punyakanok et
+al., 2004; Pradhan et al., 2005a; Pradhan et al.,
+2005b; Toutanova et al., 2005).
+Most of the studies have focused on machine
+learning because of the availability of standard
+datasets, such as PropBank (Kingsbury and Palmer,
+2002). Naturally, the usefulness of parse trees in
+</bodyText>
+<page confidence="0.98088">
+53
+</page>
+<bodyText confidence="0.999776525">
+this task can be anticipated. For example, the recent
+CoNLL 2005 shared task (Carreras and M`arquez,
+2005) provided parse trees for use and their useful-
+ness was ensured. Most of the methods heuristically
+extract features from parse trees, and from other
+sources, and use them in machine learning methods
+based on feature vector representation. As a result,
+these methods depend on feature engineering, which
+is time-consuming.
+Tree kernels (Collins and Duffy, 2001; Kashima
+and Koyanagi, 2002) have been proposed to directly
+handle trees in kernel-based methods, such as SVMs
+(Vapnik, 1995). Tree kernels calculate the similar-
+ity between trees, taking into consideration all of the
+subtrees, and, therefore there is no need for such fea-
+ture engineering.
+Moschitti and Bejan (2004) extensively studied
+tree kernels for semantic role labeling. However,
+they reported that they could not successfully build
+an accurate argument recognizer, although the role
+assignment was improved. Although Moschitti et al.
+(2005) reported on argument recognition using tree
+kernels, it was a preliminary evaluation because they
+used oracle parse trees.
+Kazama and Torisawa (2005) proposed a new tree
+kernel for node relation labeling, as which SRL can
+be cast. This kernel is defined on marked ordered la-
+beled trees, where a node can have a mark to indicate
+the existence of a relation. We refer to this kernel
+as the MOLT kernel. Compared to (Moschitti and
+Bejan, 2004) where tree fragments are heuristically
+extracted before applying tree kernels, the MOLT
+kernel is general and desirable since it does not re-
+quire such fragment extraction. However, the eval-
+uation conducted by Kazama and Torisawa (2005)
+was limited to preliminary experiments for role as-
+signment. In this study, we first evaluated the per-
+formance of the MOLT kernel for argument recogni-
+tion, and found that the MOLT kernel cannot achieve
+a high accuracy if used in its original form.
+</bodyText>
+<note confidence="0.89395">
+Proceedings of the 10th Conference on Computational Natural Language Learning (CoNLL -X),
+pages 53–60, New York City, June 2006. @c 2006 Association for Computational Linguistics
+</note>
+<figure confidence="0.996834806451613">
+S
+NP VP
+(a)
+S
+NP VP
+(b)
+S
+NP VP
+(c)
+*1
+NP VP
+S
+(a&apos;)
+PP
+PP
+PP
+PP
+NP
+NP
+NP
+NP
+NP
+NP
+NP
+NP
+*0
+PRP VBD DT NN IN DT NN
+PRP VBD DT NN IN DT NN
+PRP VBD DT NN IN DT NN
+PRP VBD DT NN IN DT NN
+I saw a cat in the park I saw a cat in the park I saw a cat in the park I saw a cat in the park
+</figure>
+<figureCaption confidence="0.9929915">
+Figure 1: (a)-(c): Argument recognition as node relation recognition. (a’): relation (a) represented as marked
+ordered tree.
+</figureCaption>
+<bodyText confidence="0.999950152173913">
+Therefore, in this paper we propose a modifica-
+tion of the MOLT kernel, which greatly improves
+the accuracy. The problem with the original MOLT
+kernel is that it treats subtrees with one mark, i.e.,
+those including only the argument or the predicate
+node, and subtrees with two marks, i.e., those in-
+cluding both the argument and the predicate nodes
+equally, although the latter is likely to be more im-
+portant for distinguishing difficult arguments. Thus,
+we modified the MOLT kernel so that the marks can
+be weighted in order to give large weights to the sub-
+trees with many marks. We call the modified kernel
+the WMOLT kernel (the kernel on weighted marked
+ordered labeled trees). We show that this modifica-
+tion greatly improves the accuracy when the weights
+for marks are properly tuned.
+One of the issues that arises when using tree ker-
+nels is time complexity. In general, tree kernels can
+be calculated in O(|T1||T2|) time, where |Ti |is the
+number of nodes in tree Ti, using dynamic program-
+ming (DP) procedures (Collins and Duffy, 2001;
+Kashima and Koyanagi, 2002). However, this cost
+is not negligible in practice. Kazama and Torisawa
+(2005) proposed a method that drastically speeds up
+the calculation during training by converting trees
+into efficient vectors using a tree mining algorithm.
+However, the slow classification during runtime re-
+mained an open problem.
+We propose a method for speeding up the runtime
+classification for argument recognition. In argument
+recognition, we determine whether a node is an ar-
+gument or not for all the nodes in a tree . This
+requires a series of calculations between a support
+vector tree and a tree with slightly different mark-
+ing. By exploiting this property, we can efficiently
+update DP cells to obtain the kernel value with less
+computational cost.
+In the experiments, we demonstrated that the
+WMOLT kernel drastically improved the accuracy
+and that our speed-up method enabled more than
+40 times faster argument recognition. Despite these
+successes, the performance of our current system is
+F1 = 78.22 on the CoNLL 2005 evaluation set when
+using the Charniak parse trees, which is far worse
+than the state-of-the-art system. We will present
+possible reasons and future directions.
+</bodyText>
+<sectionHeader confidence="0.97174" genericHeader="method">
+2 Semantic Role Labeling
+</sectionHeader>
+<bodyText confidence="0.9999056">
+Semantic role labeling (SRL) recognizes the argu-
+ments of a given predicate and assigns the correct
+role to each argument. For example, the sentence “I
+saw a cat in the park” will be labeled as follows with
+respect to the predicate “see”.
+</bodyText>
+<equation confidence="0.888815">
+[A0 I] [V saw] [A1 a cat] [AM-LOC in the park]
+</equation>
+<bodyText confidence="0.99998625">
+In the example, A0, A1, and AM-LOC are the roles
+assigned to the arguments. In the CoNLL 2005
+dataset, there are the numbered arguments (AX)
+whose semantics are predicate dependent, the ad-
+juncts (AM-X), and the references (R-X) for rel-
+ative clauses.
+Many previous studies employed two-step SRL
+methods, where (1) we first recognize the argu-
+ments, and then (2) classify the argument to the cor-
+rect role. We also assume this two-step processing
+and focus on the argument recognition.
+Given a parse tree, argument recognition can be
+cast as the classification of tree nodes into two
+classes, “ARG” and “NO-ARG”. Then, we consider
+the words (a phrase) that are the descendants of an
+“ARG” node to be an argument. Since arguments
+are defined for a given predicate, this classification
+is the recognition of a relation between the predicate
+and tree nodes. Thus, we want to build a binary clas-
+sifier that returns a +1 for correct relations and a -1
+for incorrect relations. For the above example, the
+classifier will output a +1 for the relations indicated
+by (a), (b), and (c) in Figure 1 and a -1 for the rela-
+tions between the predicate node and other nodes.
+</bodyText>
+<page confidence="0.989756">
+54
+</page>
+<bodyText confidence="0.999981777777778">
+Since the task is the classification of trees with
+node relations, tree kernels for usual ordered la-
+beled trees, such as those proposed by Collins and
+Duffy (2001) and Kashima and Koyanagi (2002),
+are not useful. Kazama and Torisawa (2005) pro-
+posed to represent a node relation in a tree as a
+marked ordered labeled tree and presented a kernel
+for it (MOLT kernel). We adopted the MOLT kernel
+and extend it for accurate argument recognition.
+</bodyText>
+<sectionHeader confidence="0.999618" genericHeader="method">
+3 Kernels for Argument Recognition
+</sectionHeader>
+<subsectionHeader confidence="0.985284">
+3.1 Kernel-based classification
+</subsectionHeader>
+<bodyText confidence="0.999911083333333">
+Kernel-based methods, such as support vector ma-
+chines (SVMs) (Vapnik, 1995), consider a mapping
+4b(x) that maps the object x into a, (usually high-
+dimensional), feature space and learn a classifier in
+this space. A kernel function K(xi, xj) is a function
+that calculates the inner product (4b(xi), 4b(xj)) in
+the feature space without explicitly computing 4b(x),
+which is sometimes intractable. Then, any classifier
+that is represented by using only the inner products
+between the vectors in a feature space can be re-
+written using the kernel function. For example, an
+SVM classifier has the form:
+</bodyText>
+<equation confidence="0.992341">
+f(x) = ∑ αiK(xi, x) + b,
+i
+</equation>
+<bodyText confidence="0.999993833333333">
+where αi and b are the parameters learned in the
+training. With kernel-based methods, we can con-
+struct a powerful classifier in a high-dimensional
+feature space. In addition, objects x do not need
+to be vectors as long as a kernel function is defined
+(e.g., x can be strings, trees, or graphs).
+</bodyText>
+<subsectionHeader confidence="0.998842">
+3.2 MOLT kernel
+</subsectionHeader>
+<bodyText confidence="0.9998965">
+A marked ordered labeled tree (Kazama and Tori-
+sawa, 2005) is an ordered labeled tree in which each
+node can have a mark in addition to a label. We can
+encode a k-node relation by using k distinct marks.
+In this study, we determine an argument node with-
+out considering other arguments of the same pred-
+icate, i.e., we represent an argument relation as a
+two-node relation using two marks. For example,
+the relation (a) in Figure 1 can be represented as the
+marked ordered labeled tree (a’).1
+</bodyText>
+<footnote confidence="0.799242">
+1Note that we use mark *0 for the predicate node and mark
+*1 for the argument node.
+</footnote>
+<tableCaption confidence="0.954886">
+Table 1: Notations for MOLT kernel.
+</tableCaption>
+<listItem confidence="0.999531583333333">
+• ni denotes a node of a tree. In this paper, ni is an ID assigned in the
+post-order traversal.
+• |Ti |denotes the number of nodes in tree Ti.
+• l(ni) returns the label of node ni.
+• m(ni) returns the mark of node ni. If ni has no mark, m(ni)
+returns the special mark no-mark.
+• marked(ni) returns true iff m(ni) is not no-mark.
+• nc(ni) is the number of children of node ni.
+• chk(ni) is the k-th child of node ni.
+• pa(ni) is the parent of node ni.
+• root(Ti) is the root node of Ti
+• ni ≽ nj means that ni is an elder sister of nj.
+</listItem>
+<bodyText confidence="0.995540333333333">
+Kazama and Torisawa (2005) presented a kernel
+on marked ordered trees (the MOLT kernel), which
+is defined as:2
+</bodyText>
+<equation confidence="0.998125">
+K(T1, T2) = ∑E W(Si) · #Si(T1) · #Si(T2),
+i=1
+</equation>
+<bodyText confidence="0.999417666666667">
+where Si is a possible subtree and #Si(Tj) is
+the number of times Si is included in Tj. The
+mapping corresponding to this kernel is 4b(T) =
+</bodyText>
+<equation confidence="0.6575895">
+√ √
+( W (S1)#S1(T),··· , W (SE)#SE(T)), which
+</equation>
+<bodyText confidence="0.9998176">
+maps the tree into the feature space of all the possi-
+ble subtrees.
+The tree inclusion is defined in many ways. For
+example, Kashima and Koyanagi (2002) presented
+the following type of inclusion.
+</bodyText>
+<listItem confidence="0.577893">
+1 DEFINITION S is included in T iff there exists a
+one-to-one function ψ from a node of S to a node
+</listItem>
+<equation confidence="0.597977333333333">
+of T, such that (i) pa(ψ(ni)) = ψ(pa(ni)), (ii)
+ψ(ni) r ψ(nj) iff ni r nj, , and (iii) l(ψ(ni)) =
+l(ni) (and m(ψ(ni)) = m(ni) in the MOLT kernel).
+</equation>
+<bodyText confidence="0.999514">
+See Table 1 for the meaning of each function. This
+definition means that any subtrees preserving the
+parent-child relation, the sibling relation, and label-
+marks, are allowed. In this paper, we employ this
+definition, since Kazama and Torisawa (2005) re-
+ported that the MOLT kernel with this definition has
+a higher accuracy than one with the definition pre-
+sented by Collins and Duffy (2001).
+W(Si) is the weight of subtree Si. The weight-
+ing in Kazama and Torisawa (2005) is written as fol-
+</bodyText>
+<footnote confidence="0.9858005">
+2This notation is slightly different from (Kazama and Tori-
+sawa, 2005).
+</footnote>
+<page confidence="0.99829">
+55
+</page>
+<tableCaption confidence="0.915740666666667">
+Table 2: Example of subtree inclusion and sub-
+tree weights. The last row shows the weights for
+WMOLT kernel.
+</tableCaption>
+<bodyText confidence="0.773710666666667">
+T included subtrees
+W(Si) 0 λ λ λ2 λ2 λ3
+W(Si) 0 λγ λγ λ2γ λ2γ2 λ3γ2
+</bodyText>
+<equation confidence="0.9775756">
+lows.
+{
+A|Si |if marked(Si),
+W(Si) = (1)
+0 otherwise,
+</equation>
+<bodyText confidence="0.999843952380952">
+where marked(Si) returns true iff marked(ni) =
+true for at least one node in tree Si. By this weight-
+ing, only the subtrees with at least one mark are con-
+sidered. The idea behind this is that subtrees having
+no marks are not useful for relation recognition or
+labeling. A (0 &lt; A &lt; 1) is a factor to prevent the ker-
+nel values from becoming too large, which has been
+used in previous studies (Collins and Duffy, 2001;
+Kashima and Koyanagi, 2002).
+Table 2 shows an example of subtree inclusion
+and the weights given to each included subtree. Note
+that the subtrees are treated differently when the
+markings are different, even if the labels are the
+same.
+Although the dimension of the feature space
+is exponential, tree kernels can be calculated in
+O(|T1||T2|) time using dynamic programming (DP)
+procedures (Collins and Duffy, 2001; Kashima and
+Koyanagi, 2002). The MOLT kernel also has an
+O(|T1||T2|) DP procedure (Kazama and Torisawa,
+2005).
+</bodyText>
+<subsectionHeader confidence="0.990069">
+3.3 WMOLT kernel
+</subsectionHeader>
+<bodyText confidence="0.999932">
+Although Kazama and Torisawa (2005) evaluated
+the MOLT kernel for SRL, the evaluation was only
+on the role assignment task and was preliminary. We
+evaluated the MOLT kernel for argument recogni-
+tion, and found that the MOLT kernel cannot achieve
+a high accuracy for argument recognition.
+The problem is that the MOLT kernel treats sub-
+trees with one mark and subtrees with two marks
+equally, although the latter seems to be more impor-
+tant in distinguishing difficult arguments.
+Consider the sentence, “He said industry should
+build plants”. For “say”, we have the following la-
+beling.
+[A0 He] [V said] [A1 industry should build plants]
+On the other hand, for “build”, we have
+He said [A0 industry] [AM-MOD should] [V build]
+[A1 plants].
+As can be seen, “he” is the A0 argument of “say”,
+but not an argument of “build”. Thus, our classifier
+should return a +1 for the tree where “he” is marked
+when the predicate is “say”, and a -1 when the pred-
+icate is “build”. Although the subtrees around the
+node for “say” and “build” are different, the subtrees
+around the node for “he” are identical for both cases.
+If “he” is often the A0 argument in the corpus, it is
+likely that the classifier returns a +1 even for “build”.
+Although the subtrees containing both the predicate
+and the argument nodes are considered in the MOLT
+kernel, they are given relatively small weights by Eq.
+(1), since such subtrees are large.
+Thus, we modify the MOLT kernel so that the
+mark can be weighted according to its importance
+and the more marks the subtrees contain, the more
+weights they get. The modification is simple. We
+change the definition of W(Si) as follows.
+</bodyText>
+<equation confidence="0.991572333333333">
+{ W(Si)
+= A|Si |∏ni∈Si &apos;y(m(ni)) if marked(Si),
+0 otherwise,
+</equation>
+<bodyText confidence="0.99252">
+where &apos;y(m) (&gt; 1) is the weight of mark m. We
+call a kernel with this weight the WMOLT kernel.
+In this study, we assume &apos;y(no-mark) = 1 and
+&apos;y(*0) = &apos;y(*1) = &apos;y. Then, the weight is simpli-
+fied as follows.
+</bodyText>
+<equation confidence="0.983606666666667">
+{
+A|Si|&apos;y#m(Si) if marked(Si),
+0 otherwise,
+</equation>
+<bodyText confidence="0.999946">
+where #m(Si) is the number of marked nodes in
+Si. The last row in Table 2 shows how the subtree
+weights change by introducing this mark weighting.
+For the WMOLT kernel, we can derive
+O(|T1||T2|) DP procedure by slightly modify-
+ing the procedure presented by Kazama and
+Torisawa (2005). The method for speeding up
+training described in Kazama and Torisawa (2005)
+can also be applied with a slight modification.
+</bodyText>
+<equation confidence="0.9736575">
+W(Si) =
+56
+Algorithm 3.1: WMOLT-KERNEL(T1, T2)
+for n1 ← 1 to |T1 |do // nodes are ordered by the post-order traversal
+m ← marked(n1)
+for n2 ← 1 to |T2 |do // actually iterate only on n2 with l(n1) = l(n2)
+if l(n1) ≠ l(n2) or m(n1) ≠ m(n2) then
+C(n1, n2) ← 0 Cr(n1, n2) ← 0
+</equation>
+<bodyText confidence="0.509061">
+else if n1 and n2 are leaf nodes then
+</bodyText>
+<figure confidence="0.9783800625">
+if m then C(n1, n2) ← A · γ; Cr(n1, n2) ← A · γ else C(n1, n2) ← A; Cr(n1, n2) ← 0
+else
+S(0, j) ← 1, S(i, 0) ← 1 (i ∈ [0, nc(n1)], j ∈ [0, nc(n2)])
+if m then Sr(0, j) ← 1, Sr(i, 0) ← 1 else Sr(0, j) ← 0, Sr(i, 0) ← 0
+for i ← 1 to nc(n1) do
+for j ← 1 to nc(n2) do
+S(i, j) ← S(i−1, j) + S(i, j−1) − S(i−1, j−1) + S(i−1, j−1) · C(chi(n1), chj(n2))
+Sr(i, j) ← Sr(i−1, j) + Sr(i, j−1) − Sr(i−1, j−1) + Sr(i−1, j−1) · C(chi(n1), chj(n2))
++S(i−1, j−1) · Cr(chi(n1), chj(n2)) − Sr(i−1, j−1) · Cr(chi(n1), chj(n2))
+if m then C(n1, n2) ← A · γ · S(nc(n1), nc(n2)) else C(n1, n2) ← A · S(nc(n1), nc(n2))
+if m then Cr(n1, n2) ← A · γ · Sr(nc(n1), nc(n2)) else Cr(n1, n2) ← A · Sr(nc(n1), nc(n2))
+return (En1 1 1 1 EI 22I 1 Cr(n1, n2))
+(A)
+8
+&lt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt; &gt;
+&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;:
+</figure>
+<bodyText confidence="0.839997">
+We describe this DP procedure in some detail.
+The key is the use of two DP matrices of size
+</bodyText>
+<equation confidence="0.5227195">
+|T1 |x |T2|. The first is C(n1, n2) defined as:
+C(n1, n2)≡ ESi W′(Si) · #Si(T1 A n1) · #Si(T2 A n2),
+</equation>
+<bodyText confidence="0.985625">
+where #Si(Tj △ nk) represents the number of times
+subtree Si is included in tree Tj with ψ(root(Si)) =
+nk. W′(Si) is defined as W′(Si) = A|Si|y#m(Si).
+This means that this matrix records the values that
+ignore whether marked(Si) = true or not. The
+</bodyText>
+<equation confidence="0.875122714285714">
+second is Cr(n1, n2) defined as:
+Cr(n1,n2)≡ ESi W(Si) · #Si(T1 A n1) · #Si(T2 A n2).
+With these matrices, the kernel is calculated as:
+∑
+K(T1, T2) =
+n1ET1
+C(n1, n2) and Cr(n1, n2) are calculated recur-
+</equation>
+<bodyText confidence="0.999842333333333">
+sively, starting from the leaves of the trees. The re-
+cursive procedure is shown in Algorithm 3.1. See
+also Table 1 for the meaning of the functions used.
+</bodyText>
+<sectionHeader confidence="0.996071" genericHeader="method">
+4 Fast Argument Recognition
+</sectionHeader>
+<bodyText confidence="0.994799">
+We use the SVMs for the classifiers in argument
+recognition in this study and describe the fast clas-
+sification method based on SVMs.3 We denote a
+marked ordered labeled tree where node nk of an
+ordered labeled tree U is marked by mark X, nl by
+Y , and so on, by UOjnk = X, nl = Y,... }.
+</bodyText>
+<footnote confidence="0.96857">
+3The method can be applied to a wide range of kernel-based
+methods that have the same structure as SVMs.
+</footnote>
+<equation confidence="0.861206071428571">
+Algorithm 4.1: CALCULATE-T(U, Tj)
+procedure FAST-UPDATE(nk)
+diff ← 0, m(nk) ← *1, U ← φ
+for n2 ← 1 to |Tj |do change(n2) ← true
+n1 ← nk
+while n1 ≠ nil do
+8
+&gt;for n2 ← 1 to |Tj |do
+&gt;&gt;&gt;&gt;// actually iterate only on n2 with l(pa(n1)) = l(n2)
+&gt;&gt;&gt;nchange(n2) ← false
+&gt;&gt;&gt;&gt;for n2 ← 1 to |Tj |do
+&lt;&gt;&gt;&gt;&gt;// actually iterate only on n2 with l(n1) = l(n2)
+if change(n2) then
+&gt;&gt;pre ← Cr(n1, n2), U ← U ∪ (n1, n2)
+&gt;&gt;&gt;update C(n1, n2) and Cr(n1, n2)
+&gt;&gt;&gt;&gt;&gt;using (A) of Algorithm 3.1
+&gt;&gt;diff += (Cr(n1, n2) − pre)
+&gt;&gt;&gt;&gt;if pa(n2) ≠ nil then nchange(pa(n2)) ← true
+: n1 ← pa(n1), change ← nchange
+for (n1, n2) ∈ U do //restore DP cells
+C(n1, n2) ← C′(n1, n2), Cr(n1, n2) ← Cr′(n1, n2)
+m(nk) ← no-mark
+return (diff )
+main
+m(nv) ← ∗0, k ← WMOLT-KERNEL(U, Tj)
+C′(n1, n2) ← C(n1, n2), Cr′(n1, n2) ← Cr(n1, n2)
+for nk ← 1 to |U |do (nk ≠ nv)
+diff ← FAST-UPDATE(nk), t(nk) ← k + diff
+</equation>
+<bodyText confidence="0.999882">
+Given a sentence represented by tree U and the
+node for the target predicate nv, the argument recog-
+nition requires the calculation of:
+</bodyText>
+<equation confidence="0.987738">
+∑s(nk) = αjK(UOjnv =*0, nk =*11, Tj)+b,
+TjESV
+</equation>
+<bodyText confidence="0.9250732">
+(2)
+for all nk E U (74 nv), where SV represents the
+support vectors. Naively, this requires O(|U |x
+|SV |x |U||Tj|) time, which is rather costly in prac-
+tice.
+</bodyText>
+<equation confidence="0.712759">
+∑ Cr(n1, n2).
+n2ET2
+</equation>
+<page confidence="0.991492">
+57
+</page>
+<bodyText confidence="0.999483583333333">
+However, if we exploit the fact that U@{nv =
+*0, nk = *1} is different from U@{nv = *0} at one
+node, we can greatly speed up the above calculation.
+At first, we calculate K(U@{nv = *0},Tj) using
+the DP procedure presented in the previous section,
+and then calculate K(U@{nv = *0, nk = *1},Tj)
+using a more efficient DP that updates only the val-
+ues of the necessary DP cells of the first DP. More
+specifically, we only need to update the DP cells in-
+volving the ancestor nodes of nk.
+Here we show the procedure for calculating
+t(nk) = K(U@{nv = *0,nk = *1},Tj) for all
+nk for a given support vector Tj, which will suf-
+fice for calculating s(nk). Algorithm 4.1 shows the
+procedure. For each nk, this procedure updates at
+most (nk’s depth) × |Tj |cells, which is much less
+than |U |× |Tj |cells. In addition, when updating
+the cells for (n1, n2), we only need to update them
+when the cells for any child of n2 have been updated
+in the calculation of the cells for the children of n1.
+To achieve this, change(n2) in the algorithm stores
+whether the cells of any child of n2 have been up-
+dated. This technique will also reduce the number
+of updated cells.
+</bodyText>
+<sectionHeader confidence="0.994331" genericHeader="method">
+5 Non-overlapping Constraint
+</sectionHeader>
+<bodyText confidence="0.989194785714286">
+Finally, in argument recognition, there is a strong
+constraint that the arguments for a given predicate
+do not overlap each other. To enforce this constraint,
+we employ the approach presented by Toutanova
+et al. (2005). Given the local classification proba-
+bility p(nk = Xk) (Xk ∈ {ARG, NO-ARG}),
+this method finds the assignment that maximizes
+∏
+k p(nk = Xk) while satisfying the above non-
+overlapping constraint, by using a dynamic pro-
+gramming procedure. Since the output of SVMs is
+not a probability value, in this study we obtain the
+probability value by converting the output from the
+SVM, s(nk), using the sigmoid function:4
+</bodyText>
+<equation confidence="0.884801">
+p(nk = ARG) = 1/(1 + exp(−s(nk))).
+</equation>
+<sectionHeader confidence="0.997351" genericHeader="method">
+6 Evaluation
+</sectionHeader>
+<subsectionHeader confidence="0.998377">
+6.1 Setting
+</subsectionHeader>
+<bodyText confidence="0.930308">
+For our evaluation we used the dataset pro-
+vided for the CoNLL 2005 SRL shared task
+</bodyText>
+<footnote confidence="0.678773">
+4Parameter fitting (Platt, 1999) is not performed.
+</footnote>
+<bodyText confidence="0.980918636363636">
+(www.lsi.upc.edu/˜srlconll). We used only the train-
+ing part and divided it into our training, develop-
+ment, and test sets (23,899, 7,966, and 7,967 sen-
+tences, respectively). We used the outputs of the
+Charniak parser provided with the dataset. We also
+used POS tags, which were also provided, by insert-
+ing the nodes labeled by POS tags above the word
+nodes. The words were downcased.
+We used TinySVM5 as the implementation of the
+SVMs, adding the WMOLT kernel. We normalized
+√
+the kernel as: K(Ti,Tj)/ K(Ti,Ti) × K(Tj,Tj).
+To train the classifiers, for a positive example we
+used the marked ordered labeled tree that encodes
+an argument in the training set. Although nodes
+other than the argument nodes were potentially neg-
+ative examples, we used 1/5 of these nodes that were
+randomly-sampled, since the number of such nodes
+is so large that the training cannot be performed in
+practice. Note that we ignored the arguments that
+do not match any node in the tree (the rate of such
+arguments was about 3.5% in the training set).
+</bodyText>
+<subsectionHeader confidence="0.999923">
+6.2 Effect of mark weighting
+</subsectionHeader>
+<bodyText confidence="0.999974782608696">
+We first evaluated the effect of the mark weight-
+ing of the WMOLT kernel. For several fixed -y, we
+tuned A and the soft-margin constant of the SVM, C,
+and evaluated the recognition accuracy. We tested
+30 different values of C ∈ [0.1... 500] for each
+A ∈ [0.05, 0.1, 0.15, 0.2, 0.25, 0.3]. The tuning was
+performed using the method for speeding up the
+training with tree kernels described by Kazama and
+Torisawa (2005). We conducted the above experi-
+ment for several training sizes.
+Table 3 shows the results. This table shows the
+best setting of A and C, the performance on the de-
+velopment set with the best setting, and the perfor-
+mance on the test set. The performance is shown
+in the F1 measure. Note that we treated the region
+labeled C-k in the CoNLL 2005 dataset as an inde-
+pendent argument.
+We can see that the mark weighting greatly im-
+proves the accuracy over the original MOLT kernel
+(i.e., -y = 1). In addition, we can see that the best
+setting for -y is somewhere around -y = 4, 000. In
+this experiment, we could only test up to 1,000 sen-
+tences due to the cost of SVM training, which were
+</bodyText>
+<footnote confidence="0.331549">
+5chasen.org/˜taku/software/TinySVM
+</footnote>
+<page confidence="0.998829">
+58
+</page>
+<tableCaption confidence="0.999646">
+Table 3: Effect of -y in mark weighting of WMOLT kernel.
+</tableCaption>
+<table confidence="0.9997772">
+training size (No. of sentences)
+250 500 700 1,000
+setting dev test setting dev test setting dev test setting dev test
+7 (A,C) (F1) (F1) (A,C) (F1) (F1) (A,C) (F1) (F1) (A,C) (F1) (F1)
+1 0.15, 20.50 63.66 65.13 0.2, 20.50 69.01 70.33 0.2, 20.50 72.11 73.57 0.25, 12.04 75.38 76.25
+100 0.3, 12.04 80.13 80.85 0.3,500 82.25 82.98 0.3, 34.92 83.93 84.72 0.3, 3.18 85.09 85.85
+1,000 0.2, 2.438 82.65 83.36 0.2, 2.438 84.80 85.45 0.2, 3.182 85.58 86.20 0.2, 7.071 86.40 86.80
+2,000 0.2, 2.438 83.43 84.12 0.2, 2.438 85.56 86.24 0.2, 2.438 86.23 86.80 0.2, 12.04 86.61 87.18
+4,000 0.2, 2.438 83.87 84.50 0.15, 4.15 84.94 85.61 0.15, 7.07 85.84 86.32 0.2, 12.04 86.82 87.31
+4,000 (w/o) 80.81 81.41 80.71 81.51 81.86 82.33 84.27 84.63
+</table>
+<bodyText confidence="0.9951002">
+empirically O(L2) where L is the number of train-
+ing examples, regardless of the use of the speed-up
+method (Kazama and Torisawa, 2005), However, we
+can observe that the WMOLT kernel achieves a high
+accuracy even when the training data is very small.
+</bodyText>
+<subsectionHeader confidence="0.999073">
+6.3 Effect of non-overlapping constraint
+</subsectionHeader>
+<bodyText confidence="0.999987">
+Additionally, we observed how the accuracy
+changes when we do not use the method described
+in Section 5 and instead consider the node to be an
+argument when s(nk) &gt; 0. The last row in Ta-
+ble 3 shows the accuracy for the model obtained
+with -y = 4, 000. We could observe that the non-
+overlapping constraint also improves the accuracy.
+</bodyText>
+<subsectionHeader confidence="0.982671">
+6.4 Recognition speed-up
+</subsectionHeader>
+<bodyText confidence="0.999494">
+Next, we examined the method for fast argument
+recognition described in Section 4. Using the clas-
+sifiers with -y = 4, 000, we measured the time re-
+quired for recognizing the arguments for 200 sen-
+tences with the naive classification of Eq. (2) and
+with the fast update procedure shown in Algorithm
+4.1. The time was measured using a computer with
+2.2-GHz dual-core Opterons and 8-GB of RAM.
+Table 4 shows the results. We can see a constant
+speed-up by a factor of more than 40, although the
+time was increased for both methods as the size of
+the training data increases (due to the increase in the
+number of support vectors).
+</bodyText>
+<tableCaption confidence="0.946817">
+Table 4: Recognition time (sec.) with naive classifi-
+cation and proposed fast update.
+</tableCaption>
+<bodyText confidence="0.8652542">
+training size (No. of sentences)
+250 500 750 1,000
+naive 11,266 13,008 18,313 30,226
+proposed 226 310 442 731
+speed-up 49.84 41.96 41.43 41.34
+</bodyText>
+<subsectionHeader confidence="0.985833">
+6.5 Evaluation on CoNLL 2005 evaluation set
+</subsectionHeader>
+<bodyText confidence="0.999932666666667">
+To compare the performance of our system with
+other systems, we conducted the evaluation on the
+official evaluation set of the CoNLL 2005 shared
+task. We used a model trained using 2,000 sen-
+tences (57,547 examples) with (-y = 4, 000, A =
+0.2, C = 12.04), the best setting in the previous ex-
+periments. This is the largest model we have suc-
+cessfully trained so far, and has F1 = 88.00 on the
+test set in the previous experiments.
+The accuracy of this model on the official evalua-
+tion set was F1 = 79.96 using the criterion from the
+previous experiments where we treated a C-k argu-
+ment as an independent argument. The official eval-
+uation script returned F1 = 78.22. This difference
+is caused because the official script takes C-k argu-
+ments into consideration, while our system cannot
+output C-k labels since it is just an argument rec-
+ognizer. Therefore, the performance will become
+slightly higher than F1 = 78.22 if we perform the
+role assignment step. However, our current system
+is worse than the systems reported in the CoNLL
+2005 shared task in any case, since it is reported that
+they had F1 = 79.92 to 83.78 argument recognition
+accuracy (Carreras and M`arquez, 2005).
+</bodyText>
+<sectionHeader confidence="0.999673" genericHeader="method">
+7 Discussion
+</sectionHeader>
+<bodyText confidence="0.999974">
+Although we have improved the accuracy by intro-
+ducing the WMOLT kernel, the accuracy for the offi-
+cial evaluation set was not satisfactory. One possible
+reason is the accuracy of the parser. Since the Char-
+niak parser is trained on the same set with the train-
+ing set of the CoNLL 2005 shared task, the pars-
+ing accuracy is worse for the official evaluation set
+than for the training set. For example, the rate of the
+arguments that do not match any node of the parse
+tree is 3.93% for the training set, but 8.16% for the
+</bodyText>
+<page confidence="0.99606">
+59
+</page>
+<bodyText confidence="0.999985567567568">
+evaluation set. This, to some extent, explains why
+our system, which achieved F1 = 88.00 for our test
+set, could only achieved F1 = 79.96. To achieve a
+higher accuracy, we need to make the system more
+robust to parsing errors. Some of the non-matching
+arguments are caused by incorrect treatment of quo-
+tation marks and commas. These errors seem to be
+solved by using simple pre-processing. Other major
+non-matching arguments are caused by PP attach-
+ment errors. To solve these errors, we need to ex-
+plore more, such as using n-best parses and the use
+of several syntactic views (Pradhan et al., 2005b).
+Another reason for the low accuracy is the size of
+the training data. In this study, we could train the
+SVM with 2,000 sentences (this took more than 30
+hours including the conversion of trees), but this is
+a very small fraction of the entire training set. We
+need to explore the methods for incorporating a large
+training set within a reasonable training time. For
+example, the combination of small SVMs (Shen et
+al., 2003) is a possible direction.
+The contribution of this study is not the accuracy
+achieved. The first contribution is the demonstration
+of the drastic effect of the mark weighting. We will
+explore more accurate kernels based on the WMOLT
+kernel. For example, we are planning to use dif-
+ferent weights depending on the marks. The sec-
+ond contribution is the method of speeding-up argu-
+ment recognition. This is of great importance, since
+the proposed method can be applied to other tasks
+where all nodes in a tree should be classified. In ad-
+dition, this method became possible because of the
+WMOLT kernel, and it is hard to apply to Moschitti
+and Bejan (2004) where the tree structure changes
+during recognition. Thus, the architecture that uses
+the WMOLT kernel is promising, if we assume fur-
+ther progress is possible with the kernel design.
+</bodyText>
+<sectionHeader confidence="0.999168" genericHeader="conclusions">
+8 Conclusion
+</sectionHeader>
+<bodyText confidence="0.999968555555556">
+We proposed a method for recognizing semantic role
+arguments using the WMOLT kernel. The mark
+weighting introduced in the WMOLT kernel greatly
+improved the accuracy. In addition, we presented
+a method for speeding up the recognition, which re-
+sulted in more than a 40 times faster recognition. Al-
+though the accuracy of the current system is worse
+than the state-of-the-art system, we expect to further
+improve our system.
+</bodyText>
+<sectionHeader confidence="0.99847" genericHeader="references">
+References
+</sectionHeader>
+<reference confidence="0.999954133333333">
+X. Carreras and L. M`arquez. 2005. Introduction to the
+CoNLL-2005 shared task: Semantic role labeling. In
+CoNLL 2005.
+M. Collins and N. Duffy. 2001. Convolution kernels for
+natural language. In NIPS 2001.
+D. Gildea and D. Jurafsky. 2002. Automatic labeling of
+semantic roles. Computational Linguistics, 28(3).
+K. Hacioglu, S. Pradhan, W. Ward, J. H. Martin, and
+D. Jurafsky. 2004. Semantic role labeling by tagging
+syntactic chunks. In CoNLL 2004.
+H. Kashima and T. Koyanagi. 2002. Kernels for semi-
+structured data. In ICML 2002, pages 291–298.
+J. Kazama and K. Torisawa. 2005. Speeding up training
+with tree kernels for node relation labeling. In EMNLP
+2005.
+P. Kingsbury and M. Palmer. 2002. From treebank to
+propbank. In LREC 02.
+A. Moschitti and C. A. Bejan. 2004. A semantic kernels
+for predicate argument classification. In CoNLL 2004.
+A. Moschitti, B. Coppola, D. Pighin, and B. Basili. 2005.
+Engineering of syntactic features for shallow semantic
+parsing. In ACL 2005 Workshop on Feature Enginner-
+ing for Machine Learning in Natural Language Pro-
+cessing.
+A. Moschitti. 2004. A study on convolution kernels for
+shallow semantic parsing. In ACL 2004.
+J. C. Platt. 1999. Probabilistic outputs for support vector
+machines and comparisons to regularized likelihood
+methods. Advances in Large Margin Classifiers.
+S. Pradhan, K. Hacioglu, W. Ward, D. Jurafsky, and J. H.
+Martin. 2005a. Support vector learning for semantic
+argument classification. Machine Learning, 60(1).
+S. Pradhan, W. Ward, K. Hacioglu, J. H. Martin, and
+D. Jurafsky. 2005b. Semantic role labeling using dif-
+ferent syntactic views. In ACL 2005.
+V. Punyakanok, D. Roth, W. Yih, and D. Zimak. 2004.
+Semantic role labeling via integer linear programming
+inference. In COLING 2004.
+L. Shen, A. Sarkar, and A. K. Joshi. 2003. Using LTAG
+based features in parse reranking. In EMNLP 2003.
+K. Toutanova, A. Haghighi, and C. D. Manning. 2005.
+Joint learning improves semantic role labeling. In ACL
+2005.
+V. Vapnik. 1995. The Nature of Statistical Learning The-
+ory. Springer Verlag.
+</reference>
+<page confidence="0.998415">
+60
+</page>
+</variant>
+</algorithm>
+<algorithm name="ParsHed" version="110505">
+<variant no="0" confidence="0.794703">
+<title confidence="0.9974095">Semantic Role Recognition using Kernels on Weighted Marked Ordered Labeled Trees</title>
+<author confidence="0.83597">Kazama</author>
+<affiliation confidence="0.942837">Japan Advanced Institute of Science and Technology</affiliation>
+<address confidence="0.972061">Asahidai 1-1, Nomi, Ishikawa, 923-1292</address>
+<abstract confidence="0.999683818181818">We present a method for recognizing semantic role arguments using a kernel on weighted marked ordered labeled trees (the WMOLT kernel). We extend the kernels on marked ordered labeled trees (Kazama and Torisawa, 2005) so that the mark can be weighted according to its importance. We improve the accuracy by giving more weights on subtrees that contain the predicate and the argument nodes with this ability. Although Kazama and Torisawa (2005) presented fast training with tree kernels, the slow classification during runtime remained to be solved. In this paper, we give a solution that uses an efficient DP updating procedure applicable in argument recognition. We demonstrate that the WMOLT kernel improves the accuracy, and our speed-up method makes the recognition more than 40 times faster than the naive classification.</abstract>
+</variant>
+</algorithm>
+<algorithm name="ParsCit" version="110505">
+<citationList>
+<citation valid="true">
+<authors>
+<author>X Carreras</author>
+<author>L M`arquez</author>
+</authors>
+<title>Introduction to the CoNLL-2005 shared task: Semantic role labeling. In CoNLL</title>
+<date>2005</date>
+<marker>Carreras, M`arquez, 2005</marker>
+<rawString>X. Carreras and L. M`arquez. 2005. Introduction to the CoNLL-2005 shared task: Semantic role labeling. In CoNLL 2005.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>M Collins</author>
+<author>N Duffy</author>
+</authors>
+<title>Convolution kernels for natural language. In</title>
+<date>2001</date>
+<booktitle>NIPS</booktitle>
+<contexts>
+<context position="2253" citStr="Collins and Duffy, 2001" startWordPosition="353" endWordPosition="356">chine learning because of the availability of standard datasets, such as PropBank (Kingsbury and Palmer, 2002). Naturally, the usefulness of parse trees in 53 this task can be anticipated. For example, the recent CoNLL 2005 shared task (Carreras and M`arquez, 2005) provided parse trees for use and their usefulness was ensured. Most of the methods heuristically extract features from parse trees, and from other sources, and use them in machine learning methods based on feature vector representation. As a result, these methods depend on feature engineering, which is time-consuming. Tree kernels (Collins and Duffy, 2001; Kashima and Koyanagi, 2002) have been proposed to directly handle trees in kernel-based methods, such as SVMs (Vapnik, 1995). Tree kernels calculate the similarity between trees, taking into consideration all of the subtrees, and, therefore there is no need for such feature engineering. Moschitti and Bejan (2004) extensively studied tree kernels for semantic role labeling. However, they reported that they could not successfully build an accurate argument recognizer, although the role assignment was improved. Although Moschitti et al. (2005) reported on argument recognition using tree kernels</context>
+<context position="5347" citStr="Collins and Duffy, 2001" startWordPosition="895" endWordPosition="898">tinguishing difficult arguments. Thus, we modified the MOLT kernel so that the marks can be weighted in order to give large weights to the subtrees with many marks. We call the modified kernel the WMOLT kernel (the kernel on weighted marked ordered labeled trees). We show that this modification greatly improves the accuracy when the weights for marks are properly tuned. One of the issues that arises when using tree kernels is time complexity. In general, tree kernels can be calculated in O(|T1||T2|) time, where |Ti |is the number of nodes in tree Ti, using dynamic programming (DP) procedures (Collins and Duffy, 2001; Kashima and Koyanagi, 2002). However, this cost is not negligible in practice. Kazama and Torisawa (2005) proposed a method that drastically speeds up the calculation during training by converting trees into efficient vectors using a tree mining algorithm. However, the slow classification during runtime remained an open problem. We propose a method for speeding up the runtime classification for argument recognition. In argument recognition, we determine whether a node is an argument or not for all the nodes in a tree . This requires a series of calculations between a support vector tree and </context>
+<context position="8172" citStr="Collins and Duffy (2001)" startWordPosition="1370" endWordPosition="1373">n argument. Since arguments are defined for a given predicate, this classification is the recognition of a relation between the predicate and tree nodes. Thus, we want to build a binary classifier that returns a +1 for correct relations and a -1 for incorrect relations. For the above example, the classifier will output a +1 for the relations indicated by (a), (b), and (c) in Figure 1 and a -1 for the relations between the predicate node and other nodes. 54 Since the task is the classification of trees with node relations, tree kernels for usual ordered labeled trees, such as those proposed by Collins and Duffy (2001) and Kashima and Koyanagi (2002), are not useful. Kazama and Torisawa (2005) proposed to represent a node relation in a tree as a marked ordered labeled tree and presented a kernel for it (MOLT kernel). We adopted the MOLT kernel and extend it for accurate argument recognition. 3 Kernels for Argument Recognition 3.1 Kernel-based classification Kernel-based methods, such as support vector machines (SVMs) (Vapnik, 1995), consider a mapping 4b(x) that maps the object x into a, (usually highdimensional), feature space and learn a classifier in this space. A kernel function K(xi, xj) is a function </context>
+<context position="11771" citStr="Collins and Duffy (2001)" startWordPosition="2023" endWordPosition="2026"> S is included in T iff there exists a one-to-one function ψ from a node of S to a node of T, such that (i) pa(ψ(ni)) = ψ(pa(ni)), (ii) ψ(ni) r ψ(nj) iff ni r nj, , and (iii) l(ψ(ni)) = l(ni) (and m(ψ(ni)) = m(ni) in the MOLT kernel). See Table 1 for the meaning of each function. This definition means that any subtrees preserving the parent-child relation, the sibling relation, and labelmarks, are allowed. In this paper, we employ this definition, since Kazama and Torisawa (2005) reported that the MOLT kernel with this definition has a higher accuracy than one with the definition presented by Collins and Duffy (2001). W(Si) is the weight of subtree Si. The weighting in Kazama and Torisawa (2005) is written as fol2This notation is slightly different from (Kazama and Torisawa, 2005). 55 Table 2: Example of subtree inclusion and subtree weights. The last row shows the weights for WMOLT kernel. T included subtrees W(Si) 0 λ λ λ2 λ2 λ3 W(Si) 0 λγ λγ λ2γ λ2γ2 λ3γ2 lows. { A|Si |if marked(Si), W(Si) = (1) 0 otherwise, where marked(Si) returns true iff marked(ni) = true for at least one node in tree Si. By this weighting, only the subtrees with at least one mark are considered. The idea behind this is that subtre</context>
+<context position="13002" citStr="Collins and Duffy, 2001" startWordPosition="2244" endWordPosition="2247">g no marks are not useful for relation recognition or labeling. A (0 &lt; A &lt; 1) is a factor to prevent the kernel values from becoming too large, which has been used in previous studies (Collins and Duffy, 2001; Kashima and Koyanagi, 2002). Table 2 shows an example of subtree inclusion and the weights given to each included subtree. Note that the subtrees are treated differently when the markings are different, even if the labels are the same. Although the dimension of the feature space is exponential, tree kernels can be calculated in O(|T1||T2|) time using dynamic programming (DP) procedures (Collins and Duffy, 2001; Kashima and Koyanagi, 2002). The MOLT kernel also has an O(|T1||T2|) DP procedure (Kazama and Torisawa, 2005). 3.3 WMOLT kernel Although Kazama and Torisawa (2005) evaluated the MOLT kernel for SRL, the evaluation was only on the role assignment task and was preliminary. We evaluated the MOLT kernel for argument recognition, and found that the MOLT kernel cannot achieve a high accuracy for argument recognition. The problem is that the MOLT kernel treats subtrees with one mark and subtrees with two marks equally, although the latter seems to be more important in distinguishing difficult argum</context>
+</contexts>
+<marker>Collins, Duffy, 2001</marker>
+<rawString>M. Collins and N. Duffy. 2001. Convolution kernels for natural language. In NIPS 2001.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>D Gildea</author>
+<author>D Jurafsky</author>
+</authors>
+<title>Automatic labeling of semantic roles.</title>
+<date>2002</date>
+<journal>Computational Linguistics,</journal>
+<volume>28</volume>
+<issue>3</issue>
+<contexts>
+<context position="1454" citStr="Gildea and Jurafsky, 2002" startWordPosition="227" endWordPosition="230">give a solution that uses an efficient DP updating procedure applicable in argument recognition. We demonstrate that the WMOLT kernel improves the accuracy, and our speed-up method makes the recognition more than 40 times faster than the naive classification. 1 Introduction Semantic role labeling (SRL) is a task that recognizes the arguments of a predicate (verb) in a sentence and assigns the correct role to each argument. As this task is recognized as an important step after (or the last step of) syntactic analysis, many studies have been conducted to achieve accurate semantic role labeling (Gildea and Jurafsky, 2002; Moschitti, 2004; Hacioglu et al., 2004; Punyakanok et al., 2004; Pradhan et al., 2005a; Pradhan et al., 2005b; Toutanova et al., 2005). Most of the studies have focused on machine learning because of the availability of standard datasets, such as PropBank (Kingsbury and Palmer, 2002). Naturally, the usefulness of parse trees in 53 this task can be anticipated. For example, the recent CoNLL 2005 shared task (Carreras and M`arquez, 2005) provided parse trees for use and their usefulness was ensured. Most of the methods heuristically extract features from parse trees, and from other sources, an</context>
+</contexts>
+<marker>Gildea, Jurafsky, 2002</marker>
+<rawString>D. Gildea and D. Jurafsky. 2002. Automatic labeling of semantic roles. Computational Linguistics, 28(3).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>K Hacioglu</author>
+<author>S Pradhan</author>
+<author>W Ward</author>
+<author>J H Martin</author>
+<author>D Jurafsky</author>
+</authors>
+<title>Semantic role labeling by tagging syntactic chunks. In CoNLL</title>
+<date>2004</date>
+<contexts>
+<context position="1494" citStr="Hacioglu et al., 2004" startWordPosition="234" endWordPosition="237">dating procedure applicable in argument recognition. We demonstrate that the WMOLT kernel improves the accuracy, and our speed-up method makes the recognition more than 40 times faster than the naive classification. 1 Introduction Semantic role labeling (SRL) is a task that recognizes the arguments of a predicate (verb) in a sentence and assigns the correct role to each argument. As this task is recognized as an important step after (or the last step of) syntactic analysis, many studies have been conducted to achieve accurate semantic role labeling (Gildea and Jurafsky, 2002; Moschitti, 2004; Hacioglu et al., 2004; Punyakanok et al., 2004; Pradhan et al., 2005a; Pradhan et al., 2005b; Toutanova et al., 2005). Most of the studies have focused on machine learning because of the availability of standard datasets, such as PropBank (Kingsbury and Palmer, 2002). Naturally, the usefulness of parse trees in 53 this task can be anticipated. For example, the recent CoNLL 2005 shared task (Carreras and M`arquez, 2005) provided parse trees for use and their usefulness was ensured. Most of the methods heuristically extract features from parse trees, and from other sources, and use them in machine learning methods b</context>
+</contexts>
+<marker>Hacioglu, Pradhan, Ward, Martin, Jurafsky, 2004</marker>
+<rawString>K. Hacioglu, S. Pradhan, W. Ward, J. H. Martin, and D. Jurafsky. 2004. Semantic role labeling by tagging syntactic chunks. In CoNLL 2004.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>H Kashima</author>
+<author>T Koyanagi</author>
+</authors>
+<title>Kernels for semistructured data. In ICML</title>
+<date>2002</date>
+<pages>291--298</pages>
+<contexts>
+<context position="2282" citStr="Kashima and Koyanagi, 2002" startWordPosition="357" endWordPosition="360"> the availability of standard datasets, such as PropBank (Kingsbury and Palmer, 2002). Naturally, the usefulness of parse trees in 53 this task can be anticipated. For example, the recent CoNLL 2005 shared task (Carreras and M`arquez, 2005) provided parse trees for use and their usefulness was ensured. Most of the methods heuristically extract features from parse trees, and from other sources, and use them in machine learning methods based on feature vector representation. As a result, these methods depend on feature engineering, which is time-consuming. Tree kernels (Collins and Duffy, 2001; Kashima and Koyanagi, 2002) have been proposed to directly handle trees in kernel-based methods, such as SVMs (Vapnik, 1995). Tree kernels calculate the similarity between trees, taking into consideration all of the subtrees, and, therefore there is no need for such feature engineering. Moschitti and Bejan (2004) extensively studied tree kernels for semantic role labeling. However, they reported that they could not successfully build an accurate argument recognizer, although the role assignment was improved. Although Moschitti et al. (2005) reported on argument recognition using tree kernels, it was a preliminary evalua</context>
+<context position="5376" citStr="Kashima and Koyanagi, 2002" startWordPosition="899" endWordPosition="902">uments. Thus, we modified the MOLT kernel so that the marks can be weighted in order to give large weights to the subtrees with many marks. We call the modified kernel the WMOLT kernel (the kernel on weighted marked ordered labeled trees). We show that this modification greatly improves the accuracy when the weights for marks are properly tuned. One of the issues that arises when using tree kernels is time complexity. In general, tree kernels can be calculated in O(|T1||T2|) time, where |Ti |is the number of nodes in tree Ti, using dynamic programming (DP) procedures (Collins and Duffy, 2001; Kashima and Koyanagi, 2002). However, this cost is not negligible in practice. Kazama and Torisawa (2005) proposed a method that drastically speeds up the calculation during training by converting trees into efficient vectors using a tree mining algorithm. However, the slow classification during runtime remained an open problem. We propose a method for speeding up the runtime classification for argument recognition. In argument recognition, we determine whether a node is an argument or not for all the nodes in a tree . This requires a series of calculations between a support vector tree and a tree with slightly differen</context>
+<context position="8204" citStr="Kashima and Koyanagi (2002)" startWordPosition="1375" endWordPosition="1378">re defined for a given predicate, this classification is the recognition of a relation between the predicate and tree nodes. Thus, we want to build a binary classifier that returns a +1 for correct relations and a -1 for incorrect relations. For the above example, the classifier will output a +1 for the relations indicated by (a), (b), and (c) in Figure 1 and a -1 for the relations between the predicate node and other nodes. 54 Since the task is the classification of trees with node relations, tree kernels for usual ordered labeled trees, such as those proposed by Collins and Duffy (2001) and Kashima and Koyanagi (2002), are not useful. Kazama and Torisawa (2005) proposed to represent a node relation in a tree as a marked ordered labeled tree and presented a kernel for it (MOLT kernel). We adopted the MOLT kernel and extend it for accurate argument recognition. 3 Kernels for Argument Recognition 3.1 Kernel-based classification Kernel-based methods, such as support vector machines (SVMs) (Vapnik, 1995), consider a mapping 4b(x) that maps the object x into a, (usually highdimensional), feature space and learn a classifier in this space. A kernel function K(xi, xj) is a function that calculates the inner produc</context>
+<context position="11091" citStr="Kashima and Koyanagi (2002)" startWordPosition="1901" endWordPosition="1904">d of node ni. • pa(ni) is the parent of node ni. • root(Ti) is the root node of Ti • ni ≽ nj means that ni is an elder sister of nj. Kazama and Torisawa (2005) presented a kernel on marked ordered trees (the MOLT kernel), which is defined as:2 K(T1, T2) = ∑E W(Si) · #Si(T1) · #Si(T2), i=1 where Si is a possible subtree and #Si(Tj) is the number of times Si is included in Tj. The mapping corresponding to this kernel is 4b(T) = √ √ ( W (S1)#S1(T),··· , W (SE)#SE(T)), which maps the tree into the feature space of all the possible subtrees. The tree inclusion is defined in many ways. For example, Kashima and Koyanagi (2002) presented the following type of inclusion. 1 DEFINITION S is included in T iff there exists a one-to-one function ψ from a node of S to a node of T, such that (i) pa(ψ(ni)) = ψ(pa(ni)), (ii) ψ(ni) r ψ(nj) iff ni r nj, , and (iii) l(ψ(ni)) = l(ni) (and m(ψ(ni)) = m(ni) in the MOLT kernel). See Table 1 for the meaning of each function. This definition means that any subtrees preserving the parent-child relation, the sibling relation, and labelmarks, are allowed. In this paper, we employ this definition, since Kazama and Torisawa (2005) reported that the MOLT kernel with this definition has a hi</context>
+<context position="12616" citStr="Kashima and Koyanagi, 2002" startWordPosition="2183" endWordPosition="2186">ree weights. The last row shows the weights for WMOLT kernel. T included subtrees W(Si) 0 λ λ λ2 λ2 λ3 W(Si) 0 λγ λγ λ2γ λ2γ2 λ3γ2 lows. { A|Si |if marked(Si), W(Si) = (1) 0 otherwise, where marked(Si) returns true iff marked(ni) = true for at least one node in tree Si. By this weighting, only the subtrees with at least one mark are considered. The idea behind this is that subtrees having no marks are not useful for relation recognition or labeling. A (0 &lt; A &lt; 1) is a factor to prevent the kernel values from becoming too large, which has been used in previous studies (Collins and Duffy, 2001; Kashima and Koyanagi, 2002). Table 2 shows an example of subtree inclusion and the weights given to each included subtree. Note that the subtrees are treated differently when the markings are different, even if the labels are the same. Although the dimension of the feature space is exponential, tree kernels can be calculated in O(|T1||T2|) time using dynamic programming (DP) procedures (Collins and Duffy, 2001; Kashima and Koyanagi, 2002). The MOLT kernel also has an O(|T1||T2|) DP procedure (Kazama and Torisawa, 2005). 3.3 WMOLT kernel Although Kazama and Torisawa (2005) evaluated the MOLT kernel for SRL, the evaluatio</context>
+</contexts>
+<marker>Kashima, Koyanagi, 2002</marker>
+<rawString>H. Kashima and T. Koyanagi. 2002. Kernels for semistructured data. In ICML 2002, pages 291–298.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J Kazama</author>
+<author>K Torisawa</author>
+</authors>
+<title>Speeding up training with tree kernels for node relation labeling.</title>
+<date>2005</date>
+<booktitle>In EMNLP</booktitle>
+<contexts>
+<context position="705" citStr="Kazama and Torisawa (2005)" startWordPosition="103" endWordPosition="106">s Jun’ichi Kazama and Kentaro Torisawa Japan Advanced Institute of Science and Technology (JAIST) Asahidai 1-1, Nomi, Ishikawa, 923-1292 Japan {kazama, torisawa}@jaist.ac.jp Abstract We present a method for recognizing semantic role arguments using a kernel on weighted marked ordered labeled trees (the WMOLT kernel). We extend the kernels on marked ordered labeled trees (Kazama and Torisawa, 2005) so that the mark can be weighted according to its importance. We improve the accuracy by giving more weights on subtrees that contain the predicate and the argument nodes with this ability. Although Kazama and Torisawa (2005) presented fast training with tree kernels, the slow classification during runtime remained to be solved. In this paper, we give a solution that uses an efficient DP updating procedure applicable in argument recognition. We demonstrate that the WMOLT kernel improves the accuracy, and our speed-up method makes the recognition more than 40 times faster than the naive classification. 1 Introduction Semantic role labeling (SRL) is a task that recognizes the arguments of a predicate (verb) in a sentence and assigns the correct role to each argument. As this task is recognized as an important step a</context>
+<context position="2951" citStr="Kazama and Torisawa (2005)" startWordPosition="456" endWordPosition="459">s in kernel-based methods, such as SVMs (Vapnik, 1995). Tree kernels calculate the similarity between trees, taking into consideration all of the subtrees, and, therefore there is no need for such feature engineering. Moschitti and Bejan (2004) extensively studied tree kernels for semantic role labeling. However, they reported that they could not successfully build an accurate argument recognizer, although the role assignment was improved. Although Moschitti et al. (2005) reported on argument recognition using tree kernels, it was a preliminary evaluation because they used oracle parse trees. Kazama and Torisawa (2005) proposed a new tree kernel for node relation labeling, as which SRL can be cast. This kernel is defined on marked ordered labeled trees, where a node can have a mark to indicate the existence of a relation. We refer to this kernel as the MOLT kernel. Compared to (Moschitti and Bejan, 2004) where tree fragments are heuristically extracted before applying tree kernels, the MOLT kernel is general and desirable since it does not require such fragment extraction. However, the evaluation conducted by Kazama and Torisawa (2005) was limited to preliminary experiments for role assignment. In this stud</context>
+<context position="5454" citStr="Kazama and Torisawa (2005)" startWordPosition="911" endWordPosition="914">order to give large weights to the subtrees with many marks. We call the modified kernel the WMOLT kernel (the kernel on weighted marked ordered labeled trees). We show that this modification greatly improves the accuracy when the weights for marks are properly tuned. One of the issues that arises when using tree kernels is time complexity. In general, tree kernels can be calculated in O(|T1||T2|) time, where |Ti |is the number of nodes in tree Ti, using dynamic programming (DP) procedures (Collins and Duffy, 2001; Kashima and Koyanagi, 2002). However, this cost is not negligible in practice. Kazama and Torisawa (2005) proposed a method that drastically speeds up the calculation during training by converting trees into efficient vectors using a tree mining algorithm. However, the slow classification during runtime remained an open problem. We propose a method for speeding up the runtime classification for argument recognition. In argument recognition, we determine whether a node is an argument or not for all the nodes in a tree . This requires a series of calculations between a support vector tree and a tree with slightly different marking. By exploiting this property, we can efficiently update DP cells to </context>
+<context position="8248" citStr="Kazama and Torisawa (2005)" startWordPosition="1382" endWordPosition="1385">fication is the recognition of a relation between the predicate and tree nodes. Thus, we want to build a binary classifier that returns a +1 for correct relations and a -1 for incorrect relations. For the above example, the classifier will output a +1 for the relations indicated by (a), (b), and (c) in Figure 1 and a -1 for the relations between the predicate node and other nodes. 54 Since the task is the classification of trees with node relations, tree kernels for usual ordered labeled trees, such as those proposed by Collins and Duffy (2001) and Kashima and Koyanagi (2002), are not useful. Kazama and Torisawa (2005) proposed to represent a node relation in a tree as a marked ordered labeled tree and presented a kernel for it (MOLT kernel). We adopted the MOLT kernel and extend it for accurate argument recognition. 3 Kernels for Argument Recognition 3.1 Kernel-based classification Kernel-based methods, such as support vector machines (SVMs) (Vapnik, 1995), consider a mapping 4b(x) that maps the object x into a, (usually highdimensional), feature space and learn a classifier in this space. A kernel function K(xi, xj) is a function that calculates the inner product (4b(xi), 4b(xj)) in the feature space with</context>
+<context position="9509" citStr="Kazama and Torisawa, 2005" startWordPosition="1594" endWordPosition="1598">ch is sometimes intractable. Then, any classifier that is represented by using only the inner products between the vectors in a feature space can be rewritten using the kernel function. For example, an SVM classifier has the form: f(x) = ∑ αiK(xi, x) + b, i where αi and b are the parameters learned in the training. With kernel-based methods, we can construct a powerful classifier in a high-dimensional feature space. In addition, objects x do not need to be vectors as long as a kernel function is defined (e.g., x can be strings, trees, or graphs). 3.2 MOLT kernel A marked ordered labeled tree (Kazama and Torisawa, 2005) is an ordered labeled tree in which each node can have a mark in addition to a label. We can encode a k-node relation by using k distinct marks. In this study, we determine an argument node without considering other arguments of the same predicate, i.e., we represent an argument relation as a two-node relation using two marks. For example, the relation (a) in Figure 1 can be represented as the marked ordered labeled tree (a’).1 1Note that we use mark *0 for the predicate node and mark *1 for the argument node. Table 1: Notations for MOLT kernel. • ni denotes a node of a tree. In this paper, n</context>
+<context position="11631" citStr="Kazama and Torisawa (2005)" startWordPosition="1998" endWordPosition="2001">. The tree inclusion is defined in many ways. For example, Kashima and Koyanagi (2002) presented the following type of inclusion. 1 DEFINITION S is included in T iff there exists a one-to-one function ψ from a node of S to a node of T, such that (i) pa(ψ(ni)) = ψ(pa(ni)), (ii) ψ(ni) r ψ(nj) iff ni r nj, , and (iii) l(ψ(ni)) = l(ni) (and m(ψ(ni)) = m(ni) in the MOLT kernel). See Table 1 for the meaning of each function. This definition means that any subtrees preserving the parent-child relation, the sibling relation, and labelmarks, are allowed. In this paper, we employ this definition, since Kazama and Torisawa (2005) reported that the MOLT kernel with this definition has a higher accuracy than one with the definition presented by Collins and Duffy (2001). W(Si) is the weight of subtree Si. The weighting in Kazama and Torisawa (2005) is written as fol2This notation is slightly different from (Kazama and Torisawa, 2005). 55 Table 2: Example of subtree inclusion and subtree weights. The last row shows the weights for WMOLT kernel. T included subtrees W(Si) 0 λ λ λ2 λ2 λ3 W(Si) 0 λγ λγ λ2γ λ2γ2 λ3γ2 lows. { A|Si |if marked(Si), W(Si) = (1) 0 otherwise, where marked(Si) returns true iff marked(ni) = true for a</context>
+<context position="13113" citStr="Kazama and Torisawa, 2005" startWordPosition="2261" endWordPosition="2264">nel values from becoming too large, which has been used in previous studies (Collins and Duffy, 2001; Kashima and Koyanagi, 2002). Table 2 shows an example of subtree inclusion and the weights given to each included subtree. Note that the subtrees are treated differently when the markings are different, even if the labels are the same. Although the dimension of the feature space is exponential, tree kernels can be calculated in O(|T1||T2|) time using dynamic programming (DP) procedures (Collins and Duffy, 2001; Kashima and Koyanagi, 2002). The MOLT kernel also has an O(|T1||T2|) DP procedure (Kazama and Torisawa, 2005). 3.3 WMOLT kernel Although Kazama and Torisawa (2005) evaluated the MOLT kernel for SRL, the evaluation was only on the role assignment task and was preliminary. We evaluated the MOLT kernel for argument recognition, and found that the MOLT kernel cannot achieve a high accuracy for argument recognition. The problem is that the MOLT kernel treats subtrees with one mark and subtrees with two marks equally, although the latter seems to be more important in distinguishing difficult arguments. Consider the sentence, “He said industry should build plants”. For “say”, we have the following labeling.</context>
+<context position="15367" citStr="Kazama and Torisawa (2005)" startWordPosition="2656" endWordPosition="2659"> definition of W(Si) as follows. { W(Si) = A|Si |∏ni∈Si &apos;y(m(ni)) if marked(Si), 0 otherwise, where &apos;y(m) (&gt; 1) is the weight of mark m. We call a kernel with this weight the WMOLT kernel. In this study, we assume &apos;y(no-mark) = 1 and &apos;y(*0) = &apos;y(*1) = &apos;y. Then, the weight is simplified as follows. { A|Si|&apos;y#m(Si) if marked(Si), 0 otherwise, where #m(Si) is the number of marked nodes in Si. The last row in Table 2 shows how the subtree weights change by introducing this mark weighting. For the WMOLT kernel, we can derive O(|T1||T2|) DP procedure by slightly modifying the procedure presented by Kazama and Torisawa (2005). The method for speeding up training described in Kazama and Torisawa (2005) can also be applied with a slight modification. W(Si) = 56 Algorithm 3.1: WMOLT-KERNEL(T1, T2) for n1 ← 1 to |T1 |do // nodes are ordered by the post-order traversal m ← marked(n1) for n2 ← 1 to |T2 |do // actually iterate only on n2 with l(n1) = l(n2) if l(n1) ≠ l(n2) or m(n1) ≠ m(n2) then C(n1, n2) ← 0 Cr(n1, n2) ← 0 else if n1 and n2 are leaf nodes then if m then C(n1, n2) ← A · γ; Cr(n1, n2) ← A · γ else C(n1, n2) ← A; Cr(n1, n2) ← 0 else S(0, j) ← 1, S(i, 0) ← 1 (i ∈ [0, nc(n1)], j ∈ [0, nc(n2)]) if m then Sr(</context>
+<context position="22485" citStr="Kazama and Torisawa (2005)" startWordPosition="4007" endWordPosition="4010">training cannot be performed in practice. Note that we ignored the arguments that do not match any node in the tree (the rate of such arguments was about 3.5% in the training set). 6.2 Effect of mark weighting We first evaluated the effect of the mark weighting of the WMOLT kernel. For several fixed -y, we tuned A and the soft-margin constant of the SVM, C, and evaluated the recognition accuracy. We tested 30 different values of C ∈ [0.1... 500] for each A ∈ [0.05, 0.1, 0.15, 0.2, 0.25, 0.3]. The tuning was performed using the method for speeding up the training with tree kernels described by Kazama and Torisawa (2005). We conducted the above experiment for several training sizes. Table 3 shows the results. This table shows the best setting of A and C, the performance on the development set with the best setting, and the performance on the test set. The performance is shown in the F1 measure. Note that we treated the region labeled C-k in the CoNLL 2005 dataset as an independent argument. We can see that the mark weighting greatly improves the accuracy over the original MOLT kernel (i.e., -y = 1). In addition, we can see that the best setting for -y is somewhere around -y = 4, 000. In this experiment, we co</context>
+<context position="24121" citStr="Kazama and Torisawa, 2005" startWordPosition="4301" endWordPosition="4304">.2, 20.50 72.11 73.57 0.25, 12.04 75.38 76.25 100 0.3, 12.04 80.13 80.85 0.3,500 82.25 82.98 0.3, 34.92 83.93 84.72 0.3, 3.18 85.09 85.85 1,000 0.2, 2.438 82.65 83.36 0.2, 2.438 84.80 85.45 0.2, 3.182 85.58 86.20 0.2, 7.071 86.40 86.80 2,000 0.2, 2.438 83.43 84.12 0.2, 2.438 85.56 86.24 0.2, 2.438 86.23 86.80 0.2, 12.04 86.61 87.18 4,000 0.2, 2.438 83.87 84.50 0.15, 4.15 84.94 85.61 0.15, 7.07 85.84 86.32 0.2, 12.04 86.82 87.31 4,000 (w/o) 80.81 81.41 80.71 81.51 81.86 82.33 84.27 84.63 empirically O(L2) where L is the number of training examples, regardless of the use of the speed-up method (Kazama and Torisawa, 2005), However, we can observe that the WMOLT kernel achieves a high accuracy even when the training data is very small. 6.3 Effect of non-overlapping constraint Additionally, we observed how the accuracy changes when we do not use the method described in Section 5 and instead consider the node to be an argument when s(nk) &gt; 0. The last row in Table 3 shows the accuracy for the model obtained with -y = 4, 000. We could observe that the nonoverlapping constraint also improves the accuracy. 6.4 Recognition speed-up Next, we examined the method for fast argument recognition described in Section 4. Usi</context>
+</contexts>
+<marker>Kazama, Torisawa, 2005</marker>
+<rawString>J. Kazama and K. Torisawa. 2005. Speeding up training with tree kernels for node relation labeling. In EMNLP 2005.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>P Kingsbury</author>
+<author>M Palmer</author>
+</authors>
+<title>From treebank to propbank.</title>
+<date>2002</date>
+<booktitle>In LREC 02.</booktitle>
+<marker>Kingsbury, Palmer, 2002</marker>
+<rawString>P. Kingsbury and M. Palmer. 2002. From treebank to propbank. In LREC 02.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>A Moschitti</author>
+<author>C A Bejan</author>
+</authors>
+<title>A semantic kernels for predicate argument classification. In CoNLL</title>
+<date>2004</date>
+<contexts>
+<context position="2569" citStr="Moschitti and Bejan (2004)" startWordPosition="402" endWordPosition="405">ss was ensured. Most of the methods heuristically extract features from parse trees, and from other sources, and use them in machine learning methods based on feature vector representation. As a result, these methods depend on feature engineering, which is time-consuming. Tree kernels (Collins and Duffy, 2001; Kashima and Koyanagi, 2002) have been proposed to directly handle trees in kernel-based methods, such as SVMs (Vapnik, 1995). Tree kernels calculate the similarity between trees, taking into consideration all of the subtrees, and, therefore there is no need for such feature engineering. Moschitti and Bejan (2004) extensively studied tree kernels for semantic role labeling. However, they reported that they could not successfully build an accurate argument recognizer, although the role assignment was improved. Although Moschitti et al. (2005) reported on argument recognition using tree kernels, it was a preliminary evaluation because they used oracle parse trees. Kazama and Torisawa (2005) proposed a new tree kernel for node relation labeling, as which SRL can be cast. This kernel is defined on marked ordered labeled trees, where a node can have a mark to indicate the existence of a relation. We refer t</context>
+<context position="28913" citStr="Moschitti and Bejan (2004)" startWordPosition="5145" endWordPosition="5148">. The contribution of this study is not the accuracy achieved. The first contribution is the demonstration of the drastic effect of the mark weighting. We will explore more accurate kernels based on the WMOLT kernel. For example, we are planning to use different weights depending on the marks. The second contribution is the method of speeding-up argument recognition. This is of great importance, since the proposed method can be applied to other tasks where all nodes in a tree should be classified. In addition, this method became possible because of the WMOLT kernel, and it is hard to apply to Moschitti and Bejan (2004) where the tree structure changes during recognition. Thus, the architecture that uses the WMOLT kernel is promising, if we assume further progress is possible with the kernel design. 8 Conclusion We proposed a method for recognizing semantic role arguments using the WMOLT kernel. The mark weighting introduced in the WMOLT kernel greatly improved the accuracy. In addition, we presented a method for speeding up the recognition, which resulted in more than a 40 times faster recognition. Although the accuracy of the current system is worse than the state-of-the-art system, we expect to further im</context>
+</contexts>
+<marker>Moschitti, Bejan, 2004</marker>
+<rawString>A. Moschitti and C. A. Bejan. 2004. A semantic kernels for predicate argument classification. In CoNLL 2004.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>A Moschitti</author>
+<author>B Coppola</author>
+<author>D Pighin</author>
+<author>B Basili</author>
+</authors>
+<title>Engineering of syntactic features for shallow semantic parsing.</title>
+<date>2005</date>
+<booktitle>In ACL 2005 Workshop on Feature Enginnering for Machine Learning in Natural Language Processing.</booktitle>
+<contexts>
+<context position="2801" citStr="Moschitti et al. (2005)" startWordPosition="434" endWordPosition="437">engineering, which is time-consuming. Tree kernels (Collins and Duffy, 2001; Kashima and Koyanagi, 2002) have been proposed to directly handle trees in kernel-based methods, such as SVMs (Vapnik, 1995). Tree kernels calculate the similarity between trees, taking into consideration all of the subtrees, and, therefore there is no need for such feature engineering. Moschitti and Bejan (2004) extensively studied tree kernels for semantic role labeling. However, they reported that they could not successfully build an accurate argument recognizer, although the role assignment was improved. Although Moschitti et al. (2005) reported on argument recognition using tree kernels, it was a preliminary evaluation because they used oracle parse trees. Kazama and Torisawa (2005) proposed a new tree kernel for node relation labeling, as which SRL can be cast. This kernel is defined on marked ordered labeled trees, where a node can have a mark to indicate the existence of a relation. We refer to this kernel as the MOLT kernel. Compared to (Moschitti and Bejan, 2004) where tree fragments are heuristically extracted before applying tree kernels, the MOLT kernel is general and desirable since it does not require such fragmen</context>
+</contexts>
+<marker>Moschitti, Coppola, Pighin, Basili, 2005</marker>
+<rawString>A. Moschitti, B. Coppola, D. Pighin, and B. Basili. 2005. Engineering of syntactic features for shallow semantic parsing. In ACL 2005 Workshop on Feature Enginnering for Machine Learning in Natural Language Processing.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>A Moschitti</author>
+</authors>
+<title>A study on convolution kernels for shallow semantic parsing.</title>
+<date>2004</date>
+<booktitle>In ACL</booktitle>
+<contexts>
+<context position="1471" citStr="Moschitti, 2004" startWordPosition="231" endWordPosition="233">n efficient DP updating procedure applicable in argument recognition. We demonstrate that the WMOLT kernel improves the accuracy, and our speed-up method makes the recognition more than 40 times faster than the naive classification. 1 Introduction Semantic role labeling (SRL) is a task that recognizes the arguments of a predicate (verb) in a sentence and assigns the correct role to each argument. As this task is recognized as an important step after (or the last step of) syntactic analysis, many studies have been conducted to achieve accurate semantic role labeling (Gildea and Jurafsky, 2002; Moschitti, 2004; Hacioglu et al., 2004; Punyakanok et al., 2004; Pradhan et al., 2005a; Pradhan et al., 2005b; Toutanova et al., 2005). Most of the studies have focused on machine learning because of the availability of standard datasets, such as PropBank (Kingsbury and Palmer, 2002). Naturally, the usefulness of parse trees in 53 this task can be anticipated. For example, the recent CoNLL 2005 shared task (Carreras and M`arquez, 2005) provided parse trees for use and their usefulness was ensured. Most of the methods heuristically extract features from parse trees, and from other sources, and use them in mac</context>
+</contexts>
+<marker>Moschitti, 2004</marker>
+<rawString>A. Moschitti. 2004. A study on convolution kernels for shallow semantic parsing. In ACL 2004.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>J C Platt</author>
+</authors>
+<title>Probabilistic outputs for support vector machines and comparisons to regularized likelihood methods. Advances in Large Margin Classifiers.</title>
+<date>1999</date>
+<contexts>
+<context position="20995" citStr="Platt, 1999" startWordPosition="3751" endWordPosition="3752">by Toutanova et al. (2005). Given the local classification probability p(nk = Xk) (Xk ∈ {ARG, NO-ARG}), this method finds the assignment that maximizes ∏ k p(nk = Xk) while satisfying the above nonoverlapping constraint, by using a dynamic programming procedure. Since the output of SVMs is not a probability value, in this study we obtain the probability value by converting the output from the SVM, s(nk), using the sigmoid function:4 p(nk = ARG) = 1/(1 + exp(−s(nk))). 6 Evaluation 6.1 Setting For our evaluation we used the dataset provided for the CoNLL 2005 SRL shared task 4Parameter fitting (Platt, 1999) is not performed. (www.lsi.upc.edu/˜srlconll). We used only the training part and divided it into our training, development, and test sets (23,899, 7,966, and 7,967 sentences, respectively). We used the outputs of the Charniak parser provided with the dataset. We also used POS tags, which were also provided, by inserting the nodes labeled by POS tags above the word nodes. The words were downcased. We used TinySVM5 as the implementation of the SVMs, adding the WMOLT kernel. We normalized √ the kernel as: K(Ti,Tj)/ K(Ti,Ti) × K(Tj,Tj). To train the classifiers, for a positive example we used th</context>
+</contexts>
+<marker>Platt, 1999</marker>
+<rawString>J. C. Platt. 1999. Probabilistic outputs for support vector machines and comparisons to regularized likelihood methods. Advances in Large Margin Classifiers.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>S Pradhan</author>
+<author>K Hacioglu</author>
+<author>W Ward</author>
+<author>D Jurafsky</author>
+<author>J H Martin</author>
+</authors>
+<title>Support vector learning for semantic argument classification.</title>
+<date>2005</date>
+<booktitle>Machine Learning,</booktitle>
+<volume>60</volume>
+<issue>1</issue>
+<contexts>
+<context position="1541" citStr="Pradhan et al., 2005" startWordPosition="242" endWordPosition="245">ion. We demonstrate that the WMOLT kernel improves the accuracy, and our speed-up method makes the recognition more than 40 times faster than the naive classification. 1 Introduction Semantic role labeling (SRL) is a task that recognizes the arguments of a predicate (verb) in a sentence and assigns the correct role to each argument. As this task is recognized as an important step after (or the last step of) syntactic analysis, many studies have been conducted to achieve accurate semantic role labeling (Gildea and Jurafsky, 2002; Moschitti, 2004; Hacioglu et al., 2004; Punyakanok et al., 2004; Pradhan et al., 2005a; Pradhan et al., 2005b; Toutanova et al., 2005). Most of the studies have focused on machine learning because of the availability of standard datasets, such as PropBank (Kingsbury and Palmer, 2002). Naturally, the usefulness of parse trees in 53 this task can be anticipated. For example, the recent CoNLL 2005 shared task (Carreras and M`arquez, 2005) provided parse trees for use and their usefulness was ensured. Most of the methods heuristically extract features from parse trees, and from other sources, and use them in machine learning methods based on feature vector representation. As a res</context>
+<context position="27835" citStr="Pradhan et al., 2005" startWordPosition="4958" endWordPosition="4961">, but 8.16% for the 59 evaluation set. This, to some extent, explains why our system, which achieved F1 = 88.00 for our test set, could only achieved F1 = 79.96. To achieve a higher accuracy, we need to make the system more robust to parsing errors. Some of the non-matching arguments are caused by incorrect treatment of quotation marks and commas. These errors seem to be solved by using simple pre-processing. Other major non-matching arguments are caused by PP attachment errors. To solve these errors, we need to explore more, such as using n-best parses and the use of several syntactic views (Pradhan et al., 2005b). Another reason for the low accuracy is the size of the training data. In this study, we could train the SVM with 2,000 sentences (this took more than 30 hours including the conversion of trees), but this is a very small fraction of the entire training set. We need to explore the methods for incorporating a large training set within a reasonable training time. For example, the combination of small SVMs (Shen et al., 2003) is a possible direction. The contribution of this study is not the accuracy achieved. The first contribution is the demonstration of the drastic effect of the mark weighti</context>
+</contexts>
+<marker>Pradhan, Hacioglu, Ward, Jurafsky, Martin, 2005</marker>
+<rawString>S. Pradhan, K. Hacioglu, W. Ward, D. Jurafsky, and J. H. Martin. 2005a. Support vector learning for semantic argument classification. Machine Learning, 60(1).</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>S Pradhan</author>
+<author>W Ward</author>
+<author>K Hacioglu</author>
+<author>J H Martin</author>
+<author>D Jurafsky</author>
+</authors>
+<title>Semantic role labeling using different syntactic views.</title>
+<date>2005</date>
+<booktitle>In ACL</booktitle>
+<contexts>
+<context position="1541" citStr="Pradhan et al., 2005" startWordPosition="242" endWordPosition="245">ion. We demonstrate that the WMOLT kernel improves the accuracy, and our speed-up method makes the recognition more than 40 times faster than the naive classification. 1 Introduction Semantic role labeling (SRL) is a task that recognizes the arguments of a predicate (verb) in a sentence and assigns the correct role to each argument. As this task is recognized as an important step after (or the last step of) syntactic analysis, many studies have been conducted to achieve accurate semantic role labeling (Gildea and Jurafsky, 2002; Moschitti, 2004; Hacioglu et al., 2004; Punyakanok et al., 2004; Pradhan et al., 2005a; Pradhan et al., 2005b; Toutanova et al., 2005). Most of the studies have focused on machine learning because of the availability of standard datasets, such as PropBank (Kingsbury and Palmer, 2002). Naturally, the usefulness of parse trees in 53 this task can be anticipated. For example, the recent CoNLL 2005 shared task (Carreras and M`arquez, 2005) provided parse trees for use and their usefulness was ensured. Most of the methods heuristically extract features from parse trees, and from other sources, and use them in machine learning methods based on feature vector representation. As a res</context>
+<context position="27835" citStr="Pradhan et al., 2005" startWordPosition="4958" endWordPosition="4961">, but 8.16% for the 59 evaluation set. This, to some extent, explains why our system, which achieved F1 = 88.00 for our test set, could only achieved F1 = 79.96. To achieve a higher accuracy, we need to make the system more robust to parsing errors. Some of the non-matching arguments are caused by incorrect treatment of quotation marks and commas. These errors seem to be solved by using simple pre-processing. Other major non-matching arguments are caused by PP attachment errors. To solve these errors, we need to explore more, such as using n-best parses and the use of several syntactic views (Pradhan et al., 2005b). Another reason for the low accuracy is the size of the training data. In this study, we could train the SVM with 2,000 sentences (this took more than 30 hours including the conversion of trees), but this is a very small fraction of the entire training set. We need to explore the methods for incorporating a large training set within a reasonable training time. For example, the combination of small SVMs (Shen et al., 2003) is a possible direction. The contribution of this study is not the accuracy achieved. The first contribution is the demonstration of the drastic effect of the mark weighti</context>
+</contexts>
+<marker>Pradhan, Ward, Hacioglu, Martin, Jurafsky, 2005</marker>
+<rawString>S. Pradhan, W. Ward, K. Hacioglu, J. H. Martin, and D. Jurafsky. 2005b. Semantic role labeling using different syntactic views. In ACL 2005.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>V Punyakanok</author>
+<author>D Roth</author>
+<author>W Yih</author>
+<author>D Zimak</author>
+</authors>
+<title>Semantic role labeling via integer linear programming inference.</title>
+<date>2004</date>
+<booktitle>In COLING</booktitle>
+<contexts>
+<context position="1519" citStr="Punyakanok et al., 2004" startWordPosition="238" endWordPosition="241">able in argument recognition. We demonstrate that the WMOLT kernel improves the accuracy, and our speed-up method makes the recognition more than 40 times faster than the naive classification. 1 Introduction Semantic role labeling (SRL) is a task that recognizes the arguments of a predicate (verb) in a sentence and assigns the correct role to each argument. As this task is recognized as an important step after (or the last step of) syntactic analysis, many studies have been conducted to achieve accurate semantic role labeling (Gildea and Jurafsky, 2002; Moschitti, 2004; Hacioglu et al., 2004; Punyakanok et al., 2004; Pradhan et al., 2005a; Pradhan et al., 2005b; Toutanova et al., 2005). Most of the studies have focused on machine learning because of the availability of standard datasets, such as PropBank (Kingsbury and Palmer, 2002). Naturally, the usefulness of parse trees in 53 this task can be anticipated. For example, the recent CoNLL 2005 shared task (Carreras and M`arquez, 2005) provided parse trees for use and their usefulness was ensured. Most of the methods heuristically extract features from parse trees, and from other sources, and use them in machine learning methods based on feature vector re</context>
+</contexts>
+<marker>Punyakanok, Roth, Yih, Zimak, 2004</marker>
+<rawString>V. Punyakanok, D. Roth, W. Yih, and D. Zimak. 2004. Semantic role labeling via integer linear programming inference. In COLING 2004.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>L Shen</author>
+<author>A Sarkar</author>
+<author>A K Joshi</author>
+</authors>
+<title>Using LTAG based features in parse reranking.</title>
+<date>2003</date>
+<booktitle>In EMNLP</booktitle>
+<contexts>
+<context position="28263" citStr="Shen et al., 2003" startWordPosition="5033" endWordPosition="5036">atching arguments are caused by PP attachment errors. To solve these errors, we need to explore more, such as using n-best parses and the use of several syntactic views (Pradhan et al., 2005b). Another reason for the low accuracy is the size of the training data. In this study, we could train the SVM with 2,000 sentences (this took more than 30 hours including the conversion of trees), but this is a very small fraction of the entire training set. We need to explore the methods for incorporating a large training set within a reasonable training time. For example, the combination of small SVMs (Shen et al., 2003) is a possible direction. The contribution of this study is not the accuracy achieved. The first contribution is the demonstration of the drastic effect of the mark weighting. We will explore more accurate kernels based on the WMOLT kernel. For example, we are planning to use different weights depending on the marks. The second contribution is the method of speeding-up argument recognition. This is of great importance, since the proposed method can be applied to other tasks where all nodes in a tree should be classified. In addition, this method became possible because of the WMOLT kernel, and</context>
+</contexts>
+<marker>Shen, Sarkar, Joshi, 2003</marker>
+<rawString>L. Shen, A. Sarkar, and A. K. Joshi. 2003. Using LTAG based features in parse reranking. In EMNLP 2003.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>K Toutanova</author>
+<author>A Haghighi</author>
+<author>C D Manning</author>
+</authors>
+<title>Joint learning improves semantic role labeling.</title>
+<date>2005</date>
+<booktitle>In ACL</booktitle>
+<contexts>
+<context position="1590" citStr="Toutanova et al., 2005" startWordPosition="250" endWordPosition="253">oves the accuracy, and our speed-up method makes the recognition more than 40 times faster than the naive classification. 1 Introduction Semantic role labeling (SRL) is a task that recognizes the arguments of a predicate (verb) in a sentence and assigns the correct role to each argument. As this task is recognized as an important step after (or the last step of) syntactic analysis, many studies have been conducted to achieve accurate semantic role labeling (Gildea and Jurafsky, 2002; Moschitti, 2004; Hacioglu et al., 2004; Punyakanok et al., 2004; Pradhan et al., 2005a; Pradhan et al., 2005b; Toutanova et al., 2005). Most of the studies have focused on machine learning because of the availability of standard datasets, such as PropBank (Kingsbury and Palmer, 2002). Naturally, the usefulness of parse trees in 53 this task can be anticipated. For example, the recent CoNLL 2005 shared task (Carreras and M`arquez, 2005) provided parse trees for use and their usefulness was ensured. Most of the methods heuristically extract features from parse trees, and from other sources, and use them in machine learning methods based on feature vector representation. As a result, these methods depend on feature engineering,</context>
+<context position="20409" citStr="Toutanova et al. (2005)" startWordPosition="3649" endWordPosition="3652"> |U |× |Tj |cells. In addition, when updating the cells for (n1, n2), we only need to update them when the cells for any child of n2 have been updated in the calculation of the cells for the children of n1. To achieve this, change(n2) in the algorithm stores whether the cells of any child of n2 have been updated. This technique will also reduce the number of updated cells. 5 Non-overlapping Constraint Finally, in argument recognition, there is a strong constraint that the arguments for a given predicate do not overlap each other. To enforce this constraint, we employ the approach presented by Toutanova et al. (2005). Given the local classification probability p(nk = Xk) (Xk ∈ {ARG, NO-ARG}), this method finds the assignment that maximizes ∏ k p(nk = Xk) while satisfying the above nonoverlapping constraint, by using a dynamic programming procedure. Since the output of SVMs is not a probability value, in this study we obtain the probability value by converting the output from the SVM, s(nk), using the sigmoid function:4 p(nk = ARG) = 1/(1 + exp(−s(nk))). 6 Evaluation 6.1 Setting For our evaluation we used the dataset provided for the CoNLL 2005 SRL shared task 4Parameter fitting (Platt, 1999) is not perfor</context>
+</contexts>
+<marker>Toutanova, Haghighi, Manning, 2005</marker>
+<rawString>K. Toutanova, A. Haghighi, and C. D. Manning. 2005. Joint learning improves semantic role labeling. In ACL 2005.</rawString>
+</citation>
+<citation valid="true">
+<authors>
+<author>V Vapnik</author>
+</authors>
+<title>The Nature of Statistical Learning Theory.</title>
+<date>1995</date>
+<publisher>Springer Verlag.</publisher>
+<contexts>
+<context position="2379" citStr="Vapnik, 1995" startWordPosition="374" endWordPosition="375">s of parse trees in 53 this task can be anticipated. For example, the recent CoNLL 2005 shared task (Carreras and M`arquez, 2005) provided parse trees for use and their usefulness was ensured. Most of the methods heuristically extract features from parse trees, and from other sources, and use them in machine learning methods based on feature vector representation. As a result, these methods depend on feature engineering, which is time-consuming. Tree kernels (Collins and Duffy, 2001; Kashima and Koyanagi, 2002) have been proposed to directly handle trees in kernel-based methods, such as SVMs (Vapnik, 1995). Tree kernels calculate the similarity between trees, taking into consideration all of the subtrees, and, therefore there is no need for such feature engineering. Moschitti and Bejan (2004) extensively studied tree kernels for semantic role labeling. However, they reported that they could not successfully build an accurate argument recognizer, although the role assignment was improved. Although Moschitti et al. (2005) reported on argument recognition using tree kernels, it was a preliminary evaluation because they used oracle parse trees. Kazama and Torisawa (2005) proposed a new tree kernel </context>
+<context position="8593" citStr="Vapnik, 1995" startWordPosition="1439" endWordPosition="1440">ate node and other nodes. 54 Since the task is the classification of trees with node relations, tree kernels for usual ordered labeled trees, such as those proposed by Collins and Duffy (2001) and Kashima and Koyanagi (2002), are not useful. Kazama and Torisawa (2005) proposed to represent a node relation in a tree as a marked ordered labeled tree and presented a kernel for it (MOLT kernel). We adopted the MOLT kernel and extend it for accurate argument recognition. 3 Kernels for Argument Recognition 3.1 Kernel-based classification Kernel-based methods, such as support vector machines (SVMs) (Vapnik, 1995), consider a mapping 4b(x) that maps the object x into a, (usually highdimensional), feature space and learn a classifier in this space. A kernel function K(xi, xj) is a function that calculates the inner product (4b(xi), 4b(xj)) in the feature space without explicitly computing 4b(x), which is sometimes intractable. Then, any classifier that is represented by using only the inner products between the vectors in a feature space can be rewritten using the kernel function. For example, an SVM classifier has the form: f(x) = ∑ αiK(xi, x) + b, i where αi and b are the parameters learned in the tra</context>
+</contexts>
+<marker>Vapnik, 1995</marker>
+<rawString>V. Vapnik. 1995. The Nature of Statistical Learning Theory. Springer Verlag.</rawString>
+</citation>
+</citationList>
+</algorithm>
+</algorithms>
