@@ -13,6 +13,8 @@ class Article :
         self.txt = path + "txt/" + filename + ".txt"
         self.json = path + "json/" + filename + ".json"
 
+        print("now processing " + filename)
+
         if (os.path.exists(self.txt) == 0) :
             print("Creating text file from xml...")
             preprocess_file(self.xml, self.txt, path + "dico.txt", path + "corpus_words.txt", 2)
@@ -22,10 +24,10 @@ class Article :
         else :
             print("Text file already exists.")
 
-        if (os.path.exists(self.json) == 0) :
-            command = "/Users/paulazoulai/Desktop/pre/semafor/bin/runSemafor.sh " + self.txt + " " + self.json + " 4"
-            os.system(command)
-            print("Json file created.")
+        # if (os.path.exists(self.json) == 0) :
+        #     command = "/Users/paulazoulai/Desktop/pre/semafor/bin/runSemafor.sh " + self.txt + " " + self.json + " 4"
+        #     os.system(command)
+        #     print("Json file created.")
 
-        else :
-            print("Json file already exists.")
+        # else :
+        #     print("Json file already exists.")

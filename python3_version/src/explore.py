@@ -70,7 +70,7 @@ def display_frame_instances(frame_name, nmax = 5, abstract = 0) :    # prints al
             # We are now dealing with a json file
             output = json.load(open(json_path + filename))
             shuffle(output)
-            for sentence in (output) :
+            for sentence in  (output) :
                 if i > nmax :
                     break
                 for frame in sentence["frames"] :

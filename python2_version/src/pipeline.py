@@ -26,6 +26,10 @@ for filename in os.listdir(xml_path) :
         try :
             L.append(Article(filename[:-4]))
         except :
+<<<<<<< HEAD
             os.rename(os.path.abspath(filename), path + "rejected/" + filename)
+=======
+            os.rename(xml_path + filename, path + "rejected/" + filename)
+>>>>>>> python2_version
 
 print("Currenlty " + str(len(L)) + " files fully pre-processed." )

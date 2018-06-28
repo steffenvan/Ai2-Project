@@ -49,7 +49,7 @@ def is_english(word, en_dictionnary, corpus_dictionnary = {}, min = 0) :
         i = len(word)
         j = 0
         
-        while word[j].isalpha() == 0 :
+        while j <=i-1 and word[j].isalpha() == 0 :
             j += 1
         
         while (word[j:i].isalpha() == 0 and i >= j) :

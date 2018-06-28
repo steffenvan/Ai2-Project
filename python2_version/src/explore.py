@@ -4,8 +4,13 @@ This file contains functions useful for preliminary data analysis, such as extra
 import os
 import json
 from path import root
+<<<<<<< HEAD
 import pandas as pd
 import seaborn as sns
+=======
+# import pandas as pd
+# import seaborn as sns
+>>>>>>> python2_version
 import matplotlib.pyplot as plt
 import numpy as np
 from random import shuffle
@@ -37,18 +42,29 @@ def number_of_sentences(json_file) :
 def count_frames(filename, in_abstract = 0) :
 
     counts = {}
+<<<<<<< HEAD
     if in_abstract :
         doc = abstract_json(json_path + filename)
     else :
         doc = json.load(open(json_path + filename))
+=======
+    
+    doc = json.load(open(filename))
+>>>>>>> python2_version
 
     for sentence in doc :
         for frame in sentence["frames"] :
             frame_name = frame["target"]["name"]
             if frame_name in counts :
+<<<<<<< HEAD
                 counts[frame_name] += 1
             else :
                 counts[frame_name] = 1
+=======
+                counts[str(frame_name)] += 1
+            else :
+                counts[str(frame_name)] = 1
+>>>>>>> python2_version
 
 
     return counts
